@@ -1,0 +1,18 @@
+[proxy]
+listen_addr = "0.0.0.0:80"
+listen_addr_tls = "0.0.0.0:443"
+
+[api]
+listen_addr = "127.0.0.1:9527"
+
+[storage]
+database_url = "postgresql://prx_waf:prx_waf@127.0.0.1:5432/prx_waf"
+max_connections = 20
+
+# Example host configuration (can also be managed via API)
+# [[hosts]]
+# host = "example.com"
+# port = 80
+# remote_host = "127.0.0.1"
+# remote_port = 8080
+# guard_status = true

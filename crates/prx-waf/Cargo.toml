@@ -1,0 +1,30 @@
+[package]
+name = "prx-waf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "prx-waf"
+path = "src/main.rs"
+
+[dependencies]
+waf-common = { path = "../waf-common" }
+waf-storage = { path = "../waf-storage" }
+waf-engine = { path = "../waf-engine" }
+waf-api = { path = "../waf-api" }
+gateway = { path = "../gateway" }
+
+tokio = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+pingora = { workspace = true }
+pingora-core = { workspace = true }
+pingora-proxy = { workspace = true }

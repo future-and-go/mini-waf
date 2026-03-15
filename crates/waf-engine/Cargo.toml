@@ -1,0 +1,20 @@
+[package]
+name = "waf-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+waf-common = { path = "../waf-common" }
+waf-storage = { path = "../waf-storage" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+dashmap = { workspace = true }
+ipnet = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
