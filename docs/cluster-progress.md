@@ -117,3 +117,43 @@
 | 2026-03-16 12:05 | P1 | Killed stale processes, re-dispatched focused Claude | IN_PROGRESS |
 | 2026-03-16 12:06 | P2 | wild-valley finished (code 0) — partial P2 committed bee3ae2 (428 lines). cargo check+test pass | PARTIAL |
 | 2026-03-16 12:06 | P2 | Re-dispatched Claude (dawn-kelp PID 347845) for remaining P2: RuleReloader, worker apply, stats datagram send, integration test | IN_PROGRESS |
+
+---
+
+## Incident Log
+
+### 2026-03-16 12:03 — Stale Process Accumulation (manual intervention)
+
+**Problem:** Simon reported "these 2 subprocesses definitely have issues". Investigation found 6 Claude processes running simultaneously:
+
+| PID | Started | Task | Status |
+|-----|---------|------|--------|
+| 131398 | 10:19 | PRX unwrap cleanup (original) | Running 2h, stuck in Python analysis script |
+| 166896 | 10:40 | PRX unwrap helper subprocess | Shell wrapper, idle |
+| 300653 | 11:51 | WAF P1 completion (cron-dispatched) | Active, writing code |
+| 300654 | 11:51 | WAF P1 Claude (actual) | Active |
+| 314077 | 11:55 | WAF P2 rule sync (cron-dispatched) | Active, writing code |
+| 314078 | 11:55 | WAF P2 Claude (actual) | Active |
+
+**Root cause:** 
+1. PRX unwrap Claude (131398) over-engineered — wrote a Python script to analyze unwraps instead of directly fixing them. Ran 2h with no new file changes.
+2. Cron monitor (30min cycle) detected P1 done, auto-dispatched P2, but P1 completion Claude was still running → overlap.
+3. No dedup logic: cron doesn't check if a Claude process is already running before dispatching.
+
+**Actions taken:**
+1. Killed all 6 processes (`kill 131398 166896 300653 300654 314077 314078`)
+2. Verified existing code compiles (`cargo check --all-features` pass)
+3. Committed salvageable work:
+   - PRX: 27 files, 157+/149- (04ae588) — Mutex + Router scorer fixes
+   - WAF: P2 partial 428 lines (bee3ae2) — rule sync + events + forward
+4. Re-dispatched focused tasks:
+   - `brisk-fjord` (PID 338387): PRX unwrap — only 5 specific files, no Python analysis
+   - `nimble-gulf` (PID 339394): WAF P1 verification + completion
+5. nimble-gulf completed 12:07 — confirmed 4 integration tests passing, all P1 deliverables verified
+6. Cron auto-dispatched P2 continuation (dawn-kelp, PID 347845)
+
+**Lessons:**
+- Claude CLI can get stuck in analysis paralysis (Python scripts instead of direct edits)
+- Need dedup: cron should check `ps aux | grep claude` before dispatching
+- Kill-and-restart is cheap; waiting 2h for a stuck process is expensive
+- Commit salvageable work before killing — the dead process may have written useful code
