@@ -5,11 +5,11 @@
 
 ## Current State
 
-- **Active Phase:** P2
+- **Active Phase:** P3
 - **Phase Status:** IN_PROGRESS
-- **Claude Process:** dawn-kelp (PID 347845)
-- **Last Check:** 2026-03-16 12:06 EDT
-- **Next Action:** Wait for P2 Claude to finish, then verify
+- **Claude Process:** fresh-bison (PID 398876)
+- **Last Check:** 2026-03-16 12:19 EDT
+- **Next Action:** Wait for P3 Claude to finish, then verify
 
 ---
 
@@ -50,20 +50,23 @@
   - [x] Thread launch in main.rs (conditional on cluster.enabled)
   - [x] Integration test: 2-node heartbeat
 
-### P2: Rule & Config Sync (est. 14h)
-- **Status:** PENDING
+### P2: Rule & Config Sync (est. 14h) ✅
+- **Status:** DONE
 - **Depends on:** P1
+- **Completed:** 2026-03-16 12:19 EDT
+- **Commits:** bee3ae2 (partial), d466c08 (complete)
+- **Tests:** 16 pass (`cargo test -p waf-cluster`)
 - **Tasks:**
-  - [ ] RuleChangelog ring buffer
-  - [ ] Full snapshot (lz4 compressed)
-  - [ ] Incremental sync
-  - [ ] Worker apply rule updates
-  - [ ] RuleReloader trait
-  - [ ] Config sync protocol
-  - [ ] Event batching + forwarding
-  - [ ] Stats aggregation (QUIC datagrams)
-  - [ ] API write forwarding
-  - [ ] Integration test: rule sync
+  - [x] RuleChangelog ring buffer
+  - [x] Full snapshot (lz4 compressed)
+  - [x] Incremental sync
+  - [x] Worker apply rule updates
+  - [x] RuleReloader trait (waf-engine)
+  - [x] Config sync protocol
+  - [x] Event batching + forwarding
+  - [x] Stats aggregation (QUIC datagrams)
+  - [x] API write forwarding
+  - [x] Integration test: rule sync (2 tests — full + incremental + fallback)
 
 ### P3: Election + Failover (est. 16h)
 - **Status:** PENDING
@@ -117,6 +120,8 @@
 | 2026-03-16 12:05 | P1 | Killed stale processes, re-dispatched focused Claude | IN_PROGRESS |
 | 2026-03-16 12:06 | P2 | wild-valley finished (code 0) — partial P2 committed bee3ae2 (428 lines). cargo check+test pass | PARTIAL |
 | 2026-03-16 12:06 | P2 | Re-dispatched Claude (dawn-kelp PID 347845) for remaining P2: RuleReloader, worker apply, stats datagram send, integration test | IN_PROGRESS |
+| 2026-03-16 12:19 | P2 | dawn-kelp completed — all P2 tasks done, 16 cluster tests pass, committed d466c08 | DONE |
+| 2026-03-16 12:19 | P3 | Dispatched Claude (fresh-bison PID 398876) for Election + Failover | IN_PROGRESS |
 
 ---
 
