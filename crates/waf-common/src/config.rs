@@ -23,6 +23,9 @@ pub struct AppConfig {
     /// GeoIP lookup configuration
     #[serde(default)]
     pub geoip: GeoIpConfig,
+    /// Cluster configuration — None means standalone mode (default)
+    #[serde(default)]
+    pub cluster: Option<ClusterConfig>,
 }
 
 impl Default for AppConfig {
@@ -38,6 +41,7 @@ impl Default for AppConfig {
             crowdsec: CrowdSecConfig::default(),
             rules: RulesConfig::default(),
             geoip: GeoIpConfig::default(),
+            cluster: None,
         }
     }
 }
@@ -371,4 +375,217 @@ pub fn load_config(path: &str) -> anyhow::Result<AppConfig> {
     let content = std::fs::read_to_string(path)?;
     let config: AppConfig = toml::from_str(&content)?;
     Ok(config)
+}
+
+// ─── Cluster Configuration ─────────────────────────────────────────────────
+
+/// Node role in the cluster
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeRole {
+    Main,
+    Worker,
+    Candidate,
+}
+
+/// Cluster TLS/certificate configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterCryptoConfig {
+    /// Path to CA certificate PEM file
+    #[serde(default = "default_ca_cert_path")]
+    pub ca_cert: String,
+    /// Path to node certificate PEM file
+    #[serde(default = "default_node_cert_path")]
+    pub node_cert: String,
+    /// Path to node private key PEM file
+    #[serde(default = "default_node_key_path")]
+    pub node_key: String,
+    /// Auto-generate CA and node certs on first startup
+    #[serde(default = "default_true")]
+    pub auto_generate: bool,
+    /// CA certificate validity in days (default 10 years)
+    #[serde(default = "default_ca_validity_days")]
+    pub ca_validity_days: u32,
+    /// Node certificate validity in days (default 1 year)
+    #[serde(default = "default_node_validity_days")]
+    pub node_validity_days: u32,
+    /// Renew node cert this many days before expiry
+    #[serde(default = "default_renewal_before_days")]
+    pub renewal_before_days: u32,
+}
+
+fn default_ca_cert_path() -> String { "/app/certs/cluster-ca.pem".to_string() }
+fn default_node_cert_path() -> String { "/app/certs/node.pem".to_string() }
+fn default_node_key_path() -> String { "/app/certs/node.key".to_string() }
+fn default_ca_validity_days() -> u32 { 3650 }
+fn default_node_validity_days() -> u32 { 365 }
+fn default_renewal_before_days() -> u32 { 7 }
+
+impl Default for ClusterCryptoConfig {
+    fn default() -> Self {
+        Self {
+            ca_cert: default_ca_cert_path(),
+            node_cert: default_node_cert_path(),
+            node_key: default_node_key_path(),
+            auto_generate: true,
+            ca_validity_days: default_ca_validity_days(),
+            node_validity_days: default_node_validity_days(),
+            renewal_before_days: default_renewal_before_days(),
+        }
+    }
+}
+
+/// Cluster sync intervals and batch sizes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterSyncConfig {
+    /// Periodic rule version check interval in seconds
+    #[serde(default = "default_rules_interval")]
+    pub rules_interval_secs: u64,
+    /// Config sync interval in seconds
+    #[serde(default = "default_config_interval")]
+    pub config_interval_secs: u64,
+    /// Flush event batch after this many events
+    #[serde(default = "default_events_batch_size")]
+    pub events_batch_size: usize,
+    /// Flush event batch after this many seconds even if not full
+    #[serde(default = "default_events_flush_interval")]
+    pub events_flush_interval_secs: u64,
+    /// Stats push interval in seconds
+    #[serde(default = "default_stats_interval")]
+    pub stats_interval_secs: u64,
+    /// Maximum events in the worker queue before dropping oldest
+    #[serde(default = "default_events_queue_size")]
+    pub events_queue_size: usize,
+}
+
+fn default_rules_interval() -> u64 { 10 }
+fn default_config_interval() -> u64 { 30 }
+fn default_events_batch_size() -> usize { 100 }
+fn default_events_flush_interval() -> u64 { 5 }
+fn default_stats_interval() -> u64 { 10 }
+fn default_events_queue_size() -> usize { 10_000 }
+
+impl Default for ClusterSyncConfig {
+    fn default() -> Self {
+        Self {
+            rules_interval_secs: default_rules_interval(),
+            config_interval_secs: default_config_interval(),
+            events_batch_size: default_events_batch_size(),
+            events_flush_interval_secs: default_events_flush_interval(),
+            stats_interval_secs: default_stats_interval(),
+            events_queue_size: default_events_queue_size(),
+        }
+    }
+}
+
+/// Raft-lite election configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterElectionConfig {
+    /// Minimum election timeout in milliseconds
+    #[serde(default = "default_timeout_min_ms")]
+    pub timeout_min_ms: u64,
+    /// Maximum election timeout in milliseconds
+    #[serde(default = "default_timeout_max_ms")]
+    pub timeout_max_ms: u64,
+    /// Main→workers heartbeat interval in milliseconds
+    #[serde(default = "default_heartbeat_interval_ms")]
+    pub heartbeat_interval_ms: u64,
+    /// Phi threshold to suspect a node is failing
+    #[serde(default = "default_phi_suspect")]
+    pub phi_suspect: f64,
+    /// Phi threshold to declare a node dead and trigger election
+    #[serde(default = "default_phi_dead")]
+    pub phi_dead: f64,
+}
+
+fn default_timeout_min_ms() -> u64 { 150 }
+fn default_timeout_max_ms() -> u64 { 300 }
+fn default_heartbeat_interval_ms() -> u64 { 50 }
+fn default_phi_suspect() -> f64 { 8.0 }
+fn default_phi_dead() -> f64 { 12.0 }
+
+impl Default for ClusterElectionConfig {
+    fn default() -> Self {
+        Self {
+            timeout_min_ms: default_timeout_min_ms(),
+            timeout_max_ms: default_timeout_max_ms(),
+            heartbeat_interval_ms: default_heartbeat_interval_ms(),
+            phi_suspect: default_phi_suspect(),
+            phi_dead: default_phi_dead(),
+        }
+    }
+}
+
+/// Node health check configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterHealthConfig {
+    /// Health check interval in seconds
+    #[serde(default = "default_health_check_interval")]
+    pub check_interval_secs: u64,
+    /// Number of missed heartbeats before declaring node unhealthy
+    #[serde(default = "default_max_missed_heartbeats")]
+    pub max_missed_heartbeats: u32,
+}
+
+fn default_health_check_interval() -> u64 { 5 }
+fn default_max_missed_heartbeats() -> u32 { 3 }
+
+impl Default for ClusterHealthConfig {
+    fn default() -> Self {
+        Self {
+            check_interval_secs: default_health_check_interval(),
+            max_missed_heartbeats: default_max_missed_heartbeats(),
+        }
+    }
+}
+
+/// Full cluster configuration — presence of this section enables clustering
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterConfig {
+    /// Enable clustering. Must be true for any cluster behaviour.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Unique node identifier. Auto-generated from hostname+random suffix if empty.
+    #[serde(default)]
+    pub node_id: String,
+    /// Role assignment: "auto" | "main" | "worker"
+    #[serde(default = "default_cluster_role")]
+    pub role: String,
+    /// QUIC listen address for cluster communication
+    #[serde(default = "default_cluster_addr")]
+    pub listen_addr: String,
+    /// Static seed nodes. At least one reachable seed required to join an existing cluster.
+    #[serde(default)]
+    pub seeds: Vec<String>,
+    /// TLS/certificate settings
+    #[serde(default)]
+    pub crypto: ClusterCryptoConfig,
+    /// Sync intervals and batch sizes
+    #[serde(default)]
+    pub sync: ClusterSyncConfig,
+    /// Election protocol settings
+    #[serde(default)]
+    pub election: ClusterElectionConfig,
+    /// Health check settings
+    #[serde(default)]
+    pub health: ClusterHealthConfig,
+}
+
+fn default_cluster_role() -> String { "auto".to_string() }
+fn default_cluster_addr() -> String { "0.0.0.0:16851".to_string() }
+
+impl Default for ClusterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            node_id: String::new(),
+            role: default_cluster_role(),
+            listen_addr: default_cluster_addr(),
+            seeds: Vec::new(),
+            crypto: ClusterCryptoConfig::default(),
+            sync: ClusterSyncConfig::default(),
+            election: ClusterElectionConfig::default(),
+            health: ClusterHealthConfig::default(),
+        }
+    }
 }

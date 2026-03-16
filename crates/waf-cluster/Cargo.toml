@@ -1,0 +1,37 @@
+[package]
+name = "waf-cluster"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+waf-common = { path = "../waf-common" }
+
+# Transport (QUIC/TLS) — already in workspace
+quinn          = { workspace = true }
+rustls         = { workspace = true }
+rcgen          = { workspace = true }
+rustls-pemfile = { workspace = true }
+bytes          = { workspace = true }
+
+# Async runtime — already in workspace
+tokio = { workspace = true }
+
+# Serialization — already in workspace
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+# Logging — already in workspace
+tracing = { workspace = true }
+
+# Error handling — already in workspace
+anyhow = { workspace = true }
+
+# Crypto — already in workspace
+aes-gcm = { workspace = true }
+
+# Utilities — already in workspace
+rand = { workspace = true }
+
+# Compression — only genuinely new workspace dep
+lz4_flex = { workspace = true }

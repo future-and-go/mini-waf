@@ -41,3 +41,53 @@ cors_origins = []
 # remote_host = "127.0.0.1"
 # remote_port = 8080
 # guard_status = true
+
+# ── Cluster Configuration (disabled by default — opt-in) ──────────────────────
+# Remove the leading '#' characters from the [cluster] section to enable.
+#
+# [cluster]
+# # Enable clustering. Default: false — zero behavior change for standalone deployments.
+# enabled = false
+#
+# # Unique node identifier. Auto-generated from hostname+uuid suffix if empty.
+# node_id = ""
+#
+# # Role assignment. "auto" participates in leader election.
+# # Values: "auto" | "main" | "worker"
+# role = "auto"
+#
+# # QUIC listen address for inter-node communication.
+# listen_addr = "0.0.0.0:16851"
+#
+# # Static seed nodes. At least one reachable seed required to join a cluster.
+# # seeds = ["10.0.0.1:16851", "10.0.0.2:16851"]
+# seeds = []
+#
+# [cluster.crypto]
+# ca_cert   = "/app/certs/cluster-ca.pem"
+# node_cert = "/app/certs/node.pem"
+# node_key  = "/app/certs/node.key"
+# # Auto-generate CA and node certs on first startup (required for initial main).
+# auto_generate       = true
+# ca_validity_days    = 3650   # 10 years
+# node_validity_days  = 365    # 1 year
+# renewal_before_days = 7      # auto-renew 7 days before expiry
+#
+# [cluster.sync]
+# rules_interval_secs        = 10    # periodic rule version check
+# config_interval_secs       = 30
+# events_batch_size          = 100   # flush event batch at this count
+# events_flush_interval_secs = 5     # flush even if batch not full
+# stats_interval_secs        = 10
+# events_queue_size          = 10000 # drop oldest if worker falls behind
+#
+# [cluster.election]
+# timeout_min_ms        = 150    # random election timeout range (ms)
+# timeout_max_ms        = 300
+# heartbeat_interval_ms = 50     # main → workers heartbeat interval
+# phi_suspect           = 8.0
+# phi_dead              = 12.0
+#
+# [cluster.health]
+# check_interval_secs   = 5
+# max_missed_heartbeats = 3
