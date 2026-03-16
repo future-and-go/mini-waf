@@ -395,6 +395,12 @@ impl Database {
         .bind(&req.geo_info)
         .execute(&self.pool)
         .await?;
+
+        // Broadcast to WebSocket subscribers
+        if let Ok(event_json) = serde_json::to_value(&req) {
+            self.broadcast_event(event_json);
+        }
+
         Ok(())
     }
 
@@ -636,6 +642,344 @@ impl Database {
         sqlx::query("UPDATE lb_backends SET is_healthy=$2, last_health_check=NOW(), updated_at=NOW() WHERE id=$1")
             .bind(id).bind(is_healthy).execute(&self.pool).await?;
         Ok(())
+    }
+
+    // ─── Phase 4: Admin Users ─────────────────────────────────────────────────
+
+    pub async fn list_admin_users(&self) -> Result<Vec<AdminUser>, StorageError> {
+        Ok(sqlx::query_as::<_, AdminUser>("SELECT * FROM admin_users ORDER BY created_at")
+            .fetch_all(&self.pool)
+            .await?)
+    }
+
+    pub async fn get_admin_user_by_id(&self, id: Uuid) -> Result<Option<AdminUser>, StorageError> {
+        Ok(sqlx::query_as::<_, AdminUser>("SELECT * FROM admin_users WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?)
+    }
+
+    pub async fn get_admin_user_by_username(&self, username: &str) -> Result<Option<AdminUser>, StorageError> {
+        Ok(sqlx::query_as::<_, AdminUser>("SELECT * FROM admin_users WHERE username = $1")
+            .bind(username)
+            .fetch_optional(&self.pool)
+            .await?)
+    }
+
+    pub async fn create_admin_user(
+        &self,
+        req: CreateAdminUser,
+        password_hash: &str,
+    ) -> Result<AdminUser, StorageError> {
+        let id = Uuid::new_v4();
+        let now = chrono::Utc::now();
+        Ok(sqlx::query_as::<_, AdminUser>(
+            r#"INSERT INTO admin_users
+               (id, username, email, password_hash, role, is_active, created_at, updated_at)
+               VALUES ($1,$2,$3,$4,$5,true,$6,$6) RETURNING *"#,
+        )
+        .bind(id)
+        .bind(&req.username)
+        .bind(&req.email)
+        .bind(password_hash)
+        .bind(req.role.as_deref().unwrap_or("admin"))
+        .bind(now)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    pub async fn update_admin_user_last_login(&self, id: Uuid) -> Result<(), StorageError> {
+        sqlx::query("UPDATE admin_users SET last_login = NOW(), updated_at = NOW() WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn admin_users_count(&self) -> Result<i64, StorageError> {
+        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM admin_users")
+            .fetch_one(&self.pool)
+            .await?)
+    }
+
+    // ─── Phase 4: Refresh Tokens ──────────────────────────────────────────────
+
+    pub async fn create_refresh_token(
+        &self,
+        user_id: Uuid,
+        token_hash: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<RefreshToken, StorageError> {
+        let id = Uuid::new_v4();
+        let now = chrono::Utc::now();
+        Ok(sqlx::query_as::<_, RefreshToken>(
+            r#"INSERT INTO refresh_tokens
+               (id, user_id, token_hash, expires_at, revoked, created_at)
+               VALUES ($1,$2,$3,$4,false,$5) RETURNING *"#,
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(token_hash)
+        .bind(expires_at)
+        .bind(now)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    pub async fn get_refresh_token_by_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<RefreshToken>, StorageError> {
+        Ok(sqlx::query_as::<_, RefreshToken>(
+            "SELECT * FROM refresh_tokens WHERE token_hash = $1 AND revoked = false AND expires_at > NOW()",
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    pub async fn revoke_refresh_token(&self, token_hash: &str) -> Result<(), StorageError> {
+        sqlx::query("UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1")
+            .bind(token_hash)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn revoke_all_user_tokens(&self, user_id: Uuid) -> Result<(), StorageError> {
+        sqlx::query("UPDATE refresh_tokens SET revoked = true WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    // ─── Phase 4: Statistics ──────────────────────────────────────────────────
+
+    pub async fn get_stats_overview(&self) -> Result<StatsOverview, StorageError> {
+        let total_blocked_logs: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM attack_logs WHERE action = 'block'")
+                .fetch_one(&self.pool)
+                .await?;
+        let total_blocked_events: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM security_events WHERE action = 'block'")
+                .fetch_one(&self.pool)
+                .await?;
+        let total_blocked = total_blocked_logs + total_blocked_events;
+
+        let total_allowed: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM attack_logs WHERE action = 'allow'")
+                .fetch_one(&self.pool)
+                .await?;
+
+        let total_requests = total_blocked + total_allowed;
+
+        let hosts_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM hosts")
+                .fetch_one(&self.pool)
+                .await?;
+
+        // Top attacking IPs
+        let top_ips: Vec<TopEntry> = sqlx::query(
+            "SELECT client_ip AS entry_key, COUNT(*)::bigint AS cnt \
+             FROM security_events \
+             GROUP BY client_ip \
+             ORDER BY cnt DESC \
+             LIMIT 10",
+        )
+        .map(|row: sqlx::postgres::PgRow| {
+            use sqlx::Row;
+            TopEntry { key: row.get("entry_key"), count: row.get("cnt") }
+        })
+        .fetch_all(&self.pool)
+        .await?;
+
+        // Top triggered rules
+        let top_rules: Vec<TopEntry> = sqlx::query(
+            "SELECT rule_name AS entry_key, COUNT(*)::bigint AS cnt \
+             FROM security_events \
+             GROUP BY rule_name \
+             ORDER BY cnt DESC \
+             LIMIT 10",
+        )
+        .map(|row: sqlx::postgres::PgRow| {
+            use sqlx::Row;
+            TopEntry { key: row.get("entry_key"), count: row.get("cnt") }
+        })
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(StatsOverview {
+            total_requests,
+            total_blocked,
+            total_allowed,
+            hosts_count,
+            top_ips,
+            top_rules,
+        })
+    }
+
+    pub async fn get_stats_timeseries(
+        &self,
+        host_code: Option<&str>,
+        hours: i64,
+    ) -> Result<Vec<TimeSeriesPoint>, StorageError> {
+        let rows: Vec<TimeSeriesPoint> = sqlx::query(
+            "SELECT \
+                date_trunc('hour', created_at) AS ts, \
+                COUNT(*)::bigint AS total, \
+                COUNT(*) FILTER (WHERE action = 'block')::bigint AS blocked \
+             FROM security_events \
+             WHERE created_at >= NOW() - make_interval(hours => $1::int) \
+               AND ($2::text IS NULL OR host_code = $2) \
+             GROUP BY date_trunc('hour', created_at) \
+             ORDER BY ts ASC",
+        )
+        .bind(hours as i32)
+        .bind(host_code)
+        .map(|row: sqlx::postgres::PgRow| {
+            use sqlx::Row;
+            TimeSeriesPoint {
+                ts: row.get("ts"),
+                total: row.get("total"),
+                blocked: row.get("blocked"),
+            }
+        })
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn delete_old_stats(&self, days: i64) -> Result<u64, StorageError> {
+        let r = sqlx::query(
+            "DELETE FROM request_stats WHERE period_start < NOW() - make_interval(days => $1::int)",
+        )
+        .bind(days as i32)
+        .execute(&self.pool)
+        .await?;
+        Ok(r.rows_affected())
+    }
+
+    // ─── Phase 4: Notifications ───────────────────────────────────────────────
+
+    pub async fn list_notification_configs(
+        &self,
+        host_code: Option<&str>,
+    ) -> Result<Vec<NotificationConfig>, StorageError> {
+        Ok(match host_code {
+            Some(code) => sqlx::query_as::<_, NotificationConfig>(
+                "SELECT * FROM notification_configs WHERE host_code = $1 ORDER BY created_at",
+            )
+            .bind(code)
+            .fetch_all(&self.pool)
+            .await?,
+            None => sqlx::query_as::<_, NotificationConfig>(
+                "SELECT * FROM notification_configs ORDER BY created_at",
+            )
+            .fetch_all(&self.pool)
+            .await?,
+        })
+    }
+
+    pub async fn get_notification_config(&self, id: Uuid) -> Result<Option<NotificationConfig>, StorageError> {
+        Ok(sqlx::query_as::<_, NotificationConfig>(
+            "SELECT * FROM notification_configs WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    pub async fn create_notification_config(
+        &self,
+        req: CreateNotificationConfig,
+    ) -> Result<NotificationConfig, StorageError> {
+        let id = Uuid::new_v4();
+        let now = chrono::Utc::now();
+        Ok(sqlx::query_as::<_, NotificationConfig>(
+            r#"INSERT INTO notification_configs
+               (id, name, host_code, event_type, channel_type, config_json, enabled, rate_limit_secs, created_at, updated_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9) RETURNING *"#,
+        )
+        .bind(id)
+        .bind(&req.name)
+        .bind(&req.host_code)
+        .bind(&req.event_type)
+        .bind(&req.channel_type)
+        .bind(&req.config_json)
+        .bind(req.enabled.unwrap_or(true))
+        .bind(req.rate_limit_secs.unwrap_or(300))
+        .bind(now)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    pub async fn delete_notification_config(&self, id: Uuid) -> Result<bool, StorageError> {
+        let r = sqlx::query("DELETE FROM notification_configs WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(r.rows_affected() > 0)
+    }
+
+    pub async fn update_notification_last_triggered(&self, id: Uuid) -> Result<(), StorageError> {
+        sqlx::query(
+            "UPDATE notification_configs SET last_triggered = NOW(), updated_at = NOW() WHERE id = $1",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_enabled_notification_configs(
+        &self,
+        event_type: &str,
+    ) -> Result<Vec<NotificationConfig>, StorageError> {
+        Ok(sqlx::query_as::<_, NotificationConfig>(
+            "SELECT * FROM notification_configs WHERE event_type = $1 AND enabled = true",
+        )
+        .bind(event_type)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    pub async fn create_notification_log(
+        &self,
+        config_id: Option<Uuid>,
+        event_type: &str,
+        channel_type: &str,
+        status: &str,
+        message: Option<&str>,
+        error_msg: Option<&str>,
+    ) -> Result<(), StorageError> {
+        sqlx::query(
+            r#"INSERT INTO notification_log
+               (id, config_id, event_type, channel_type, status, message, error_msg)
+               VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)"#,
+        )
+        .bind(config_id)
+        .bind(event_type)
+        .bind(channel_type)
+        .bind(status)
+        .bind(message)
+        .bind(error_msg)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_notification_log(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<NotificationLog>, StorageError> {
+        Ok(sqlx::query_as::<_, NotificationLog>(
+            "SELECT * FROM notification_log ORDER BY created_at DESC LIMIT $1",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     pub async fn list_security_events(

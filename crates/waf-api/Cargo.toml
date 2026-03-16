@@ -10,7 +10,6 @@ waf-storage = { path = "../waf-storage" }
 waf-engine = { path = "../waf-engine" }
 gateway = { path = "../gateway" }
 tokio = { workspace = true }
-axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 serde = { workspace = true }
@@ -20,3 +19,18 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+argon2 = { workspace = true }
+jsonwebtoken = { workspace = true }
+reqwest = { workspace = true }
+lettre = { workspace = true }
+rust-embed = { workspace = true }
+mime_guess = { workspace = true }
+aes-gcm = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+rand = { workspace = true }
+totp-lite = { workspace = true }
+data-encoding = { workspace = true }
+dashmap = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }

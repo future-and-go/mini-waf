@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{
+    middleware,
     routing::{delete, get, post},
     Router,
 };
@@ -9,8 +10,17 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
+use crate::auth::{login, logout, refresh_token};
 use crate::handlers::*;
+use crate::middleware::require_auth;
+use crate::notifications::{
+    create_notification, delete_notification, list_notifications, notification_log,
+    test_notification,
+};
 use crate::state::AppState;
+use crate::stats::{stats_overview, stats_timeseries};
+use crate::static_files::static_handler;
+use crate::websocket::{ws_events, ws_logs};
 
 /// Build the Axum router with all API routes
 pub fn build_router(state: Arc<AppState>) -> Router {
@@ -19,7 +29,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    Router::new()
+    // Public auth routes (no JWT required)
+    let auth_routes = Router::new()
+        .route("/api/auth/login", post(login))
+        .route("/api/auth/logout", post(logout))
+        .route("/api/auth/refresh", post(refresh_token));
+
+    // Protected API routes (JWT required)
+    let protected_routes = Router::new()
         // Hosts
         .route("/api/hosts", get(list_hosts).post(create_host))
         .route("/api/hosts/:id", get(get_host).put(update_host).delete(delete_host))
@@ -37,7 +54,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/block-urls/:id", delete(delete_block_url))
         // Attack logs
         .route("/api/attack-logs", get(list_attack_logs))
-        // Security events (Phase 2 attack detection)
+        // Security events
         .route("/api/security-events", get(list_security_events))
         // System status
         .route("/api/status", get(get_status))
@@ -57,6 +74,32 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         // Phase 3: Certificates
         .route("/api/certificates", get(list_certificates).post(upload_certificate))
         .route("/api/certificates/:id", delete(delete_certificate))
+        // Phase 4: Statistics
+        .route("/api/stats/overview", get(stats_overview))
+        .route("/api/stats/timeseries", get(stats_timeseries))
+        // Phase 4: Notifications
+        .route("/api/notifications", get(list_notifications).post(create_notification))
+        .route("/api/notifications/:id", delete(delete_notification))
+        .route("/api/notifications/log", get(notification_log))
+        .route("/api/notifications/:id/test", post(test_notification))
+        .layer(middleware::from_fn_with_state(state.clone(), require_auth));
+
+    // WebSocket routes (auth via query param, no layer middleware)
+    let ws_routes = Router::new()
+        .route("/ws/events", get(ws_events))
+        .route("/ws/logs", get(ws_logs));
+
+    // Serve the embedded Vue 3 admin UI at /ui/*
+    let ui_routes = Router::new()
+        .route("/ui", get(static_handler))
+        .route("/ui/", get(static_handler))
+        .route("/ui/*path", get(static_handler));
+
+    Router::new()
+        .merge(auth_routes)
+        .merge(protected_routes)
+        .merge(ws_routes)
+        .merge(ui_routes)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

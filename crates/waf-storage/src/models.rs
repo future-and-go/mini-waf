@@ -343,3 +343,127 @@ pub struct CreateCertificate {
     pub chain_pem: Option<String>,
     pub auto_renew: Option<bool>,
 }
+
+// ─── Phase 4: Auth ────────────────────────────────────────────────────────────
+
+/// Admin user
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AdminUser {
+    pub id: Uuid,
+    pub username: String,
+    pub email: Option<String>,
+    #[serde(skip_serializing)]
+    pub password_hash: String,
+    pub role: String,
+    pub is_active: bool,
+    #[serde(skip_serializing)]
+    pub totp_secret: Option<String>,
+    pub totp_enabled: bool,
+    pub last_login: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Refresh token entry
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct RefreshToken {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub token_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub revoked: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Create admin user request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateAdminUser {
+    pub username: String,
+    pub email: Option<String>,
+    pub password: String,
+    pub role: Option<String>,
+}
+
+// ─── Phase 4: Statistics ──────────────────────────────────────────────────────
+
+/// Aggregated request statistics row
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct RequestStat {
+    pub id: Uuid,
+    pub host_code: String,
+    pub period_start: DateTime<Utc>,
+    pub period_type: String,
+    pub total_requests: i64,
+    pub blocked_requests: i64,
+    pub allowed_requests: i64,
+    pub stats_json: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Stats overview (aggregated from existing tables)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatsOverview {
+    pub total_requests: i64,
+    pub total_blocked: i64,
+    pub total_allowed: i64,
+    pub hosts_count: i64,
+    pub top_ips: Vec<TopEntry>,
+    pub top_rules: Vec<TopEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopEntry {
+    pub key: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeSeriesPoint {
+    pub ts: DateTime<Utc>,
+    pub total: i64,
+    pub blocked: i64,
+}
+
+// ─── Phase 4: Notifications ───────────────────────────────────────────────────
+
+/// Notification configuration entry
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct NotificationConfig {
+    pub id: Uuid,
+    pub name: String,
+    pub host_code: Option<String>,
+    pub event_type: String,
+    pub channel_type: String,
+    pub config_json: serde_json::Value,
+    pub enabled: bool,
+    pub rate_limit_secs: i32,
+    pub last_triggered: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Notification log entry
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct NotificationLog {
+    pub id: Uuid,
+    pub config_id: Option<Uuid>,
+    pub event_type: String,
+    pub channel_type: String,
+    pub status: String,
+    pub message: Option<String>,
+    pub error_msg: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Create notification config request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateNotificationConfig {
+    pub name: String,
+    pub host_code: Option<String>,
+    pub event_type: String,
+    pub channel_type: String,
+    pub config_json: serde_json::Value,
+    pub enabled: Option<bool>,
+    pub rate_limit_secs: Option<i32>,
+}

@@ -191,5 +191,10 @@ async fn init_async(
         Arc::clone(&router),
     ));
 
+    // Phase 4: create default admin user if none exist
+    if let Err(e) = waf_api::auth::ensure_default_admin(&api_state).await {
+        tracing::warn!("Could not ensure default admin: {e}");
+    }
+
     Ok((engine, router, api_state))
 }
