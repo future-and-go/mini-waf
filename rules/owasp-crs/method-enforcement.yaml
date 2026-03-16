@@ -1,18 +1,27 @@
 version: '1.0'
-description: OWASP CRS rules converted from REQUEST-911-METHOD-ENFORCEMENT.conf
-source: OWASP Core Rule Set v4.x (https://github.com/coreruleset/coreruleset)
+description: Method Enforcement (OWASP CRS 911)
+source: OWASP Core Rule Set v4.x
 license: Apache-2.0
 rules:
-- id: CRS-PROTO-911100
-  name: Method is not allowed by policy
-  category: protocol
-  severity: critical
-  paranoia: 1
-  field: method
-  operator: regex
-  value: '!@within %{tx.allowed_methods}'
-  action: block
-  tags:
-  - owasp-crs
-  - generic
-  crs_id: 911100
+  - id: CRS-911100
+    name: Method is not allowed by policy
+    category: protocol
+    severity: critical
+    paranoia: 1
+    field: method
+    operator: not_in
+    value:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - PATCH
+      - HEAD
+      - OPTIONS
+      - CONNECT
+      - TRACE
+    action: block
+    tags:
+      - owasp-crs
+      - method-enforcement
+    crs_id: 911100

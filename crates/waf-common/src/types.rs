@@ -224,6 +224,9 @@ pub struct DefenseConfig {
     /// Auto-ban duration in seconds
     #[serde(default = "default_cc_ban_duration_secs")]
     pub cc_ban_duration_secs: u64,
+    /// OWASP CRS paranoia level (1–4, default 1 = most permissive)
+    #[serde(default = "default_owasp_paranoia")]
+    pub owasp_paranoia: u8,
 }
 
 fn bool_true() -> bool { true }
@@ -231,6 +234,7 @@ fn default_cc_rps() -> f64 { 100.0 }
 fn default_cc_burst() -> u32 { 200 }
 fn default_cc_ban_threshold() -> u32 { 10 }
 fn default_cc_ban_duration_secs() -> u64 { 300 }
+fn default_owasp_paranoia() -> u8 { 1 }
 
 impl Default for DefenseConfig {
     fn default() -> Self {
@@ -248,6 +252,7 @@ impl Default for DefenseConfig {
             cc_burst: default_cc_burst(),
             cc_ban_threshold: default_cc_ban_threshold(),
             cc_ban_duration_secs: default_cc_ban_duration_secs(),
+            owasp_paranoia: default_owasp_paranoia(),
         }
     }
 }

@@ -6,3 +6,11 @@ node_modules/
 web/admin-ui/dist/
 # ip2region xdb binary data files — download with `prx-waf geoip download`
 data/*.xdb
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Root-level tools/ was a duplicate of rules/tools/ — canonical path is rules/tools/
+/tools/
