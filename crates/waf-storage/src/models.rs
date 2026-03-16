@@ -74,7 +74,7 @@ pub struct BlockUrl {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Attack log entry
+/// Attack log entry (Phase 1 — IP / URL blacklist hits)
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct AttackLog {
     pub id: Uuid,
@@ -92,6 +92,24 @@ pub struct AttackLog {
     pub request_headers: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
 }
+
+/// Security event entry (Phase 2 — attack detection)
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct SecurityEvent {
+    pub id: Uuid,
+    pub host_code: String,
+    pub client_ip: String,
+    pub method: String,
+    pub path: String,
+    pub rule_id: Option<String>,
+    pub rule_name: String,
+    pub action: String,
+    pub detail: Option<String>,
+    pub geo_info: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+}
+
+// ─── Request / Input types ────────────────────────────────────────────────────
 
 /// Create host request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +167,31 @@ pub struct CreateUrlRule {
 pub struct AttackLogQuery {
     pub host_code: Option<String>,
     pub client_ip: Option<String>,
+    pub action: Option<String>,
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+}
+
+/// Create security event (used internally by the engine)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateSecurityEvent {
+    pub host_code: String,
+    pub client_ip: String,
+    pub method: String,
+    pub path: String,
+    pub rule_id: Option<String>,
+    pub rule_name: String,
+    pub action: String,
+    pub detail: Option<String>,
+    pub geo_info: Option<serde_json::Value>,
+}
+
+/// Security event query parameters
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SecurityEventQuery {
+    pub host_code: Option<String>,
+    pub client_ip: Option<String>,
+    pub rule_name: Option<String>,
     pub action: Option<String>,
     pub page: Option<i64>,
     pub page_size: Option<i64>,

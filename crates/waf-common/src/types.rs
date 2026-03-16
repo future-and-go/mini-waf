@@ -71,6 +71,13 @@ pub enum Phase {
     IpBlacklist = 2,
     UrlWhitelist = 3,
     UrlBlacklist = 4,
+    SqlInjection = 5,
+    Xss = 6,
+    Rce = 7,
+    Scanner = 8,
+    DirTraversal = 9,
+    Bot = 10,
+    RateLimit = 11,
 }
 
 impl std::fmt::Display for Phase {
@@ -80,6 +87,13 @@ impl std::fmt::Display for Phase {
             Phase::IpBlacklist => write!(f, "IP Blacklist"),
             Phase::UrlWhitelist => write!(f, "URL Whitelist"),
             Phase::UrlBlacklist => write!(f, "URL Blacklist"),
+            Phase::SqlInjection => write!(f, "SQL Injection"),
+            Phase::Xss => write!(f, "XSS"),
+            Phase::Rce => write!(f, "RCE"),
+            Phase::Scanner => write!(f, "Scanner"),
+            Phase::DirTraversal => write!(f, "Directory Traversal"),
+            Phase::Bot => write!(f, "Bot"),
+            Phase::RateLimit => write!(f, "Rate Limit"),
         }
     }
 }
@@ -113,6 +127,8 @@ pub struct HostConfig {
     pub load_balance_strategy: LoadBalanceStrategy,
     pub defense_config: DefenseConfig,
     pub log_only_mode: bool,
+    /// Custom HTML block page template; placeholders: {{req_id}}, {{rule_name}}, {{client_ip}}
+    pub block_page_template: Option<String>,
 }
 
 impl Default for HostConfig {
@@ -135,6 +151,7 @@ impl Default for HostConfig {
             load_balance_strategy: LoadBalanceStrategy::RoundRobin,
             defense_config: DefenseConfig::default(),
             log_only_mode: false,
+            block_page_template: None,
         }
     }
 }
@@ -160,7 +177,28 @@ pub struct DefenseConfig {
     pub sensitive: bool,
     pub dir_traversal: bool,
     pub owasp_set: bool,
+    /// CC / rate-limit protection enabled
+    #[serde(default = "bool_true")]
+    pub cc: bool,
+    /// Token bucket refill rate (requests per second)
+    #[serde(default = "default_cc_rps")]
+    pub cc_rps: f64,
+    /// Token bucket burst capacity
+    #[serde(default = "default_cc_burst")]
+    pub cc_burst: u32,
+    /// Violations before auto-ban
+    #[serde(default = "default_cc_ban_threshold")]
+    pub cc_ban_threshold: u32,
+    /// Auto-ban duration in seconds
+    #[serde(default = "default_cc_ban_duration_secs")]
+    pub cc_ban_duration_secs: u64,
 }
+
+fn bool_true() -> bool { true }
+fn default_cc_rps() -> f64 { 100.0 }
+fn default_cc_burst() -> u32 { 200 }
+fn default_cc_ban_threshold() -> u32 { 10 }
+fn default_cc_ban_duration_secs() -> u64 { 300 }
 
 impl Default for DefenseConfig {
     fn default() -> Self {
@@ -173,6 +211,11 @@ impl Default for DefenseConfig {
             sensitive: true,
             dir_traversal: true,
             owasp_set: false,
+            cc: true,
+            cc_rps: default_cc_rps(),
+            cc_burst: default_cc_burst(),
+            cc_ban_threshold: default_cc_ban_threshold(),
+            cc_ban_duration_secs: default_cc_ban_duration_secs(),
         }
     }
 }

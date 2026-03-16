@@ -375,4 +375,69 @@ impl Database {
 
         Ok((rows, total))
     }
+
+    // ─── Security Events ─────────────────────────────────────────────────────
+
+    pub async fn create_security_event(&self, req: CreateSecurityEvent) -> Result<(), StorageError> {
+        sqlx::query(
+            r#"INSERT INTO security_events
+               (host_code, client_ip, method, path, rule_id, rule_name, action, detail, geo_info)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#
+        )
+        .bind(&req.host_code)
+        .bind(&req.client_ip)
+        .bind(&req.method)
+        .bind(&req.path)
+        .bind(&req.rule_id)
+        .bind(&req.rule_name)
+        .bind(&req.action)
+        .bind(&req.detail)
+        .bind(&req.geo_info)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_security_events(
+        &self,
+        query: &SecurityEventQuery,
+    ) -> Result<(Vec<SecurityEvent>, i64), StorageError> {
+        let page = query.page.unwrap_or(1).max(1);
+        let page_size = query.page_size.unwrap_or(20).min(100).max(1);
+        let offset = (page - 1) * page_size;
+
+        let total: i64 = sqlx::query_scalar(
+            r#"SELECT COUNT(*) FROM security_events
+               WHERE ($1::text IS NULL OR host_code = $1)
+                 AND ($2::text IS NULL OR client_ip = $2)
+                 AND ($3::text IS NULL OR rule_name = $3)
+                 AND ($4::text IS NULL OR action = $4)"#,
+        )
+        .bind(&query.host_code)
+        .bind(&query.client_ip)
+        .bind(&query.rule_name)
+        .bind(&query.action)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let rows = sqlx::query_as::<_, SecurityEvent>(
+            r#"SELECT * FROM security_events
+               WHERE ($1::text IS NULL OR host_code = $1)
+                 AND ($2::text IS NULL OR client_ip = $2)
+                 AND ($3::text IS NULL OR rule_name = $3)
+                 AND ($4::text IS NULL OR action = $4)
+               ORDER BY created_at DESC
+               LIMIT $5 OFFSET $6"#,
+        )
+        .bind(&query.host_code)
+        .bind(&query.client_ip)
+        .bind(&query.rule_name)
+        .bind(&query.action)
+        .bind(page_size)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok((rows, total))
+    }
 }

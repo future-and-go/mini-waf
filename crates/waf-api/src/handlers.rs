@@ -8,7 +8,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use waf_storage::models::{
-    AttackLogQuery, CreateHost, CreateIpRule, CreateUrlRule, UpdateHost,
+    AttackLogQuery, CreateHost, CreateIpRule, CreateUrlRule, SecurityEventQuery, UpdateHost,
 };
 
 use crate::error::{ApiError, ApiResult};
@@ -233,6 +233,22 @@ pub async fn list_attack_logs(
     Ok(Json(json!({
         "success": true,
         "data": logs,
+        "total": total,
+        "page": query.page.unwrap_or(1),
+        "page_size": query.page_size.unwrap_or(20),
+    })))
+}
+
+// ─── Security Events ─────────────────────────────────────────────────────────
+
+pub async fn list_security_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SecurityEventQuery>,
+) -> ApiResult<Json<Value>> {
+    let (events, total) = state.db.list_security_events(&query).await?;
+    Ok(Json(json!({
+        "success": true,
+        "data": events,
         "total": total,
         "page": query.page.unwrap_or(1),
         "page_size": query.page_size.unwrap_or(20),

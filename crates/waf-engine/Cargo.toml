@@ -13,7 +13,9 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+bytes = { workspace = true }
 dashmap = { workspace = true }
+regex = { workspace = true }
 ipnet = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true }

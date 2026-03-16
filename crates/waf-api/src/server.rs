@@ -37,6 +37,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/block-urls/:id", delete(delete_block_url))
         // Attack logs
         .route("/api/attack-logs", get(list_attack_logs))
+        // Security events (Phase 2 attack detection)
+        .route("/api/security-events", get(list_security_events))
         // System status
         .route("/api/status", get(get_status))
         // Rule reload
