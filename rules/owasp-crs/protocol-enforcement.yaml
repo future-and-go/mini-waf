@@ -1,0 +1,627 @@
+# Auto-generated from OWASP CRS
+# Source: OWASP CRS v4.25.0
+# Description: Protocol Enforcement
+# License: Apache-2.0
+# DO NOT EDIT MANUALLY - use modsec2yaml.py to regenerate
+
+version: '1.0'
+description: Protocol Enforcement
+source: OWASP CRS v4.25.0
+license: Apache-2.0
+rules:
+  - id: CRS-920170
+    name: GET or HEAD Request with Body Content
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: ^(?:GET|HEAD)$
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920170
+  - id: CRS-920171
+    name: GET or HEAD Request with Transfer-Encoding
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: ^(?:GET|HEAD)$
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920171
+  - id: CRS-920190
+    name: 'Range: Invalid Last Byte Value'
+    category: protocol-attack
+    severity: warning
+    paranoia: 1
+    field: header_range
+    operator: regex
+    value: (\d+)-(\d+)
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920190
+  - id: CRS-920660
+    name: Obsolete Request-Range header detected
+    category: protocol-attack
+    severity: warning
+    paranoia: 1
+    field: all
+    operator: gt
+    value: '0'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920660
+  - id: CRS-920210
+    name: Multiple/Conflicting Connection Header Data Found
+    category: protocol-attack
+    severity: warning
+    paranoia: 1
+    field: header_connection
+    operator: regex
+    value: \b(?:keep-alive|close),\s?(?:keep-alive|close)\b
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920210
+  - id: CRS-920260
+    name: Unicode Full/Half Width Abuse Attack Attempt
+    category: protocol-attack
+    severity: warning
+    paranoia: 1
+    field: all
+    operator: regex
+    value: (?i)%uff[0-9a-f]{2}
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920260
+  - id: CRS-920270
+    name: Invalid character in request (null character)
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: validate_byte_range
+    value: 1-255
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920270
+  - id: CRS-920290
+    name: Empty Host Header
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: header_host
+    operator: regex
+    value: ^$
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920290
+  - id: CRS-920310
+    name: Request Has an Empty Accept Header
+    category: protocol-attack
+    severity: notice
+    paranoia: 1
+    field: header_accept
+    operator: regex
+    value: ^$
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920310
+  - id: CRS-920311
+    name: Request Has an Empty Accept Header
+    category: protocol-attack
+    severity: notice
+    paranoia: 1
+    field: header_accept
+    operator: regex
+    value: ^$
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920311
+  - id: CRS-920330
+    name: Empty User Agent Header
+    category: protocol-attack
+    severity: notice
+    paranoia: 1
+    field: user_agent
+    operator: regex
+    value: ^$
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920330
+  - id: CRS-920350
+    name: Host header is a numeric IP address
+    category: protocol-attack
+    severity: warning
+    paranoia: 1
+    field: header_host
+    operator: regex
+    value: (?:^([\d.]+|\[[\da-f:]+\]|[\da-f:]+)(:[\d]+)?$)
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920350
+  - id: CRS-920380
+    name: Too many arguments in request
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: equals
+    value: '1'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920380
+  - id: CRS-920360
+    name: Argument name too long
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: equals
+    value: '1'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920360
+  - id: CRS-920370
+    name: Argument value too long
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: equals
+    value: '1'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920370
+  - id: CRS-920390
+    name: Total arguments size exceeded
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: equals
+    value: '1'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920390
+  - id: CRS-920400
+    name: Uploaded file size too large
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: equals
+    value: '1'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920400
+  - id: CRS-920410
+    name: Total uploaded files size too large
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: equals
+    value: '1'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920410
+  - id: CRS-920420
+    name: Request content type is not allowed by policy
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: header_content_type
+    operator: regex
+    value: ^[^;\s]+
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920420
+  - id: CRS-920480
+    name: Request content type charset is not allowed by policy
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: header_content_type
+    operator: regex
+    value: charset\s*=\s*[\"']?([^;\"'\s]+)
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920480
+  - id: CRS-920530
+    name: Multiple charsets detected in content type header
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: header_content_type
+    operator: regex
+    value: charset.*?charset
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920530
+  - id: CRS-920640
+    name: Content-Type header missing from request with body
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: gt
+    value: '0'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920640
+  - id: CRS-920440
+    name: URL file extension is restricted by policy
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: path
+    operator: regex
+    value: \.([^.]+)$
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920440
+  - id: CRS-920500
+    name: Attempt to access a backup or working file
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: path
+    operator: regex
+    value: \.[^.~]+~(?:/.*|)$
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920500
+  - id: CRS-920450
+    name: HTTP header is restricted by policy (%{MATCHED_VAR})
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: ^.*$
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920450
+  - id: CRS-920520
+    name: Accept-Encoding header exceeded sensible length
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: header_accept_encoding
+    operator: gt
+    value: '100'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920520
+  - id: CRS-920610
+    name: Raw (unencoded) fragment in request URI
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: path
+    operator: contains
+    value: '#'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920610
+  - id: CRS-920620
+    name: Multiple Content-Type Request Headers
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: gt
+    value: '1'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920620
+  - id: CRS-920200
+    name: 'Range: Too many fields (6 or more)'
+    category: protocol-attack
+    severity: warning
+    paranoia: 2
+    field: header_range
+    operator: regex
+    value: ^bytes=(?:(?:\d+)?-(?:\d+)?\s*,?\s*){6}
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920200
+  - id: CRS-920201
+    name: 'Range: Too many fields for pdf request (63 or more)'
+    category: protocol-attack
+    severity: warning
+    paranoia: 2
+    field: path
+    operator: ends_with
+    value: .pdf
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920201
+  - id: CRS-920230
+    name: Multiple URL Encoding Detected
+    category: protocol-attack
+    severity: warning
+    paranoia: 2
+    field: query
+    operator: regex
+    value: '%[0-9a-fA-F]{2}'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920230
+  - id: CRS-920271
+    name: Invalid character in request (non printable characters)
+    category: protocol-attack
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: validate_byte_range
+    value: 9,10,13,32-126,128-255
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920271
+  - id: CRS-920320
+    name: Missing User Agent Header
+    category: protocol-attack
+    severity: notice
+    paranoia: 2
+    field: all
+    operator: equals
+    value: '0'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920320
+  - id: CRS-920121
+    name: Attempted multipart/form-data bypass
+    category: protocol-attack
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: '[''\";=\x5c]'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920121
+  - id: CRS-920451
+    name: HTTP header is restricted by policy (%{MATCHED_VAR})
+    category: protocol-attack
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: ^.*$
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920451
+  - id: CRS-920240
+    name: URL Encoding Abuse Attack Attempt
+    category: protocol-attack
+    severity: warning
+    paranoia: 2
+    field: header_content_type
+    operator: regex
+    value: ^(?i)application/x-www-form-urlencoded
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920240
+  - id: CRS-920272
+    name: Invalid character in request (outside of printable chars below ascii 127)
+    category: protocol-attack
+    severity: critical
+    paranoia: 3
+    field: all
+    operator: validate_byte_range
+    value: 32-36,38-126
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920272
+  - id: CRS-920300
+    name: Request Missing an Accept Header
+    category: protocol-attack
+    severity: notice
+    paranoia: 3
+    field: all
+    operator: equals
+    value: '0'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920300
+  - id: CRS-920490
+    name: Request header x-up-devcap-post-charset detected in combination with prefix \'UP\' to User-Agent
+    category: protocol-attack
+    severity: critical
+    paranoia: 3
+    field: all
+    operator: ge
+    value: '1'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920490
+  - id: CRS-920510
+    name: Invalid Cache-Control request header
+    category: protocol-attack
+    severity: critical
+    paranoia: 3
+    field: all
+    operator: gt
+    value: '0'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920510
+  - id: CRS-920202
+    name: 'Range: Too many fields for pdf request (6 or more)'
+    category: protocol-attack
+    severity: warning
+    paranoia: 4
+    field: path
+    operator: ends_with
+    value: .pdf
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920202
+  - id: CRS-920273
+    name: Invalid character in request (outside of very strict set)
+    category: protocol-attack
+    severity: critical
+    paranoia: 4
+    field: all
+    operator: validate_byte_range
+    value: 38,44-46,48-58,61,65-90,95,97-122
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920273
+  - id: CRS-920274
+    name: Invalid character in request headers (outside of very strict set)
+    category: protocol-attack
+    severity: critical
+    paranoia: 4
+    field: all
+    operator: validate_byte_range
+    value: 32,34,38,42-59,61,65-90,95,97-122
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920274
+  - id: CRS-920460
+    name: Abnormal character escapes in request
+    category: protocol-attack
+    severity: critical
+    paranoia: 4
+    field: all
+    operator: regex
+    value: (?:^|[^\x5c])\x5c[cdeghijklmpqwxyz123456789]
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 920460

@@ -1,0 +1,238 @@
+# Auto-generated from OWASP CRS
+# Source: OWASP CRS v4.25.0
+# Description: Protocol Attack
+# License: Apache-2.0
+# DO NOT EDIT MANUALLY - use modsec2yaml.py to regenerate
+
+version: '1.0'
+description: Protocol Attack
+source: OWASP CRS v4.25.0
+license: Apache-2.0
+rules:
+  - id: CRS-921110
+    name: HTTP Request Smuggling Attack
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?:get|p(?:(?:os|u)t|atch|rop(?:find|atch))|head|options|co(?:nnect|py)|delete|trac[ek]|m(?:kcol|ove)|(?:un)?lock)[\s\x0b]+[^\s\x0b]+[\s\x0b]+http/[0-9]
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921110
+  - id: CRS-921120
+    name: HTTP Response Splitting Attack
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: '[\n\r][^0-9A-Z_a-z]*?(?:content-(?:type|length)|set-cookie|location):[\s\x0b]*[0-9A-Z_a-z]'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921120
+  - id: CRS-921130
+    name: HTTP Response Splitting Attack
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: (?:\bhttp/\d|<(?:html|meta)\b)
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921130
+  - id: CRS-921140
+    name: HTTP Header Injection Attack via headers
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: headers
+    operator: regex
+    value: '[\n\r]'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921140
+  - id: CRS-921150
+    name: HTTP Header Injection Attack via payload (CR/LF detected)
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: query
+    operator: regex
+    value: '[\n\r]'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921150
+  - id: CRS-921160
+    name: HTTP Header Injection Attack via payload (CR/LF and header-name detected)
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: query
+    operator: regex
+    value: |-
+      [\n\r]+(?:[\s\x0b]|location|re(?:fresh|mote-(?:ip|addr))|(?:set-)?cookie|forwarded-(?:(?:fo|serve)r|host)|host|via|originating-IP|x-(?:forwarded-(?:(?:fo|serve)r|host)|host|via|remote-(?:ip|addr)|originating-IP))[\s\x0b]*:
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921160
+  - id: CRS-921190
+    name: HTTP Splitting (CR/LF in request filename detected)
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: path
+    operator: regex
+    value: '[\n\r]'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921190
+  - id: CRS-921200
+    name: LDAP Injection Attack
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      ^[^!&\(\):<>\|~]*\)[\s\x0b]*(?:\((?:[^!&\(\),<->\|~]+[<>~]?=|[\s\x0b]*[!&\|][\s\x0b]*[\(\)]?[\s\x0b]*)|\)[\s\x0b]*\([\s\x0b]*[!&\|][\s\x0b]*|[!&\|][\s\x0b]*\([^!&\(\),<->\|~]+[<>~]?=[^!&\(\):<>\|~]*)
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+    crs_id: 921200
+  - id: CRS-921421
+    name: 'Content-Type header: Dangerous content type outside the mime type declaration'
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: header_content_type
+    operator: regex
+    value: ^[^\s\x0b,;]+[\s\x0b,;].*?(?:application/(?:.+\+)?json|(?:application/(?:soap\+)?|text/)xml)
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921421
+  - id: CRS-921240
+    name: mod_proxy attack attempt detected
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: path
+    operator: regex
+    value: unix:[^|]*\|
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921240
+  - id: CRS-921250
+    name: Old Cookies V1 usage attempt detected
+    category: protocol-attack
+    severity: critical
+    paranoia: 1
+    field: cookies
+    operator: equals
+    value: '1'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921250
+  - id: CRS-921151
+    name: HTTP Header Injection Attack via payload (CR/LF detected)
+    category: protocol-attack
+    severity: critical
+    paranoia: 2
+    field: query
+    operator: regex
+    value: '[\n\r]'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921151
+  - id: CRS-921422
+    name: 'Content-Type header: Dangerous content type outside the mime type declaration'
+    category: protocol-attack
+    severity: critical
+    paranoia: 2
+    field: header_content_type
+    operator: regex
+    value: |-
+      ^[^\s\x0b,;]+[\s\x0b,;].*?\b(?:((?:tex|multipar)t|application)|((?:audi|vide)o|image|cs[sv]|(?:vn|relate)d|p(?:df|lain)|json|(?:soa|cs)p|x(?:ml|-www-form-urlencoded)|form-data|x-amf|(?:octe|repor)t|stream)|([\+/]))\b
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921422
+  - id: CRS-921230
+    name: HTTP Range Header detected
+    category: protocol-attack
+    severity: critical
+    paranoia: 3
+    field: all
+    operator: gt
+    value: '0'
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921230
+  - id: CRS-921210
+    name: HTTP Parameter Pollution after detecting bogus char after parameter array
+    category: protocol-attack
+    severity: critical
+    paranoia: 3
+    field: query
+    operator: regex
+    value: (][^\]]+$|][^\]]+\[)
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921210
+  - id: CRS-921220
+    name: HTTP Parameter Pollution possible via array notation
+    category: protocol-attack
+    severity: critical
+    paranoia: 4
+    field: query
+    operator: regex
+    value: \[
+    action: block
+    tags:
+      - owasp-crs
+      - protocol-attack
+      - attack-protocol
+    crs_id: 921220

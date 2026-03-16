@@ -1,0 +1,96 @@
+# Auto-generated from OWASP CRS
+# Source: OWASP CRS v4.25.0
+# Description: Local File Inclusion
+# License: Apache-2.0
+# DO NOT EDIT MANUALLY - use modsec2yaml.py to regenerate
+
+version: '1.0'
+description: Local File Inclusion
+source: OWASP CRS v4.25.0
+license: Apache-2.0
+rules:
+  - id: CRS-930100
+    name: Path Traversal Attack (/../) or (/.../)
+    category: lfi
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)(?:[/\x5c]|%(?:2(?:f|5(?:2f|5c|c(?:1%259c|0%25af))|%46)|5c|c(?:0%(?:[2aq]f|5c|9v)|1%(?:[19p]c|8s|af))|(?:bg%q|(?:e|f(?:8%8)?0%8)0%80%a)f|u(?:221[56]|EFC8|F025|002f)|%3(?:2(?:%(?:%6|4)6|F)|5%%63)|1u)|0x(?:2f|5c))(?:\.(?:%0[01]|\?)?|\?\.?|%(?:2(?:(?:5(?:2|c0%25a))?e|%45)|c0(?:\.|%[256aef]e)|u(?:(?:ff0|002)e|2024)|%32(?:%(?:%6|4)5|E)|(?:e|f(?:(?:8|c%80)%8)?0%8)0%80%ae)|0x2e){2,3}(?:[/\x5c]|%(?:2(?:f|5(?:2f|5c|c(?:1%259c|0%25af))|%46)|5c|c(?:0%(?:[2aq]f|5c|9v)|1%(?:[19p]c|8s|af))|(?:bg%q|(?:e|f(?:8%8)?0%8)0%80%a)f|u(?:221[56]|EFC8|F025|002f)|%3(?:2(?:%(?:%6|4)6|F)|5%%63)|1u)|0x(?:2f|5c))
+    action: block
+    tags:
+      - owasp-crs
+      - lfi
+      - attack-lfi
+    crs_id: 930100
+  - id: CRS-930110
+    name: Path Traversal Attack (/../) or (/.../)
+    category: lfi
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: (?:^|[/;\x5c])\.{2,3}[/;\x5c]
+    action: block
+    tags:
+      - owasp-crs
+      - lfi
+      - attack-lfi
+    crs_id: 930110
+  - id: CRS-930120
+    name: OS File Access Attempt
+    category: lfi
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: pm_from_file
+    value: lfi-os-files.data
+    action: block
+    tags:
+      - owasp-crs
+      - lfi
+      - attack-lfi
+    crs_id: 930120
+  - id: CRS-930130
+    name: Restricted File Access Attempt
+    category: lfi
+    severity: critical
+    paranoia: 1
+    field: path
+    operator: pm_from_file
+    value: restricted-files.data
+    action: block
+    tags:
+      - owasp-crs
+      - lfi
+      - attack-lfi
+    crs_id: 930130
+  - id: CRS-930140
+    name: 'Restricted File Access Attempt: AI Coding Assistant Artifact'
+    category: lfi
+    severity: critical
+    paranoia: 1
+    field: path
+    operator: pm_from_file
+    value: ai-critical-artifacts.data
+    action: block
+    tags:
+      - owasp-crs
+      - lfi
+      - attack-lfi
+    crs_id: 930140
+  - id: CRS-930121
+    name: OS File Access Attempt in REQUEST_HEADERS
+    category: lfi
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: pm_from_file
+    value: lfi-os-files.data
+    action: block
+    tags:
+      - owasp-crs
+      - lfi
+      - attack-lfi
+    crs_id: 930121

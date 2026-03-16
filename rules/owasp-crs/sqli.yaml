@@ -1,0 +1,888 @@
+# Auto-generated from OWASP CRS
+# Source: OWASP CRS v4.25.0
+# Description: SQL Injection
+# License: Apache-2.0
+# DO NOT EDIT MANUALLY - use modsec2yaml.py to regenerate
+
+version: '1.0'
+description: SQL Injection
+source: OWASP CRS v4.25.0
+license: Apache-2.0
+rules:
+  - id: CRS-942100
+    name: SQL Injection Attack Detected via libinjection
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: detect_sqli
+    value: ''
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942100
+  - id: CRS-942140
+    name: 'SQL Injection Attack: Common DB Names Detected'
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)\b(?:d(?:atabas|b_nam)e[^0-9A-Z_a-z]*\(|(?:information_schema|m(?:aster\.\.sysdatabases|s(?:db|ys(?:ac(?:cess(?:objects|storage|xml)|es)|modules2?|(?:object|querie|relationship)s))|ysql\.db)|northwind|pg_(?:catalog|toast)|tempdb)\b|s(?:chema(?:_name\b|[^0-9A-Z_a-z]*\()|(?:qlite_(?:temp_)?master|ys(?:aux|\.database_name))\b))
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942140
+  - id: CRS-942151
+    name: 'SQL Injection Attack: SQL function name detected'
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)\b(?:a(?:dd(?:dat|tim)e|es_(?:de|en)crypt|s(?:cii(?:str)?|in)|tan2?)|b(?:enchmark|i(?:n_to_num|t_(?:and|count|length|x?or)))|c(?:har(?:acter)?_length|eil(?:ing)?|o(?:alesce|ercibility|llation|(?:mpres)?s|n(?:cat(?:_ws)?|nection_id|v(?:ert_tz)?)|t)|rc32|ur(?:(?:dat|tim)e|rent_(?:date|setting|time(?:stamp)?|user)))|d(?:a(?:t(?:abase(?:_to_xml)?|e(?:_(?:add|format|sub)|diff))|y(?:name|of(?:month|week|year)))|count|e(?:code|s_(?:de|en)crypt)|ump)|e(?:n(?:c(?:ode|rypt)|ds_?with)|x(?:p(?:ort_set)?|tract(?:value)?))|f(?:i(?:el|n)d_in_set|ound_rows|rom_(?:base64|days|unixtime))|g(?:e(?:ometrycollection|t(?:_(?:format|lock)|pgusername))|(?:r(?:eates|oup_conca)|tid_subse)t)|hex(?:toraw)?|i(?:fnull|n(?:et6?_(?:aton|ntoa)|s(?:ert|tr)|terval)|s(?:_(?:(?:free|used)_lock|ipv(?:4(?:_(?:compat|mapped))?|6)|n(?:ot(?:_null)?|ull)|superuser)|null))|json(?:_(?:a(?:gg|rray(?:_(?:elements(?:_text)?|length))?)|build_(?:array|object)|e(?:ac|xtract_pat)h(?:_text)?|object(?:_(?:agg|keys))?|populate_record(?:set)?|strip_nulls|t(?:o_record(?:set)?|ypeof))|b(?:_(?:array(?:_(?:elements(?:_text)?|length))?|build_(?:array|object)|e(?:ac|xtract_pat)h(?:_text)?|insert|object(?:_(?:agg|keys))?|p(?:ath_(?:(?:exists|match)(?:_tz)?|query(?:_(?:(?:array|first)(?:_tz)?|tz))?)|opulate_record(?:set)?|retty)|s(?:et(?:_lax)?|trip_nulls)|t(?:o_record(?:set)?|ypeof)))?|path)?|l(?:ast_(?:day|insert_id)|case|east|i(?:kely|nestring)|o(?:_(?:from_bytea|put)|ad_file|ca(?:ltimestamp|te)|g(?:10|2))|pad|trim)|m(?:a(?:ke(?:_set|date)|ster_pos_wait)|d5|i(?:crosecon)?d|onthname|ulti(?:linestring|po(?:int|lygon)))|n(?:ame_const|ot_in|ullif)|o(?:ct(?:et_length)?|(?:ld_passwo)?rd)|p(?:eriod_(?:add|diff)|g_(?:client_encoding|(?:databas|read_fil)e|l(?:argeobject|s_dir)|sleep|user)|o(?:lygon|w)|rocedure_analyse)|qu(?:ery_to_xml|ote)|r(?:a(?:dians|nd|wtohex)|elease_lock|ow_(?:count|to_json)|pad|trim)|s(?:chema|e(?:c_to_time|ssion_user)|ha[12]?|in|oundex|q(?:lite_(?:compileoption_(?:get|used)|source_id)|rt)|t(?:arts_?with|d(?:dev_(?:po|sam)p)?|r(?:_to_date|cmp))|ub(?:(?:dat|tim)e|str(?:ing(?:_index)?)?)|ys(?:date|tem_user))|t(?:ime(?:_(?:format|to_sec)|diff|stamp(?:add|diff)?)|o(?:_(?:base64|jsonb?)|n?char|(?:day|second)s)|r(?:im|uncate))|u(?:case|n(?:compress(?:ed_length)?|hex|i(?:str|x_timestamp))|(?:pdatexm|se_json_nul)l|tc_(?:date|time(?:stamp)?)|uid(?:_short)?)|var(?:_(?:po|sam)p|iance)|we(?:ek(?:day|ofyear)|ight_string)|xmltype|yearweek)[^0-9A-Z_a-z]*\(
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942151
+  - id: CRS-942160
+    name: Detects blind sqli tests using sleep() or benchmark()
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: (?i:sleep\s*?\(.*?\)|benchmark\s*?\(.*?\,.*?\))
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942160
+  - id: CRS-942170
+    name: Detects SQL benchmark and sleep injection attempts including conditional queries
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: (?i)(?:select|;)[\s\x0b]+(?:benchmark|if|sleep)[\s\x0b]*?\([\s\x0b]*?\(?[\s\x0b]*?[0-9A-Z_a-z]+
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942170
+  - id: CRS-942190
+    name: Detects MSSQL code execution and information gathering attempts
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)[\"'`](?:[\s\x0b]*![\s\x0b]*[\"'0-9A-Z_-z]|;?[\s\x0b]*(?:having|select|union\b[\s\x0b]*(?:all|(?:distin|sele)ct))\b[\s\x0b]*[^\s\x0b])|\b(?:(?:(?:c(?:onnection_id|urrent_user)|database|schema|user)[\s\x0b]*?|select.*?[0-9A-Z_a-z]?user)\(|exec(?:ute)?[\s\x0b]+master\.|from[^0-9A-Z_a-z]+information_schema[^0-9A-Z_a-z]|into[\s\x0b\+]+(?:dump|out)file[\s\x0b]*?[\"'`]|union(?:[\s\x0b]select[\s\x0b]@|[\s\x0b\(0-9A-Z_a-z]*?select))|[\s\x0b]*?exec(?:ute)?.*?[^0-9A-Z_a-z]xp_cmdshell|[^0-9A-Z_a-z]iif[\s\x0b]*?\(
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942190
+  - id: CRS-942220
+    name: |-
+      Looking for integer overflow attacks, these are taken from skipfish, except 2.2.2250738585072011e-308 is the \"magic number\" crash
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)^(?:429496729[56]|2(?:14748364[78]|.22507385850720(?:07|11)e-308)|-(?:214748364[89]|0000023456)|00000(?:12345|23456)|1e309)$
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942220
+  - id: CRS-942230
+    name: Detects conditional SQL injection attempts
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)[\s\x0b\(\)]case[\s\x0b]+when.*?then|\)[\s\x0b]*?like[\s\x0b]*?\(|select.*?having[\s\x0b]*?[^\s\x0b]+[\s\x0b]*?[^\s\x0b0-9A-Z_a-z]|if[\s\x0b]?\([0-9A-Z_a-z]+[\s\x0b]*?[<->~]
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942230
+  - id: CRS-942240
+    name: Detects MySQL charset switch and MSSQL DoS attempts
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)alter[\s\x0b]*?[0-9A-Z_a-z]+.*?char(?:acter)?[\s\x0b]+set[\s\x0b]+[0-9A-Z_a-z]+|[\"'`](?:;*?[\s\x0b]*?waitfor[\s\x0b]+(?:time|delay)[\s\x0b]+[\"'`]|;.*?:[\s\x0b]*?goto)
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942240
+  - id: CRS-942250
+    name: Detects MATCH AGAINST, MERGE and EXECUTE IMMEDIATE injections
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)m(?:erge.*?using|atch[\s\x0b]*?[\(\)\+-\-0-9A-Z_a-z]+[\s\x0b]*?against)[\s\x0b]*?\(|execute[\s\x0b]*?immediate[\s\x0b]*?[\"'`]
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942250
+  - id: CRS-942270
+    name: Looking for basic sql injection. Common attack string for mysql, oracle and others
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: (?i)union.*?select.*?from
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942270
+  - id: CRS-942280
+    name: Detects Postgres pg_sleep injection, waitfor delay attacks and database shutdown attempts
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)select[\s\x0b]*?pg_sleep|waitfor[\s\x0b]*?delay[\s\x0b]?[\"'`]+[\s\x0b]?[0-9]|;[\s\x0b]*?shutdown[\s\x0b]*?(?:[#;\{]|/\*|--)
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942280
+  - id: CRS-942290
+    name: Finds basic MongoDB SQL injection attempts
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)\[?\$(?:a(?:bs|c(?:cumulator|osh?)|dd(?:ToSet)?|ll(?:ElementsTrue)?|n(?:d|yElementTrue)|rray(?:ElemA|ToObjec)t|sinh?|tan[2h]?|vg)|b(?:etween|i(?:narySize|t(?:And|Not|(?:O|Xo)r)?)|ottomN?|sonSize|ucket(?:Auto)?)|c(?:eil|mp|o(?:n(?:cat(?:Arrays)?|d|vert)|sh?|unt|variance(?:Po|Sam)p)|urrentDate)|d(?:a(?:te(?:Add|Diff|From(?:Parts|String)|Subtract|T(?:o(?:Parts|String)|runc))|yOf(?:Month|Week|Year))|e(?:greesToRadians|nseRank|rivative)|iv(?:ide)?|ocumentNumber)|e(?:(?:a|lemMat)ch|q|x(?:ists|p(?:MovingAvg|r)?))|f(?:i(?:lter|rstN?)|loor|unction)|g(?:etField|roup|te?)|(?:hou|xo|yea)r|i(?:fNull|n(?:c|dexOf(?:Array|Bytes|CP)|tegral)?|s(?:Array|Number|o(?:DayOfWeek|Week(?:Year)?)))|jsonSchema|l(?:astN?|et|i(?:ke|(?:nearFil|tera)l)|n|o(?:cf|g(?:10)?)|t(?:e|rim)?)|m(?:a(?:p|xN?)|e(?:dian|rgeObjects|ta)|i(?:llisecond|n(?:N|ute)?)|o(?:d|nth)|ul(?:tiply)?)|n(?:atural|e|in|o[rt])|o(?:bjectToArray|r)|p(?:ercentile|o(?:[pw]|sition)|roject|u(?:ll(?:All)?|sh))|r(?:a(?:diansToDegrees|n(?:[dk]|ge))|e(?:(?:duc|nam)e|gex(?:Find(?:All)?|Match)?|place(?:All|One)|verseArray)|ound|trim)|s(?:(?:ampleRat|lic)e|e(?:cond|t(?:Difference|(?:Equal|WindowField)s|Field|I(?:ntersection|sSubset)|OnInsert|Union)?)|(?:hif|pli|qr)t|i(?:nh?|ze)|ort(?:Array)?|t(?:dDev(?:Po|Sam)p|r(?:Len(?:Bytes|CP)|casecmp))|u(?:b(?:str(?:Bytes|CP)?|tract)|m)|witch)|t(?:anh?|ext|o(?:Bool|D(?:(?:at|oubl)e|ecimal)|HashedIndexKey|Int|Lo(?:ng|wer)|ObjectId|String|U(?:UID|pper)|pN?)|r(?:im|unc)|s(?:Increment|Second)|ype)|unset|w(?:eek|here)|zip)\]?
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942290
+  - id: CRS-942320
+    name: Detects MySQL and PostgreSQL stored procedure/function injections
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)create[\s\x0b]+(?:function|procedure)[\s\x0b]*?[0-9A-Z_a-z]+[\s\x0b]*?\([\s\x0b]*?\)[\s\x0b]*?-|d(?:eclare[^0-9A-Z_a-z]+[#@][\s\x0b]*?[0-9A-Z_a-z]+|iv[\s\x0b]*?\([\+\-]*[\s\x0b\.0-9]+,[\+\-]*[\s\x0b\.0-9]+\))|exec[\s\x0b]*?\([\s\x0b]*?@|(?:lo_(?:impor|ge)t|procedure[\s\x0b]+analyse)[\s\x0b]*?\(|;[\s\x0b]*?(?:declare|open)[\s\x0b]+[\-0-9A-Z_a-z]+|::(?:b(?:igint|ool)|double[\s\x0b]+precision|int(?:eger)?|numeric|oid|real|(?:tex|smallin)t)
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942320
+  - id: CRS-942350
+    name: Detects MySQL UDF injection and other data/structure manipulation attempts
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)create[\s\x0b]+function[\s\x0b].+[\s\x0b]returns|;[\s\x0b]*?(?:alter|(?:(?:cre|trunc|upd)at|re(?:nam|plac))e|d(?:e(?:lete|sc)|rop)|(?:inser|selec)t|load)\b[\s\x0b]*?[\(\[]?[0-9A-Z_a-z]{2,}
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942350
+  - id: CRS-942360
+    name: Detects concatenated basic SQL injection and SQLLFI attempts
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)\b(?:(?:alter|(?:(?:cre|trunc|upd)at|renam)e|de(?:lete|sc)|(?:inser|selec)t|load)[\s\x0b]+(?:char|group_concat|load_file)\b[\s\x0b]*\(?|end[\s\x0b]*?\);)|[\s\x0b\(]load_file[\s\x0b]*?\(|[\"'`][\s\x0b]+regexp[^0-9A-Z_a-z]|[\"'0-9A-Z_-z][\s\x0b]+as\b[\s\x0b]*[\"'0-9A-Z_-z]+[\s\x0b]*\bfrom|^[^A-Z_a-z]+[\s\x0b]*?(?:(?:(?:(?:cre|trunc)at|renam)e|d(?:e(?:lete|sc)|rop)|(?:inser|selec)t|load)[\s\x0b]+[0-9A-Z_a-z]+|u(?:pdate[\s\x0b]+[0-9A-Z_a-z]+|nion[\s\x0b]*(?:all|(?:sele|distin)ct)\b)|alter[\s\x0b]*(?:a(?:(?:ggregat|pplication[\s\x0b]*rol)e|s(?:sembl|ymmetric[\s\x0b]*ke)y|u(?:dit|thorization)|vailability[\s\x0b]*group)|b(?:roker[\s\x0b]*priority|ufferpool)|c(?:ertificate|luster|o(?:l(?:latio|um)|nversio)n|r(?:edential|yptographic[\s\x0b]*provider))|d(?:atabase|efault|i(?:mension|skgroup)|omain)|e(?:(?:ndpoi|ve)nt|xte(?:nsion|rnal))|f(?:lashback|oreign|u(?:lltext|nction))|hi(?:erarchy|stogram)|group|in(?:dex(?:type)?|memory|stance)|java|l(?:a(?:ngua|r)ge|ibrary|o(?:ckdown|g(?:file[\s\x0b]*group|in)))|m(?:a(?:s(?:k|ter[\s\x0b]*key)|terialized)|e(?:ssage[\s\x0b]*type|thod)|odule)|(?:nicknam|queu)e|o(?:perator|utline)|p(?:a(?:ckage|rtition)|ermission|ro(?:cedur|fil)e)|r(?:e(?:mot|sourc)e|o(?:l(?:e|lback)|ute))|s(?:chema|e(?:arch|curity|rv(?:er|ice)|quence|ssion)|y(?:mmetric[\s\x0b]*key|nonym)|togroup)|t(?:able(?:space)?|ext|hreshold|r(?:igger|usted)|ype)|us(?:age|er)|view|w(?:ork(?:load)?|rapper)|x(?:ml[\s\x0b]*schema|srobject))\b)
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942360
+  - id: CRS-942500
+    name: MySQL in-line comment detected
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: (?i)/\*[\s\x0b]*?[!\+](?:[\s\x0b\(\)\-0-9=A-Z_a-z]+)?\*/
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942500
+  - id: CRS-942540
+    name: SQL Authentication bypass (split query)
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: ^(?:[^']*'|[^\"]*\"|[^`]*`)[\s\x0b]*;
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942540
+  - id: CRS-942560
+    name: MySQL Scientific Notation payload detected
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: (?i)1\.e(?:[\(\),]|\.[\$0-9A-Z_a-z])
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942560
+  - id: CRS-942550
+    name: JSON-Based SQL Injection
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)[\"'`][\[\{][^#\]\}]*[\]\}]+[\"'`]|(?:[\-@]>?|<@|@[\?@]|\?(?:(?:)|&|\|#>)|#(?:>>|-)|->>|[<>])[\"'`](?:[\[\{][^#\]\}]*[\]\}]+[\"'`]|\$[\.\[])|\bjson_extract\b[^\(]*\([^\)]*\)
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942550
+  - id: CRS-942120
+    name: 'SQL Injection Attack: SQL Operator Detected'
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)[!=]=|&&|\|\||->|>[=>]|<(?:[<=]|>(?:[\s\x0b]+binary)?)|\b(?:(?:xor|r(?:egexp|like)|i(?:snull|like)|notnull)\b|collate(?:[^0-9A-Z_a-z]*?(?:U&)?[\"'`]|[^0-9A-Z_a-z]+(?:(?:binary|nocase|rtrim)\b|[0-9A-Z_a-z]*?_))|(?:likel(?:ihood|y)|unlikely)[\s\x0b]*\()|r(?:egexp|like)[\s\x0b]+binary|not[\s\x0b]+between[\s\x0b]+(?:0[\s\x0b]+and|(?:'[^']*'|\"[^\"]*\")[\s\x0b]+and[\s\x0b]+(?:'[^']*'|\"[^\"]*\"))|is[\s\x0b]+null|like[\s\x0b]+(?:null|[0-9A-Z_a-z]+[\s\x0b]+escape\b)|(?:^|[^0-9A-Z_a-z])in[\s\x0b\+]*\([\s\x0b\"0-9]+[^\(\)]*\)|[!<->][\s\x0b]*all\b
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942120
+  - id: CRS-942130
+    name: 'SQL Injection Attack: SQL Boolean-based attack detected'
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: query
+    operator: regex
+    value: |-
+      (?i)[\s\x0b\"'-\)`]*?\b([0-9A-Z_a-z]+)\b[\s\x0b\"'-\)`]*?(?:=|<=>|(?:sounds[\s\x0b]+)?like|glob|r(?:like|egexp))[\s\x0b\"'-\)`]*?\b([0-9A-Z_a-z]+)\b
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942130
+  - id: CRS-942131
+    name: 'SQL Injection Attack: SQL Boolean-based attack detected'
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: query
+    operator: regex
+    value: |-
+      (?i)[\s\x0b\"'-\)`]*?\b([0-9A-Z_a-z]+)\b[\s\x0b\"'-\)`]*?(?:![<->]|<[=>]?|>=?|\^|is[\s\x0b]+not|not[\s\x0b]+(?:like|r(?:like|egexp)))[\s\x0b\"'-\)`]*?\b([0-9A-Z_a-z]+)\b
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942131
+  - id: CRS-942150
+    name: 'SQL Injection Attack: SQL function name detected'
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)\b(?:json(?:_[0-9A-Z_a-z]+)?|a(?:bs|(?:cos|sin)h?|tan[2h]?|vg)|c(?:eil(?:ing)?|h(?:a(?:nges|r(?:set)?)|r)|o(?:alesce|sh?|unt)|ast)|d(?:e(?:grees|fault)|a(?:te|y))|exp|f(?:loor(?:avg)?|ormat|ield)|g(?:lob|roup_concat)|h(?:ex|our)|i(?:f(?:null)?|if|n(?:str)?)|l(?:ast(?:_insert_rowid)?|ength|ike(?:l(?:ihood|y))?|n|o(?:ad_extension|g(?:10|2)?|wer(?:pi)?|cal)|trim)|m(?:ax|in(?:ute)?|o(?:d|nth))|n(?:ullif|ow)|p(?:i|ow(?:er)?|rintf|assword)|quote|r(?:a(?:dians|ndom(?:blob)?)|e(?:p(?:lace|eat)|verse)|ound|trim|ight)|s(?:i(?:gn|nh?)|oundex|q(?:lite_(?:compileoption_(?:get|used)|offset|source_id|version)|rt)|u(?:bstr(?:ing)?|m)|econd|leep)|t(?:anh?|otal(?:_changes)?|r(?:im|unc)|ypeof|ime)|u(?:n(?:icode|likely)|(?:pp|s)er)|zeroblob|bin|v(?:alues|ersion)|week|year)[^0-9A-Z_a-z]*\(
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942150
+  - id: CRS-942180
+    name: Detects basic SQL authentication bypass attempts 1/3
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)(?:/\*)+[\"'`]+[\s\x0b]?(?:--|[#\{]|/\*)?|[\"'`](?:[\s\x0b]*(?:(?:x?or|and|div|like|between)[\s\x0b\-0-9A-Z_a-z]+[\(\)\+-\-<->][\s\x0b]*[\"'0-9`]|[!=\|](?:[\s\x0b!\+\-0-9=]+[^\[]*[\"'\(`].*|[\s\x0b!0-9=]+[^0-9]*[0-9]+)$|(?:like|print)[^0-9A-Z_a-z]+[\"'\(0-9A-Z_-z]|;)|(?:[<>~]+|[\s\x0b]*[^\s\x0b0-9A-Z_a-z]?=[\s\x0b]*|[^0-9A-Z_a-z]*?[\+=]+[^0-9A-Z_a-z]*?)[\"'`])|[0-9][\"'`][\s\x0b]+[\"'`][\s\x0b]+[0-9]|^admin[\s\x0b]*?[\"'`]|[\s\x0b\"'\(`][\s\x0b]*?glob[^0-9A-Z_a-z]+[\"'\(0-9A-Z_-z]|[\s\x0b]is[\s\x0b]*?0[^0-9A-Z_a-z]|where[\s\x0b][\s\x0b,-\.0-9A-Z_a-z]+[\s\x0b]=
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942180
+  - id: CRS-942200
+    name: Detects MySQL comment-/space-obfuscated injections and backtick termination
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)(?:,[^\)]*?(?:[0-9a-f]+|\([0-9a-f]+\))|\([^,]+(?:,[\s\x0b]*[0-9a-f]+)+\))(?:$|[\"'`](?:$|[^\"'`]+[\"'`])|(?:\r?\n)?\z)|,[^\)]*?[\"'`][^\"'`]+[\"'`]|[^0-9A-Z_a-z]select.+[^0-9A-Z_a-z]*?from|(?:alter|(?:(?:cre|trunc|upd)at|renam)e|d(?:e(?:lete|sc)|rop)|(?:inser|selec)t|load)[\s\x0b]*?\([\s\x0b]*?space[\s\x0b]*?\(
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942200
+  - id: CRS-942210
+    name: Detects chained SQL injection attempts 1/2
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)(?:&&|\|\||and|between|div|like|n(?:and|ot)|(?:xx?)?or)[\s\x0b\(]+[0-9A-Z_a-z]+[\s\x0b\)]*?[!\+=]+[\s\x0b0-9]*?[\"'-\)=`]|[0-9](?:[\s\x0b]*?(?:and|between|div|like|x?or)[\s\x0b]*?[0-9]+[\s\x0b]*?[\+\-]|[\s\x0b]+group[\s\x0b]+by.+\()|/[0-9A-Z_a-z]+;?[\s\x0b]+(?:and|between|div|having|like|x?or|select)[^0-9A-Z_a-z]|(?:[#;]|--)[\s\x0b]*?(?:alter|drop|(?:insert|update)[\s\x0b]*?[0-9A-Z_a-z]{2,})|@.+=[\s\x0b]*?\([\s\x0b]*?select|[^0-9A-Z_a-z]SET[\s\x0b]*?@[0-9A-Z_a-z]+
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942210
+  - id: CRS-942260
+    name: Detects basic SQL authentication bypass attempts 2/3
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)[\"'`][\s\x0b]*?(?:(?:and|n(?:and|ot)|(?:xx?)?or|div|like|between|\|\||&&)[\s\x0b]+[\s\x0b0-9A-Z_a-z]+=[\s\x0b]*?[0-9A-Z_a-z]+[\s\x0b]*?having[\s\x0b]+|like[^0-9A-Z_a-z]*?[\"'0-9`])|[0-9A-Z_a-z][\s\x0b]+like[\s\x0b]+[\"'`]|like[\s\x0b]*?[\"'`]%|select[\s\x0b]+?[\s\x0b\"'-\),-\.0-9A-\[\]_-z]+from[\s\x0b]+
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942260
+  - id: CRS-942300
+    name: Detects MySQL comments, conditions and ch(a)r injections
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)\)[\s\x0b]*?when[\s\x0b]*?[0-9]+[\s\x0b]*?then|[\"'`][\s\x0b]*?(?:[#\{]|--)|/\*![\s\x0b]?[0-9]+|\b(?:(?:binary|cha?r)[\s\x0b]*?\([\s\x0b]*?[0-9]|(?:and|n(?:and|ot)|(?:xx?)?or|div|like|between|r(?:egexp|like))[\s\x0b]+[0-9A-Z_a-z]+\()|(?:\|\||&&)[\s\x0b]*?[0-9A-Z_a-z]+\(
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942300
+  - id: CRS-942310
+    name: Detects chained SQL injection attempts 2/2
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)(?:\([\s\x0b]*?select[\s\x0b]*?[0-9A-Z_a-z]+|coalesce|order[\s\x0b]+by[\s\x0b]+if[0-9A-Z_a-z]*?)[\s\x0b]*?\(|\*/from|\+[\s\x0b]*?[0-9]+[\s\x0b]*?\+[\s\x0b]*?@|[0-9A-Z_a-z][\"'`][\s\x0b]*?(?:(?:[\+\-=@\|]+[\s\x0b]+?)+|[\+\-=@\|]+)[\(0-9]|@@[0-9A-Z_a-z]+[\s\x0b]*?[^\s\x0b0-9A-Z_a-z]|[^0-9A-Z_a-z]!+[\"'`][0-9A-Z_a-z]|[\"'`](?:;[\s\x0b]*?(?:if|while|begin)|[\s\x0b0-9]+=[\s\x0b]*?[0-9])|[\s\x0b\(]+case[0-9]*?[^0-9A-Z_a-z].+[tw]hen[\s\x0b\(]
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942310
+  - id: CRS-942330
+    name: Detects classic SQL injection probings 1/3
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)[\"'`][\s\x0b]*?\b(?:x?or|div|like|between|and)\b[\s\x0b]*?[\"'`]?[0-9]|\x5cx(?:2[37]|3d)|^(?:.?[\"'`]$|[\"'\x5c`]*?(?:[\"'0-9`]+|[^\"'`]+[\"'`])[\s\x0b]*?\b(?:and|n(?:and|ot)|(?:xx?)?or|div|like|between|\|\||&&)\b[\s\x0b]*?[\"'0-9A-Z_-z][!&\(\)\+-\.@])|[^\s\x0b0-9A-Z_a-z][0-9A-Z_a-z]+[\s\x0b]*?[\-\|][\s\x0b]*?[\"'`][\s\x0b]*?[0-9A-Z_a-z]|@(?:[0-9A-Z_a-z]+[\s\x0b]+(?:and|x?or|div|like|between)\b[\s\x0b]*?[\"'0-9`]+|[\-0-9A-Z_a-z]+[\s\x0b](?:and|x?or|div|like|between)\b[\s\x0b]*?[^\s\x0b0-9A-Z_a-z])|[^\s\x0b0-:A-Z_a-z][\s\x0b]*?[0-9][^0-9A-Z_a-z]+[^\s\x0b0-9A-Z_a-z][\s\x0b]*?[\"'`].|[^0-9A-Z_a-z]information_schema|table_name[^0-9A-Z_a-z]
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942330
+  - id: CRS-942340
+    name: Detects basic SQL authentication bypass attempts 3/3
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)in[\s\x0b]*?\(+[\s\x0b]*?select|(?:(?:and|n(?:and|ot)|(?:xx?)?or|div|like|between)[\s\x0b]+|(?:\|\||&&)[\s\x0b]*?)[\s\x0b\+0-9A-Z_a-z]+(?:regexp[\s\x0b]*?\(|sounds[\s\x0b]+like[\s\x0b]*?[\"'`]|[0-9=]+x)|[\"'`](?:[\s\x0b]*?(?:(?:[0-9]+[\s\x0b]*?(?:--|#)|is[\s\x0b]*?(?:[0-9][^\"'`]+[\"'`]?[0-9A-Z_a-z]|[\.0-9]+[\s\x0b]*?[^0-9A-Z_a-z][^\"'`]*[\"'`])|(?:and|n(?:and|ot)|(?:xx?)?or|div|like|between)[\s\x0b]+|(?:\|\||&&)[\s\x0b]*?)(?:array[\s\x0b]*?\[|(?:tru|fals)e\b|[0-9A-Z_a-z]+(?:[\s\x0b]*?!?~|[\s\x0b]+(?:not[\s\x0b]+)?similar[\s\x0b]+to[\s\x0b]+))|[%&<->\^]+[0-9]+[\s\x0b]*?(?:and|n(?:and|ot)|(?:xx?)?or|div|like|between)=)|(?:[^0-9A-Z_a-z]+[\+\-0-9A-Z_a-z]+[\s\x0b]*?=[\s\x0b]*?[0-9][^0-9A-Z_a-z]+|\|?[\-0-9A-Z_a-z]{3,}[^\s\x0b,\.0-9A-Z_a-z]+)[\"'`])|\bexcept[\s\x0b]+(?:select\b|values[\s\x0b]*?\()
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942340
+  - id: CRS-942361
+    name: Detects basic SQL injection based on keyword alter or union
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: (?i:^[\W\d]+\s*?(?:alter|union)\b)
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942361
+  - id: CRS-942362
+    name: Detects concatenated basic SQL injection and SQLLFI attempts
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)(?:alter|(?:(?:cre|trunc|upd)at|renam)e|de(?:lete|sc)|(?:inser|selec)t|load)[\s\x0b]+(?:char|group_concat|load_file)[\s\x0b]?\(?|end[\s\x0b]*?\);|[\s\x0b\(]load_file[\s\x0b]*?\(|[\"'`][\s\x0b]+regexp[^0-9A-Z_a-z]|[^A-Z_a-z][\s\x0b]+as\b[\s\x0b]*[\"'0-9A-Z_-z]+[\s\x0b]*\bfrom|^[^A-Z_a-z]+[\s\x0b]*?(?:create[\s\x0b]+[0-9A-Z_a-z]+|(?:d(?:e(?:lete|sc)|rop)|(?:inser|selec)t|load|(?:renam|truncat)e|u(?:pdate|nion[\s\x0b]*(?:all|(?:sele|distin)ct))|alter[\s\x0b]*(?:a(?:(?:ggregat|pplication[\s\x0b]*rol)e|s(?:sembl|ymmetric[\s\x0b]*ke)y|u(?:dit|thorization)|vailability[\s\x0b]*group)|b(?:roker[\s\x0b]*priority|ufferpool)|c(?:ertificate|luster|o(?:l(?:latio|um)|nversio)n|r(?:edential|yptographic[\s\x0b]*provider))|d(?:atabase|efault|i(?:mension|skgroup)|omain)|e(?:(?:ndpoi|ve)nt|xte(?:nsion|rnal))|f(?:lashback|oreign|u(?:lltext|nction))|hi(?:erarchy|stogram)|group|in(?:dex(?:type)?|memory|stance)|java|l(?:a(?:ngua|r)ge|ibrary|o(?:ckdown|g(?:file[\s\x0b]*group|in)))|m(?:a(?:s(?:k|ter[\s\x0b]*key)|terialized)|e(?:ssage[\s\x0b]*type|thod)|odule)|(?:nicknam|queu)e|o(?:perator|utline)|p(?:a(?:ckage|rtition)|ermission|ro(?:cedur|fil)e)|r(?:e(?:mot|sourc)e|o(?:l(?:e|lback)|ute))|s(?:chema|e(?:arch|curity|rv(?:er|ice)|quence|ssion)|y(?:mmetric[\s\x0b]*key|nonym)|togroup)|t(?:able(?:space)?|ext|hreshold|r(?:igger|usted)|ype)|us(?:age|er)|view|w(?:ork(?:load)?|rapper)|x(?:ml[\s\x0b]*schema|srobject)))\b)
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942362
+  - id: CRS-942370
+    name: Detects classic SQL injection probings 2/3
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)[\"'`](?:[\s\x0b]*?(?:(?:\*.+(?:x?or|div|like|between|(?:an|i)d)[^0-9A-Z_a-z]*?[\"'`]|(?:x?or|div|like|between|and)[\s\x0b][^0-9]+[\-0-9A-Z_a-z]+[^0-9]*)[0-9]|[^\s\x0b0-9\?A-Z_a-z]+[\s\x0b]*?[^\s\x0b0-9A-Z_a-z]+[\s\x0b]*?[\"'`]|[^\s\x0b0-9A-Z_a-z]+[\s\x0b]*?[^A-Z_a-z](?:[^#]*#|.*?--))|[^\*]*\*[\s\x0b]*?[0-9])|\^[\"'`]|[%\(-\+\-<>][\-0-9A-Z_a-z]+[^\s\x0b0-9A-Z_a-z]+[\"'`][^,]
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942370
+  - id: CRS-942380
+    name: SQL Injection Attack
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)\b(?:having\b(?:[\s\x0b]+(?:[0-9]{1,10}|'[^=]{1,10}')[\s\x0b]*?[<->]| ?(?:[0-9]{1,10} ?[<->]+|[\"'][^=]{1,10}[ \"'<-\?\[]+))|ex(?:ecute(?:\(|[\s\x0b]{1,5}[\$\.0-9A-Z_a-z]{1,5}[\s\x0b]{0,3})|ists[\s\x0b]*?\([\s\x0b]*?select\b)|(?:create[\s\x0b]+?table.{0,20}?|like[^0-9A-Z_a-z]*?char[^0-9A-Z_a-z]*?)\()|select.*?case|from.*?limit|order[\s\x0b]by|exists[\s\x0b](?:[\s\x0b]select|s(?:elect[^\s\x0b](?:if(?:null)?[\s\x0b]\(|top|concat)|ystem[\s\x0b]\()|\bhaving\b[\s\x0b]+[0-9]{1,10}|'[^=]{1,10}')
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942380
+  - id: CRS-942390
+    name: SQL Injection Attack
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)\b(?:or\b(?:[\s\x0b]?(?:[0-9]{1,10}|[\"'][^=]{1,10}[\"'])[\s\x0b]?[<->]+|[\s\x0b]+(?:[0-9]{1,10}|'[^=]{1,10}')(?:[\s\x0b]*?[<->])?)|xor\b[\s\x0b]+(?:[0-9]{1,10}|'[^=]{1,10}')(?:[\s\x0b]*?[<->])?)|'[\s\x0b]+x?or[\s\x0b]+.{1,20}[!\+\-<->]
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942390
+  - id: CRS-942400
+    name: SQL Injection Attack
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: (?i)\band\b(?:[\s\x0b]+(?:[0-9]{1,10}[\s\x0b]*?[<->]|'[^=]{1,10}')| ?(?:[0-9]{1,10}|[\"'][^=]{1,10}[\"']) ?[<->]+)
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942400
+  - id: CRS-942410
+    name: SQL Injection Attack
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)\b(?:a(?:(?:b|co)s|vg)|bin|c(?:(?:as|o(?:nver|un))t|h(?:ar(?:set)?|r))|d(?:a(?:te|y)|e(?:fault|grees))|elt|f(?:ield|loor|ormat)|(?:hou|quarte|yea)r|i[fns]|l(?:ast|e(?:ft|ngth)|n|ikelihood|o(?:cal|g|wer))|m(?:ax|in(?:ute)?|o(?:d|nth))|now|p(?:assword|i|o(?:sition|wer))|r(?:awtonhex(?:toraw)?|e(?:p(?:eat|lace)|verse)|ight|ound)|s(?:econd|ign|leep|pace|tddev|um)|t(?:an|ime|o_(?:n?char|(?:day|second)s))|u(?:nlikely|(?:pp|s)er)|v(?:alues|ersion)|week)[^0-9A-Z_a-z]*?\(
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942410
+  - id: CRS-942470
+    name: SQL Injection Attack
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)autonomous_transaction|(?:current_use|n?varcha|tbcreato)r|db(?:a_users|ms_java)|open(?:owa_util|query|rowset)|s(?:p_(?:(?:addextendedpro|sqlexe)c|execute(?:sql)?|help|is_srvrolemember|makewebtask|oacreate|p(?:assword|repare)|replwritetovarbin)|ql_(?:longvarchar|variant))|utl_(?:file|http)|xp_(?:availablemedia|(?:cmdshel|servicecontro)l|dirtree|e(?:numdsn|xecresultset)|filelist|loginconfig|makecab|ntsec(?:_enumdomains)?|reg(?:addmultistring|delete(?:key|value)|enum(?:key|value)s|re(?:ad|movemultistring)|write)|terminate(?:_process)?)
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942470
+  - id: CRS-942480
+    name: SQL Injection Attack
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)\b(?:(?:d(?:bms_[0-9A-Z_a-z]+\.|elete\b[^0-9A-Z_a-z]*?\bfrom)|(?:group\b.*?\bby\b.{1,100}?\bhav|overlay\b[^0-9A-Z_a-z]*?\(.*?\b[^0-9A-Z_a-z]*?plac)ing|in(?:ner\b[^0-9A-Z_a-z]*?\bjoin|sert\b[^0-9A-Z_a-z]*?\binto|to\b[^0-9A-Z_a-z]*?\b(?:dump|out)file)|load\b[^0-9A-Z_a-z]*?\bdata\b.*?\binfile|s(?:elect\b.{1,100}?\b(?:(?:.*?\bdump\b.*|(?:count|length)\b.{1,100}?)\bfrom|(?:data_typ|from\b.{1,100}?\bwher)e|instr|to(?:_(?:cha|numbe)r|p\b.{1,100}?\bfrom))|ys_context)|u(?:nion\b.{1,100}?\bselect|tl_inaddr))\b|print\b[^0-9A-Z_a-z]*?@@)|(?:collation[^0-9A-Z_a-z]*?\(a|@@version|;[^0-9A-Z_a-z]*?\b(?:drop|shutdown))\b|'(?:dbo|msdasql|s(?:a|qloledb))'
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942480
+  - id: CRS-942430
+    name: 'Restricted SQL Character Anomaly Detection (args): # of special characters exceeded (12)'
+    category: sqli
+    severity: warning
+    paranoia: 2
+    field: query
+    operator: regex
+    value: ((?:(?:[!-\+\-:->@\[\]\^`\{-~]|\x{c2}\x{b4}|\x{e2}\x80[\x98\x99])[^!-\+\-:->@\[\]\^`\{-~]*?){12})
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942430
+  - id: CRS-942440
+    name: SQL Comment Sequence Detected
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: /\*!?|\*/|[';]--|--(?:[\s\x0b]|[^\-]*?-)|[^&\-]#.*?[\s\x0b]|;?\x00
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942440
+  - id: CRS-942450
+    name: SQL Bin or Hex Encoding Identified
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: (?i)\b0x[0-9a-f]{3,}|(?:x'[0-9a-f]{3,}|b'[01]{10,})'
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942450
+  - id: CRS-942510
+    name: SQLi bypass attempt by ticks or backticks detected
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: '`(?:[\s\x0b\(\)\+\-0-9<=@-Z_a-\{\}]{2,29}|(?:[\+/-9A-Za-z]{4})+(?:(?:[\+/-9A-Za-z]{2}=|[\+/-9A-Za-z]{3})=)?)`'
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942510
+  - id: CRS-942520
+    name: Detects basic SQL authentication bypass attempts 4.0/4
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)[\"'`][\s\x0b]*?(?:(?:is[\s\x0b]+not|not[\s\x0b]+(?:like|glob|(?:betwee|i)n|null|regexp|match)|mod|div|sounds[\s\x0b]+like)\b|[%&\*\+\-/<->\^\|]{1,3})
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942520
+  - id: CRS-942521
+    name: Detects basic SQL authentication bypass attempts 4.1/4
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)^(?:[^']*?(?:'[^']*?'[^']*?)*?'|[^\"]*?(?:\"[^\"]*?\"[^\"]*?)*?\"|[^`]*?(?:`[^`]*?`[^`]*?)*?`)[\s\x0b]*([0-9A-Z_a-z]+)\b
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942521
+  - id: CRS-942522
+    name: Detects basic SQL authentication bypass attempts 4.1/4
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: query
+    operator: regex
+    value: ^.*?\x5c['\"`](?:.*?['\"`])?\s*(?:and|or)\b
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942522
+  - id: CRS-942101
+    name: SQL Injection Attack Detected via libinjection
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: path
+    operator: detect_sqli
+    value: ''
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942101
+  - id: CRS-942152
+    name: 'SQL Injection Attack: SQL function name detected'
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)\b(?:a(?:dd(?:dat|tim)e|es_(?:de|en)crypt|s(?:cii(?:str)?|in)|tan2?)|b(?:enchmark|i(?:n_to_num|t_(?:and|count|length|x?or)))|c(?:har(?:acter)?_length|eil(?:ing)?|o(?:alesce|ercibility|llation|(?:mpres)?s|n(?:cat(?:_ws)?|nection_id|v(?:ert(?:_tz)?)?)|t)|rc32|ur(?:(?:dat|tim)e|rent_(?:date|setting|time(?:stamp)?|user)))|d(?:a(?:t(?:abase(?:_to_xml)?|e(?:_(?:add|format|sub)|diff))|y(?:name|of(?:month|week|year)))|count|e(?:code|grees|s_(?:de|en)crypt)|ump)|e(?:lt|n(?:c(?:ode|rypt)|ds_?with)|x(?:p(?:ort_set)?|tract(?:value)?))|f(?:i(?:el|n)d_in_set|ound_rows|rom_(?:base64|days|unixtime))|g(?:e(?:ometrycollection|t(?:_(?:format|lock)|pgusername))|(?:r(?:eates|oup_conca)|tid_subse)t)|hex(?:toraw)?|i(?:fnull|n(?:et6?_(?:aton|ntoa)|s(?:ert|tr)|terval)|s(?:_(?:(?:free|used)_lock|ipv(?:4(?:_(?:compat|mapped))?|6)|n(?:ot(?:_null)?|ull)|superuser)|null))|json(?:_(?:a(?:gg|rray(?:_(?:elements(?:_text)?|length))?)|build_(?:array|object)|e(?:ac|xtract_pat)h(?:_text)?|object(?:_(?:agg|keys))?|populate_record(?:set)?|strip_nulls|t(?:o_record(?:set)?|ypeof))|b(?:_(?:array(?:_(?:elements(?:_text)?|length))?|build_(?:array|object)|object(?:_(?:agg|keys))?|e(?:ac|xtract_pat)h(?:_text)?|insert|p(?:ath_(?:(?:exists|match)(?:_tz)?|query(?:_(?:(?:array|first)(?:_tz)?|tz))?)|opulate_record(?:set)?|retty)|s(?:et(?:_lax)?|trip_nulls)|t(?:o_record(?:set)?|ypeof)))?|path)?|l(?:ast_(?:day|insert_id)|case|e(?:as|f)t|i(?:kel(?:ihood|y)|nestring)|o(?:_(?:from_bytea|put)|ad_file|ca(?:ltimestamp|te)|g(?:10|2)|wer)|pad|trim)|m(?:a(?:ke(?:_set|date)|ster_pos_wait)|d5|i(?:crosecon)?d|onthname|ulti(?:linestring|po(?:int|lygon)))|n(?:ame_const|ot_in|ullif)|o(?:ct(?:et_length)?|(?:ld_passwo)?rd)|p(?:eriod_(?:add|diff)|g_(?:client_encoding|(?:databas|read_fil)e|l(?:argeobject|s_dir)|sleep|user)|o(?:(?:lyg|siti)on|w)|rocedure_analyse)|qu(?:arter|ery_to_xml|ote)|r(?:a(?:dians|nd|wtohex)|elease_lock|ow_(?:count|to_json)|pad|trim)|s(?:chema|e(?:c_to_time|ssion_user)|ha[12]?|in|oundex|pace|q(?:lite_(?:compileoption_(?:get|used)|source_id)|rt)|t(?:arts_?with|d(?:dev_(?:po|sam)p)?|r(?:_to_date|cmp))|ub(?:(?:dat|tim)e|str(?:ing(?:_index)?)?)|ys(?:date|tem_user))|t(?:ime(?:_(?:format|to_sec)|diff|stamp(?:add|diff)?)|o(?:_(?:base64|jsonb?)|n?char|(?:day|second)s)|r(?:im|uncate))|u(?:case|n(?:compress(?:ed_length)?|hex|i(?:str|x_timestamp)|likely)|(?:pdatexm|se_json_nul)l|tc_(?:date|time(?:stamp)?)|uid(?:_short)?)|var(?:_(?:po|sam)p|iance)|we(?:ek(?:day|ofyear)|ight_string)|xmltype|yearweek)[^0-9A-Z_a-z]*\(
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942152
+  - id: CRS-942321
+    name: Detects MySQL and PostgreSQL stored procedure/function injections
+    category: sqli
+    severity: critical
+    paranoia: 2
+    field: all
+    operator: regex
+    value: |-
+      (?i)create[\s\x0b]+(?:function|procedure)[\s\x0b]*?[0-9A-Z_a-z]+[\s\x0b]*?\([\s\x0b]*?\)[\s\x0b]*?-|d(?:eclare[^0-9A-Z_a-z]+[#@][\s\x0b]*?[0-9A-Z_a-z]+|iv[\s\x0b]*?\([\+\-]*[\s\x0b\.0-9]+,[\+\-]*[\s\x0b\.0-9]+\))|exec[\s\x0b]*?\([\s\x0b]*?@|(?:lo_(?:impor|ge)t|procedure[\s\x0b]+analyse)[\s\x0b]*?\(|;[\s\x0b]*?(?:declare|open)[\s\x0b]+[\-0-9A-Z_a-z]+|::(?:b(?:igint|ool)|double[\s\x0b]+precision|int(?:eger)?|numeric|oid|real|(?:tex|smallin)t)
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942321
+  - id: CRS-942251
+    name: Detects HAVING injections
+    category: sqli
+    severity: critical
+    paranoia: 3
+    field: all
+    operator: regex
+    value: (?i)\W+\d*?\s*?\bhaving\b\s*?[^\s\-]
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942251
+  - id: CRS-942490
+    name: Detects classic SQL injection probings 3/3
+    category: sqli
+    severity: critical
+    paranoia: 3
+    field: all
+    operator: regex
+    value: '[\"''`][\s\d]*?[^\w\s]\W*?\d\W*?.*?[\"''`\d]'
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942490
+  - id: CRS-942420
+    name: 'Restricted SQL Character Anomaly Detection (cookies): # of special characters exceeded (8)'
+    category: sqli
+    severity: warning
+    paranoia: 3
+    field: cookies
+    operator: regex
+    value: ((?:(?:[!-\+\-:->@\[\]\^`\{-~]|\x{c2}\x{b4}|\x{e2}\x80[\x98\x99])[^!-\+\-:->@\[\]\^`\{-~]*?){8})
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942420
+  - id: CRS-942431
+    name: 'Restricted SQL Character Anomaly Detection (args): # of special characters exceeded (6)'
+    category: sqli
+    severity: warning
+    paranoia: 3
+    field: all
+    operator: regex
+    value: ((?:(?:[!-\+\-:->@\[\]\^`\{-~]|\x{c2}\x{b4}|\x{e2}\x80[\x98\x99])[^!-\+\-:->@\[\]\^`\{-~]*?){6})
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942431
+  - id: CRS-942460
+    name: Meta-Character Anomaly Detection Alert - Repetitive Non-Word Characters
+    category: sqli
+    severity: warning
+    paranoia: 3
+    field: query
+    operator: regex
+    value: \W{4}
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942460
+  - id: CRS-942511
+    name: SQLi bypass attempt by ticks detected
+    category: sqli
+    severity: critical
+    paranoia: 3
+    field: all
+    operator: regex
+    value: '''(?:[\s\x0b\(\)\+\-0-9<=@-Z_a-\{\}]{2,29}|(?:[\+/-9A-Za-z]{4})+(?:(?:[\+/-9A-Za-z]{2}=|[\+/-9A-Za-z]{3})=)?)'''
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942511
+  - id: CRS-942530
+    name: SQLi query termination detected
+    category: sqli
+    severity: critical
+    paranoia: 3
+    field: all
+    operator: regex
+    value: ''';'
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942530
+  - id: CRS-942421
+    name: 'Restricted SQL Character Anomaly Detection (cookies): # of special characters exceeded (3)'
+    category: sqli
+    severity: warning
+    paranoia: 4
+    field: cookies
+    operator: regex
+    value: ((?:(?:[!-\+\-:->@\[\]\^`\{-~]|\x{c2}\x{b4}|\x{e2}\x80[\x98\x99])[^!-\+\-:->@\[\]\^`\{-~]*?){3})
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942421
+  - id: CRS-942432
+    name: 'Restricted SQL Character Anomaly Detection (args): # of special characters exceeded (2)'
+    category: sqli
+    severity: warning
+    paranoia: 4
+    field: query
+    operator: regex
+    value: ((?:(?:[!-\+\-:->@\[\]\^`\{-~]|\x{c2}\x{b4}|\x{e2}\x80[\x98\x99])[^!-\+\-:->@\[\]\^`\{-~]*?){2})
+    action: block
+    tags:
+      - owasp-crs
+      - sqli
+      - attack-sqli
+    crs_id: 942432

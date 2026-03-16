@@ -1,0 +1,116 @@
+version: "1.0"
+description: "IP Reputation and blocklist rules"
+source: "prx-waf community rules"
+license: "Apache-2.0"
+
+rules:
+  - id: "MODSEC-IPREP-001"
+    name: "Block known Tor exit node headers"
+    category: "ip-reputation"
+    severity: "high"
+    paranoia: 1
+    field: "headers"
+    operator: "regex"
+    value: "(?i)X-Tor-Exit"
+    action: "block"
+    tags: ["ip-reputation", "tor", "anonymizer"]
+    reference: "https://www.torproject.org/"
+
+  - id: "MODSEC-IPREP-002"
+    name: "Detect requests with no User-Agent (bot indicator)"
+    category: "ip-reputation"
+    severity: "medium"
+    paranoia: 2
+    field: "user_agent"
+    operator: "regex"
+    value: "^$"
+    action: "log"
+    tags: ["ip-reputation", "bot"]
+
+  - id: "MODSEC-IPREP-003"
+    name: "Block known malicious crawler user agents"
+    category: "ip-reputation"
+    severity: "high"
+    paranoia: 1
+    field: "user_agent"
+    operator: "regex"
+    value: "(?i)(?:masscan|zgrab|nuclei|sqlmap|nikto|nmap|dirbuster|wfuzz|gobuster|feroxbuster|ffuf|burpsuite|acunetix|appscan|nessus|openvas|websecurify|w3af|skipfish)"
+    action: "block"
+    tags: ["ip-reputation", "scanner", "bot"]
+
+  - id: "MODSEC-IPREP-004"
+    name: "Block requests from known exploit frameworks"
+    category: "ip-reputation"
+    severity: "critical"
+    paranoia: 1
+    field: "user_agent"
+    operator: "regex"
+    value: "(?i)(?:metasploit|msfpayload|msfconsole|canvas|core impact|saint|exploit)"
+    action: "block"
+    tags: ["ip-reputation", "exploit", "attack"]
+
+  - id: "MODSEC-IPREP-005"
+    name: "Block empty Referer with suspicious path"
+    category: "ip-reputation"
+    severity: "low"
+    paranoia: 3
+    field: "path"
+    operator: "regex"
+    value: "(?i)(?:\\.php|admin|wp-login|phpmyadmin|cpanel|webmail)"
+    action: "log"
+    tags: ["ip-reputation", "probe"]
+
+  - id: "MODSEC-IPREP-006"
+    name: "Detect headless browser indicators"
+    category: "ip-reputation"
+    severity: "medium"
+    paranoia: 2
+    field: "user_agent"
+    operator: "regex"
+    value: "(?i)(?:headlesschrome|phantomjs|selenium|puppeteer|playwright|webdriver|htmlunit)"
+    action: "log"
+    tags: ["ip-reputation", "bot", "headless"]
+
+  - id: "MODSEC-IPREP-007"
+    name: "Block Python/curl/wget automated scanners"
+    category: "ip-reputation"
+    severity: "medium"
+    paranoia: 2
+    field: "user_agent"
+    operator: "regex"
+    value: "^(?:python-requests|python-urllib|curl|wget|libwww-perl|lwp-trivial|Ruby|Java|Go-http-client|okhttp)/[0-9]"
+    action: "log"
+    tags: ["ip-reputation", "bot", "scripted"]
+
+  - id: "MODSEC-IPREP-008"
+    name: "Detect suspicious X-Forwarded-For spoofing (multiple hops)"
+    category: "ip-reputation"
+    severity: "low"
+    paranoia: 3
+    field: "headers"
+    operator: "regex"
+    value: "(?i)x-forwarded-for.*(?:127\\.0\\.0\\.1|10\\.\\d+\\.\\d+\\.\\d+|172\\.(?:1[6-9]|2[0-9]|3[01])\\.\\d+\\.\\d+|192\\.168\\.\\d+\\.\\d+)"
+    action: "log"
+    tags: ["ip-reputation", "spoofing", "xff"]
+
+  - id: "MODSEC-IPREP-009"
+    name: "Block requests with multiple X-Forwarded-For IPs (proxy chain)"
+    category: "ip-reputation"
+    severity: "medium"
+    paranoia: 3
+    field: "headers"
+    operator: "regex"
+    value: "(?i)x-forwarded-for.*(?:\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3},\\s*){3,}"
+    action: "log"
+    tags: ["ip-reputation", "proxy", "xff"]
+
+  - id: "MODSEC-IPREP-010"
+    name: "Detect fake Google/Bing/Baidu bot user agents"
+    category: "ip-reputation"
+    severity: "medium"
+    paranoia: 2
+    field: "user_agent"
+    operator: "regex"
+    value: "(?i)(?:googlebot|bingbot|baiduspider|yandexbot|duckduckbot|slurp)(?!.*(?:compatible|like Gecko))"
+    action: "log"
+    tags: ["ip-reputation", "bot", "fake-crawler"]

@@ -1,0 +1,138 @@
+version: "1.0"
+description: "HTTP response inspection rules - web shell, error disclosure, security headers"
+source: "prx-waf community rules"
+license: "Apache-2.0"
+
+rules:
+  - id: "MODSEC-RESP-001"
+    name: "Detect PHP web shell indicator in response"
+    category: "web-shell"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:eval\\s*\\(\\s*(?:base64_decode|gzinflate|str_rot13|rawurldecode|hex2bin)\\s*\\(|passthru\\s*\\(\\$_(?:GET|POST|REQUEST|COOKIE)|system\\s*\\(\\$_(?:GET|POST|REQUEST|COOKIE)|shell_exec\\s*\\(\\$_(?:GET|POST|REQUEST|COOKIE))"
+    action: "block"
+    tags: ["web-shell", "php", "rce"]
+
+  - id: "MODSEC-RESP-002"
+    name: "Detect common PHP one-liner web shell pattern"
+    category: "web-shell"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?i)<?php\\s+(?:@)?(?:eval|system|exec|passthru|shell_exec|popen|proc_open)\\s*\\("
+    action: "block"
+    tags: ["web-shell", "php", "rce"]
+
+  - id: "MODSEC-RESP-003"
+    name: "Detect ASP/ASPX web shell pattern in response"
+    category: "web-shell"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:<%\\s*(?:eval|execute|executeglobal)\\s+Request|<(?:script|object)\\s+runat\\s*=\\s*[\"']?server[\"']?)"
+    action: "block"
+    tags: ["web-shell", "asp", "rce"]
+
+  - id: "MODSEC-RESP-004"
+    name: "Detect directory listing response (Apache/Nginx)"
+    category: "data-leakage"
+    severity: "medium"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:<title>Index of /|<h1>Index of /|Directory listing for /)"
+    action: "log"
+    tags: ["data-leakage", "directory-listing"]
+
+  - id: "MODSEC-RESP-005"
+    name: "Detect .git directory exposure in response"
+    category: "data-leakage"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "\\[core\\]\\s*\\n\\s*repositoryformatversion"
+    action: "block"
+    tags: ["data-leakage", "git-exposure"]
+    reference: "https://owasp.org/www-project-web-security-testing-guide/v42/4-Web_Application_Security_Testing/02-Configuration_and_Deployment_Management_Testing/04-Review_Old_Backup_and_Unreferenced_Files_for_Sensitive_Information"
+
+  - id: "MODSEC-RESP-006"
+    name: "Detect .env file contents in response"
+    category: "data-leakage"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:APP_KEY=|DB_PASSWORD=|SECRET_KEY=|API_KEY=|AWS_SECRET)"
+    action: "block"
+    tags: ["data-leakage", "env-file", "credentials"]
+
+  - id: "MODSEC-RESP-007"
+    name: "Detect XML External Entity error disclosure in response"
+    category: "data-leakage"
+    severity: "high"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:XML parsing error|entity.*not defined|failed to load external entity)"
+    action: "log"
+    tags: ["data-leakage", "xxe", "error-disclosure"]
+
+  - id: "MODSEC-RESP-008"
+    name: "Detect Spring Boot actuator sensitive endpoint response"
+    category: "data-leakage"
+    severity: "high"
+    paranoia: 2
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:\"spring\\.datasource\\.password\"|\"management\\.server\\.port\"|\"eureka\\.client\")"
+    action: "log"
+    tags: ["data-leakage", "spring", "actuator"]
+
+  - id: "MODSEC-RESP-009"
+    name: "Detect Kubernetes/Docker secrets in response body"
+    category: "data-leakage"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:\"kind\"\\s*:\\s*\"Secret\"|\"type\"\\s*:\\s*\"kubernetes\\.io/|\"data\"\\s*:\\s*\\{[^}]*\"tls\\.crt\")"
+    action: "log"
+    tags: ["data-leakage", "kubernetes", "cloud"]
+
+  - id: "MODSEC-RESP-010"
+    name: "Detect verbose server error page (PHP Fatal Error)"
+    category: "data-leakage"
+    severity: "medium"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:Fatal error:|Parse error:|Warning:|Notice:)\\s+.{10,}?\\s+in\\s+/.{5,}?\\.php\\s+on\\s+line\\s+[0-9]+"
+    action: "log"
+    tags: ["data-leakage", "error-disclosure", "php"]
+
+  - id: "MODSEC-RESP-011"
+    name: "Detect Node.js unhandled exception disclosure"
+    category: "data-leakage"
+    severity: "medium"
+    paranoia: 2
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:UnhandledPromiseRejection|at Object\\.exports\\.createServer|at Module\\._compile|node_modules/.+\\.js:[0-9]+:[0-9]+)"
+    action: "log"
+    tags: ["data-leakage", "error-disclosure", "nodejs"]
+
+  - id: "MODSEC-RESP-012"
+    name: "Detect Python traceback disclosure"
+    category: "data-leakage"
+    severity: "medium"
+    paranoia: 2
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:Traceback \\(most recent call last\\):|File \"[^\"]+\\.py\", line [0-9]+)"
+    action: "log"
+    tags: ["data-leakage", "error-disclosure", "python"]

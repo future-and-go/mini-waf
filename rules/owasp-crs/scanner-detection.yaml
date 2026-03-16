@@ -1,0 +1,25 @@
+# Auto-generated from OWASP CRS
+# Source: OWASP CRS v4.25.0
+# Description: Scanner Detection
+# License: Apache-2.0
+# DO NOT EDIT MANUALLY - use modsec2yaml.py to regenerate
+
+version: '1.0'
+description: Scanner Detection
+source: OWASP CRS v4.25.0
+license: Apache-2.0
+rules:
+  - id: CRS-913100
+    name: Found User-Agent associated with security scanner
+    category: scanner-detection
+    severity: critical
+    paranoia: 1
+    field: user_agent
+    operator: pm_from_file
+    value: scanners-user-agents.data
+    action: block
+    tags:
+      - owasp-crs
+      - scanner-detection
+      - attack-reputation-scanner
+    crs_id: 913100

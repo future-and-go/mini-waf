@@ -1,0 +1,24 @@
+version: "1.0"
+description: "Remote sync source configuration for prx-waf rule sets"
+
+sources:
+  owasp-crs:
+    repo: "https://github.com/coreruleset/coreruleset.git"
+    branch: "main"
+    rules_path: "rules/"
+    output: "rules/owasp-crs/"
+    converter: "tools/modsec2yaml.py"
+    description: "OWASP ModSecurity Core Rule Set v4 - comprehensive web attack detection"
+    license: "Apache-2.0"
+    # Sync a specific tag instead of branch tip:
+    # tag: "v4.10.0"
+
+  # Example: additional source (disabled by default)
+  # owasp-crs-v3:
+  #   repo: "https://github.com/coreruleset/coreruleset.git"
+  #   branch: "v3.3/dev"
+  #   rules_path: "rules/"
+  #   output: "rules/owasp-crs-v3/"
+  #   converter: "tools/modsec2yaml.py"
+  #   description: "OWASP CRS v3.3 (legacy)"
+  #   license: "Apache-2.0"

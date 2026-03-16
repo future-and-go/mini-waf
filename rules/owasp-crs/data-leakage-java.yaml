@@ -1,0 +1,25 @@
+# Auto-generated from OWASP CRS
+# Source: OWASP CRS v4.25.0
+# Description: Java Data Leakage
+# License: Apache-2.0
+# DO NOT EDIT MANUALLY - use modsec2yaml.py to regenerate
+
+version: '1.0'
+description: Java Data Leakage
+source: OWASP CRS v4.25.0
+license: Apache-2.0
+rules:
+  - id: CRS-952110
+    name: Java Errors
+    category: data-leakage
+    severity: error
+    paranoia: 1
+    field: response_body
+    operator: regex
+    value: |-
+      (?i)\b(?:java[\.a-z]+E(?:xception|rror)|(?:org|com)\.[\.a-z]+Exception|Exception in thread \"[^\"]*\"|at[\s\x0b]+(?:ja(?:vax?|karta)|org|com))\b
+    action: block
+    tags:
+      - owasp-crs
+      - data-leakage
+    crs_id: 952110

@@ -1,0 +1,84 @@
+# Auto-generated from OWASP CRS
+# Source: OWASP CRS v4.25.0
+# Description: Remote File Inclusion
+# License: Apache-2.0
+# DO NOT EDIT MANUALLY - use modsec2yaml.py to regenerate
+
+version: '1.0'
+description: Remote File Inclusion
+source: OWASP CRS v4.25.0
+license: Apache-2.0
+rules:
+  - id: CRS-931100
+    name: 'Possible Remote File Inclusion (RFI) Attack: URL Parameter using IP Address'
+    category: rfi
+    severity: critical
+    paranoia: 1
+    field: query
+    operator: regex
+    value: (?i)^(f(?:ile|tps?)|https?|ssh)://(?:\[?[0-9a-f]+:[0-:a-f]+\]?|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})
+    action: block
+    tags:
+      - owasp-crs
+      - rfi
+      - attack-rfi
+    crs_id: 931100
+  - id: CRS-931110
+    name: 'Possible Remote File Inclusion (RFI) Attack: Common RFI Vulnerable Parameter Name used w/URL Payload'
+    category: rfi
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: |-
+      (?i)(?:\binclude[\s\x0b]*\([^\)]*|mosConfig_absolute_path|(?:_(?:CONF\[path|SERVER\[DOCUMENT_ROOT)|path\[docroot|config\[root_dir)\]|GALLERY_BASEDIR|appserv_root)=(?:f(?:ile|tps?)|https?)://
+    action: block
+    tags:
+      - owasp-crs
+      - rfi
+      - attack-rfi
+    crs_id: 931110
+  - id: CRS-931120
+    name: 'Possible Remote File Inclusion (RFI) Attack: URL Payload Used w/Trailing Question Mark Character (?)'
+    category: rfi
+    severity: critical
+    paranoia: 1
+    field: query
+    operator: regex
+    value: ^(?i:file|ftps?|https?).*?\?+$
+    action: block
+    tags:
+      - owasp-crs
+      - rfi
+      - attack-rfi
+    crs_id: 931120
+  - id: CRS-931130
+    name: 'Possible Remote File Inclusion (RFI) Attack: Off-Domain Reference/Link'
+    category: rfi
+    severity: critical
+    paranoia: 2
+    field: query
+    operator: regex
+    value: |-
+      (?i)(?:(?:url|jar):)?(?:a(?:cap|f[ps]|ttachment)|b(?:eshare|itcoin|lob)|c(?:a(?:llto|p)|id|vs|ompress.(?:zlib|bzip2))|d(?:a(?:v|ta)|ict|n(?:s|tp))|e(?:d2k|xpect)|f(?:(?:ee)?d|i(?:le|nger|sh)|tps?)|g(?:it|o(?:pher)?|lob)|h(?:323|ttps?)|i(?:ax|cap|(?:ma|p)ps?|rc[6s]?)|ja(?:bbe)?r|l(?:dap[is]?|ocal_file)|m(?:a(?:ilto|ven)|ms|umble)|n(?:e(?:tdoc|ws)|fs|ntps?)|ogg|p(?:aparazzi|h(?:ar|p)|op(?:2|3s?)|r(?:es|oxy)|syc)|r(?:mi|sync|tm(?:f?p)?|ar)|s(?:3|ftp|ips?|m(?:[bs]|tps?)|n(?:ews|mp)|sh(?:2(?:.(?:s(?:hell|(?:ft|c)p)|exec|tunnel))?)?|vn(?:\+ssh)?)|t(?:e(?:amspeak|lnet)|ftp|urns?)|u(?:dp|nreal|t2004)|v(?:entrilo|iew-source|nc)|w(?:ebcal|ss?)|x(?:mpp|ri)|zip)://?(?:[^@]+@)?([^/]*)
+    action: block
+    tags:
+      - owasp-crs
+      - rfi
+      - attack-rfi
+    crs_id: 931130
+  - id: CRS-931131
+    name: Possible Remote File Inclusion (RFI) Attack
+    category: rfi
+    severity: critical
+    paranoia: 2
+    field: path
+    operator: regex
+    value: |-
+      (?i)(?:(?:url|jar):)?(?:a(?:cap|f[ps]|ttachment)|b(?:eshare|itcoin|lob)|c(?:a(?:llto|p)|id|vs|ompress.(?:zlib|bzip2))|d(?:a(?:v|ta)|ict|n(?:s|tp))|e(?:d2k|xpect)|f(?:(?:ee)?d|i(?:le|nger|sh)|tps?)|g(?:it|o(?:pher)?|lob)|h(?:323|ttps?)|i(?:ax|cap|(?:ma|p)ps?|rc[6s]?)|ja(?:bbe)?r|l(?:dap[is]?|ocal_file)|m(?:a(?:ilto|ven)|ms|umble)|n(?:e(?:tdoc|ws)|fs|ntps?)|ogg|p(?:aparazzi|h(?:ar|p)|op(?:2|3s?)|r(?:es|oxy)|syc)|r(?:mi|sync|tm(?:f?p)?|ar)|s(?:3|ftp|ips?|m(?:[bs]|tps?)|n(?:ews|mp)|sh(?:2(?:.(?:s(?:hell|(?:ft|c)p)|exec|tunnel))?)?|vn(?:\+ssh)?)|t(?:e(?:amspeak|lnet)|ftp|urns?)|u(?:dp|nreal|t2004)|v(?:entrilo|iew-source|nc)|w(?:ebcal|ss?)|x(?:mpp|ri)|zip)://(?:[^@]+@)?([^/]*)
+    action: block
+    tags:
+      - owasp-crs
+      - rfi
+      - attack-rfi
+    crs_id: 931131

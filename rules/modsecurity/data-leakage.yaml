@@ -1,0 +1,138 @@
+version: "1.0"
+description: "Data leakage detection rules - PII, credentials, sensitive patterns"
+source: "prx-waf community rules"
+license: "Apache-2.0"
+
+rules:
+  - id: "MODSEC-LEAK-001"
+    name: "Detect credit card number in response (Visa/MC/Amex/Discover)"
+    category: "data-leakage"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\\b"
+    action: "log"
+    tags: ["data-leakage", "pci", "credit-card"]
+    reference: "https://owasp.org/www-community/vulnerabilities/Sensitive_Data_Exposure"
+
+  - id: "MODSEC-LEAK-002"
+    name: "Detect US Social Security Number in response"
+    category: "data-leakage"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "\\b(?!000|666|9\\d{2})\\d{3}-(?!00)\\d{2}-(?!0000)\\d{4}\\b"
+    action: "log"
+    tags: ["data-leakage", "pii", "ssn"]
+
+  - id: "MODSEC-LEAK-003"
+    name: "Detect AWS Access Key ID in response"
+    category: "data-leakage"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?:AKIA|ASIA|AROA|AIDA|ANPA|ANVA|APKA)[A-Z0-9]{16}"
+    action: "log"
+    tags: ["data-leakage", "cloud", "aws", "credentials"]
+
+  - id: "MODSEC-LEAK-004"
+    name: "Detect private SSH key in response"
+    category: "data-leakage"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "-----BEGIN (?:RSA|EC|DSA|OPENSSH) PRIVATE KEY-----"
+    action: "log"
+    tags: ["data-leakage", "credentials", "ssh"]
+
+  - id: "MODSEC-LEAK-005"
+    name: "Detect password hash patterns in response (MD5/SHA/bcrypt)"
+    category: "data-leakage"
+    severity: "high"
+    paranoia: 2
+    field: "body"
+    operator: "regex"
+    value: "(?:\\$2[ayb]\\$[0-9]{2}\\$[./A-Za-z0-9]{53}|\\$1\\$[a-zA-Z0-9./]{8}\\$[a-zA-Z0-9./]{22}|[0-9a-f]{32,64})"
+    action: "log"
+    tags: ["data-leakage", "credentials", "password-hash"]
+
+  - id: "MODSEC-LEAK-006"
+    name: "Detect database connection string in response"
+    category: "data-leakage"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:mysql|postgresql|mssql|mongodb|redis|amqp)://[\\w:@.-]+(?::[0-9]+)?/[\\w-]+"
+    action: "log"
+    tags: ["data-leakage", "credentials", "database"]
+
+  - id: "MODSEC-LEAK-007"
+    name: "Detect internal IP address disclosure in response"
+    category: "data-leakage"
+    severity: "medium"
+    paranoia: 2
+    field: "body"
+    operator: "regex"
+    value: "\\b(?:10|172\\.(?:1[6-9]|2[0-9]|3[01])|192\\.168)\\.\\d{1,3}\\.\\d{1,3}\\b"
+    action: "log"
+    tags: ["data-leakage", "network", "internal-ip"]
+
+  - id: "MODSEC-LEAK-008"
+    name: "Detect stack trace disclosure in response"
+    category: "data-leakage"
+    severity: "high"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:stack trace:|stacktrace|at (?:com|org|net|java|sun)\\.[a-z]+\\.[A-Za-z]+\\(|\\tat [A-Za-z]+\\.java:[0-9]+)"
+    action: "log"
+    tags: ["data-leakage", "debug", "stack-trace"]
+
+  - id: "MODSEC-LEAK-009"
+    name: "Detect JWT token disclosure in response"
+    category: "data-leakage"
+    severity: "high"
+    paranoia: 2
+    field: "body"
+    operator: "regex"
+    value: "eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"
+    action: "log"
+    tags: ["data-leakage", "credentials", "jwt"]
+
+  - id: "MODSEC-LEAK-010"
+    name: "Detect email address bulk disclosure in response"
+    category: "data-leakage"
+    severity: "medium"
+    paranoia: 3
+    field: "body"
+    operator: "regex"
+    value: "(?:[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,},?\\s*){5,}"
+    action: "log"
+    tags: ["data-leakage", "pii", "email"]
+
+  - id: "MODSEC-LEAK-011"
+    name: "Detect GitHub/GitLab token in response"
+    category: "data-leakage"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?:ghp_|gho_|ghu_|ghs_|ghr_|glpat-)[A-Za-z0-9_-]{20,}"
+    action: "log"
+    tags: ["data-leakage", "credentials", "git"]
+
+  - id: "MODSEC-LEAK-012"
+    name: "Detect Slack/Discord webhook token in response"
+    category: "data-leakage"
+    severity: "high"
+    paranoia: 2
+    field: "body"
+    operator: "regex"
+    value: "(?:hooks\\.slack\\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+|discord(?:app)?\\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+)"
+    action: "log"
+    tags: ["data-leakage", "credentials", "webhook"]

@@ -1,0 +1,37 @@
+# Auto-generated from OWASP CRS
+# Source: OWASP CRS v4.25.0
+# Description: Multipart/Form-Data Bypass
+# License: Apache-2.0
+# DO NOT EDIT MANUALLY - use modsec2yaml.py to regenerate
+
+version: '1.0'
+description: Multipart/Form-Data Bypass
+source: OWASP CRS v4.25.0
+license: Apache-2.0
+rules:
+  - id: CRS-922120
+    name: Content-Transfer-Encoding was deprecated by rfc7578 in 2015 and should not be used
+    category: multipart-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: content-transfer-encoding:(.*)
+    action: block
+    tags:
+      - owasp-crs
+      - multipart-attack
+    crs_id: 922120
+  - id: CRS-922130
+    name: Multipart header contains characters outside of valid range
+    category: multipart-attack
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: regex
+    value: '[^\x21-\x7E][\x21-\x39\x3B-\x7E]*:'
+    action: block
+    tags:
+      - owasp-crs
+      - multipart-attack
+    crs_id: 922130

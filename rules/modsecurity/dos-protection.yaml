@@ -1,0 +1,137 @@
+version: "1.0"
+description: "DoS and rate-limiting detection rules"
+source: "prx-waf community rules"
+license: "Apache-2.0"
+
+rules:
+  - id: "MODSEC-DOS-001"
+    name: "Detect abnormally large request body (potential DoS)"
+    category: "dos"
+    severity: "high"
+    paranoia: 1
+    field: "content_length"
+    operator: "gt"
+    value: "10485760"
+    action: "block"
+    tags: ["dos", "request-size"]
+
+  - id: "MODSEC-DOS-002"
+    name: "Detect abnormally large URL (potential buffer overflow / DoS)"
+    category: "dos"
+    severity: "high"
+    paranoia: 1
+    field: "path_length"
+    operator: "gt"
+    value: "1024"
+    action: "block"
+    tags: ["dos", "path-length"]
+
+  - id: "MODSEC-DOS-003"
+    name: "Detect excessive query string arguments"
+    category: "dos"
+    severity: "medium"
+    paranoia: 2
+    field: "query_arg_count"
+    operator: "gt"
+    value: "255"
+    action: "block"
+    tags: ["dos", "query-args"]
+
+  - id: "MODSEC-DOS-004"
+    name: "Detect slowloris-style incomplete request patterns"
+    category: "dos"
+    severity: "medium"
+    paranoia: 2
+    field: "headers"
+    operator: "regex"
+    value: "(?i)Content-Length:\\s*0\\s*$"
+    action: "log"
+    tags: ["dos", "slowloris"]
+
+  - id: "MODSEC-DOS-005"
+    name: "Block HTTP TRACE method (XST attack vector)"
+    category: "dos"
+    severity: "medium"
+    paranoia: 1
+    field: "method"
+    operator: "regex"
+    value: "^TRACE$"
+    action: "block"
+    tags: ["dos", "xst", "method"]
+
+  - id: "MODSEC-DOS-006"
+    name: "Block HTTP DEBUG method"
+    category: "dos"
+    severity: "high"
+    paranoia: 1
+    field: "method"
+    operator: "regex"
+    value: "^DEBUG$"
+    action: "block"
+    tags: ["dos", "method", "iis"]
+
+  - id: "MODSEC-DOS-007"
+    name: "Detect R.U.D.Y. attack (slow POST body)"
+    category: "dos"
+    severity: "medium"
+    paranoia: 2
+    field: "content_type"
+    operator: "regex"
+    value: "(?i)application/x-www-form-urlencoded"
+    action: "log"
+    tags: ["dos", "rudy", "slow-post"]
+
+  - id: "MODSEC-DOS-008"
+    name: "Detect hash DoS attack (many collision parameters)"
+    category: "dos"
+    severity: "high"
+    paranoia: 2
+    field: "content_length"
+    operator: "gt"
+    value: "1048576"
+    action: "log"
+    tags: ["dos", "hash-dos"]
+
+  - id: "MODSEC-DOS-009"
+    name: "Block recursive payload nesting (XML bomb / billion laughs)"
+    category: "dos"
+    severity: "critical"
+    paranoia: 1
+    field: "body"
+    operator: "regex"
+    value: "(?i)(?:<!ENTITY\\s+\\w+\\s+\"[^\"]{0,100}\"\\s*>.*?){5,}"
+    action: "block"
+    tags: ["dos", "xml-bomb", "billion-laughs"]
+
+  - id: "MODSEC-DOS-010"
+    name: "Detect ReDoS patterns (catastrophic backtracking payloads)"
+    category: "dos"
+    severity: "medium"
+    paranoia: 3
+    field: "all"
+    operator: "regex"
+    value: "(?:[a-zA-Z0-9+/]{76}\r?\n){10,}"
+    action: "log"
+    tags: ["dos", "redos"]
+
+  - id: "MODSEC-DOS-011"
+    name: "Block abnormally large cookie header"
+    category: "dos"
+    severity: "medium"
+    paranoia: 2
+    field: "cookies"
+    operator: "regex"
+    value: ".{8192,}"
+    action: "block"
+    tags: ["dos", "cookie-size"]
+
+  - id: "MODSEC-DOS-012"
+    name: "Detect zero-length Content-Type with body (protocol anomaly)"
+    category: "dos"
+    severity: "medium"
+    paranoia: 2
+    field: "content_type"
+    operator: "regex"
+    value: "^$"
+    action: "log"
+    tags: ["dos", "protocol-anomaly"]
