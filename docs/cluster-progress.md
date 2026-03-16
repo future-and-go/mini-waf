@@ -5,11 +5,11 @@
 
 ## Current State
 
-- **Active Phase:** P4
+- **Active Phase:** P5
 - **Phase Status:** IN_PROGRESS
-- **Claude Process:** nova-fjord (PID 495404)
-- **Last Check:** 2026-03-16 13:02 EDT
-- **Next Action:** Wait for P4 Claude to finish, then verify
+- **Claude Process:** nova-summit (PID 516587)
+- **Last Check:** 2026-03-16 13:08 EDT
+- **Next Action:** Wait for P5 Claude to finish → verify → notify Simon!
 
 ---
 
@@ -83,17 +83,19 @@
   - [x] CLI subcommands (cluster status/nodes/token/promote/demote/remove)
   - [x] Integration tests (4 election tests)
 
-### P4: Admin UI Cluster Panel (est. 8h)
-- **Status:** PENDING
+### P4: Admin UI Cluster Panel (est. 8h) ✅
+- **Status:** DONE
 - **Depends on:** P3
+- **Completed:** 2026-03-16 13:08 EDT
+- **Commit:** d4b81aa
 - **Tasks:**
-  - [ ] API endpoints /api/cluster/*
-  - [ ] Cluster Overview page
-  - [ ] Node Detail page
-  - [ ] Join Tokens page
-  - [ ] Sync Status page
-  - [ ] i18n (en/zh/ru/ka)
-  - [ ] npm run build passes
+  - [x] API endpoints /api/cluster/* (5 endpoints in waf-api/src/cluster.rs)
+  - [x] Cluster Overview page (ClusterOverview.vue)
+  - [x] Node Detail page (ClusterNodeDetail.vue)
+  - [x] Join Tokens page (ClusterTokens.vue)
+  - [x] Sync Status page (ClusterSync.vue)
+  - [x] i18n (en/zh/ru/ka) — all 4 languages
+  - [x] npm run build passes (3.17s, 0 errors)
 
 ### P5: Integration Test + Docker (est. 2h)
 - **Status:** PENDING
@@ -129,6 +131,8 @@
 | 2026-03-16 12:55 | P3 | fresh-bison completed — 20 cluster tests pass, committed a2ea69e (1225 lines) | DONE |
 | 2026-03-16 12:55 | P4 | Dispatched Claude (nova-fjord PID 495404) for Admin UI Cluster Panel | IN_PROGRESS |
 | 2026-03-16 13:02 | P4 | nova-fjord still running (PID 495406, 4% CPU, 382MB, ~7min elapsed) — waiting | IN_PROGRESS |
+| 2026-03-16 13:08 | P4 | nova-fjord completed — cargo check + npm build pass, committed d4b81aa (1183 lines, 17 files) | DONE |
+| 2026-03-16 13:08 | P5 | Dispatched Claude (nova-summit PID 516587) for Integration Test + Docker | IN_PROGRESS |
 
 ---
 
