@@ -1,20 +1,20 @@
 <template>
   <Layout>
     <div class="p-6">
-      <h2 class="text-xl font-semibold text-gray-800 mb-6">Dashboard</h2>
+      <h2 class="text-xl font-semibold text-gray-800 mb-6">{{ $t('dashboard.title') }}</h2>
 
       <!-- Stats cards -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Total Requests" :value="stats.total_requests_live ?? '-'" color="blue" />
-        <StatCard label="Blocked" :value="stats.total_blocked ?? '-'" color="red" />
-        <StatCard label="Allowed" :value="stats.total_allowed ?? '-'" color="green" />
-        <StatCard label="Hosts" :value="stats.hosts_count ?? '-'" color="purple" />
+        <StatCard :label="$t('dashboard.totalRequests')" :value="stats.total_requests_live ?? '-'" color="blue" />
+        <StatCard :label="$t('dashboard.blockedRequests')" :value="stats.total_blocked ?? '-'" color="red" />
+        <StatCard :label="$t('dashboard.allowedRequests')" :value="stats.total_allowed ?? '-'" color="green" />
+        <StatCard :label="$t('dashboard.activeHosts')" :value="stats.hosts_count ?? '-'" color="purple" />
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Top IPs -->
         <div class="bg-white rounded-xl shadow-sm p-4">
-          <h3 class="text-sm font-semibold text-gray-700 mb-3">Top Attacking IPs</h3>
+          <h3 class="text-sm font-semibold text-gray-700 mb-3">{{ $t('dashboard.topIPs') }}</h3>
           <div v-if="stats.top_ips?.length" class="space-y-2">
             <div
               v-for="item in stats.top_ips"
@@ -25,12 +25,12 @@
               <span class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">{{ item.count }}</span>
             </div>
           </div>
-          <p v-else class="text-sm text-gray-400">No data</p>
+          <p v-else class="text-sm text-gray-400">{{ $t('common.noData') }}</p>
         </div>
 
         <!-- Top Rules -->
         <div class="bg-white rounded-xl shadow-sm p-4">
-          <h3 class="text-sm font-semibold text-gray-700 mb-3">Top Triggered Rules</h3>
+          <h3 class="text-sm font-semibold text-gray-700 mb-3">{{ $t('dashboard.topRules') }}</h3>
           <div v-if="stats.top_rules?.length" class="space-y-2">
             <div
               v-for="item in stats.top_rules"
@@ -41,16 +41,16 @@
               <span class="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-xs font-medium">{{ item.count }}</span>
             </div>
           </div>
-          <p v-else class="text-sm text-gray-400">No data</p>
+          <p v-else class="text-sm text-gray-400">{{ $t('common.noData') }}</p>
         </div>
       </div>
 
       <!-- Live Events -->
       <div class="bg-white rounded-xl shadow-sm p-4 mt-6">
         <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-semibold text-gray-700">Live Security Events</h3>
+          <h3 class="text-sm font-semibold text-gray-700">{{ $t('dashboard.liveEvents') }}</h3>
           <span :class="wsConnected ? 'text-green-600' : 'text-gray-400'" class="text-xs font-medium">
-            {{ wsConnected ? '● Live' : '○ Disconnected' }}
+            {{ wsConnected ? $t('dashboard.live') : $t('dashboard.disconnected') }}
           </span>
         </div>
         <div class="space-y-1 max-h-64 overflow-y-auto">
@@ -61,7 +61,7 @@
           >
             {{ JSON.stringify(ev) }}
           </div>
-          <p v-if="!liveEvents.length" class="text-xs text-gray-400">Waiting for events...</p>
+          <p v-if="!liveEvents.length" class="text-xs text-gray-400">{{ $t('dashboard.waitingEvents') }}</p>
         </div>
       </div>
     </div>

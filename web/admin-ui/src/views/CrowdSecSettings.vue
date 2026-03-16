@@ -1,7 +1,7 @@
 <template>
   <Layout>
     <div class="p-6">
-      <h2 class="text-2xl font-bold text-gray-800 mb-6">CrowdSec Integration</h2>
+      <h2 class="text-2xl font-bold text-gray-800 mb-6">{{ $t('crowdsec.title') }}</h2>
 
       <!-- Status Banner -->
       <div
@@ -9,46 +9,48 @@
         class="border rounded-lg p-4 mb-6 flex items-center justify-between"
       >
         <div class="flex items-center gap-3">
-          <span class="text-2xl">{{ status.enabled ? '🛡️' : '⚠️' }}</span>
+          <component :is="status.enabled ? ShieldCheck : AlertTriangle"
+            :size="24"
+            :class="status.enabled ? 'text-green-600' : 'text-yellow-500'" />
           <div>
             <div class="font-semibold" :class="status.enabled ? 'text-green-800' : 'text-yellow-800'">
-              {{ status.enabled ? 'CrowdSec Active' : 'CrowdSec Inactive' }}
+              {{ status.enabled ? $t('crowdsec.active') : $t('crowdsec.inactive') }}
             </div>
             <div class="text-sm" :class="status.enabled ? 'text-green-600' : 'text-yellow-600'">
-              {{ status.enabled ? `LAPI: ${status.lapi_url}` : (status.connection_msg || 'Enable below to activate integration') }}
+              {{ status.enabled ? `LAPI: ${status.lapi_url}` : (status.connection_msg || $t('crowdsec.enableBelow')) }}
             </div>
           </div>
         </div>
         <div v-if="status.cache_stats" class="text-right text-sm text-green-700">
-          <div>{{ status.cache_stats.total_cached }} decisions cached</div>
-          <div>{{ status.cache_stats.hit_rate_pct.toFixed(1) }}% hit rate</div>
+          <div>{{ status.cache_stats.total_cached }} {{ $t('crowdsec.decisionsCached') }}</div>
+          <div>{{ status.cache_stats.hit_rate_pct.toFixed(1) }}% {{ $t('crowdsec.hitRate') }}</div>
         </div>
       </div>
 
       <!-- Config Form -->
       <div class="bg-white rounded-lg shadow p-6 mb-6">
-        <h3 class="text-lg font-semibold text-gray-700 mb-4">Connection Settings</h3>
+        <h3 class="text-lg font-semibold text-gray-700 mb-4">{{ $t('crowdsec.settings') }}</h3>
 
         <div class="space-y-4">
           <!-- Enable toggle -->
           <div class="flex items-center gap-3">
             <input type="checkbox" id="enabled" v-model="form.enabled" class="w-4 h-4 text-blue-600" />
-            <label for="enabled" class="font-medium text-gray-700">Enable CrowdSec Integration</label>
+            <label for="enabled" class="font-medium text-gray-700">{{ $t('crowdsec.enableIntegration') }}</label>
           </div>
 
           <!-- Mode -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Mode</label>
+            <label class="block text-sm font-medium text-gray-700 mb-1">{{ $t('crowdsec.mode') }}</label>
             <select v-model="form.mode" class="w-full border border-gray-300 rounded px-3 py-2 focus:ring-2 focus:ring-blue-500">
-              <option value="bouncer">Bouncer (pull decisions from LAPI)</option>
-              <option value="appsec">AppSec (per-request analysis)</option>
-              <option value="both">Both (bouncer + AppSec)</option>
+              <option value="bouncer">{{ $t('crowdsec.modeBouncer') }}</option>
+              <option value="appsec">{{ $t('crowdsec.modeAppsec') }}</option>
+              <option value="both">{{ $t('crowdsec.modeBoth') }}</option>
             </select>
           </div>
 
           <!-- LAPI URL -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">LAPI URL</label>
+            <label class="block text-sm font-medium text-gray-700 mb-1">{{ $t('crowdsec.lapiUrl') }}</label>
             <input
               v-model="form.lapi_url"
               type="text"
@@ -60,8 +62,8 @@
           <!-- API Key -->
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">
-              Bouncer API Key
-              <span v-if="config.api_key_set" class="text-xs text-green-600 ml-2">(key is set)</span>
+              {{ $t('crowdsec.apiKey') }}
+              <span v-if="config.api_key_set" class="text-xs text-green-600 ml-2">{{ $t('crowdsec.keyIsSet') }}</span>
             </label>
             <input
               v-model="form.api_key"
@@ -73,7 +75,7 @@
 
           <!-- Update frequency -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Update Frequency (seconds)</label>
+            <label class="block text-sm font-medium text-gray-700 mb-1">{{ $t('crowdsec.updateFrequency') }}</label>
             <input
               v-model.number="form.update_frequency_secs"
               type="number"
@@ -85,21 +87,21 @@
 
           <!-- Fallback action -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Fallback Action (when LAPI unreachable)</label>
+            <label class="block text-sm font-medium text-gray-700 mb-1">{{ $t('crowdsec.fallbackAction') }}</label>
             <select v-model="form.fallback_action" class="w-full border border-gray-300 rounded px-3 py-2 focus:ring-2 focus:ring-blue-500">
-              <option value="allow">Allow (fail open)</option>
-              <option value="block">Block (fail closed)</option>
-              <option value="log">Log Only</option>
+              <option value="allow">{{ $t('crowdsec.fallbackAllow') }}</option>
+              <option value="block">{{ $t('crowdsec.fallbackBlock') }}</option>
+              <option value="log">{{ $t('crowdsec.fallbackLog') }}</option>
             </select>
           </div>
 
-          <!-- AppSec section (shown when mode includes appsec) -->
+          <!-- AppSec section -->
           <template v-if="form.mode === 'appsec' || form.mode === 'both'">
             <div class="border-t pt-4 mt-4">
-              <h4 class="font-medium text-gray-700 mb-3">AppSec Settings</h4>
+              <h4 class="font-medium text-gray-700 mb-3">{{ $t('crowdsec.appsecSettings') }}</h4>
               <div class="space-y-3">
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1">AppSec Endpoint</label>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">{{ $t('crowdsec.appsecEndpoint') }}</label>
                   <input
                     v-model="form.appsec_endpoint"
                     type="text"
@@ -109,8 +111,8 @@
                 </div>
                 <div>
                   <label class="block text-sm font-medium text-gray-700 mb-1">
-                    AppSec API Key
-                    <span v-if="config.appsec_key_set" class="text-xs text-green-600 ml-2">(key is set)</span>
+                    {{ $t('crowdsec.appsecKey') }}
+                    <span v-if="config.appsec_key_set" class="text-xs text-green-600 ml-2">{{ $t('crowdsec.keyIsSet') }}</span>
                   </label>
                   <input
                     v-model="form.appsec_key"
@@ -131,14 +133,14 @@
             :disabled="saving"
             class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
           >
-            {{ saving ? 'Saving...' : 'Save Configuration' }}
+            {{ saving ? $t('crowdsec.saving') : $t('crowdsec.saveConfig') }}
           </button>
           <button
             @click="testConnection"
             :disabled="testing"
             class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
           >
-            {{ testing ? 'Testing...' : 'Test Connection' }}
+            {{ testing ? $t('crowdsec.testing') : $t('crowdsec.testConnection') }}
           </button>
         </div>
 
@@ -154,7 +156,7 @@
 
       <!-- Setup wizard hint -->
       <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <div class="font-semibold text-blue-800 mb-1">CLI Setup Wizard</div>
+        <div class="font-semibold text-blue-800 mb-1">{{ $t('crowdsec.cliWizard') }}</div>
         <div class="text-sm text-blue-700">
           Run <code class="bg-blue-100 px-1 rounded">prx-waf crowdsec setup</code> for an interactive setup guide,
           or <code class="bg-blue-100 px-1 rounded">prx-waf crowdsec test</code> to verify connectivity from the command line.
@@ -169,6 +171,7 @@ import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import Layout from '../components/Layout.vue'
 import { useAuthStore } from '../stores/auth'
+import { ShieldCheck, AlertTriangle } from 'lucide-vue-next'
 
 const auth = useAuthStore()
 
@@ -247,9 +250,7 @@ async function testConnection() {
   testing.value = true
   testResult.value = null
   try {
-    const payload: any = {
-      lapi_url: form.value.lapi_url,
-    }
+    const payload: any = { lapi_url: form.value.lapi_url }
     if (form.value.api_key) payload.api_key = form.value.api_key
     const r = await axios.post('/api/crowdsec/test', payload, { headers: headers() })
     testResult.value = r.data

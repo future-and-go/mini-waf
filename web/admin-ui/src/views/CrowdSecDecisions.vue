@@ -2,14 +2,14 @@
   <Layout>
     <div class="p-6">
       <div class="flex items-center justify-between mb-6">
-        <h2 class="text-2xl font-bold text-gray-800">CrowdSec Decisions</h2>
+        <h2 class="text-2xl font-bold text-gray-800">{{ $t('crowdsec.decisions.title') }}</h2>
         <div class="flex gap-3 items-center">
-          <span class="text-sm text-gray-500">{{ total }} active decisions</span>
+          <span class="text-sm text-gray-500">{{ total }} {{ $t('crowdsec.decisions.activeDecisions') }}</span>
           <button
             @click="load"
             class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
           >
-            Refresh
+            {{ $t('common.refresh') }}
           </button>
         </div>
       </div>
@@ -18,40 +18,40 @@
       <div class="bg-white rounded-lg shadow p-4 mb-4 flex gap-4 flex-wrap">
         <input
           v-model="filter.value"
-          placeholder="Filter by IP / value"
+          :placeholder="$t('crowdsec.decisions.filterByIp')"
           class="border border-gray-300 rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
         />
         <input
           v-model="filter.type"
-          placeholder="Filter by type (ban, captcha...)"
+          :placeholder="$t('crowdsec.decisions.filterByType')"
           class="border border-gray-300 rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
         />
         <input
           v-model="filter.scenario"
-          placeholder="Filter by scenario"
+          :placeholder="$t('crowdsec.decisions.filterByScenario')"
           class="border border-gray-300 rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
         />
       </div>
 
       <!-- Table -->
       <div class="bg-white rounded-lg shadow overflow-hidden">
-        <div v-if="loading" class="p-8 text-center text-gray-500">Loading decisions...</div>
+        <div v-if="loading" class="p-8 text-center text-gray-500">{{ $t('crowdsec.decisions.loading') }}</div>
         <div v-else-if="filteredDecisions.length === 0" class="p-8 text-center text-gray-500">
-          No active decisions found.
+          {{ $t('crowdsec.decisions.noDecisions') }}
           <span v-if="!isEnabled" class="block mt-1 text-sm">
-            Enable CrowdSec integration in <router-link to="/crowdsec-settings" class="text-blue-600 underline">Settings</router-link>.
+            {{ $t('crowdsec.decisions.enableCrowdsec') }} <router-link to="/crowdsec-settings" class="text-blue-600 underline">{{ $t('nav.settings') }}</router-link>.
           </span>
         </div>
         <table v-else class="min-w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
             <tr>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Scenario</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Origin</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Scope</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ $t('crowdsec.decisions.value') }}</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ $t('crowdsec.decisions.type') }}</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ $t('crowdsec.decisions.scenario') }}</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ $t('crowdsec.decisions.origin') }}</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ $t('crowdsec.decisions.scope') }}</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ $t('crowdsec.decisions.duration') }}</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ $t('crowdsec.decisions.actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200">
@@ -76,9 +76,8 @@
                 <button
                   @click="deleteDecision(d.id)"
                   class="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
-                  title="Delete this decision via LAPI"
                 >
-                  Delete
+                  {{ $t('common.delete') }}
                 </button>
               </td>
             </tr>
@@ -97,8 +96,10 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 import Layout from '../components/Layout.vue'
 import { useAuthStore } from '../stores/auth'
+import { useI18n } from 'vue-i18n'
 
 const auth = useAuthStore()
+const { t } = useI18n()
 
 interface Decision {
   id: number
@@ -152,7 +153,7 @@ async function load() {
 }
 
 async function deleteDecision(id: number) {
-  if (!confirm(`Delete decision ${id} from CrowdSec LAPI?`)) return
+  if (!confirm(t('crowdsec.decisions.confirmDelete', { id }))) return
   error.value = ''
   try {
     await axios.delete(`/api/crowdsec/decisions/${id}`, { headers: headers() })
@@ -164,7 +165,7 @@ async function deleteDecision(id: number) {
 
 onMounted(() => {
   load()
-  refreshTimer = setInterval(load, 10000) // auto-refresh every 10s
+  refreshTimer = setInterval(load, 10000)
 })
 
 onUnmounted(() => {

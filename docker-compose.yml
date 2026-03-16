@@ -3,7 +3,7 @@ version: "3.9"
 services:
   # ── PostgreSQL database ──────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    image: docker.io/library/postgres:16-alpine
     container_name: prx-waf-postgres
     restart: unless-stopped
     environment:
@@ -18,11 +18,13 @@ services:
       timeout: 5s
       retries: 5
     ports:
-      - "5432:5432"
+      - "15432:5432"
 
   # ── PRX-WAF ──────────────────────────────────────────────────────────────────
   prx-waf:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.prebuilt
     container_name: prx-waf
     restart: unless-stopped
     depends_on:
@@ -36,9 +38,9 @@ services:
       - ./rules:/app/rules:ro
       - waf_certs:/app/certs
     ports:
-      - "80:80"       # HTTP proxy
-      - "443:443"     # HTTPS proxy
-      - "9527:9527"   # Management API + Admin UI
+      - "16880:80"    # HTTP proxy
+      - "16843:443"   # HTTPS proxy
+      - "16827:9527"  # Management API + Admin UI
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9527/health || exit 1"]
       interval: 30s

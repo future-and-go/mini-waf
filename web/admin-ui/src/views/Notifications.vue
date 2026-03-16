@@ -2,32 +2,32 @@
   <Layout>
     <div class="p-6">
       <div class="flex items-center justify-between mb-6">
-        <h2 class="text-xl font-semibold text-gray-800">Notifications</h2>
-        <button @click="showForm = !showForm" class="btn-primary">+ Add Config</button>
+        <h2 class="text-xl font-semibold text-gray-800">{{ $t('notifications.title') }}</h2>
+        <button @click="showForm = !showForm" class="btn-primary">{{ $t('notifications.addConfig') }}</button>
       </div>
 
       <!-- Form -->
       <div v-if="showForm" class="bg-white rounded-xl shadow-sm p-4 mb-6">
-        <h3 class="text-sm font-semibold mb-3">New Notification Config</h3>
+        <h3 class="text-sm font-semibold mb-3">{{ $t('notifications.newConfig') }}</h3>
         <div class="grid grid-cols-2 gap-3">
-          <input v-model="form.name" placeholder="Name" class="input" />
+          <input v-model="form.name" :placeholder="$t('notifications.name')" class="input" />
           <select v-model="form.channel_type" class="input">
-            <option value="webhook">Webhook</option>
-            <option value="telegram">Telegram</option>
-            <option value="email">Email</option>
+            <option value="webhook">{{ $t('notifications.webhook') }}</option>
+            <option value="telegram">{{ $t('notifications.telegram') }}</option>
+            <option value="email">{{ $t('notifications.email') }}</option>
           </select>
           <select v-model="form.event_type" class="input">
-            <option value="attack_detected">Attack Detected</option>
-            <option value="cert_expiry">Cert Expiry</option>
-            <option value="high_traffic">High Traffic</option>
-            <option value="backend_down">Backend Down</option>
+            <option value="attack_detected">{{ $t('notifications.attackDetected') }}</option>
+            <option value="cert_expiry">{{ $t('notifications.certExpiry') }}</option>
+            <option value="high_traffic">{{ $t('notifications.highTraffic') }}</option>
+            <option value="backend_down">{{ $t('notifications.backendDown') }}</option>
           </select>
-          <input v-model="form.host_code" placeholder="Host code (optional)" class="input" />
+          <input v-model="form.host_code" :placeholder="$t('ccProtection.hostCode')" class="input" />
         </div>
 
         <!-- Channel config -->
         <div class="mt-3">
-          <p class="text-xs font-medium text-gray-600 mb-1">Channel Config (JSON)</p>
+          <p class="text-xs font-medium text-gray-600 mb-1">{{ $t('notifications.channelConfig') }}</p>
           <textarea
             v-model="configJson"
             :placeholder="channelPlaceholder"
@@ -35,8 +35,8 @@
           />
         </div>
         <div class="flex gap-2 mt-3">
-          <button @click="createNotif" class="btn-primary text-sm">Create</button>
-          <button @click="showForm = false" class="btn-secondary text-sm">Cancel</button>
+          <button @click="createNotif" class="btn-primary text-sm">{{ $t('common.create') }}</button>
+          <button @click="showForm = false" class="btn-secondary text-sm">{{ $t('common.cancel') }}</button>
         </div>
       </div>
 
@@ -45,10 +45,10 @@
         <table class="w-full text-sm">
           <thead class="bg-gray-50 border-b">
             <tr>
-              <th class="text-left px-4 py-3 font-medium text-gray-600">Name</th>
-              <th class="text-left px-4 py-3 font-medium text-gray-600">Event</th>
-              <th class="text-left px-4 py-3 font-medium text-gray-600">Channel</th>
-              <th class="text-left px-4 py-3 font-medium text-gray-600">Last Triggered</th>
+              <th class="text-left px-4 py-3 font-medium text-gray-600">{{ $t('notifications.name') }}</th>
+              <th class="text-left px-4 py-3 font-medium text-gray-600">{{ $t('notifications.event') }}</th>
+              <th class="text-left px-4 py-3 font-medium text-gray-600">{{ $t('notifications.channel') }}</th>
+              <th class="text-left px-4 py-3 font-medium text-gray-600">{{ $t('notifications.lastTriggered') }}</th>
               <th class="px-4 py-3"></th>
             </tr>
           </thead>
@@ -60,15 +60,15 @@
                 <span class="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-medium">{{ n.channel_type }}</span>
               </td>
               <td class="px-4 py-3 text-gray-400 text-xs">
-                {{ n.last_triggered ? new Date(n.last_triggered).toLocaleString() : 'Never' }}
+                {{ n.last_triggered ? new Date(n.last_triggered).toLocaleString() : $t('common.never') }}
               </td>
               <td class="px-4 py-3 text-right space-x-2">
-                <button @click="testNotif(n.id)" class="text-blue-500 hover:text-blue-700 text-xs">Test</button>
-                <button @click="deleteNotif(n.id)" class="text-red-500 hover:text-red-700 text-xs">Delete</button>
+                <button @click="testNotif(n.id)" class="text-blue-500 hover:text-blue-700 text-xs">{{ $t('common.test') }}</button>
+                <button @click="deleteNotif(n.id)" class="text-red-500 hover:text-red-700 text-xs">{{ $t('common.delete') }}</button>
               </td>
             </tr>
             <tr v-if="!notifs.length">
-              <td colspan="5" class="px-4 py-6 text-center text-gray-400">No notification configs</td>
+              <td colspan="5" class="px-4 py-6 text-center text-gray-400">{{ $t('notifications.noConfigs') }}</td>
             </tr>
           </tbody>
         </table>
@@ -80,8 +80,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { notifApi } from '../api'
+import { useI18n } from 'vue-i18n'
 import Layout from '../components/Layout.vue'
 
+const { t } = useI18n()
 const notifs = ref<any[]>([])
 const showForm = ref(false)
 const form = ref({ name: '', event_type: 'attack_detected', channel_type: 'webhook', host_code: '' })
@@ -107,7 +109,7 @@ async function createNotif() {
 }
 
 async function deleteNotif(id: string) {
-  if (!confirm('Delete?')) return
+  if (!confirm(t('notifications.confirmDelete'))) return
   await notifApi.delete(id)
   load()
 }
@@ -115,11 +117,17 @@ async function deleteNotif(id: string) {
 async function testNotif(id: string) {
   try {
     await notifApi.test(id)
-    alert('Test notification sent!')
+    alert(t('notifications.testSent'))
   } catch (e: any) {
-    alert('Failed: ' + (e.response?.data?.error || e.message))
+    alert(t('notifications.failed') + (e.response?.data?.error || e.message))
   }
 }
 
 onMounted(load)
 </script>
+
+<style scoped>
+.input { @apply border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500; }
+.btn-primary { @apply bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700; }
+.btn-secondary { @apply bg-white text-gray-700 border border-gray-300 px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-50; }
+</style>

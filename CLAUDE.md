@@ -1,5 +1,16 @@
 # CLAUDE.md — prx-waf Rust Production Code Standards
 
+## Rust Edition: 2024
+
+## Seven Iron Rules (Strictly Enforced)
+1. NO panic-capable unwrapping — .unwrap(), .expect(), any panic shorthand BANNED in production code
+2. NO dead code — zero unused variables, parameters, imports. Zero warnings.
+3. NO incomplete implementations — todo!(), unimplemented!(), placeholder returns, empty arms BANNED
+4. Business logic must be verifiable — must pass cargo check, no speculative interfaces
+5. Validate with cargo check and cargo fix — not cargo run/build
+6. Explicit error handling — validate external inputs, never panic instead of error branch
+7. Minimize allocations — prefer &str over String, Cow over clone, Arc over deep copy
+
 ## Build & Test
 ```bash
 cargo fmt --all -- --check
