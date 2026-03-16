@@ -5,31 +5,31 @@
 
 ## Current State
 
-- **Active Phase:** P0
+- **Active Phase:** P1
 - **Phase Status:** IN_PROGRESS
-- **Claude Process:** plaid-coral (PID 191030)
-- **Started:** 2026-03-16 10:57 EDT
-- **Last Check:** 2026-03-16 11:00 EDT
-- **Next Action:** Wait for P0 Claude process to finish, then verify cargo check
+- **Claude Process:** sharp-falcon (PID 236372)
+- **Started:** 2026-03-16 11:13 EDT
+- **Last Check:** 2026-03-16 11:13 EDT
+- **Next Action:** Wait for P1 Claude to finish, then verify cargo check + test
 
 ---
 
 ## Phase Progress
 
-### P0: Scaffold + Dependencies (est. 2h)
-- **Status:** IN_PROGRESS
+### P0: Scaffold + Dependencies (est. 2h) ✅
+- **Status:** DONE
 - **Started:** 2026-03-16 10:57 EDT
-- **Completed:** -
+- **Completed:** 2026-03-16 11:12 EDT (15 min)
 - **Claude Session:** plaid-coral
 - **Tasks:**
-  - [ ] Create crates/waf-cluster/ directory + Cargo.toml
-  - [ ] Register in workspace Cargo.toml
-  - [ ] Add ClusterConfig/NodeRole to waf-common
-  - [ ] Add [cluster] to configs/default.toml
-  - [ ] Create all module stubs (lib, node, protocol, transport, crypto, sync, election, health)
-  - [ ] cargo check --all-features passes
-- **Commit:** -
-- **Log:** Started claude CLI at 10:57
+  - [x] Create crates/waf-cluster/ directory + Cargo.toml
+  - [x] Register in workspace Cargo.toml
+  - [x] Add ClusterConfig/NodeRole to waf-common
+  - [x] Add [cluster] to configs/default.toml
+  - [x] Create all module stubs (lib, node, protocol, transport, crypto, sync, election, health)
+  - [x] cargo check --all-features passes
+- **Commit:** 6cb1f26
+- **Files:** 23 files, 1289 lines added
 
 ### P1: QUIC Transport + mTLS (est. 12h)
 - **Status:** PENDING
@@ -105,3 +105,6 @@
 |------|-------|--------|--------|
 | 2026-03-16 10:57 | P0 | Started Claude CLI (plaid-coral) | IN_PROGRESS |
 | 2026-03-16 11:00 | P0 | Created progress tracker | - |
+| 2026-03-16 11:12 | P0 | Verified: cargo check pass, 0 errors | DONE (15 min) |
+| 2026-03-16 11:12 | P0 | Committed 6cb1f26, pushed to main | 23 files, 1289 lines |
+| 2026-03-16 11:12 | P1 | Launching Claude CLI for QUIC+mTLS | STARTING |
