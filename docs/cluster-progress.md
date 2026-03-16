@@ -7,9 +7,9 @@
 
 - **Active Phase:** P1
 - **Phase Status:** IN_PROGRESS
-- **Claude Process:** sharp-falcon (PID 236372)
-- **Started:** 2026-03-16 11:13 EDT
-- **Last Check:** 2026-03-16 11:13 EDT
+- **Claude Process:** tide-claw (PID 269301)
+- **Started:** 2026-03-16 11:32 EDT (re-dispatched; sharp-falcon completed partial)
+- **Last Check:** 2026-03-16 11:32 EDT
 - **Next Action:** Wait for P1 Claude to finish, then verify cargo check + test
 
 ---
@@ -107,4 +107,6 @@
 | 2026-03-16 11:00 | P0 | Created progress tracker | - |
 | 2026-03-16 11:12 | P0 | Verified: cargo check pass, 0 errors | DONE (15 min) |
 | 2026-03-16 11:12 | P0 | Committed 6cb1f26, pushed to main | 23 files, 1289 lines |
-| 2026-03-16 11:12 | P1 | Launching Claude CLI for QUIC+mTLS | STARTING |
+| 2026-03-16 11:12 | P1 | Launching Claude CLI for QUIC+mTLS (sharp-falcon) | STARTING |
+| 2026-03-16 11:32 | P1 | sharp-falcon finished — partial: crypto+server done (510 lines). Committed 7d57e3f | PARTIAL |
+| 2026-03-16 11:32 | P1 | Re-dispatched Claude (tide-claw PID 269301) for remaining P1 tasks | IN_PROGRESS |
