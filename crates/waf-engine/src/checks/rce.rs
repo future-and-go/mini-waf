@@ -131,6 +131,7 @@ mod tests {
                 defense_config: DefenseConfig { rce: true, ..DefenseConfig::default() },
                 ..HostConfig::default()
             }),
+            geo: None,
         }
     }
 

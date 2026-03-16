@@ -300,6 +300,37 @@ impl Default for SecurityConfig {
     }
 }
 
+/// Automatic ip2region xdb update configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeoIpAutoUpdateConfig {
+    /// Enable periodic automatic xdb updates.  Default: `false`.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Update check interval.  Supports suffixes: `d` (days), `h` (hours),
+    /// `m` (minutes), `s` (seconds).  Default: `"7d"`.
+    #[serde(default = "default_geoip_update_interval")]
+    pub interval: String,
+    /// Base URL for downloading xdb files.
+    /// Default: GitHub raw content URL for ip2region master.
+    #[serde(default = "default_geoip_source_url")]
+    pub source_url: String,
+}
+
+fn default_geoip_update_interval() -> String { "7d".to_string() }
+fn default_geoip_source_url() -> String {
+    "https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data".to_string()
+}
+
+impl Default for GeoIpAutoUpdateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval: default_geoip_update_interval(),
+            source_url: default_geoip_source_url(),
+        }
+    }
+}
+
 /// GeoIP lookup configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeoIpConfig {
@@ -314,6 +345,9 @@ pub struct GeoIpConfig {
     /// Cache policy: "full_memory" (fastest, ~20MB), "vector_index" (~2MB), "no_cache" (1-2MB).
     #[serde(default = "default_geoip_cache_policy")]
     pub cache_policy: String,
+    /// Automatic xdb update settings.
+    #[serde(default)]
+    pub auto_update: GeoIpAutoUpdateConfig,
 }
 
 fn default_ipv4_xdb() -> String { "data/ip2region_v4.xdb".to_string() }
@@ -327,6 +361,7 @@ impl Default for GeoIpConfig {
             ipv4_xdb_path: default_ipv4_xdb(),
             ipv6_xdb_path: default_ipv6_xdb(),
             cache_policy: default_geoip_cache_policy(),
+            auto_update: GeoIpAutoUpdateConfig::default(),
         }
     }
 }

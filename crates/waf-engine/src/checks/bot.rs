@@ -146,6 +146,7 @@ mod tests {
                 defense_config: DefenseConfig { bot: true, ..DefenseConfig::default() },
                 ..HostConfig::default()
             }),
+            geo: None,
         }
     }
 

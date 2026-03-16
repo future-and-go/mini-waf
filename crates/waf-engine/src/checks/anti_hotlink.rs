@@ -182,6 +182,7 @@ mod tests {
             content_length: 0,
             is_tls: false,
             host_config,
+            geo: None,
         }
     }
 

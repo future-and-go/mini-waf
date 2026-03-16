@@ -9,8 +9,8 @@ use gateway::{HostRouter, TunnelConfig, WafProxy};
 use waf_api::{start_api_server, AppState};
 use waf_common::config::{load_config, AppConfig};
 use waf_engine::{
-    init_crowdsec, CrowdSecClient, CrowdSecConfig, ExportFormat, RuleManager, WafEngine,
-    WafEngineConfig,
+    cache_policy_from_str, init_crowdsec, spawn_auto_updater, CrowdSecClient, CrowdSecConfig,
+    ExportFormat, GeoIpService, RuleManager, WafEngine, WafEngineConfig, XdbUpdater,
 };
 use waf_storage::Database;
 
@@ -46,6 +46,9 @@ enum Commands {
     /// Bot detection management (list, add, remove, test)
     #[command(subcommand)]
     Bot(BotCommands),
+    /// GeoIP database management (download, update, status)
+    #[command(subcommand)]
+    Geoip(GeoIpCommands),
 }
 
 // ── CrowdSec sub-commands ─────────────────────────────────────────────────────
@@ -179,6 +182,19 @@ enum BotCommands {
     },
 }
 
+// ── GeoIP sub-commands ────────────────────────────────────────────────────────
+
+/// GeoIP database sub-commands
+#[derive(Subcommand, Debug)]
+enum GeoIpCommands {
+    /// Download xdb files from upstream (first-time setup or forced refresh)
+    Download,
+    /// Check for updates and download if newer files are available
+    Update,
+    /// Show current xdb file info (path, size, modification date)
+    Status,
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 fn main() -> anyhow::Result<()> {
@@ -235,6 +251,105 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Bot(sub) => {
             run_bot_cmd(sub, &config)?;
+        }
+        Commands::Geoip(sub) => {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?
+                .block_on(run_geoip_cmd(sub, &config))?;
+        }
+    }
+
+    Ok(())
+}
+
+// ── GeoIP commands ────────────────────────────────────────────────────────────
+
+async fn run_geoip_cmd(cmd: GeoIpCommands, config: &AppConfig) -> anyhow::Result<()> {
+    use std::path::PathBuf;
+    use waf_engine::geoip_updater::xdb_file_info;
+
+    // Derive the data directory from the configured xdb path.
+    let data_dir = PathBuf::from(&config.geoip.ipv4_xdb_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("data"));
+
+    let source_url = config.geoip.auto_update.source_url.clone();
+    let updater = XdbUpdater::new(data_dir.clone(), source_url);
+
+    match cmd {
+        GeoIpCommands::Download => {
+            println!("Downloading ip2region xdb files...");
+            println!("  Source: {}", config.geoip.auto_update.source_url);
+            println!("  Target: {}/", data_dir.display());
+            println!();
+
+            match updater.download().await {
+                Ok(result) => {
+                    if result.ipv4_updated {
+                        println!("  IPv4 xdb: {} bytes", result.ipv4_size);
+                    }
+                    if result.ipv6_updated {
+                        println!("  IPv6 xdb: {} bytes", result.ipv6_size);
+                    }
+                    println!();
+                    println!("Download complete.");
+                }
+                Err(e) => {
+                    eprintln!("ERROR: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        GeoIpCommands::Update => {
+            println!("Checking for ip2region xdb updates...");
+
+            let policy = cache_policy_from_str(&config.geoip.cache_policy);
+            let geoip = GeoIpService::init(
+                &config.geoip.ipv4_xdb_path,
+                &config.geoip.ipv6_xdb_path,
+                policy,
+            )?;
+
+            match updater.update(&geoip).await {
+                Ok(result) if result.ipv4_updated || result.ipv6_updated => {
+                    println!("Updated successfully:");
+                    if result.ipv4_updated {
+                        println!("  IPv4 xdb: {} bytes", result.ipv4_size);
+                    }
+                    if result.ipv6_updated {
+                        println!("  IPv6 xdb: {} bytes", result.ipv6_size);
+                    }
+                }
+                Ok(_) => {
+                    println!("Already up to date.");
+                }
+                Err(e) => {
+                    eprintln!("ERROR: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        GeoIpCommands::Status => {
+            println!("GeoIP xdb Status");
+            println!("================");
+            println!();
+
+            let v4_path = std::path::Path::new(&config.geoip.ipv4_xdb_path);
+            let v6_path = std::path::Path::new(&config.geoip.ipv6_xdb_path);
+
+            println!("  IPv4:  {}", xdb_file_info(v4_path));
+            println!("  IPv6:  {}", xdb_file_info(v6_path));
+            println!();
+            println!("  Config:");
+            println!("    Enabled:        {}", config.geoip.enabled);
+            println!("    Cache policy:   {}", config.geoip.cache_policy);
+            println!("    Auto-update:    {}", config.geoip.auto_update.enabled);
+            println!("    Interval:       {}", config.geoip.auto_update.interval);
+            println!("    Source URL:     {}", config.geoip.auto_update.source_url);
         }
     }
 
@@ -850,6 +965,46 @@ async fn init_async(
     // WAF engine
     let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
     engine.reload_rules().await?;
+
+    // GeoIP service
+    if config.geoip.enabled {
+        let policy = cache_policy_from_str(&config.geoip.cache_policy);
+        match GeoIpService::init(
+            &config.geoip.ipv4_xdb_path,
+            &config.geoip.ipv6_xdb_path,
+            policy,
+        ) {
+            Ok(service) => {
+                info!("GeoIP service initialized");
+                let service = Arc::new(service);
+                engine.set_geoip(Arc::clone(&service));
+
+                // Spawn background auto-updater if enabled.
+                if config.geoip.auto_update.enabled {
+                    let data_dir = std::path::PathBuf::from(&config.geoip.ipv4_xdb_path)
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| std::path::PathBuf::from("data"));
+
+                    let handle = spawn_auto_updater(
+                        Arc::clone(&service),
+                        config.geoip.auto_update.clone(),
+                        data_dir,
+                    );
+                    // Keep the task alive for the process lifetime.
+                    std::mem::forget(handle);
+
+                    info!(
+                        "GeoIP auto-updater spawned (interval: {})",
+                        config.geoip.auto_update.interval
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize GeoIP service: {}", e);
+            }
+        }
+    }
 
     // Host router
     let router = Arc::new(HostRouter::new());

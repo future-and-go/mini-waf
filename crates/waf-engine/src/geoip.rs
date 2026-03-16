@@ -1,25 +1,31 @@
 //! GeoIP lookup service backed by ip2region xdb files.
 //!
-//! Wraps two `ip2region::Searcher` instances (one for IPv4, one for IPv6)
-//! behind an `Arc` so the service can be cloned cheaply and shared across
-//! threads without any locks.
+//! Uses `ArcSwapOption` for each searcher so the underlying xdb files can be
+//! atomically replaced at runtime (hot-reload) without any reader downtime.
 
 use std::net::IpAddr;
 use std::sync::Arc;
 
+use arc_swap::ArcSwapOption;
 use ip2region::{CachePolicy, Searcher};
 use tracing::{info, warn};
 use waf_common::GeoIpInfo;
 
-/// Immutable, thread-safe GeoIP lookup service.
+/// Thread-safe GeoIP lookup service with hot-reload support.
 ///
 /// Construct once (during engine initialisation) then share via `Arc<GeoIpService>`.
-#[derive(Clone)]
+/// The internal searchers can be atomically swapped at any time via [`reload`].
 pub struct GeoIpService {
     /// Searcher loaded with the IPv4 xdb file, if available.
-    ipv4: Option<Arc<Searcher>>,
+    ipv4: ArcSwapOption<Searcher>,
     /// Searcher loaded with the IPv6 xdb file, if available.
-    ipv6: Option<Arc<Searcher>>,
+    ipv6: ArcSwapOption<Searcher>,
+    /// Path to the IPv4 xdb file (used during reload).
+    ipv4_path: String,
+    /// Path to the IPv6 xdb file (used during reload).
+    ipv6_path: String,
+    /// Cache policy used when loading or reloading searchers.
+    cache_policy: CachePolicy,
 }
 
 impl GeoIpService {
@@ -45,26 +51,62 @@ impl GeoIpService {
             );
         }
 
-        Ok(Self { ipv4, ipv6 })
+        Ok(Self {
+            ipv4: ArcSwapOption::new(ipv4),
+            ipv6: ArcSwapOption::new(ipv6),
+            ipv4_path: ipv4_path.to_string(),
+            ipv6_path: ipv6_path.to_string(),
+            cache_policy,
+        })
     }
 
     /// Returns `true` if at least one searcher is available.
     pub fn is_available(&self) -> bool {
-        self.ipv4.is_some() || self.ipv6.is_some()
+        self.ipv4.load().is_some() || self.ipv6.load().is_some()
+    }
+
+    /// Hot-reload xdb files from disk without service interruption.
+    ///
+    /// Loads fresh `Searcher` instances from the original file paths and
+    /// atomically swaps them in via `ArcSwapOption::store`.  Any concurrent
+    /// in-flight lookups continue using the old searchers until they complete.
+    ///
+    /// Returns `Ok(true)` after a successful reload.  Returns `Ok(false)` if
+    /// neither file exists (degraded / first-time-setup situation).
+    pub fn reload(&self) -> anyhow::Result<bool> {
+        let new_ipv4 = load_searcher(&self.ipv4_path, self.cache_policy, "IPv4");
+        let new_ipv6 = load_searcher(&self.ipv6_path, self.cache_policy, "IPv6");
+
+        let any_loaded = new_ipv4.is_some() || new_ipv6.is_some();
+
+        // Atomic swap — readers see either old or new, never a torn state.
+        self.ipv4.store(new_ipv4);
+        self.ipv6.store(new_ipv6);
+
+        if any_loaded {
+            info!("GeoIP: hot-reloaded xdb files from disk");
+        }
+
+        Ok(any_loaded)
     }
 
     /// Look up the GeoIP information for `ip`.
     ///
-    /// Returns a default (all-empty) `GeoIpInfo` if no searcher is available
-    /// for the address family, or if the lookup fails.
+    /// Loads the current searcher via `ArcSwapOption::load` (lock-free) and
+    /// performs the lookup.  Returns a default (all-empty) `GeoIpInfo` if no
+    /// searcher is available for the address family, or if the lookup fails.
     pub fn lookup(&self, ip: IpAddr) -> GeoIpInfo {
-        let searcher = match ip {
-            IpAddr::V4(_) => self.ipv4.as_deref(),
-            IpAddr::V6(_) => self.ipv6.as_deref(),
+        // Load the current Arc for the correct address family.
+        // The guard keeps the Arc alive for the duration of this lookup.
+        let guard = match ip {
+            IpAddr::V4(_) => self.ipv4.load(),
+            IpAddr::V6(_) => self.ipv6.load(),
         };
 
-        let Some(searcher) = searcher else {
-            return GeoIpInfo::default();
+        // Deref chain: Guard -> Option<Arc<Searcher>> -> Option<&Searcher>
+        let searcher = match guard.as_deref() {
+            Some(s) => s,
+            None => return GeoIpInfo::default(),
         };
 
         let raw = match searcher.search(ip.to_string().as_str()) {

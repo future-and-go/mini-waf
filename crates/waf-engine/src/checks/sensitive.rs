@@ -205,6 +205,7 @@ mod tests {
             content_length: body.len() as u64,
             is_tls: false,
             host_config,
+            geo: None,
         }
     }
 

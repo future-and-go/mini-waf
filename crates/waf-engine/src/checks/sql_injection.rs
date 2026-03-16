@@ -116,6 +116,7 @@ mod tests {
                 defense_config: DefenseConfig { sqli: true, ..DefenseConfig::default() },
                 ..HostConfig::default()
             }),
+            geo: None,
         }
     }
 

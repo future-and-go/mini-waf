@@ -157,6 +157,7 @@ mod tests {
                 defense_config: DefenseConfig { scan: true, ..DefenseConfig::default() },
                 ..HostConfig::default()
             }),
+            geo: None,
         }
     }
 

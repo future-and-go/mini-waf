@@ -79,6 +79,7 @@ mod tests {
             content_length: 0,
             is_tls: false,
             host_config: Arc::new(HostConfig::default()),
+            geo: None,
         }
     }
 

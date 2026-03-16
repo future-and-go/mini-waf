@@ -127,6 +127,7 @@ mod tests {
                 defense_config: DefenseConfig { xss: true, ..DefenseConfig::default() },
                 ..HostConfig::default()
             }),
+            geo: None,
         }
     }
 

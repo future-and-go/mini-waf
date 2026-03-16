@@ -313,6 +313,7 @@ mod tests {
             content_length,
             is_tls: false,
             host_config,
+            geo: None,
         }
     }
 

@@ -164,6 +164,7 @@ mod tests {
                 },
                 ..HostConfig::default()
             }),
+            geo: None,
         }
     }
 

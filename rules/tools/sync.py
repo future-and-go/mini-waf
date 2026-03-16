@@ -47,6 +47,15 @@ DEFAULT_SOURCES = {
         "description": "OWASP ModSecurity Core Rule Set v4",
         "license": "Apache-2.0",
     },
+    "ip2region": {
+        # Direct HTTP download — no git clone required.
+        "type": "http",
+        "base_url": "https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data",
+        "files": ["ip2region_v4.xdb", "ip2region_v6.xdb"],
+        "output": "../../data/",
+        "description": "ip2region IPv4/IPv6 geolocation xdb files",
+        "license": "Apache-2.0",
+    },
 }
 
 
@@ -219,6 +228,123 @@ def get_local_head(clone_dir: Path) -> str:
 # Sync logic
 # ---------------------------------------------------------------------------
 
+def http_download_file(url: str, dest: Path) -> int:
+    """
+    Download a single file via HTTP to `dest`.
+    Returns the number of bytes written.
+    Raises on error.
+    """
+    try:
+        import urllib.request
+        tmp = Path(str(dest) + ".tmp")
+        urllib.request.urlretrieve(url, str(tmp))
+        tmp.replace(dest)
+        return dest.stat().st_size
+    except Exception as e:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"Failed to download {url}: {e}") from e
+
+
+def http_head_size(url: str) -> int | None:
+    """
+    Issue an HTTP HEAD request and return Content-Length (or None).
+    """
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            cl = resp.headers.get("Content-Length")
+            return int(cl) if cl else None
+    except Exception:
+        return None
+
+
+def cmd_sync_ip2region(args, cfg: dict) -> int:
+    """
+    Sync ip2region xdb files via direct HTTP download (no git required).
+    """
+    base_url = cfg.get("base_url", DEFAULT_SOURCES["ip2region"]["base_url"])
+    files = cfg.get("files", DEFAULT_SOURCES["ip2region"]["files"])
+    output = cfg.get("output", "../../data/")
+
+    tools_dir = Path(__file__).parent
+    output_dir = (tools_dir / output).resolve()
+
+    print("=" * 60)
+    print("  prx-waf Sync — ip2region xdb")
+    print("=" * 60)
+    print(f"  Source: {base_url}")
+    print(f"  Output: {output_dir}")
+    print(f"  Files:  {', '.join(files)}")
+    print(f"  Dry run: {args.dry_run}")
+    print()
+
+    if args.dry_run:
+        print("  [DRY RUN] Would download:")
+        for filename in files:
+            print(f"    {base_url}/{filename}  →  {output_dir / filename}")
+        return 0
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    ok = True
+    for filename in files:
+        url = f"{base_url}/{filename}"
+        dest = output_dir / filename
+        print(f"  Downloading {filename} ...", end=" ", flush=True)
+        try:
+            size = http_download_file(url, dest)
+            print(f"OK ({size:,} bytes)")
+        except Exception as e:
+            print(f"FAILED: {e}")
+            ok = False
+
+    print()
+    if ok:
+        print("  ip2region xdb sync complete.")
+    else:
+        print("  One or more files failed to download.")
+    print()
+    return 0 if ok else 1
+
+
+def cmd_check_ip2region(cfg: dict) -> bool:
+    """
+    Check whether ip2region xdb files appear up to date.
+    Returns True if updates are available.
+    """
+    base_url = cfg.get("base_url", DEFAULT_SOURCES["ip2region"]["base_url"])
+    files = cfg.get("files", DEFAULT_SOURCES["ip2region"]["files"])
+    output = cfg.get("output", "../../data/")
+
+    tools_dir = Path(__file__).parent
+    output_dir = (tools_dir / output).resolve()
+
+    any_updates = False
+    for filename in files:
+        local_path = output_dir / filename
+        url = f"{base_url}/{filename}"
+
+        if not local_path.exists():
+            print(f"  {filename}: not found locally — update available")
+            any_updates = True
+            continue
+
+        local_size = local_path.stat().st_size
+        remote_size = http_head_size(url)
+
+        if remote_size is None:
+            print(f"  {filename}: local={local_size:,} bytes, remote size unknown")
+        elif remote_size != local_size:
+            print(f"  {filename}: local={local_size:,} bytes, remote={remote_size:,} bytes — update available")
+            any_updates = True
+        else:
+            print(f"  {filename}: {local_size:,} bytes (up to date)")
+
+    return any_updates
+
+
 def run_converter(converter_script: Path, src_conf_dir: Path, output_dir: Path) -> bool:
     """
     Run modsec2yaml.py to convert .conf files to .yaml.
@@ -318,6 +444,17 @@ def cmd_check(args, sources_cfg: dict) -> int:
     any_updates = False
     for name in names:
         cfg = build_source_config(sources_cfg, name, None, None, None)
+
+        print(f"\n  Source: {name}")
+
+        # Handle http-type sources (e.g. ip2region) separately — no git required.
+        if cfg.get("type") == "http":
+            print(f"  Type:   http (direct download)")
+            print(f"  Base:   {cfg.get('base_url', '-')}")
+            if cmd_check_ip2region(cfg):
+                any_updates = True
+            continue
+
         repo = cfg["repo"]
         tag = cfg.get("tag")
         branch = cfg.get("branch", "main")
@@ -327,7 +464,6 @@ def cmd_check(args, sources_cfg: dict) -> int:
         ref = f"refs/tags/{tag}" if tag else f"refs/heads/{branch}"
         remote_sha = get_remote_head(repo, ref)
 
-        print(f"\n  Source: {name}")
         print(f"  Repo:   {repo}")
         print(f"  Ref:    {tag or branch}")
 
@@ -369,6 +505,12 @@ def cmd_sync(args, sources_cfg: dict) -> int:
         getattr(args, "branch", None),
         args.tag,
     )
+
+    # Handle http-type sources (e.g. ip2region) — direct HTTP download, no git.
+    if cfg.get("type") == "http":
+        if args.output:
+            cfg["output"] = args.output
+        return cmd_sync_ip2region(args, cfg)
 
     repo = cfg["repo"]
     branch = cfg.get("branch", "main")
@@ -464,8 +606,11 @@ Examples:
   python sync.py --source owasp-crs --output ../owasp-crs/
   python sync.py --source owasp-crs --output ../owasp-crs/ --tag v4.10.0
   python sync.py --source owasp-crs --output ../owasp-crs/ --branch main --dry-run
+  python sync.py --source ip2region --output ../../data/
+  python sync.py --source ip2region --dry-run
   python sync.py --check
   python sync.py --check --source owasp-crs
+  python sync.py --check --source ip2region
         """,
     )
     parser.add_argument(
