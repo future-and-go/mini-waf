@@ -24,6 +24,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
+regex = { workspace = true }
 
 pingora = { workspace = true }
 pingora-core = { workspace = true }

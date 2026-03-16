@@ -15,3 +15,7 @@ pub use crowdsec::{
 pub use engine::{WafEngine, WafEngineConfig};
 pub use plugins::{PluginAction, PluginInfo, PluginManager, WasmPlugin};
 pub use rules::engine::{CustomRule, CustomRulesEngine};
+pub use rules::formats::{ExportFormat, RuleFormat, ValidationError};
+pub use rules::manager::RuleManager;
+pub use rules::registry::{Rule, RuleRegistry, RuleStats};
+pub use rules::sources::{RuleLoadReport, RuleReloadReport, RuleSource};

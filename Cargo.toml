@@ -90,6 +90,9 @@ futures-util = "0.3"
 multipart = { version = "0.18", default-features = false, features = ["server"] }
 axum-extra = { version = "0.9", features = ["multipart"] }
 
+# Phase 7 additions
+notify = { version = "6", default-features = false, features = ["macos_fsevent"] }
+
 [profile.release]
 opt-level = 3
 lto = true

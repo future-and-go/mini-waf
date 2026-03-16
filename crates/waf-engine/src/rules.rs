@@ -1,4 +1,10 @@
+pub mod builtin;
 pub mod engine;
+pub mod formats;
+pub mod hot_reload;
+pub mod manager;
+pub mod registry;
+pub mod sources;
 
 use std::net::IpAddr;
 use dashmap::DashMap;

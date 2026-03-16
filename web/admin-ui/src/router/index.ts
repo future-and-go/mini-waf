@@ -18,6 +18,10 @@ const routes = [
   { path: '/crowdsec-settings', component: () => import('../views/CrowdSecSettings.vue') },
   { path: '/crowdsec-decisions', component: () => import('../views/CrowdSecDecisions.vue') },
   { path: '/crowdsec-stats', component: () => import('../views/CrowdSecStats.vue') },
+  // Phase 7: Rule management
+  { path: '/rules-management', component: () => import('../views/RulesManagement.vue') },
+  { path: '/rule-sources', component: () => import('../views/RuleSources.vue') },
+  { path: '/bot-management', component: () => import('../views/BotManagement.vue') },
 ]
 
 const router = createRouter({

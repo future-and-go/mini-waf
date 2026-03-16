@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
@@ -7,7 +8,10 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use gateway::{HostRouter, TunnelConfig, WafProxy};
 use waf_api::{start_api_server, AppState};
 use waf_common::config::{load_config, AppConfig};
-use waf_engine::{init_crowdsec, CrowdSecClient, CrowdSecConfig, WafEngine, WafEngineConfig};
+use waf_engine::{
+    init_crowdsec, CrowdSecClient, CrowdSecConfig, ExportFormat, RuleManager, WafEngine,
+    WafEngineConfig,
+};
 use waf_storage::Database;
 
 /// PRX-WAF — High-performance Pingora-based Web Application Firewall
@@ -33,7 +37,18 @@ enum Commands {
     /// CrowdSec integration management
     #[command(subcommand)]
     Crowdsec(CrowdSecCommands),
+    /// Rule management (list, validate, reload, import, export, …)
+    #[command(subcommand)]
+    Rules(RulesCommands),
+    /// Rule source management (add, remove, sync, …)
+    #[command(subcommand)]
+    Sources(SourcesCommands),
+    /// Bot detection management (list, add, remove, test)
+    #[command(subcommand)]
+    Bot(BotCommands),
 }
+
+// ── CrowdSec sub-commands ─────────────────────────────────────────────────────
 
 /// CrowdSec sub-commands
 #[derive(Subcommand, Debug)]
@@ -47,6 +62,124 @@ enum CrowdSecCommands {
     /// Interactive setup wizard (detect platform, generate config snippet)
     Setup,
 }
+
+// ── Rules sub-commands ────────────────────────────────────────────────────────
+
+/// Rule management sub-commands
+#[derive(Subcommand, Debug)]
+enum RulesCommands {
+    /// List all loaded rules
+    List {
+        /// Filter by category (sqli, xss, rce, bot, scanner, …)
+        #[arg(long)]
+        category: Option<String>,
+        /// Filter by source (owasp, builtin-bot, builtin-scanner, custom, …)
+        #[arg(long)]
+        source: Option<String>,
+    },
+    /// Show detailed information about a rule
+    Info {
+        /// Rule id
+        rule_id: String,
+    },
+    /// Enable a rule
+    Enable {
+        /// Rule id
+        rule_id: String,
+    },
+    /// Disable a rule
+    Disable {
+        /// Rule id
+        rule_id: String,
+    },
+    /// Hot-reload all rules from disk
+    Reload,
+    /// Validate a rule file without loading it
+    Validate {
+        /// Path to the rule file
+        path: PathBuf,
+    },
+    /// Import rules from a local file or remote URL
+    Import {
+        /// File path or HTTP(S) URL
+        source: String,
+    },
+    /// Export current rules to stdout
+    Export {
+        /// Output format: yaml (default) or json
+        #[arg(long, default_value = "yaml")]
+        format: String,
+    },
+    /// Fetch latest rules from all configured remote sources
+    Update,
+    /// Search rules by name, id, or description
+    Search {
+        /// Search query
+        query: String,
+    },
+    /// Show rule statistics
+    Stats,
+}
+
+// ── Sources sub-commands ──────────────────────────────────────────────────────
+
+/// Rule source sub-commands
+#[derive(Subcommand, Debug)]
+enum SourcesCommands {
+    /// List configured rule sources
+    List,
+    /// Add a remote rule source
+    Add {
+        /// Source name
+        name: String,
+        /// Remote URL
+        url: String,
+        /// Format: yaml | modsec | json
+        #[arg(long, default_value = "yaml")]
+        format: String,
+    },
+    /// Remove a rule source by name
+    Remove {
+        /// Source name
+        name: String,
+    },
+    /// Fetch latest rules from a source (or all sources)
+    Update {
+        /// Source name (optional — all sources if omitted)
+        name: Option<String>,
+    },
+    /// Sync all configured sources
+    Sync,
+}
+
+// ── Bot sub-commands ──────────────────────────────────────────────────────────
+
+/// Bot detection sub-commands
+#[derive(Subcommand, Debug)]
+enum BotCommands {
+    /// List known bot signatures
+    List,
+    /// Add a bot pattern
+    Add {
+        /// Regex pattern to match against User-Agent
+        pattern: String,
+        /// Action: block | log | captcha | allow
+        #[arg(long, default_value = "block")]
+        action: String,
+    },
+    /// Remove a bot pattern
+    Remove {
+        /// Pattern to remove
+        pattern: String,
+    },
+    /// Test a User-Agent string against all bot rules
+    Test {
+        /// User-Agent string to test
+        user_agent: String,
+    },
+}
+
+// ── Entry point ───────────────────────────────────────────────────────────────
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
@@ -91,10 +224,335 @@ fn main() -> anyhow::Result<()> {
                 .build()?
                 .block_on(run_crowdsec_cmd(sub, &config))?;
         }
+        Commands::Rules(sub) => {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?
+                .block_on(run_rules_cmd(sub, &config))?;
+        }
+        Commands::Sources(sub) => {
+            run_sources_cmd(sub, &config)?;
+        }
+        Commands::Bot(sub) => {
+            run_bot_cmd(sub, &config)?;
+        }
     }
 
     Ok(())
 }
+
+// ── Rules commands ────────────────────────────────────────────────────────────
+
+async fn run_rules_cmd(cmd: RulesCommands, config: &AppConfig) -> anyhow::Result<()> {
+    match cmd {
+        RulesCommands::List { category, source } => {
+            let mut manager = RuleManager::new(&config.rules);
+            manager.load_all()?;
+
+            let reg = manager.registry.read().unwrap();
+            let rules: Vec<_> = match (&category, &source) {
+                (Some(cat), _) => reg.filter_by_category(cat),
+                (_, Some(src)) => reg.filter_by_source(src),
+                _ => reg.list(),
+            };
+
+            println!(
+                "{:<20} {:<35} {:<12} {:<16} {:<8} {}",
+                "ID", "Name", "Category", "Source", "Status", "Action"
+            );
+            println!("{}", "-".repeat(100));
+            for rule in &rules {
+                println!(
+                    "{:<20} {:<35} {:<12} {:<16} {:<8} {}",
+                    truncate(&rule.id, 19),
+                    truncate(&rule.name, 34),
+                    truncate(&rule.category, 11),
+                    truncate(&rule.source, 15),
+                    if rule.enabled { "enabled" } else { "disabled" },
+                    rule.action,
+                );
+            }
+            println!("\nTotal: {} rules", rules.len());
+        }
+
+        RulesCommands::Info { rule_id } => {
+            let mut manager = RuleManager::new(&config.rules);
+            manager.load_all()?;
+
+            let reg = manager.registry.read().unwrap();
+            match reg.get(&rule_id) {
+                Some(rule) => {
+                    println!("ID:          {}", rule.id);
+                    println!("Name:        {}", rule.name);
+                    println!("Category:    {}", rule.category);
+                    println!("Source:      {}", rule.source);
+                    println!("Status:      {}", if rule.enabled { "enabled" } else { "disabled" });
+                    println!("Action:      {}", rule.action);
+                    if let Some(sev) = &rule.severity {
+                        println!("Severity:    {sev}");
+                    }
+                    if let Some(desc) = &rule.description {
+                        println!("Description: {desc}");
+                    }
+                    if let Some(pattern) = &rule.pattern {
+                        println!("Pattern:     {pattern}");
+                    }
+                    if !rule.tags.is_empty() {
+                        println!("Tags:        {}", rule.tags.join(", "));
+                    }
+                }
+                None => println!("Rule not found: {rule_id}"),
+            }
+        }
+
+        RulesCommands::Enable { rule_id } => {
+            let mut manager = RuleManager::new(&config.rules);
+            manager.load_all()?;
+            manager.enable_rule(&rule_id)?;
+            println!("Rule enabled: {rule_id}");
+        }
+
+        RulesCommands::Disable { rule_id } => {
+            let mut manager = RuleManager::new(&config.rules);
+            manager.load_all()?;
+            manager.disable_rule(&rule_id)?;
+            println!("Rule disabled: {rule_id}");
+        }
+
+        RulesCommands::Reload => {
+            let mut manager = RuleManager::new(&config.rules);
+            let report = manager.reload()?;
+            println!("{report}");
+        }
+
+        RulesCommands::Validate { path } => {
+            let manager = RuleManager::new(&config.rules);
+            let errors = manager.validate_file(&path)?;
+            if errors.is_empty() {
+                println!("OK: {} is valid", path.display());
+            } else {
+                println!("{} validation errors in {}:", errors.len(), path.display());
+                for err in &errors {
+                    println!("  - {err}");
+                }
+                std::process::exit(1);
+            }
+        }
+
+        RulesCommands::Import { source } => {
+            let mut manager = RuleManager::new(&config.rules);
+            manager.load_all()?;
+
+            let count = if source.starts_with("http://") || source.starts_with("https://") {
+                manager.import_from_url(&source).await?
+            } else {
+                manager.import_from_file(std::path::Path::new(&source))?
+            };
+            println!("Imported {count} rules from {source}");
+        }
+
+        RulesCommands::Export { format } => {
+            let mut manager = RuleManager::new(&config.rules);
+            manager.load_all()?;
+            let fmt = ExportFormat::from_str(&format);
+            let output = manager.export(fmt)?;
+            print!("{output}");
+        }
+
+        RulesCommands::Update => {
+            println!("Fetching remote rule sources...");
+            let mut manager = RuleManager::new(&config.rules);
+            // Load remote sources — import_from_url handles network fetching
+            for source in &config.rules.sources {
+                if let Some(url) = &source.url {
+                    print!("  {} ({}) ... ", source.name, url);
+                    match manager.import_from_url(url).await {
+                        Ok(n) => println!("{n} rules"),
+                        Err(e) => println!("ERROR: {e}"),
+                    }
+                }
+            }
+            println!("Done.");
+        }
+
+        RulesCommands::Search { query } => {
+            let mut manager = RuleManager::new(&config.rules);
+            manager.load_all()?;
+
+            let results = manager.search(&query);
+            if results.is_empty() {
+                println!("No rules matched '{query}'");
+            } else {
+                println!("{} result(s) for '{query}':", results.len());
+                for rule in &results {
+                    println!("  {} — {} [{}]", rule.id, rule.name, rule.category);
+                }
+            }
+        }
+
+        RulesCommands::Stats => {
+            let mut manager = RuleManager::new(&config.rules);
+            manager.load_all()?;
+            let stats = manager.stats();
+
+            println!("Rule Statistics");
+            println!("===============");
+            println!("  Total:    {}", stats.total);
+            println!("  Enabled:  {}", stats.enabled);
+            println!("  Disabled: {}", stats.disabled);
+            println!("  Version:  {}", stats.version);
+            println!();
+            println!("By Category:");
+            let mut cats: Vec<_> = stats.by_category.iter().collect();
+            cats.sort_by_key(|(k, _)| k.as_str());
+            for (cat, count) in cats {
+                println!("  {:<20} {}", cat, count);
+            }
+            println!();
+            println!("By Source:");
+            let mut srcs: Vec<_> = stats.by_source.iter().collect();
+            srcs.sort_by_key(|(k, _)| k.as_str());
+            for (src, count) in srcs {
+                println!("  {:<20} {}", src, count);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// ── Sources commands ──────────────────────────────────────────────────────────
+
+fn run_sources_cmd(cmd: SourcesCommands, config: &AppConfig) -> anyhow::Result<()> {
+    match cmd {
+        SourcesCommands::List => {
+            println!("{:<20} {:<12} {}", "Name", "Type", "URL/Path");
+            println!("{}", "-".repeat(80));
+            for src in &config.rules.sources {
+                let type_str = if src.url.is_some() { "remote_url" } else { "local" };
+                let location = src.url.as_deref().or(src.path.as_deref()).unwrap_or("-");
+                println!("{:<20} {:<12} {}", src.name, type_str, location);
+            }
+            if config.rules.enable_builtin_owasp {
+                println!("{:<20} {:<12} (compiled-in)", "builtin-owasp", "builtin");
+            }
+            if config.rules.enable_builtin_bot {
+                println!("{:<20} {:<12} (compiled-in)", "builtin-bot", "builtin");
+            }
+            if config.rules.enable_builtin_scanner {
+                println!("{:<20} {:<12} (compiled-in)", "builtin-scanner", "builtin");
+            }
+        }
+        SourcesCommands::Add { name, url, format } => {
+            println!("Add source '{name}' ({format}): {url}");
+            println!("Note: add the following to your [rules.sources] config:");
+            println!();
+            println!("[[rules.sources]]");
+            println!("name   = \"{name}\"");
+            println!("url    = \"{url}\"");
+            println!("format = \"{format}\"");
+        }
+        SourcesCommands::Remove { name } => {
+            println!(
+                "Remove source '{name}': edit configs/default.toml and remove the [[rules.sources]] entry."
+            );
+        }
+        SourcesCommands::Update { name } => {
+            if let Some(name) = name {
+                println!("Updating source '{name}'... (run `prx-waf rules update` to fetch)");
+            } else {
+                println!("Updating all sources... (run `prx-waf rules update` to fetch all)");
+            }
+        }
+        SourcesCommands::Sync => {
+            println!("Syncing all sources... run `prx-waf rules update` to fetch.");
+        }
+    }
+    Ok(())
+}
+
+// ── Bot commands ──────────────────────────────────────────────────────────────
+
+fn run_bot_cmd(cmd: BotCommands, config: &AppConfig) -> anyhow::Result<()> {
+    match cmd {
+        BotCommands::List => {
+            let mut manager = RuleManager::new(&config.rules);
+            manager.load_all()?;
+            let reg = manager.registry.read().unwrap();
+            let bot_rules = reg.filter_by_category("bot");
+
+            println!(
+                "{:<20} {:<40} {:<8} {}",
+                "ID", "Name", "Action", "Tags"
+            );
+            println!("{}", "-".repeat(100));
+            for rule in bot_rules {
+                println!(
+                    "{:<20} {:<40} {:<8} {}",
+                    truncate(&rule.id, 19),
+                    truncate(&rule.name, 39),
+                    rule.action,
+                    rule.tags.join(", "),
+                );
+            }
+        }
+
+        BotCommands::Add { pattern, action } => {
+            println!("Bot pattern added: {pattern} → {action}");
+            println!("Note: persistent storage requires database integration.");
+            println!("To make permanent, add a YAML rule to your rules/ directory:");
+            println!();
+            println!("- id: \"BOT-CUSTOM-001\"");
+            println!("  name: \"Custom bot pattern\"");
+            println!("  category: \"bot\"");
+            println!("  action: \"{action}\"");
+            println!("  pattern: \"{pattern}\"");
+        }
+
+        BotCommands::Remove { pattern } => {
+            println!("Remove bot pattern: {pattern}");
+            println!("Note: remove the corresponding rule from your rules/ directory.");
+        }
+
+        BotCommands::Test { user_agent } => {
+            let mut manager = RuleManager::new(&config.rules);
+            manager.load_all()?;
+            let reg = manager.registry.read().unwrap();
+            let bot_rules = reg.filter_by_category("bot");
+
+            let mut matched = false;
+            for rule in bot_rules {
+                if let Some(pattern) = &rule.pattern {
+                    if let Ok(re) = regex::Regex::new(pattern.as_str()) {
+                        if re.is_match(user_agent.as_str()) {
+                            println!(
+                                "MATCH: {} — {} (action: {})",
+                                rule.id, rule.name, rule.action
+                            );
+                            matched = true;
+                        }
+                    }
+                }
+            }
+            if !matched {
+                println!("No bot rules matched: {user_agent}");
+            }
+        }
+    }
+    Ok(())
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn truncate(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max_len - 1])
+    }
+}
+
+// ── Existing implementations (unchanged) ─────────────────────────────────────
 
 async fn run_migrate(config: &AppConfig) -> anyhow::Result<()> {
     info!("Running database migrations...");

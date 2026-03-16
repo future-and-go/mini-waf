@@ -21,6 +21,10 @@
         <NavItem to="/crowdsec-settings" icon="🌩️">CS Settings</NavItem>
         <NavItem to="/crowdsec-decisions" icon="🚫">CS Decisions</NavItem>
         <NavItem to="/crowdsec-stats" icon="📈">CS Stats</NavItem>
+        <div class="pt-2 pb-1 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Rules</div>
+        <NavItem to="/rules-management" icon="📋">Rule Manager</NavItem>
+        <NavItem to="/rule-sources" icon="🔗">Rule Sources</NavItem>
+        <NavItem to="/bot-management" icon="🤖">Bot Detection</NavItem>
       </nav>
       <div class="px-4 py-3 border-t border-gray-700">
         <div class="flex items-center justify-between">

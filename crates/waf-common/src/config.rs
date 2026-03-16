@@ -17,6 +17,9 @@ pub struct AppConfig {
     /// Phase 6: CrowdSec integration
     #[serde(default)]
     pub crowdsec: CrowdSecConfig,
+    /// Phase 7: Rule management
+    #[serde(default)]
+    pub rules: RulesConfig,
 }
 
 impl Default for AppConfig {
@@ -30,6 +33,71 @@ impl Default for AppConfig {
             http3: Http3Config::default(),
             security: SecurityConfig::default(),
             crowdsec: CrowdSecConfig::default(),
+            rules: RulesConfig::default(),
+        }
+    }
+}
+
+/// Rule source entry from configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleSourceEntry {
+    pub name: String,
+    /// Local directory path (for local sources)
+    pub path: Option<String>,
+    /// Remote URL (for remote sources)
+    pub url: Option<String>,
+    /// Rule format: yaml | modsec | json
+    #[serde(default = "default_rule_format")]
+    pub format: String,
+    /// Update interval in seconds (for remote sources)
+    #[serde(default = "default_update_interval")]
+    pub update_interval: u64,
+}
+
+fn default_rule_format() -> String { "yaml".to_string() }
+fn default_update_interval() -> u64 { 86400 }
+
+/// Phase 7: Rule management configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RulesConfig {
+    /// Directory to watch for rule files
+    #[serde(default = "default_rules_dir")]
+    pub dir: String,
+    /// Enable file-system hot-reload
+    #[serde(default = "default_hot_reload")]
+    pub hot_reload: bool,
+    /// Debounce ms after last file change before reload
+    #[serde(default = "default_debounce_ms")]
+    pub reload_debounce_ms: u64,
+    /// Load built-in OWASP CRS rules
+    #[serde(default = "default_true")]
+    pub enable_builtin_owasp: bool,
+    /// Load built-in bot detection rules
+    #[serde(default = "default_true")]
+    pub enable_builtin_bot: bool,
+    /// Load built-in scanner detection rules
+    #[serde(default = "default_true")]
+    pub enable_builtin_scanner: bool,
+    /// Configured rule sources
+    #[serde(default)]
+    pub sources: Vec<RuleSourceEntry>,
+}
+
+fn default_rules_dir() -> String { "rules/".to_string() }
+fn default_hot_reload() -> bool { true }
+fn default_debounce_ms() -> u64 { 500 }
+fn default_true() -> bool { true }
+
+impl Default for RulesConfig {
+    fn default() -> Self {
+        Self {
+            dir: default_rules_dir(),
+            hot_reload: default_hot_reload(),
+            reload_debounce_ms: default_debounce_ms(),
+            enable_builtin_owasp: true,
+            enable_builtin_bot: true,
+            enable_builtin_scanner: true,
+            sources: Vec::new(),
         }
     }
 }
