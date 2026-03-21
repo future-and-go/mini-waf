@@ -1,8 +1,13 @@
 /// WebSocket handlers for real-time event/log streaming.
 ///
 /// Endpoints:
-///   GET /ws/events?token=<jwt>  — live security events
-///   GET /ws/logs?token=<jwt>    — live access log stream
+///   GET /ws/events  — live security events
+///   GET /ws/logs    — live access log stream
+///
+/// Authentication (in priority order):
+///   1. `Authorization: Bearer <jwt>` header  (recommended)
+///   2. `Sec-WebSocket-Protocol: bearer.<jwt>` header
+///   3. `?token=<jwt>` query parameter  (deprecated — token may appear in logs)
 ///
 /// Max 50 concurrent connections. Heartbeat ping every 30 s.
 use std::sync::Arc;
@@ -15,12 +20,13 @@ use axum::{
         Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
 use serde_json::json;
 use tokio::time::interval;
+use tracing::warn;
 
 use crate::auth::validate_access_token;
 use crate::state::AppState;
@@ -35,34 +41,74 @@ const MAX_WS_CONNECTIONS: u32 = 50;
 /// GET /ws/events — live security event stream
 pub async fn ws_events(
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
     Query(params): Query<WsQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    auth_and_upgrade(ws, params, state, "events").await
+    auth_and_upgrade(ws, &headers, params, state, "events").await
 }
 
 /// GET /ws/logs — live access log stream
 pub async fn ws_logs(
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
     Query(params): Query<WsQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    auth_and_upgrade(ws, params, state, "logs").await
+    auth_and_upgrade(ws, &headers, params, state, "logs").await
+}
+
+/// Extract JWT token from headers or query parameter.
+///
+/// Priority:
+///   1. `Authorization: Bearer <token>` header
+///   2. `Sec-WebSocket-Protocol: bearer.<token>` header
+///   3. `?token=<token>` query parameter (deprecated)
+fn extract_ws_token(headers: &HeaderMap, params: &WsQuery) -> Option<String> {
+    // 1. Authorization header (preferred)
+    if let Some(auth) = headers.get("authorization")
+        && let Ok(s) = auth.to_str()
+        && let Some(token) = s.strip_prefix("Bearer ")
+    {
+        return Some(token.to_string());
+    }
+
+    // 2. Sec-WebSocket-Protocol header with "bearer." prefix
+    if let Some(proto) = headers.get("sec-websocket-protocol")
+        && let Ok(s) = proto.to_str()
+    {
+        // Protocol value may contain multiple comma-separated values
+        for part in s.split(',') {
+            let trimmed = part.trim();
+            if let Some(token) = trimmed.strip_prefix("bearer.") {
+                return Some(token.to_string());
+            }
+        }
+    }
+
+    // 3. Query parameter (deprecated — logs warning)
+    if let Some(ref token) = params.token {
+        warn!("WebSocket auth via query parameter is deprecated; use Authorization header instead");
+        return Some(token.clone());
+    }
+
+    None
 }
 
 async fn auth_and_upgrade(
     ws: WebSocketUpgrade,
+    headers: &HeaderMap,
     params: WsQuery,
     state: Arc<AppState>,
     stream: &'static str,
 ) -> Response {
-    // Validate JWT from query param
-    let token = match params.token {
+    // Extract JWT from headers or query parameter
+    let token = match extract_ws_token(headers, &params) {
         Some(t) => t,
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({ "error": "token required" })),
+                Json(json!({ "error": "token required — use Authorization header" })),
             )
                 .into_response();
         }

@@ -43,6 +43,8 @@ pub struct AppState {
     // ── Phase 7: Cluster ─────────────────────────────────────────────────────
     /// Shared cluster node state (None when running in standalone mode)
     pub cluster_state: Option<Arc<waf_cluster::NodeState>>,
+    /// Allowed CORS origins for admin API (empty = allow all — insecure default)
+    pub cors_origins: Vec<String>,
 }
 
 impl AppState {
@@ -82,6 +84,7 @@ impl AppState {
             crowdsec_lapi_url: None,
             community_reporter: None,
             cluster_state: None,
+            cors_origins: Vec::new(),
         })
     }
 

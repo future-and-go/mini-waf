@@ -1,9 +1,20 @@
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 use waf_common::{DetectionResult, Phase, RequestCtx};
 
 use super::Check;
+
+/// Maximum number of entries in the rate-limiter map.
+/// Beyond this limit, stale entries are forcefully evicted.
+const MAX_ENTRIES: usize = 100_000;
+
+/// Entries idle for longer than this duration are eligible for eviction.
+const ENTRY_TTL: Duration = Duration::from_secs(600); // 10 minutes
+
+/// How often the background cleanup task runs.
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(60); // 1 minute
 
 /// Per-IP token bucket state.
 struct BucketState {
@@ -21,14 +32,65 @@ struct BucketState {
 ///
 /// State is stored per `(host_code, client_ip)` key in a `DashMap` so it is
 /// safe to call from multiple threads simultaneously.
+///
+/// A background cleanup task evicts entries that have been idle for longer
+/// than [`ENTRY_TTL`] and enforces [`MAX_ENTRIES`] to prevent unbounded
+/// memory growth from IP-rotating attackers.
 pub struct CcCheck {
-    buckets: DashMap<String, BucketState>,
+    buckets: Arc<DashMap<String, BucketState>>,
 }
 
 impl CcCheck {
     pub fn new() -> Self {
-        Self {
-            buckets: DashMap::new(),
+        let buckets = Arc::new(DashMap::new());
+
+        // Spawn background cleanup task if a Tokio runtime is available.
+        // In unit tests without a runtime this gracefully degrades to
+        // no background cleanup (which is acceptable for tests).
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let buckets_bg = Arc::clone(&buckets);
+            handle.spawn(async move {
+                let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
+                loop {
+                    interval.tick().await;
+                    Self::cleanup(&buckets_bg);
+                }
+            });
+        }
+
+        Self { buckets }
+    }
+
+    /// Remove expired entries and enforce the maximum entry count.
+    fn cleanup(buckets: &DashMap<String, BucketState>) {
+        let now = Instant::now();
+
+        // Remove entries whose last_check is older than ENTRY_TTL
+        // and whose ban has expired (or was never set).
+        buckets.retain(|_key, state| {
+            let idle = now.duration_since(state.last_check);
+            let still_banned = state
+                .banned_until
+                .map(|b| now < b)
+                .unwrap_or(false);
+
+            // Keep if still banned or recently active
+            still_banned || idle < ENTRY_TTL
+        });
+
+        // If still over the limit after TTL eviction, remove oldest entries
+        if buckets.len() > MAX_ENTRIES {
+            // Collect keys with their last_check time, sorted oldest first
+            let mut entries: Vec<(String, Instant)> = buckets
+                .iter()
+                .map(|e| (e.key().clone(), e.value().last_check))
+                .collect();
+            entries.sort_by_key(|(_k, t)| *t);
+
+            let to_remove = buckets.len().saturating_sub(MAX_ENTRIES);
+            for (key, _) in entries.into_iter().take(to_remove) {
+                buckets.remove(&key);
+            }
         }
     }
 }

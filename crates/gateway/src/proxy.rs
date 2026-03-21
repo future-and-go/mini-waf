@@ -12,7 +12,7 @@ use pingora_proxy::{ProxyHttp, Session};
 use waf_common::{HostConfig, RequestCtx, WafAction};
 use waf_engine::WafEngine;
 
-use crate::context::GatewayCtx;
+use crate::context::{BODY_PREVIEW_LIMIT, GatewayCtx};
 use crate::router::HostRouter;
 
 /// Pingora-based reverse proxy with WAF integration
@@ -80,6 +80,12 @@ impl WafProxy {
             }
         }
 
+        // Parse Content-Length for informational purposes
+        let content_length = headers
+            .get("content-length")
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0);
+
         RequestCtx {
             req_id: Uuid::new_v4().to_string(),
             client_ip,
@@ -91,7 +97,7 @@ impl WafProxy {
             query,
             headers,
             body_preview: Bytes::new(),
-            content_length: 0,
+            content_length,
             is_tls: false,
             host_config,
             geo: None, // populated by WafEngine::inspect when GeoIP is enabled
@@ -201,6 +207,97 @@ impl ProxyHttp for WafProxy {
         }
 
         Ok(false)
+    }
+
+    /// Buffer the first [`BODY_PREVIEW_LIMIT`] bytes of the request body and
+    /// run WAF body-content inspection once enough data is available.
+    ///
+    /// This callback is invoked for each body chunk *before* it is forwarded
+    /// to the upstream.  We buffer up to 64 KiB and then run a supplementary
+    /// WAF check so that SQLi / XSS / RCE patterns in POST bodies are caught.
+    async fn request_body_filter(
+        &self,
+        session: &mut Session,
+        body: &mut Option<Bytes>,
+        end_of_stream: bool,
+        ctx: &mut GatewayCtx,
+    ) -> pingora_core::Result<()> {
+        // Only buffer when we have a request context and haven't inspected yet
+        if ctx.body_inspected {
+            return Ok(());
+        }
+
+        // Accumulate body bytes up to the preview limit
+        if let Some(chunk) = body {
+            let remaining = BODY_PREVIEW_LIMIT.saturating_sub(ctx.body_buf.len());
+            if remaining > 0 {
+                let take = chunk.len().min(remaining);
+                ctx.body_buf.extend_from_slice(&chunk[..take]);
+            }
+        }
+
+        // Run body WAF check when we have enough data or at end of stream
+        let should_inspect =
+            ctx.body_buf.len() >= BODY_PREVIEW_LIMIT || (end_of_stream && !ctx.body_buf.is_empty());
+
+        if !should_inspect {
+            return Ok(());
+        }
+
+        ctx.body_inspected = true;
+
+        // Build a RequestCtx clone with body_preview populated
+        let mut request_ctx = match &ctx.request_ctx {
+            Some(c) => c.clone(),
+            None => return Ok(()),
+        };
+
+        request_ctx.body_preview = Bytes::copy_from_slice(&ctx.body_buf);
+
+        // Run WAF inspection with body content
+        let decision = self.engine.inspect(&mut request_ctx).await;
+
+        if !decision.is_allowed() {
+            match &decision.action {
+                WafAction::Block { status, body: block_body } => {
+                    warn!(
+                        "WAF blocked request (body): ip={} path={} host={}",
+                        request_ctx.client_ip, request_ctx.path, request_ctx.host,
+                    );
+                    let status_code = *status;
+                    let body_str = block_body
+                        .clone()
+                        .unwrap_or_else(|| "Access Denied".to_string());
+
+                    let response = pingora_http::ResponseHeader::build(status_code, None)?;
+                    session
+                        .write_response_header(Box::new(response), false)
+                        .await?;
+                    let body_bytes = Bytes::from(body_str);
+                    session.write_response_body(Some(body_bytes), true).await?;
+
+                    return Err(pingora_core::Error::explain(
+                        pingora_core::ErrorType::HTTPStatus(status_code),
+                        "WAF blocked request body",
+                    ));
+                }
+                WafAction::Redirect { url } => {
+                    let mut response = pingora_http::ResponseHeader::build(302, None)?;
+                    response.insert_header("location", url.as_str())?;
+                    session
+                        .write_response_header(Box::new(response), true)
+                        .await?;
+
+                    return Err(pingora_core::Error::explain(
+                        pingora_core::ErrorType::HTTPStatus(302),
+                        "WAF redirected request",
+                    ));
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
     }
 
     async fn logging(

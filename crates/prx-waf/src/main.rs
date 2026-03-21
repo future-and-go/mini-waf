@@ -1233,6 +1233,8 @@ fn run_server(config: AppConfig) -> anyhow::Result<()> {
     // Optionally start HTTP/3 listener
     if config.http3.enabled {
         let h3_config = config.http3.clone();
+        let h3_engine = Arc::clone(&engine);
+        let h3_router = Arc::clone(&router);
         std::thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -1284,6 +1286,8 @@ fn run_server(config: AppConfig) -> anyhow::Result<()> {
                     key_pem,
                     "http://127.0.0.1:8080".to_string(),
                     h3_config.upstream_tls_verify,
+                    Arc::clone(&h3_engine),
+                    Arc::clone(&h3_router),
                 )
                 .await
                 {
@@ -1448,6 +1452,9 @@ async fn init_async(
 
     // Build app state
     let mut api_state = AppState::new(Arc::clone(&db), Arc::clone(&engine), Arc::clone(&router))?;
+
+    // Apply CORS origins from security config
+    api_state.cors_origins = config.security.cors_origins.clone();
 
     // Phase 4: create default admin user if none exist
     {

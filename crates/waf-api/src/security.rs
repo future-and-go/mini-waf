@@ -57,6 +57,12 @@ pub async fn security_headers_middleware(req: Request<Body>, next: Next) -> impl
 
 // ─── Rate limiter ──────────────────────────────────────────────────────────────
 
+/// Maximum number of per-IP entries before forced LRU eviction.
+const API_RATE_MAX_ENTRIES: usize = 50_000;
+
+/// Entries idle longer than this are evicted during periodic cleanup.
+const API_RATE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+
 /// Token-bucket entry per IP
 struct Bucket {
     tokens: f64,
@@ -64,6 +70,9 @@ struct Bucket {
 }
 
 /// Simple in-process per-IP rate limiter (token bucket algorithm).
+///
+/// Includes periodic cleanup of stale entries to prevent unbounded memory
+/// growth when facing large numbers of unique source IPs.
 pub struct ApiRateLimiter {
     buckets: Mutex<HashMap<IpAddr, Bucket>>,
     rps: f64,
@@ -72,11 +81,23 @@ pub struct ApiRateLimiter {
 
 impl ApiRateLimiter {
     pub fn new(rps: u32) -> Arc<Self> {
-        Arc::new(Self {
+        let limiter = Arc::new(Self {
             buckets: Mutex::new(HashMap::new()),
             rps: rps as f64,
             burst: (rps * 5).max(10) as f64,
-        })
+        });
+
+        // Spawn background cleanup task (runs every 60 seconds)
+        let limiter_bg = Arc::clone(&limiter);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                limiter_bg.cleanup();
+            }
+        });
+
+        limiter
     }
 
     /// Returns `true` if the request is allowed, `false` if rate-limited.
@@ -100,6 +121,30 @@ impl ApiRateLimiter {
             true
         } else {
             false
+        }
+    }
+
+    /// Evict entries that have been idle longer than [`API_RATE_TTL`] and
+    /// enforce [`API_RATE_MAX_ENTRIES`] by removing oldest entries first.
+    fn cleanup(&self) {
+        let now = Instant::now();
+        let mut map = self.buckets.lock();
+
+        // Remove stale entries
+        map.retain(|_ip, bucket| now.duration_since(bucket.last_refill) < API_RATE_TTL);
+
+        // If still over limit, evict oldest entries
+        if map.len() > API_RATE_MAX_ENTRIES {
+            let mut entries: Vec<(IpAddr, Instant)> = map
+                .iter()
+                .map(|(ip, b)| (*ip, b.last_refill))
+                .collect();
+            entries.sort_by_key(|(_ip, t)| *t);
+
+            let to_remove = map.len().saturating_sub(API_RATE_MAX_ENTRIES);
+            for (ip, _) in entries.into_iter().take(to_remove) {
+                map.remove(&ip);
+            }
         }
     }
 }

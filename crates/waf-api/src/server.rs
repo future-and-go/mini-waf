@@ -5,7 +5,8 @@ use axum::{
     Router, middleware,
     routing::{delete, get, post},
 };
-use tower_http::cors::{Any, CorsLayer};
+use axum::http::{HeaderValue, Method, header::{AUTHORIZATION, CONTENT_TYPE}};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -36,10 +37,24 @@ use crate::websocket::{ws_events, ws_logs};
 
 /// Build the Axum router with all API routes
 pub fn build_router(state: Arc<AppState>) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    // Build CORS layer: use configured origin allowlist when available,
+    // otherwise fall back to permissive mode (backward compatible but insecure).
+    let cors = if state.cors_origins.is_empty() {
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+            .allow_headers([AUTHORIZATION, CONTENT_TYPE])
+    } else {
+        let origins: Vec<HeaderValue> = state
+            .cors_origins
+            .iter()
+            .filter_map(|o| o.parse::<HeaderValue>().ok())
+            .collect();
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(origins))
+            .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+            .allow_headers([AUTHORIZATION, CONTENT_TYPE])
+    };
 
     // Public routes (no JWT)
     let public_routes = Router::new()
