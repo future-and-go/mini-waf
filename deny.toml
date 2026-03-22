@@ -1,0 +1,91 @@
+# cargo-deny configuration — OpenPRX standard v2
+
+[graph]
+all-features = true
+exclude-dev = false
+
+[output]
+feature-depth = 1
+
+[advisories]
+yanked = "deny"
+unmaintained = "all"
+unsound = "workspace"
+# Review all ignores by: 2026-06-01
+ignore = [
+    # protobuf 2.28.0 DoS — blocked by pingora 0.8.0 pinning prometheus 0.13 (uses protobuf v2)
+    # pingora main branch already upgraded, waiting for 0.9.x release
+    { id = "RUSTSEC-2024-0437", reason = "protobuf: blocked by pingora 0.8.0, awaiting pingora 0.9.x" },
+    # Unmaintained transitive deps — no replacement available
+    { id = "RUSTSEC-2025-0069", reason = "daemonize: pingora transitive dep" },
+    { id = "RUSTSEC-2024-0388", reason = "derivative: pingora transitive dep" },
+    { id = "RUSTSEC-2024-0436", reason = "paste: pingora transitive dep" },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile: unmaintained, used by gateway+waf-cluster for PEM parsing, no replacement yet" },
+    # wasmtime CVEs — blocked by pingora 0.8.0, needs pingora upgrade
+    { id = "RUSTSEC-2024-0438", reason = "wasmtime: Windows device names, blocked by pingora" },
+    { id = "RUSTSEC-2025-0046", reason = "wasmtime: fd_renumber panic, blocked by pingora" },
+    { id = "RUSTSEC-2025-0118", reason = "wasmtime: shared memory unsound, blocked by pingora" },
+    { id = "RUSTSEC-2026-0020", reason = "wasmtime: WASI resource exhaustion, blocked by pingora" },
+    { id = "RUSTSEC-2026-0021", reason = "wasmtime: WASI HTTP fields panic, blocked by pingora" },
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "OpenSSL",
+    "Zlib",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+    "0BSD",
+    "BSL-1.0",
+    "CC0-1.0",
+]
+confidence-threshold = 0.8
+include-dev = false
+include-build = true
+unused-allowed-license = "allow"
+
+[licenses.private]
+ignore = true
+
+[[licenses.clarify]]
+crate = "maker"
+expression = "MIT"
+license-files = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+allow-wildcard-paths = true
+allow-workspace = true
+highlight = "all"
+
+deny = [
+    { crate = "openssl", reason = "Use rustls-tls instead", use-instead = "rustls" },
+    { crate = "openssl-sys", reason = "Use rustls-tls instead" },
+]
+
+[[bans.features]]
+crate = "reqwest"
+deny = ["native-tls", "native-tls-vendored"]
+
+[bans.workspace-dependencies]
+duplicates = "warn"
+unused = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = [
+    "https://github.com/rust-lang/crates.io-index",
+]
+allow-git = [
+    "https://github.com/lionsoul2014/ip2region.git",
+]

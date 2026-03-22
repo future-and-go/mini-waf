@@ -43,6 +43,9 @@ parking_lot = { workspace = true }
 # Compression — only genuinely new workspace dep
 lz4_flex = { workspace = true }
 
+[lints]
+workspace = true
+
 [dev-dependencies]
 tokio       = { workspace = true }
 async-trait = { workspace = true }

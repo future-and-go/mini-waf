@@ -11,7 +11,6 @@ waf-engine = { path = "../waf-engine" }
 waf-cluster = { path = "../waf-cluster" }
 gateway = { path = "../gateway" }
 tokio = { workspace = true }
-tower = { workspace = true }
 tower-http = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -25,18 +24,15 @@ jsonwebtoken = { workspace = true }
 reqwest = { workspace = true }
 lettre = { workspace = true }
 rust-embed = { workspace = true }
-mime_guess = { workspace = true }
-aes-gcm = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 rand = { workspace = true }
-totp-lite = { workspace = true }
-data-encoding = { workspace = true }
 dashmap = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
-axum-extra = { workspace = true }
 futures-util = { workspace = true }
-bytes = { workspace = true }
 ipnet = { workspace = true }
 parking_lot = { workspace = true }
+
+[lints]
+workspace = true

@@ -87,7 +87,7 @@ rustls = { version = "0.23", features = ["ring"] }
 h3 = "0.0.8"
 h3-quinn = "0.0.10"
 rustls-pemfile = "2"
-tokio-tungstenite = { version = "0.23", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.23", default-features = false, features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 multipart = { version = "0.18", default-features = false, features = ["server"] }
 axum-extra = { version = "0.9", features = ["multipart"] }
@@ -100,6 +100,40 @@ lz4_flex = "0.11"
 hmac = "0.12"
 time = { version = "0.3", default-features = false, features = ["std"] }
 parking_lot = "0.12"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+indexing_slicing = "deny"
+
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+undocumented_unsafe_blocks = "deny"
+
+inefficient_to_string = "deny"
+large_futures = "warn"
+
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+cast_precision_loss = "warn"
+cast_lossless = "warn"
+too_many_lines = "allow"
 
 [profile.release]
 opt-level = 3

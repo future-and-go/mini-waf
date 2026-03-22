@@ -18,15 +18,14 @@ gateway = { path = "../gateway" }
 
 tokio = { workspace = true }
 clap = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-toml = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 regex = { workspace = true }
 
-pingora = { workspace = true }
 pingora-core = { workspace = true }
 pingora-proxy = { workspace = true }
+
+[lints]
+workspace = true
