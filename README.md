@@ -195,6 +195,17 @@ url             = "https://example.com/rules/owasp.yaml"
 format          = "yaml"
 update_interval = 86400  # 24h in seconds
 
+# --- Cluster ---
+[cluster]
+enabled     = false
+node_id     = ""                  # auto-generated if empty
+role        = "auto"              # auto | main | worker
+listen_addr = "0.0.0.0:16851"    # QUIC inter-node communication
+seeds       = []                  # seed node addresses
+
+[cluster.crypto]
+auto_generate = true
+
 # --- CrowdSec Integration ---
 [crowdsec]
 enabled               = false
@@ -285,7 +296,7 @@ Built-in rules are compiled into the binary and loaded automatically (configurab
 
 ## Architecture
 
-PRX-WAF is organized as a 6-crate Cargo workspace:
+PRX-WAF is organized as a 7-crate Cargo workspace:
 
 ```
 prx-waf/
@@ -295,8 +306,9 @@ prx-waf/
 │   ├── waf-engine/     Detection pipeline, rules engine, checks, plugins, CrowdSec
 │   ├── waf-storage/    PostgreSQL layer (sqlx), migrations, models
 │   ├── waf-api/        Axum REST API, JWT/TOTP auth, WebSocket, static UI
-│   └── waf-common/     Shared types: RequestCtx, WafDecision, HostConfig, config
-├── migrations/         SQL migration files (0001–0007)
+│   ├── waf-common/     Shared types: RequestCtx, WafDecision, HostConfig, config
+│   └── waf-cluster/    Cluster consensus, QUIC transport, rule sync, certificates
+├── migrations/         SQL migration files (0001–0008)
 ├── configs/            Example TOML config files
 ├── rules/              Rule files directory (YAML, ModSec, JSON)
 └── web/admin-ui/       Vue 3 admin SPA (served embedded in waf-api)
@@ -351,25 +363,66 @@ Content-Type: application/json
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/hosts` | List all hosts |
-| POST | `/api/hosts` | Add a host |
-| PUT | `/api/hosts/:id` | Update a host |
-| DELETE | `/api/hosts/:id` | Delete a host |
-| GET | `/api/rules/ip` | List IP rules |
-| POST | `/api/rules/ip` | Add IP rule (allow/block) |
-| GET | `/api/rules/url` | List URL rules |
-| POST | `/api/rules/url` | Add URL rule |
-| GET | `/api/rules/custom` | List custom rules |
-| POST | `/api/rules/custom` | Create custom rule |
-| GET | `/api/security-events` | List attack logs |
-| GET | `/api/stats` | Request statistics |
+| GET | `/health` | Health check (public) |
+| POST | `/api/auth/login` | Obtain JWT token |
+| POST | `/api/auth/logout` | Invalidate session |
+| POST | `/api/auth/refresh` | Refresh JWT token |
+| GET/POST | `/api/hosts` | List / add proxy hosts |
+| GET/PUT/DELETE | `/api/hosts/:id` | Get / update / delete host |
+| GET/POST | `/api/allow-ips` | List / add IP allowlist entries |
+| DELETE | `/api/allow-ips/:id` | Remove IP allowlist entry |
+| GET/POST | `/api/block-ips` | List / add IP blocklist entries |
+| DELETE | `/api/block-ips/:id` | Remove IP blocklist entry |
+| GET/POST | `/api/allow-urls` | List / add URL allowlist entries |
+| DELETE | `/api/allow-urls/:id` | Remove URL allowlist entry |
+| GET/POST | `/api/block-urls` | List / add URL blocklist entries |
+| DELETE | `/api/block-urls/:id` | Remove URL blocklist entry |
+| GET | `/api/attack-logs` | Attack log entries |
+| GET | `/api/security-events` | Security event stream history |
+| GET | `/api/status` | System status |
+| POST | `/api/reload` | Hot-reload rules |
+| GET/POST | `/api/custom-rules` | List / create custom rules |
+| DELETE | `/api/custom-rules/:id` | Delete custom rule |
+| GET/POST | `/api/sensitive-patterns` | List / add sensitive word patterns |
+| DELETE | `/api/sensitive-patterns/:id` | Delete sensitive pattern |
+| GET/POST | `/api/hotlink-config` | Get / set anti-hotlink config |
+| GET/POST | `/api/lb-backends` | List / add load-balancer backends |
+| DELETE | `/api/lb-backends/:id` | Delete LB backend |
+| GET/POST | `/api/certificates` | List / upload TLS certificates |
+| DELETE | `/api/certificates/:id` | Delete certificate |
+| GET | `/api/stats/overview` | Aggregated traffic statistics |
+| GET | `/api/stats/timeseries` | Time-series traffic data |
+| GET | `/api/stats/geo` | Geo-distribution statistics |
+| GET/POST | `/api/notifications` | List / create notification channels |
+| DELETE | `/api/notifications/:id` | Delete notification channel |
+| GET | `/api/notifications/log` | Notification delivery log |
+| POST | `/api/notifications/:id/test` | Send test notification |
+| GET/POST | `/api/plugins` | List / upload WASM plugins |
+| DELETE | `/api/plugins/:id` | Delete plugin |
+| POST | `/api/plugins/:id/enable` | Enable plugin |
+| POST | `/api/plugins/:id/disable` | Disable plugin |
+| GET/POST | `/api/tunnels` | List / create reverse tunnels |
+| DELETE | `/api/tunnels/:id` | Delete tunnel |
+| GET | `/api/cache/stats` | Cache statistics |
+| DELETE | `/api/cache` | Flush entire cache |
+| DELETE | `/api/cache/host/:host` | Flush cache for a host |
+| DELETE | `/api/cache/key` | Flush a specific cache key |
+| GET | `/api/audit-log` | Admin action audit log |
+| GET | `/api/cluster/status` | Cluster health overview |
+| GET | `/api/cluster/nodes` | List cluster nodes |
+| GET | `/api/cluster/nodes/:id` | Get cluster node details |
+| POST | `/api/cluster/token` | Generate node join token |
+| POST | `/api/cluster/nodes/remove` | Remove a node from cluster |
+| GET | `/api/crowdsec/status` | CrowdSec integration status |
 | GET | `/api/crowdsec/decisions` | Active CrowdSec decisions |
-| GET | `/api/plugins` | List WASM plugins |
-| POST | `/api/plugins` | Upload WASM plugin |
-| GET | `/api/tunnels` | List reverse tunnels |
-| POST | `/api/tunnels` | Create tunnel |
+| DELETE | `/api/crowdsec/decisions/:id` | Delete a CrowdSec decision |
+| POST | `/api/crowdsec/test` | Test LAPI connectivity |
+| GET/PUT | `/api/crowdsec/config` | Get / update CrowdSec config |
+| GET | `/api/crowdsec/stats` | CrowdSec statistics |
+| GET | `/api/crowdsec/events` | CrowdSec event log |
 | WS | `/ws/events` | Real-time security event stream |
-| GET | `/health` | Health check |
+| WS | `/ws/logs` | Real-time access/attack log stream |
+| WS | `/ws/tunnel` | Reverse tunnel WebSocket endpoint |
 
 ---
 

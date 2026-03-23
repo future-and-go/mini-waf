@@ -57,7 +57,7 @@ podman-compose down && podman-compose up -d --build
 - Validate inputs before unsafe block
 
 ## Architecture
-- Workspace: 6 crates (prx-waf, gateway, waf-engine, waf-storage, waf-api, waf-common)
+- Workspace: 7 crates (prx-waf, gateway, waf-engine, waf-storage, waf-api, waf-common, waf-cluster)
 - WAF engine: Pingora-based reverse proxy
 - Rules: YAML files in rules/ directory
 - Admin UI: Vue 3 + Tailwind in web/admin-ui/
