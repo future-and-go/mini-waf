@@ -21,9 +21,10 @@ static SQLI_DESCS: &[&str] = &[
     "MySQL/MSSQL system table enumeration",
 ];
 
-#[allow(clippy::expect_used)]
+// SAFETY: All patterns are compile-time string literals. If any pattern fails
+// to compile it is a code bug that must be caught in development, not at runtime.
 static SQLI_SET: LazyLock<RegexSet> = LazyLock::new(|| {
-    RegexSet::new([
+    match RegexSet::new([
         // UNION … SELECT
         r"(?i)\bunion\b[\s/\*]+select\b",
         // Comment sequences followed by DML keywords
@@ -48,8 +49,10 @@ static SQLI_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"'[\s]*(or|and|union|select|drop|insert|update|delete)\b",
         // MySQL/MSSQL catalog tables
         r"(?i)\b(mysql\.(user|db)|master\.\.(sysdatabases|sysobjects))\b",
-    ])
-    .expect("SQL injection regex set compilation failed")
+    ]) {
+        Ok(set) => set,
+        Err(e) => panic!("BUG: SQL injection regex set failed to compile: {e}"),
+    }
 });
 
 /// SQL injection detection checker.

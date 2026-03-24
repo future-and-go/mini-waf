@@ -6,9 +6,10 @@ use waf_common::{DetectionResult, Phase, RequestCtx};
 use super::Check;
 
 /// Known search-engine / legitimate crawlers — these are allowed through.
-#[allow(clippy::expect_used)]
+// SAFETY: All patterns are compile-time string literals. If any pattern fails
+// to compile it is a code bug that must be caught in development, not at runtime.
 static GOOD_BOT_SET: LazyLock<RegexSet> = LazyLock::new(|| {
-    RegexSet::new([
+    match RegexSet::new([
         r"(?i)\bgooglebot\b",
         r"(?i)\bbingbot\b",
         r"(?i)\bslurp\b", // Yahoo
@@ -28,8 +29,10 @@ static GOOD_BOT_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)Googlebot-Image",
         r"(?i)Googlebot-News",
         r"(?i)Googlebot-Video",
-    ])
-    .expect("Good bot regex set compilation failed")
+    ]) {
+        Ok(set) => set,
+        Err(e) => panic!("BUG: good bot regex set failed to compile: {e}"),
+    }
 });
 
 /// Malicious / suspicious bot signatures.
@@ -49,9 +52,10 @@ static BAD_BOT_DESCS: &[&str] = &[
     "Go standard HTTP client",
 ];
 
-#[allow(clippy::expect_used)]
+// SAFETY: All patterns are compile-time string literals. If any pattern fails
+// to compile it is a code bug that must be caught in development, not at runtime.
 static BAD_BOT_SET: LazyLock<RegexSet> = LazyLock::new(|| {
-    RegexSet::new([
+    match RegexSet::new([
         r"(?i)\bscrapy\b",
         r"(?i)\bzgrab\b",
         r"(?i)\bmasscan\b",
@@ -66,8 +70,10 @@ static BAD_BOT_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)^Java/",
         r"(?i)^Ruby$|^Ruby/",
         r"(?i)^Go-http-client/",
-    ])
-    .expect("Bad bot regex set compilation failed")
+    ]) {
+        Ok(set) => set,
+        Err(e) => panic!("BUG: bad bot regex set failed to compile: {e}"),
+    }
 });
 
 /// Bot detection checker.

@@ -69,15 +69,17 @@ impl HostPatterns {
 // ── Built-in automaton ────────────────────────────────────────────────────────
 
 fn builtin_ac() -> Arc<AhoCorasick> {
-    // SAFETY rationale: these are compile-time constant patterns that are
-    // guaranteed to be valid.  If they ever fail to compile it is a code bug
-    // that must be caught during development, not at runtime.
-    #[allow(clippy::expect_used)]
-    let ac = AhoCorasickBuilder::new()
+    // SAFETY: BUILTIN_PATTERNS are compile-time constant string literals.
+    // If any pattern fails to compile it is a code bug that must be caught
+    // during development, not at runtime.
+    let ac = match AhoCorasickBuilder::new()
         .match_kind(MatchKind::LeftmostFirst)
         .ascii_case_insensitive(true)
         .build(BUILTIN_PATTERNS)
-        .expect("builtin sensitive patterns must compile");
+    {
+        Ok(ac) => ac,
+        Err(e) => panic!("BUG: builtin sensitive patterns failed to compile: {e}"),
+    };
     Arc::new(ac)
 }
 

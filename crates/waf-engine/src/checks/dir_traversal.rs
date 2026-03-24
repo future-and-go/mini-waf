@@ -16,9 +16,10 @@ static TRAVERSAL_DESCS: &[&str] = &[
     "Windows drive-letter path (C:\\)",
 ];
 
-#[allow(clippy::expect_used)]
+// SAFETY: All patterns are compile-time string literals. If any pattern fails
+// to compile it is a code bug that must be caught in development, not at runtime.
 static TRAVERSAL_SET: LazyLock<RegexSet> = LazyLock::new(|| {
-    RegexSet::new([
+    match RegexSet::new([
         // Classic ../
         r"(\.\./|\.\.\\)",
         // URL single-encoded: %2e%2e or %2E%2E (with / or %2f after)
@@ -35,8 +36,10 @@ static TRAVERSAL_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)/(etc|proc|var/log|usr/local|root|home|tmp|dev|sys)(/|$)",
         // Windows drive-letter path
         r"(?i)[A-Za-z]:\\",
-    ])
-    .expect("Directory traversal regex set compilation failed")
+    ]) {
+        Ok(set) => set,
+        Err(e) => panic!("BUG: directory traversal regex set failed to compile: {e}"),
+    }
 });
 
 /// Directory traversal / path injection detection checker.

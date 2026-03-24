@@ -28,9 +28,10 @@ static RCE_DESCS: &[&str] = &[
     "nc/netcat reverse shell",
 ];
 
-#[allow(clippy::expect_used)]
+// SAFETY: All patterns are compile-time string literals. If any pattern fails
+// to compile it is a code bug that must be caught in development, not at runtime.
 static RCE_SET: LazyLock<RegexSet> = LazyLock::new(|| {
-    RegexSet::new([
+    match RegexSet::new([
         // Pipe/semicolon followed by known shell commands
         r"(?i)[|;`]\s*(cat|ls|dir|wget|curl|bash|sh|zsh|fish|nc|ncat|nmap|python[23]?|perl|ruby|php|exec|system|passthru|popen|id|whoami|uname)\b",
         // $() subshell
@@ -63,8 +64,10 @@ static RCE_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)\bwget\s+https?://",
         // Netcat reverse shell patterns
         r"(?i)\bnc\b.*-[el]",
-    ])
-    .expect("RCE regex set compilation failed")
+    ]) {
+        Ok(set) => set,
+        Err(e) => panic!("BUG: RCE regex set failed to compile: {e}"),
+    }
 });
 
 /// Remote Code Execution / Command Injection detection checker.

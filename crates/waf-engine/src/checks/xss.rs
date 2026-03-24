@@ -24,9 +24,10 @@ static XSS_DESCS: &[&str] = &[
     "<svg>/<math> inline vector",
 ];
 
-#[allow(clippy::expect_used)]
+// SAFETY: All patterns are compile-time string literals. If any pattern fails
+// to compile it is a code bug that must be caught in development, not at runtime.
 static XSS_SET: LazyLock<RegexSet> = LazyLock::new(|| {
-    RegexSet::new([
+    match RegexSet::new([
         // <script...>
         r"(?i)<\s*/?\s*script[\s/>]",
         // Event handlers: on[event]=
@@ -59,8 +60,10 @@ static XSS_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)<\s*(object|embed)[\s/>]",
         // Inline SVG/MathML vectors
         r"(?i)<\s*(svg|math)[\s/>]",
-    ])
-    .expect("XSS regex set compilation failed")
+    ]) {
+        Ok(set) => set,
+        Err(e) => panic!("BUG: XSS regex set failed to compile: {e}"),
+    }
 });
 
 /// XSS detection checker.

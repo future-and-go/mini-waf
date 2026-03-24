@@ -44,9 +44,10 @@ static SCANNER_UA_DESCS: &[&str] = &[
     "Scrapy (web scraper)",
 ];
 
-#[allow(clippy::expect_used)]
+// SAFETY: All patterns are compile-time string literals. If any pattern fails
+// to compile it is a code bug that must be caught in development, not at runtime.
 static SCANNER_UA_SET: LazyLock<RegexSet> = LazyLock::new(|| {
-    RegexSet::new([
+    match RegexSet::new([
         r"(?i)\bsqlmap\b",
         r"(?i)\bnmap\b",
         r"(?i)\bnikto\b",
@@ -84,8 +85,10 @@ static SCANNER_UA_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)(headlesschrome|headless chrome|puppeteer|selenium|webdriver)",
         r"(?i)\bphantomjs\b",
         r"(?i)\bscrapy\b",
-    ])
-    .expect("Scanner UA regex set compilation failed")
+    ]) {
+        Ok(set) => set,
+        Err(e) => panic!("BUG: scanner UA regex set failed to compile: {e}"),
+    }
 });
 
 /// Security scanner / automated tool detection checker (User-Agent based).
