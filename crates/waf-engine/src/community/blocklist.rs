@@ -35,6 +35,9 @@ struct BlocklistVersionResponse {
 #[derive(Debug, Deserialize)]
 struct BlocklistSignedResponse {
     version: u64,
+    /// Optional key identifier returned by the server for key-rotation awareness.
+    #[serde(default)]
+    key_id: Option<String>,
     payload_hex: String,
     signature_hex: String,
 }
@@ -54,6 +57,29 @@ pub struct BlocklistEntry {
     pub source: String,
 }
 
+/// Delta response from `GET /api/v1/waf/blocklist/delta?since_version=N`.
+#[derive(Debug, Deserialize)]
+struct DeltaResponse {
+    from_version: i64,
+    to_version: i64,
+    added: Vec<DeltaAddedEntry>,
+    removed: Vec<DeltaRemovedEntry>,
+}
+
+/// A newly added entry in a blocklist delta.
+#[derive(Debug, Deserialize)]
+struct DeltaAddedEntry {
+    ip: String,
+    scenario: String,
+    action: Option<String>,
+}
+
+/// A removed entry in a blocklist delta.
+#[derive(Debug, Deserialize)]
+struct DeltaRemovedEntry {
+    ip: String,
+}
+
 /// Deserialized entry from the signed payload (matches `WafConsensusEntry` shape).
 #[derive(Debug, Deserialize)]
 struct SignedBlocklistEntry {
@@ -67,6 +93,24 @@ struct SignedBlocklistEntry {
 pub struct CommunityDecision {
     pub reason: String,
     pub source: String,
+}
+
+// ---- Public key discovery types ---------------------------------------------
+
+/// Response from `GET /api/v1/keys/signing`.
+#[derive(Debug, Deserialize)]
+struct KeysResponse {
+    keys: Vec<KeyInfo>,
+}
+
+/// A single key entry from the signing-keys discovery endpoint.
+#[derive(Debug, Deserialize)]
+struct KeyInfo {
+    key_id: String,
+    public_key_hex: String,
+    #[serde(default)]
+    _algorithm: String,
+    status: String,
 }
 
 /// Parse a hex-encoded Ed25519 public key string into a `VerifyingKey`.
@@ -98,6 +142,43 @@ pub fn parse_public_key(hex_str: &str) -> Option<VerifyingKey> {
             None
         }
     }
+}
+
+/// Fetch signing public keys from the community server's key-discovery endpoint.
+///
+/// This is a standalone function (not a method on `CommunityBlocklistSync`) so
+/// that it can be called during `init_community` before the sync object exists.
+///
+/// Returns a list of `(key_id, VerifyingKey)` pairs for all active keys.
+pub async fn fetch_signing_keys_from_server(client: &CommunityClient) -> anyhow::Result<Vec<(String, VerifyingKey)>> {
+    let url = format!("{}/api/v1/keys/signing", client.base_url);
+
+    let resp = client
+        .http
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to fetch signing keys: {e}"))?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("signing keys endpoint returned {}", resp.status());
+    }
+
+    let body: KeysResponse = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to parse signing keys response: {e}"))?;
+
+    let mut keys = Vec::new();
+    for key_info in &body.keys {
+        if key_info.status != "active" {
+            continue;
+        }
+        if let Some(vk) = parse_public_key(&key_info.public_key_hex) {
+            keys.push((key_info.key_id.clone(), vk));
+        }
+    }
+    Ok(keys)
 }
 
 /// Synchronises the community blocklist in the background.
@@ -200,9 +281,20 @@ impl CommunityBlocklistSync {
                     if server_version > local {
                         info!(
                             local_version = local,
-                            server_version, "Community blocklist version changed, re-fetching"
+                            server_version, "Community blocklist version changed, updating"
                         );
-                        self.full_pull().await;
+                        // Try incremental delta first; fall back to full pull
+                        match self.delta_pull().await {
+                            Ok(true) => { /* delta applied successfully */ }
+                            Ok(false) => {
+                                info!("Delta unavailable, performing full pull");
+                                self.full_pull().await;
+                            }
+                            Err(e) => {
+                                warn!("Delta pull failed: {e:#}, falling back to full pull");
+                                self.full_pull().await;
+                            }
+                        }
                     }
                 }
                 Err(e) => {
@@ -210,6 +302,81 @@ impl CommunityBlocklistSync {
                 }
             }
         }
+    }
+
+    /// Attempt incremental delta pull.
+    ///
+    /// Returns `Ok(true)` if the delta was applied successfully,
+    /// `Ok(false)` if the caller should fall back to a full pull.
+    async fn delta_pull(&self) -> Result<bool, anyhow::Error> {
+        let local_version = self.current_version.load(Ordering::Relaxed);
+        if local_version == 0 {
+            // Never pulled before — must do full pull
+            return Ok(false);
+        }
+
+        let url = format!(
+            "{}/api/v1/waf/blocklist/delta?since_version={}",
+            self.client.base_url, local_version
+        );
+        let resp = self.client.http.get(&url).bearer_auth(&self.api_key).send().await?;
+
+        if resp.status() == reqwest::StatusCode::GONE {
+            info!("Delta not available (version too old), falling back to full pull");
+            return Ok(false);
+        }
+
+        if !resp.status().is_success() {
+            anyhow::bail!("delta pull returned {}", resp.status());
+        }
+
+        let body = read_response_body_limited(resp, MAX_BLOCKLIST_RESPONSE_BYTES)
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let delta: DeltaResponse = serde_json::from_slice(&body)?;
+
+        // Too many changes — fall back to full pull for atomicity
+        if delta.added.len() + delta.removed.len() > 5000 {
+            info!(
+                added = delta.added.len(),
+                removed = delta.removed.len(),
+                "Delta too large, falling back to full pull"
+            );
+            return Ok(false);
+        }
+
+        // Apply delta to existing map
+        let mut map = self.blocked_ips.write();
+        for entry in &delta.removed {
+            if let Ok(ip) = entry.ip.parse::<IpAddr>() {
+                map.remove(&ip);
+            }
+        }
+        for entry in &delta.added {
+            if let Ok(ip) = entry.ip.parse::<IpAddr>() {
+                map.insert(
+                    ip,
+                    CommunityDecision {
+                        reason: entry.scenario.clone(),
+                        source: format!("community-{}", entry.action.as_deref().unwrap_or("block")),
+                    },
+                );
+            }
+        }
+        drop(map);
+
+        #[allow(clippy::cast_sign_loss)]
+        let new_version = delta.to_version as u64;
+        self.current_version.store(new_version, Ordering::Relaxed);
+
+        info!(
+            from = delta.from_version,
+            to = delta.to_version,
+            added = delta.added.len(),
+            removed = delta.removed.len(),
+            "Community blocklist delta applied"
+        );
+        Ok(true)
     }
 
     /// Fetch the full blocklist from the community server and replace the cache.
@@ -295,10 +462,22 @@ impl CommunityBlocklistSync {
 
         // Verify the Ed25519 signature over the compressed payload
         if let Err(e) = verify_key.verify(&payload, &signature) {
-            error!(
-                "Community blocklist SIGNATURE VERIFICATION FAILED: {e} — \
-                 rejecting update (possible MITM or key mismatch)"
-            );
+            // Include the server's key_id (if present) in the error message
+            // so operators can diagnose key rotation issues.
+            if let Some(ref server_key_id) = data.key_id {
+                error!(
+                    server_key_id = %server_key_id,
+                    "Community blocklist SIGNATURE VERIFICATION FAILED: {e} — \
+                     rejecting update. The server's key_id is '{server_key_id}'; \
+                     check that [community] public_key matches or remove it to \
+                     enable automatic key discovery."
+                );
+            } else {
+                error!(
+                    "Community blocklist SIGNATURE VERIFICATION FAILED: {e} — \
+                     rejecting update (possible MITM or key mismatch)"
+                );
+            }
             return;
         }
 

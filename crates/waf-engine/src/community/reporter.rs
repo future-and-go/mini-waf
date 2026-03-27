@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tracing::{info, warn};
 
-use waf_common::DetectionResult;
+use waf_common::{DetectionResult, Phase};
 
 use super::client::CommunityClient;
 
@@ -70,6 +70,26 @@ pub struct CommunityReporter {
     dropped: AtomicU64,
 }
 
+/// Map detection phase to signal confidence for community reporting.
+///
+/// Higher confidence means the detection engine is more precise.
+/// Lower confidence (e.g. `GeoIP`) means the signal alone is weak evidence.
+const fn compute_confidence(phase: Phase) -> f64 {
+    match phase {
+        Phase::SqlInjection | Phase::Rce => 0.95,
+        Phase::Xss => 0.90,
+        Phase::DirTraversal | Phase::Owasp => 0.85,
+        Phase::CustomRule | Phase::IpBlacklist | Phase::UrlBlacklist => 0.80,
+        Phase::Sensitive | Phase::Scanner | Phase::Bot => 0.70,
+        Phase::RateLimit | Phase::CrowdSec => 0.60,
+        Phase::Community => 0.50,
+        Phase::GeoIp | Phase::AntiHotlink => 0.40,
+        // Whitelist phases rarely trigger signal reporting,
+        // but covered for exhaustive matching.
+        Phase::IpWhitelist | Phase::UrlWhitelist => 0.30,
+    }
+}
+
 impl CommunityReporter {
     pub fn new(client: Arc<CommunityClient>, api_key: String, batch_size: usize, flush_interval_secs: u64) -> Self {
         let cap = (batch_size * CHANNEL_CAP_MULTIPLIER).max(CHANNEL_CAP_MIN);
@@ -106,7 +126,7 @@ impl CommunityReporter {
             geo_country: req_info
                 .and_then(|r| r.geo_country.clone())
                 .unwrap_or_else(|| "unknown".to_string()),
-            confidence: 1.0,
+            confidence: compute_confidence(detection.phase),
             signal_ts: Utc::now(),
         };
 

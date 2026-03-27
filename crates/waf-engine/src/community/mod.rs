@@ -34,6 +34,9 @@ pub struct CommunityComponents {
 /// Performs machine enrollment if no `api_key` is configured, then starts
 /// background tasks for signal reporting and blocklist syncing.
 ///
+/// When no `public_key` is configured, automatically attempts to discover
+/// the server's signing key via `GET /api/v1/keys/signing`.
+///
 /// Returns `None` when `config.enabled == false` or when enrollment fails.
 pub async fn init_community(
     config: CommunityConfig,
@@ -85,13 +88,15 @@ pub async fn init_community(
 
     // Parse optional Ed25519 public key for signature verification.
     //
-    // Three cases (fail-closed security):
-    //   a) public_key present and valid   → use verified `/blocklist/full` path
-    //   b) public_key absent or empty     → unsigned fallback + warn
-    //   c) public_key present but invalid → REFUSE to initialise (fail-closed)
+    // Four cases:
+    //   a) public_key present and valid      -> use verified `/blocklist/full` path
+    //   b) public_key absent or empty        -> auto-discover from server, fallback to unsigned
+    //   c) public_key present but invalid    -> REFUSE to initialise (fail-closed)
+    //   d) auto-discovery succeeds           -> use discovered key for verification
     let verify_key = match config.public_key.as_deref().map(str::trim) {
         Some(pk) if !pk.is_empty() => {
             if let Some(vk) = blocklist::parse_public_key(pk) {
+                info!("Using manually configured community public key for signature verification");
                 Some(vk)
             } else {
                 error!(
@@ -102,11 +107,38 @@ pub async fn init_community(
             }
         }
         _ => {
-            warn!(
-                "Community blocklist running WITHOUT signature verification — \
-                 set [community] public_key for MITM protection"
+            // No public_key configured -- try auto-discovery from server
+            info!(
+                "No community public_key configured, attempting auto-discovery \
+                 from server key endpoint..."
             );
-            None
+            match blocklist::fetch_signing_keys_from_server(&client).await {
+                Ok(keys) => {
+                    if let Some((key_id, vk)) = keys.first() {
+                        info!(
+                            key_id = %key_id,
+                            total_keys = keys.len(),
+                            "Auto-discovered community signing key, \
+                             signature verification enabled"
+                        );
+                        Some(*vk)
+                    } else {
+                        warn!(
+                            "Community key discovery returned no active keys \
+                             -- blocklist running WITHOUT signature verification"
+                        );
+                        None
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Community key auto-discovery failed: {e} \
+                         -- blocklist running WITHOUT signature verification. \
+                         Set [community] public_key manually for MITM protection."
+                    );
+                    None
+                }
+            }
         }
     };
 
