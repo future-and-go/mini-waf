@@ -13,7 +13,7 @@ pub use reporter::{CommunityReporter, RequestInfo};
 
 use std::sync::Arc;
 use tokio::sync::watch;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// All runtime components of the community threat intelligence integration.
 pub struct CommunityComponents {
@@ -83,11 +83,39 @@ pub async fn init_community(
         }
     };
 
+    // Parse optional Ed25519 public key for signature verification.
+    //
+    // Three cases (fail-closed security):
+    //   a) public_key present and valid   → use verified `/blocklist/full` path
+    //   b) public_key absent or empty     → unsigned fallback + warn
+    //   c) public_key present but invalid → REFUSE to initialise (fail-closed)
+    let verify_key = match config.public_key.as_deref().map(str::trim) {
+        Some(pk) if !pk.is_empty() => {
+            if let Some(vk) = blocklist::parse_public_key(pk) {
+                Some(vk)
+            } else {
+                error!(
+                    "Community blocklist initialisation REFUSED: public_key is set but invalid. \
+                     Fix or remove [community] public_key to continue."
+                );
+                return None;
+            }
+        }
+        _ => {
+            warn!(
+                "Community blocklist running WITHOUT signature verification — \
+                 set [community] public_key for MITM protection"
+            );
+            None
+        }
+    };
+
     // Create blocklist sync and checker
     let blocklist_sync = Arc::new(CommunityBlocklistSync::new(
         Arc::clone(&client),
         api_key.clone(),
         config.sync_interval_secs,
+        verify_key,
     ));
     let checker = Arc::new(CommunityChecker::new(Arc::clone(&blocklist_sync)));
 

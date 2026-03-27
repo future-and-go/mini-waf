@@ -1146,7 +1146,10 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
 
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
 
-    let (engine, router, api_state) = rt.block_on(init_async(config))?;
+    // `_shutdown_guards` holds the watch senders that signal background workers
+    // to stop.  They are dropped automatically when `run_server` returns (after
+    // `server.run_forever()` exits), which sends the shutdown signal.
+    let (engine, router, api_state, _shutdown_guards) = rt.block_on(init_async(config))?;
 
     // Start the management API in a background thread
     let api_listen = config.api.listen_addr.clone();
@@ -1296,8 +1299,22 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
     server.run_forever();
 }
 
+/// Shutdown guards that keep background-task sender halves alive.
+///
+/// Each field is a `tokio::sync::watch::Sender<bool>`.  Dropping this struct
+/// closes the watch channel, which signals background workers to exit via
+/// `changed().is_err()`.
+struct ShutdownGuards {
+    /// Keeps the `CrowdSec` background worker alive while the server runs.
+    _crowdsec: Option<tokio::sync::watch::Sender<bool>>,
+    /// Keeps the Community background worker alive while the server runs.
+    _community: Option<tokio::sync::watch::Sender<bool>>,
+}
+
 /// Async initialization: database, engine, rules, Phases 5 & 6
-async fn init_async(config: &AppConfig) -> anyhow::Result<(Arc<WafEngine>, Arc<HostRouter>, Arc<AppState>)> {
+async fn init_async(
+    config: &AppConfig,
+) -> anyhow::Result<(Arc<WafEngine>, Arc<HostRouter>, Arc<AppState>, ShutdownGuards)> {
     info!("Connecting to database...");
     let db = Arc::new(Database::connect(&config.storage.database_url, config.storage.max_connections).await?);
 
@@ -1449,73 +1466,87 @@ async fn init_async(config: &AppConfig) -> anyhow::Result<(Arc<WafEngine>, Arc<H
 
     // Phase 6: CrowdSec integration
     let cs_config = app_config_to_crowdsec(config);
-    if cs_config.enabled {
-        // Create a channel for graceful shutdown signal
+    let crowdsec_shutdown_guard = if cs_config.enabled {
+        // Create a channel for graceful shutdown signal.
+        // The sender is returned to the caller so it lives until the server
+        // exits; dropping it signals the background worker to shut down.
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-        // Keep shutdown_tx alive for the process lifetime by leaking it
-        std::mem::forget(shutdown_tx);
 
-        match init_crowdsec(cs_config.clone(), shutdown_rx).await {
-            Some(components) => {
-                info!(
-                    lapi_url = %cs_config.lapi_url,
-                    "CrowdSec integration active"
-                );
+        if let Some(components) = init_crowdsec(cs_config.clone(), shutdown_rx).await {
+            info!(
+                lapi_url = %cs_config.lapi_url,
+                "CrowdSec integration active"
+            );
 
-                // Plug bouncer checker and AppSec client into the WAF engine
-                engine.set_crowdsec(Arc::clone(&components.checker), components.appsec_client.clone());
+            // Plug bouncer checker and AppSec client into the WAF engine
+            engine.set_crowdsec(Arc::clone(&components.checker), components.appsec_client.clone());
 
-                // Share cache and client with the API layer
-                api_state.crowdsec_cache = Some(Arc::clone(&components.cache));
-                api_state.crowdsec_client = Some(Arc::clone(&components.lapi_client));
-                api_state.crowdsec_lapi_url = Some(cs_config.lapi_url.clone());
+            // Share cache and client with the API layer
+            api_state.crowdsec_cache = Some(Arc::clone(&components.cache));
+            api_state.crowdsec_client = Some(Arc::clone(&components.lapi_client));
+            api_state.crowdsec_lapi_url = Some(cs_config.lapi_url.clone());
 
-                // Keep the background task alive (leaked intentionally — lives until process exit)
-                std::mem::forget(components);
-            }
-            None => {
-                tracing::warn!("CrowdSec enabled in config but failed to initialise");
-            }
+            // Keep the background task alive by holding its join handle inside
+            // the components struct.  The sender is passed back to the caller.
+            std::mem::forget(components);
+            Some(shutdown_tx)
+        } else {
+            tracing::warn!("CrowdSec enabled in config but failed to initialise");
+            None
         }
-    }
+    } else {
+        None
+    };
 
     // Phase 8: Community threat intelligence sharing
-    if config.community.enabled {
+    let community_shutdown_guard = if config.community.enabled {
         let community_config = waf_engine::community::config::CommunityConfig {
             enabled: config.community.enabled,
             server_url: config.community.server_url.clone(),
             api_key: config.community.api_key.clone(),
             machine_id: config.community.machine_id.clone(),
+            public_key: config.community.public_key.clone(),
             batch_size: config.community.batch_size,
             flush_interval_secs: config.community.flush_interval_secs,
             sync_interval_secs: config.community.sync_interval_secs,
         };
 
-        // Create a shutdown channel for community tasks
+        // Create a shutdown channel for community tasks.
+        // The sender is returned to the caller so it lives until the server
+        // exits; dropping it signals the community worker to shut down.
         let (community_shutdown_tx, community_shutdown_rx) = tokio::sync::watch::channel(false);
-        std::mem::forget(community_shutdown_tx);
 
-        match init_community(community_config, community_shutdown_rx).await {
-            Some(components) => {
-                info!(
-                    server_url = %config.community.server_url,
-                    "Community threat intelligence active"
-                );
+        if let Some(components) = init_community(community_config, community_shutdown_rx).await {
+            info!(
+                server_url = %config.community.server_url,
+                "Community threat intelligence active"
+            );
 
-                // Plug community checker into the WAF engine
-                engine.set_community(Arc::clone(&components.checker));
+            // Plug community checker into the WAF engine
+            engine.set_community(Arc::clone(&components.checker));
 
-                // Share reporter with the API state for potential future use
-                api_state.community_reporter = Some(Arc::clone(&components.reporter));
+            // Plug community reporter into the WAF engine so detections
+            // are automatically pushed to the community platform
+            engine.set_community_reporter(Arc::clone(&components.reporter));
 
-                // Keep background tasks alive
-                std::mem::forget(components);
-            }
-            None => {
-                tracing::warn!("Community sharing enabled in config but failed to initialise");
-            }
+            // Share reporter with the API state for potential future use
+            api_state.community_reporter = Some(Arc::clone(&components.reporter));
+
+            // Keep background task join handles alive; sender is passed back.
+            std::mem::forget(components);
+            Some(community_shutdown_tx)
+        } else {
+            tracing::warn!("Community sharing enabled in config but failed to initialise");
+            None
         }
-    }
+    } else {
+        None
+    };
 
-    Ok((engine, router, Arc::new(api_state)))
+    let guards = ShutdownGuards {
+        _crowdsec: crowdsec_shutdown_guard,
+        _community: community_shutdown_guard,
+    };
+
+    Ok((engine, router, Arc::new(api_state), guards))
 }

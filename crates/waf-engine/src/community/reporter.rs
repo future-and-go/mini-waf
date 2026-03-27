@@ -1,10 +1,11 @@
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tracing::{info, warn};
 
@@ -36,7 +37,7 @@ struct WafSignalBatch {
 
 /// Optional request context for enriching WAF signals.
 ///
-/// When the gateway calls `push_detection`, it should provide as much
+/// When the gateway calls `try_push_detection`, it should provide as much
 /// HTTP context as available.
 pub struct RequestInfo {
     pub http_method: String,
@@ -45,48 +46,56 @@ pub struct RequestInfo {
     pub geo_country: Option<String>,
 }
 
+/// Channel capacity multiplier applied to `batch_size`.
+const CHANNEL_CAP_MULTIPLIER: usize = 16;
+
+/// Minimum channel capacity regardless of batch size.
+const CHANNEL_CAP_MIN: usize = 1024;
+
 /// Batches WAF detection signals and flushes them to the community API.
 ///
-/// Mirrors the `CrowdSecPusher` pattern: events are buffered and sent
-/// either when the buffer reaches `batch_size` or every
-/// `flush_interval_secs`, whichever comes first.
+/// Uses a bounded MPSC channel instead of a mutex-protected buffer.
+/// `try_push_detection` is **synchronous** and never blocks the hot path.
+/// When the channel is full (flood scenario), signals are dropped and
+/// a counter is incremented for observability.
 pub struct CommunityReporter {
     client: Arc<CommunityClient>,
     api_key: String,
     batch_size: usize,
     flush_interval_secs: u64,
-    buffer: Mutex<Vec<WafSignal>>,
+    tx: mpsc::Sender<WafSignal>,
+    /// Receiver is taken exactly once by `run_flush_task`.
+    rx: parking_lot::Mutex<Option<mpsc::Receiver<WafSignal>>>,
+    /// Number of signals dropped due to back-pressure.
+    dropped: AtomicU64,
 }
 
 impl CommunityReporter {
     pub fn new(client: Arc<CommunityClient>, api_key: String, batch_size: usize, flush_interval_secs: u64) -> Self {
+        let cap = (batch_size * CHANNEL_CAP_MULTIPLIER).max(CHANNEL_CAP_MIN);
+        let (tx, rx) = mpsc::channel(cap);
         Self {
             client,
             api_key,
             batch_size,
             flush_interval_secs,
-            buffer: Mutex::new(Vec::new()),
+            tx,
+            rx: parking_lot::Mutex::new(Some(rx)),
+            dropped: AtomicU64::new(0),
         }
     }
 
-    /// Queue a WAF detection for the next batch push.
+    /// Synchronously queue a WAF detection for the next batch push.
     ///
-    /// `req_info` enriches the signal with HTTP request context.
-    /// The backend derives `machine_id` from the Bearer token, so it is
-    /// not included in the signal payload.
+    /// This is designed for the hot path: it never awaits, never spawns,
+    /// and never allocates beyond the `WafSignal` itself.
     ///
-    /// Invalid `client_ip` values (not parseable as `IpAddr`) are silently
-    /// dropped with a warning log, because the backend deserialises the field
-    /// as `std::net::IpAddr` and an invalid IP would reject the whole batch.
-    pub async fn push_detection(&self, client_ip: &str, detection: &DetectionResult, req_info: Option<&RequestInfo>) {
-        // Validate IP before queuing — backend expects std::net::IpAddr
-        let Ok(ip) = client_ip.parse::<IpAddr>() else {
-            warn!(client_ip, "Dropping signal: invalid source IP");
-            return;
-        };
-
+    /// When the internal channel is full (sustained flood), the signal is
+    /// silently dropped and a counter is incremented.  The flush task
+    /// periodically logs the drop count for observability.
+    pub fn try_push_detection(&self, client_ip: IpAddr, detection: &DetectionResult, req_info: Option<&RequestInfo>) {
         let signal = WafSignal {
-            source_ip: ip.to_string(),
+            source_ip: client_ip.to_string(),
             scenario: detection.phase.to_string(),
             rule_id: detection.rule_id.clone().unwrap_or_else(|| "unknown".to_string()),
             rule_name: detection.rule_name.clone(),
@@ -101,40 +110,89 @@ impl CommunityReporter {
             signal_ts: Utc::now(),
         };
 
-        let mut buf = self.buffer.lock().await;
-        buf.push(signal);
-
-        if buf.len() >= self.batch_size {
-            let batch = std::mem::take(&mut *buf);
-            drop(buf);
-            self.flush_batch(batch).await;
+        if self.tx.try_send(signal).is_err() {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
         }
     }
 
-    /// Background task: flush the event buffer on a timer and on shutdown.
+    /// Background task: drain the channel in batches and flush to the API.
+    ///
+    /// Signals are flushed either when `batch_size` is reached or every
+    /// `flush_interval_secs`, whichever comes first. On shutdown the
+    /// remaining signals are drained and flushed.
     pub async fn run_flush_task(self: Arc<Self>, mut shutdown_rx: watch::Receiver<bool>) {
+        let mut rx = {
+            let Some(r) = self.rx.lock().take() else {
+                warn!("CommunityReporter flush task already started or receiver missing");
+                return;
+            };
+            r
+        };
+
         let interval = Duration::from_secs(self.flush_interval_secs);
+        let mut batch = Vec::with_capacity(self.batch_size);
+
         loop {
             tokio::select! {
-                () = tokio::time::sleep(interval) => {}
+                () = tokio::time::sleep(interval) => {
+                    // Timer fired — drain whatever is in the channel
+                    while let Ok(sig) = rx.try_recv() {
+                        batch.push(sig);
+                    }
+                    self.log_and_reset_drops();
+                    if !batch.is_empty() {
+                        let to_flush = std::mem::replace(&mut batch, Vec::with_capacity(self.batch_size));
+                        self.flush_batch(to_flush).await;
+                    }
+                }
+                maybe_sig = rx.recv() => {
+                    if let Some(sig) = maybe_sig {
+                        batch.push(sig);
+                        // Eagerly drain up to batch_size
+                        while batch.len() < self.batch_size {
+                            match rx.try_recv() {
+                                Ok(s) => batch.push(s),
+                                Err(_) => break,
+                            }
+                        }
+                        if batch.len() >= self.batch_size {
+                            let to_flush = std::mem::replace(&mut batch, Vec::with_capacity(self.batch_size));
+                            self.flush_batch(to_flush).await;
+                        }
+                    } else {
+                        // Channel closed — final flush
+                        self.log_and_reset_drops();
+                        if !batch.is_empty() {
+                            self.flush_batch(std::mem::take(&mut batch)).await;
+                        }
+                        return;
+                    }
+                }
                 result = shutdown_rx.changed() => {
                     if result.is_err() || *shutdown_rx.borrow() {
-                        // Final flush before exit
-                        let batch = {
-                            let mut buf = self.buffer.lock().await;
-                            std::mem::take(&mut *buf)
-                        };
-                        self.flush_batch(batch).await;
+                        // Shutdown — drain remaining and flush
+                        while let Ok(sig) = rx.try_recv() {
+                            batch.push(sig);
+                        }
+                        self.log_and_reset_drops();
+                        if !batch.is_empty() {
+                            self.flush_batch(std::mem::take(&mut batch)).await;
+                        }
                         return;
                     }
                 }
             }
+        }
+    }
 
-            let batch = {
-                let mut buf = self.buffer.lock().await;
-                std::mem::take(&mut *buf)
-            };
-            self.flush_batch(batch).await;
+    /// Log and reset the dropped-signal counter.
+    fn log_and_reset_drops(&self) {
+        let dropped = self.dropped.swap(0, Ordering::Relaxed);
+        if dropped > 0 {
+            warn!(
+                dropped,
+                "Community signal channel full — dropped signals (back-pressure)"
+            );
         }
     }
 

@@ -29,6 +29,12 @@ ip2region = { git = "https://github.com/lionsoul2014/ip2region.git", branch = "m
 arc-swap = "1"
 parking_lot = { workspace = true }
 libinjectionrs = "0.1"
+ed25519-dalek = { workspace = true }
+zstd = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }
 
 [lints]
 workspace = true

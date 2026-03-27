@@ -416,6 +416,11 @@ pub struct CommunityConfig {
     /// Machine identifier obtained during enrollment.
     #[serde(default)]
     pub machine_id: Option<String>,
+    /// Ed25519 public key (hex-encoded 32 bytes) for blocklist signature verification.
+    /// When set, the WAF verifies signed snapshots from `/blocklist/full`.
+    /// When absent, falls back to the unverified `/blocklist/decoded` endpoint.
+    #[serde(default)]
+    pub public_key: Option<String>,
     /// Maximum number of signals to batch before flushing.
     #[serde(default = "default_community_batch_size")]
     pub batch_size: usize,
@@ -447,6 +452,7 @@ impl Default for CommunityConfig {
             server_url: default_community_server_url(),
             api_key: None,
             machine_id: None,
+            public_key: None,
             batch_size: default_community_batch_size(),
             flush_interval_secs: default_community_flush_interval(),
             sync_interval_secs: default_community_sync_interval(),

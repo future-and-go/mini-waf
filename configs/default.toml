@@ -91,3 +91,18 @@ cors_origins = []
 # [cluster.health]
 # check_interval_secs   = 5
 # max_missed_heartbeats = 3
+
+# ── Community Integration ─────────────────────────────────────────────────────
+# Share threat intelligence with the OpenPRX community network.
+# Enable to report detected attacks and receive the community blocklist.
+# Run `prx-waf community enroll` first to obtain machine_id and api_key.
+#
+# [community]
+# enabled = false
+# server_url = "https://community.openprx.dev"
+# api_key = ""           # Obtained from: prx-waf community enroll
+# machine_id = ""        # Obtained from: prx-waf community enroll
+# public_key = ""        # Ed25519 hex (64 chars). If set but invalid, init is refused.
+# batch_size = 50        # Number of signals to buffer before flushing
+# flush_interval_secs = 30   # Flush buffer even when batch_size not reached
+# sync_interval_secs = 300   # Blocklist sync interval (default: 5 minutes)

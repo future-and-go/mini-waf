@@ -14,7 +14,7 @@ use crate::checks::{
     AntiHotlinkCheck, BotCheck, CcCheck, Check, DirTraversalCheck, GeoCheck, OWASPCheck, RceCheck, ScannerCheck,
     SensitiveCheck, SqlInjectionCheck, XssCheck,
 };
-use crate::community::CommunityChecker;
+use crate::community::{CommunityChecker, CommunityReporter, RequestInfo};
 use crate::crowdsec::{AppSecClient, AppSecResult, CrowdSecChecker, appsec_to_detection};
 use crate::geoip::GeoIpService;
 use crate::rules::engine::{CustomRulesEngine, from_db_rule};
@@ -57,6 +57,8 @@ pub struct WafEngine {
     // ── Community ──────────────────────────────────────────────────────────
     /// Community blocklist checker (set once after engine construction via `set_community`)
     community_checker: OnceLock<Arc<CommunityChecker>>,
+    /// Community signal reporter for pushing detections (set once via `set_community_reporter`)
+    community_reporter: OnceLock<Arc<CommunityReporter>>,
     // ── `GeoIP` ────────────────────────────────────────────────────────────────
     /// `GeoIP` lookup service (set once after engine construction via `set_geoip`)
     geoip: OnceLock<Arc<GeoIpService>>,
@@ -96,6 +98,7 @@ impl WafEngine {
             crowdsec_checker: OnceLock::new(),
             appsec_client: OnceLock::new(),
             community_checker: OnceLock::new(),
+            community_reporter: OnceLock::new(),
             geoip: OnceLock::new(),
         }
     }
@@ -111,6 +114,14 @@ impl WafEngine {
     /// Plug the community checker into the engine (called once after init).
     pub fn set_community(&self, checker: Arc<CommunityChecker>) {
         let _ = self.community_checker.set(checker);
+    }
+
+    /// Plug the community signal reporter into the engine (called once after init).
+    ///
+    /// When set, every WAF detection (block or `log_only`) is pushed to the
+    /// community reporter buffer for eventual batch upload.
+    pub fn set_community_reporter(&self, reporter: Arc<CommunityReporter>) {
+        let _ = self.community_reporter.set(reporter);
     }
 
     /// Plug the `GeoIP` lookup service into the engine (called once after init).
@@ -215,6 +226,7 @@ impl WafEngine {
         let ip_blacklist = check_ip_blacklist(ctx, &self.store);
         if !ip_blacklist.is_allowed() {
             self.log_attack(ctx, &ip_blacklist);
+            self.report_community_signal(ctx, &ip_blacklist);
             return ip_blacklist;
         }
 
@@ -228,6 +240,7 @@ impl WafEngine {
         let url_bl = check_url_blacklist(ctx, &self.store);
         if !url_bl.is_allowed() {
             self.log_attack(ctx, &url_bl);
+            self.report_community_signal(ctx, &url_bl);
             return url_bl;
         }
 
@@ -246,6 +259,7 @@ impl WafEngine {
                 WafDecision::block(403, Some(body), result)
             };
             self.log_security_event(ctx, &decision);
+            self.report_community_signal(ctx, &decision);
             return decision;
         }
 
@@ -280,6 +294,7 @@ impl WafEngine {
                 WafDecision::block(403, Some(body), result)
             };
             self.log_security_event(ctx, &decision);
+            self.report_community_signal(ctx, &decision);
             return decision;
         }
 
@@ -299,6 +314,7 @@ impl WafEngine {
                 };
 
                 self.log_security_event(ctx, &decision);
+                self.report_community_signal(ctx, &decision);
                 return decision;
             }
         }
@@ -319,6 +335,7 @@ impl WafEngine {
                         WafDecision::block(403, Some(body), result)
                     };
                     self.log_security_event(ctx, &decision);
+                    self.report_community_signal(ctx, &decision);
                     return decision;
                 }
                 AppSecResult::Allow | AppSecResult::Unavailable => {}
@@ -338,6 +355,7 @@ impl WafEngine {
                 WafDecision::block(403, Some(body), result)
             };
             self.log_security_event(ctx, &decision);
+            self.report_community_signal(ctx, &decision);
             return decision;
         }
 
@@ -354,6 +372,7 @@ impl WafEngine {
                 WafDecision::block(403, Some(body), result)
             };
             self.log_security_event(ctx, &decision);
+            self.report_community_signal(ctx, &decision);
             return decision;
         }
 
@@ -370,6 +389,7 @@ impl WafEngine {
                 WafDecision::block(403, Some(body), result)
             };
             self.log_security_event(ctx, &decision);
+            self.report_community_signal(ctx, &decision);
             return decision;
         }
 
@@ -386,6 +406,7 @@ impl WafEngine {
                 WafDecision::block(403, Some(body), result)
             };
             self.log_security_event(ctx, &decision);
+            self.report_community_signal(ctx, &decision);
             return decision;
         }
 
@@ -484,5 +505,29 @@ impl WafEngine {
                 warn!("Failed to log security event: {}", e);
             }
         });
+    }
+
+    /// Push a detection signal to the community reporter via bounded channel.
+    ///
+    /// This is a **synchronous** call on the hot path — no `tokio::spawn`,
+    /// no async mutex, just a single `try_send` into an MPSC channel.
+    /// When the channel is full (back-pressure from flood traffic), the signal is silently
+    /// dropped and the reporter logs the drop count periodically.
+    fn report_community_signal(&self, ctx: &RequestCtx, decision: &WafDecision) {
+        let Some(reporter) = self.community_reporter.get() else {
+            return;
+        };
+        let Some(result) = &decision.result else {
+            return;
+        };
+
+        let req_info = RequestInfo {
+            http_method: ctx.method.clone(),
+            request_path: ctx.path.clone(),
+            request_host: ctx.host.clone(),
+            geo_country: ctx.geo.as_ref().map(|g| g.iso_code.clone()),
+        };
+
+        reporter.try_push_detection(ctx.client_ip, result, Some(&req_info));
     }
 }
