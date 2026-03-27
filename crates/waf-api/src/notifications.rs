@@ -9,6 +9,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context as _;
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -18,6 +19,8 @@ use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use waf_storage::models::CreateNotificationConfig;
+
+use waf_common::url_validator::validate_public_url_with_ips;
 
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
@@ -68,15 +71,48 @@ pub struct WebhookChannel {
 }
 
 impl WebhookChannel {
-    pub fn new(url: String, secret: Option<String>) -> Self {
-        Self {
-            url,
-            secret,
-            client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-                .unwrap_or_default(),
+    /// Construct a webhook channel with DNS-rebinding protection.
+    ///
+    /// `host` is the hostname extracted from the already-validated URL
+    /// (obtained from `validated_url.host_str()`).  `resolved_addrs` must be
+    /// the addresses returned by [`validate_public_url_with_ips`] at validation
+    /// time.  When both `host` and `resolved_addrs` are non-empty (i.e. the URL
+    /// contains a DNS hostname rather than an IP literal), the reqwest client is
+    /// configured via `resolve_to_addrs` to connect only to those IPs.
+    ///
+    /// This prevents DNS rebinding from redirecting a later request to a
+    /// private/internal address between validation and send time (TOCTOU).
+    ///
+    /// Redirects are unconditionally disabled so a `3xx` response cannot
+    /// point the client to an internal endpoint.
+    pub fn new(
+        url: String,
+        secret: Option<String>,
+        host: Option<&str>,
+        resolved_addrs: &[std::net::SocketAddr],
+    ) -> anyhow::Result<Self> {
+        let mut builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            // Disable all redirects — a 3xx to an internal host would bypass
+            // the SSRF check performed before construction.
+            .redirect(reqwest::redirect::Policy::none());
+
+        // Pin the client to the IPs that were validated at config-save time.
+        // This closes the TOCTOU window between `validate_public_url_with_ips`
+        // and the actual HTTP request: even if the attacker flips DNS to point
+        // at 127.0.0.1 after validation, the pinned client will still connect
+        // to the originally-resolved public IP.
+        //
+        // Only applied for DNS hostnames; IP-literal URLs return an empty
+        // `resolved_addrs` slice and need no override.
+        if !resolved_addrs.is_empty()
+            && let Some(h) = host
+        {
+            builder = builder.resolve_to_addrs(h, resolved_addrs);
         }
+
+        let client = builder.build().context("failed to build webhook HTTP client")?;
+        Ok(Self { url, secret, client })
     }
 }
 
@@ -108,15 +144,16 @@ pub struct TelegramChannel {
 }
 
 impl TelegramChannel {
-    pub fn new(bot_token: String, chat_id: String) -> Self {
-        Self {
+    pub fn new(bot_token: String, chat_id: String) -> anyhow::Result<Self> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .context("failed to build Telegram HTTP client")?;
+        Ok(Self {
             bot_token,
             chat_id,
-            client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-                .unwrap_or_default(),
-        }
+            client,
+        })
     }
 }
 
@@ -194,12 +231,25 @@ impl NotificationChannel for EmailChannel {
 pub fn build_channel(channel_type: &str, config: &serde_json::Value) -> anyhow::Result<Box<dyn NotificationChannel>> {
     match channel_type {
         "webhook" => {
-            let url = config["url"]
+            let raw_url = config["url"]
                 .as_str()
-                .ok_or_else(|| anyhow::anyhow!("webhook.url missing"))?
-                .to_string();
+                .ok_or_else(|| anyhow::anyhow!("webhook.url missing"))?;
+            // SSRF guard: reject private/loopback IPs, reserved ranges, and
+            // dangerous hostname literals.  Returns the resolved IPs so we can
+            // pin the HTTP client and close the DNS-rebinding TOCTOU window.
+            let (validated_url, resolved_addrs) =
+                validate_public_url_with_ips(raw_url).map_err(|e| anyhow::anyhow!("webhook URL rejected: {e}"))?;
+            // Extract the hostname from the already-validated URL so that
+            // WebhookChannel::new() can call resolve_to_addrs without needing
+            // to re-parse the URL string.
+            let host = validated_url.host_str().map(ToOwned::to_owned);
             let secret = config["secret"].as_str().map(ToOwned::to_owned);
-            Ok(Box::new(WebhookChannel::new(url, secret)))
+            Ok(Box::new(WebhookChannel::new(
+                raw_url.to_string(),
+                secret,
+                host.as_deref(),
+                &resolved_addrs,
+            )?))
         }
         "telegram" => {
             let token = config["bot_token"]
@@ -210,7 +260,9 @@ pub fn build_channel(channel_type: &str, config: &serde_json::Value) -> anyhow::
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("telegram.chat_id missing"))?
                 .to_string();
-            Ok(Box::new(TelegramChannel::new(token, chat_id)))
+            // Telegram channel constructs its own URL from the bot token; the
+            // URL is always https://api.telegram.org/... and is not user-controlled.
+            Ok(Box::new(TelegramChannel::new(token, chat_id)?))
         }
         "email" => {
             let smtp_host = config["smtp_host"].as_str().unwrap_or("127.0.0.1").to_string();

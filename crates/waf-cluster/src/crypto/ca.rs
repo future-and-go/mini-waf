@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair, PKCS_ED25519};
+use rustls_pki_types::pem::PemObject as _;
 use time::OffsetDateTime;
 use tracing::info;
 
@@ -79,7 +80,7 @@ impl CertificateAuthority {
 
     /// Return the CA certificate DER bytes for use in rustls root stores.
     pub fn cert_der(&self) -> Result<rustls::pki_types::CertificateDer<'static>> {
-        rustls_pemfile::certs(&mut self.cert_pem.as_bytes())
+        rustls::pki_types::CertificateDer::pem_slice_iter(self.cert_pem.as_bytes())
             .next()
             .context("CA PEM contains no certificate")?
             .context("failed to parse CA certificate DER")

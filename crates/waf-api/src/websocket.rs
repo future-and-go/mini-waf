@@ -144,7 +144,7 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>, stream: &'static
                         let text = val.to_string();
                         // Forward all events for both /ws/logs and /ws/events
                         let _ = stream; // all event types forwarded by default
-                        if socket.send(Message::Text(text)).await.is_err() {
+                        if socket.send(Message::Text(text.into())).await.is_err() {
                             break;
                         }
                     }
@@ -157,7 +157,7 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>, stream: &'static
 
             // Heartbeat ping
             _ = ping_interval.tick() => {
-                if socket.send(Message::Ping(vec![])).await.is_err() {
+                if socket.send(Message::Ping(vec![].into())).await.is_err() {
                     break;
                 }
             }

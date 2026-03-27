@@ -31,7 +31,10 @@ static GOOD_BOT_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)Googlebot-Video",
     ]) {
         Ok(set) => set,
-        Err(e) => panic!("BUG: good bot regex set failed to compile: {e}"),
+        Err(e) => {
+            tracing::error!("BUG: good bot regex set failed to compile: {e}");
+            RegexSet::empty()
+        }
     }
 });
 
@@ -72,7 +75,10 @@ static BAD_BOT_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)^Go-http-client/",
     ]) {
         Ok(set) => set,
-        Err(e) => panic!("BUG: bad bot regex set failed to compile: {e}"),
+        Err(e) => {
+            tracing::error!("BUG: bad bot regex set failed to compile: {e}");
+            RegexSet::empty()
+        }
     }
 });
 

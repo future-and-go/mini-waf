@@ -10,8 +10,9 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 
-use rustls::pki_types::CertificateDer;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::WebPkiClientVerifier;
+use rustls_pki_types::pem::PemObject as _;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 
@@ -39,11 +40,11 @@ fn make_server_tls(ca_der: CertificateDer<'static>, cert_pem: &str, key_pem: &st
 
     let verifier = WebPkiClientVerifier::builder(Arc::new(root_store)).build().unwrap();
 
-    let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut cert_pem.as_bytes())
+    let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    let key = rustls_pemfile::private_key(&mut key_pem.as_bytes()).unwrap().unwrap();
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).unwrap();
 
     let mut config = rustls::ServerConfig::builder()
         .with_client_cert_verifier(verifier)

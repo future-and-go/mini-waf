@@ -203,7 +203,7 @@ pub async fn ws_tunnel(
         let (mut ws_sink, mut ws_stream) = socket.split();
 
         // Send OK greeting
-        let _ = ws_sink.send(axum::extract::ws::Message::Text("OK".to_string())).await;
+        let _ = ws_sink.send(axum::extract::ws::Message::Text("OK".into())).await;
 
         info!(tunnel = %cfg.name, "Tunnel WebSocket session started");
 
@@ -213,7 +213,7 @@ pub async fn ws_tunnel(
                 msg = rx.recv() => {
                     match msg {
                         Some(m) => {
-                            if ws_sink.send(axum::extract::ws::Message::Text(m)).await.is_err() {
+                            if ws_sink.send(axum::extract::ws::Message::Text(m.into())).await.is_err() {
                                 break;
                             }
                         }

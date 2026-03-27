@@ -33,15 +33,14 @@ pub fn alt_svc_header(port: u16) -> String {
 
 /// Build a `rustls::ServerConfig` suitable for QUIC (ALPN "h3").
 pub fn build_tls_config(cert_pem: &str, key_pem: &str) -> anyhow::Result<rustls::ServerConfig> {
-    use rustls::pki_types::CertificateDer;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use rustls_pki_types::pem::PemObject as _;
 
-    let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut cert_pem.as_bytes())
+    let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
         .collect::<Result<Vec<_>, _>>()
         .context("failed to parse certificate PEM")?;
 
-    let key = rustls_pemfile::private_key(&mut key_pem.as_bytes())
-        .context("failed to read private key PEM")?
-        .context("no private key found in PEM")?;
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).context("no private key found in PEM")?;
 
     let mut tls_config = rustls::ServerConfig::builder()
         .with_no_client_auth()

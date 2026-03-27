@@ -9,6 +9,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use base64::Engine as _;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls_pki_types::pem::PemObject as _;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
@@ -62,12 +63,11 @@ impl ClusterClient {
             .add(self.ca_cert_der.clone())
             .context("failed to add cluster CA to client root store")?;
 
-        let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut self.node_cert_pem.as_bytes())
+        let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(self.node_cert_pem.as_bytes())
             .collect::<Result<Vec<_>, _>>()
             .context("failed to parse node cert PEM")?;
 
-        let key: PrivateKeyDer<'static> = rustls_pemfile::private_key(&mut self.node_key_pem.as_bytes())
-            .context("failed to read node key PEM")?
+        let key: PrivateKeyDer<'static> = PrivateKeyDer::from_pem_slice(self.node_key_pem.as_bytes())
             .context("no private key found in node key PEM")?;
 
         let mut tls_config = rustls::ClientConfig::builder()

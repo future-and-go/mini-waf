@@ -12,7 +12,7 @@ waf-engine = { path = "../waf-engine" }
 quinn          = { workspace = true }
 rustls         = { workspace = true }
 rcgen          = { workspace = true }
-rustls-pemfile = { workspace = true }
+rustls-pki-types = { workspace = true }
 bytes          = { workspace = true }
 
 # Async runtime — already in workspace

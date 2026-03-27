@@ -87,7 +87,10 @@ static SCANNER_UA_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)\bscrapy\b",
     ]) {
         Ok(set) => set,
-        Err(e) => panic!("BUG: scanner UA regex set failed to compile: {e}"),
+        Err(e) => {
+            tracing::error!("BUG: scanner UA regex set failed to compile: {e}");
+            RegexSet::empty()
+        }
     }
 });
 

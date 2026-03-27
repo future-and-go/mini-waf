@@ -30,17 +30,17 @@ pingora-http = { version = "0.8" }
 pingora-timeout = { version = "0.8" }
 
 # API framework
-axum = { version = "0.7", features = ["macros", "ws", "multipart"] }
-tower = { version = "0.4" }
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+axum = { version = "0.8", features = ["macros", "ws", "multipart"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1.1"
 
-# Database - PostgreSQL
-sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "macros", "migrate", "chrono", "uuid"] }
+# Database - PostgreSQL (default-features = false to exclude mysql/sqlite which pull in rsa RUSTSEC-2023-0071)
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "macros", "migrate", "chrono", "uuid", "json"] }
 
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -60,16 +60,16 @@ http = "1"
 # Phase 3 additions
 rhai = { version = "1", features = ["sync"] }
 aho-corasick = "1"
-serde_yaml = "0.9"
+serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
 instant-acme = "0.7"
 rcgen = "0.13"
 base64 = "0.22"
 
 # Phase 4 additions
 argon2 = { version = "0.5", features = ["std"] }
-jsonwebtoken = "9"
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 aes-gcm = "0.10"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 lettre = { version = "0.11", default-features = false, features = ["tokio1", "smtp-transport", "builder"] }
 rust-embed = "8"
 mime_guess = "2"
@@ -80,20 +80,23 @@ totp-lite = "2"
 data-encoding = "2"
 
 # Phase 5 additions
-wasmtime = { version = "23", default-features = false, features = ["cranelift", "runtime", "component-model"] }
+wasmtime = { version = "43.0.0", default-features = false, features = ["cranelift", "runtime", "component-model", "std", "anyhow"] }
 moka = { version = "0.12", features = ["future"] }
 quinn = { version = "0.11", features = ["rustls"] }
 rustls = { version = "0.23", features = ["ring"] }
 h3 = "0.0.8"
 h3-quinn = "0.0.10"
-rustls-pemfile = "2"
-tokio-tungstenite = { version = "0.23", default-features = false, features = ["rustls-tls-webpki-roots"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 multipart = { version = "0.18", default-features = false, features = ["server"] }
-axum-extra = { version = "0.9", features = ["multipart"] }
+axum-extra = { version = "0.12", features = ["multipart"] }
 
 # Phase 7 additions
 notify = { version = "6", default-features = false, features = ["macos_fsevent"] }
+
+# URL validation
+url = "2"
 
 # Cluster additions
 lz4_flex = "0.11"

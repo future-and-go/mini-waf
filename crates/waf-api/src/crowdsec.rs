@@ -20,6 +20,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use waf_common::crypto::{encrypt_field, master_key};
+use waf_common::url_validator::validate_scheme_only;
 use waf_engine::{CacheStats, Decision};
 use waf_storage::models::{CrowdSecEventQuery, UpsertCrowdSecConfig};
 
@@ -138,13 +139,22 @@ pub async fn test_crowdsec_connection(
     let api_key = body.get("api_key").and_then(|v| v.as_str()).map(ToString::to_string);
 
     match (lapi_url, api_key) {
-        (Some(url), Some(key)) => match waf_engine::CrowdSecClient::new(url, key) {
-            Ok(client) => match client.test_connection().await {
-                Ok(msg) => Json(serde_json::json!({ "success": true, "message": msg })),
+        (Some(url), Some(key)) => {
+            // Validate scheme only: CrowdSec LAPI legitimately runs on loopback
+            // or private addresses in on-premise deployments, so we only reject
+            // non-HTTP(S) schemes (file://, ftp://, etc.) to block protocol-level
+            // SSRF vectors while preserving normal local/private deployments.
+            if let Err(e) = validate_scheme_only(&url) {
+                return Json(serde_json::json!({ "success": false, "message": e.to_string() }));
+            }
+            match waf_engine::CrowdSecClient::new(url, key) {
+                Ok(client) => match client.test_connection().await {
+                    Ok(msg) => Json(serde_json::json!({ "success": true, "message": msg })),
+                    Err(e) => Json(serde_json::json!({ "success": false, "message": e.to_string() })),
+                },
                 Err(e) => Json(serde_json::json!({ "success": false, "message": e.to_string() })),
-            },
-            Err(e) => Json(serde_json::json!({ "success": false, "message": e.to_string() })),
-        },
+            }
+        }
         _ => {
             // Use the running client if available
             if let Some(ref client) = state.crowdsec_client {
@@ -207,6 +217,18 @@ pub async fn update_crowdsec_config(
     State(state): State<Arc<AppState>>,
     Json(body): Json<UpdateCrowdSecConfig>,
 ) -> Result<Json<CrowdSecConfigResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Validate lapi_url scheme before persisting to prevent storing a URL with
+    // a dangerous protocol (file://, ftp://, etc.).  Private/loopback addresses
+    // are intentionally allowed because CrowdSec LAPI commonly runs locally.
+    if let Some(ref url) = body.lapi_url {
+        validate_scheme_only(url).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("invalid lapi_url: {e}") })),
+            )
+        })?;
+    }
+
     let key = master_key().map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,

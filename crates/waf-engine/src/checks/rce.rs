@@ -66,7 +66,10 @@ static RCE_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)\bnc\b.*-[el]",
     ]) {
         Ok(set) => set,
-        Err(e) => panic!("BUG: RCE regex set failed to compile: {e}"),
+        Err(e) => {
+            tracing::error!("BUG: RCE regex set failed to compile: {e}");
+            RegexSet::empty()
+        }
     }
 });
 

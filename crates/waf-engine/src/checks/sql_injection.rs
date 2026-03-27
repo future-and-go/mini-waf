@@ -51,7 +51,10 @@ static SQLI_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)\b(mysql\.(user|db)|master\.\.(sysdatabases|sysobjects))\b",
     ]) {
         Ok(set) => set,
-        Err(e) => panic!("BUG: SQL injection regex set failed to compile: {e}"),
+        Err(e) => {
+            tracing::error!("BUG: SQL injection regex set failed to compile: {e}");
+            RegexSet::empty()
+        }
     }
 });
 

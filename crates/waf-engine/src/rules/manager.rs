@@ -157,8 +157,8 @@ impl RuleManager {
                     // Already handled above
                 }
                 RuleSource::RemoteUrl { name, .. } => {
-                    // Remote URLs need async fetch; skip here
-                    warn!(source = %name, "Remote source skipped in sync load_all");
+                    // Remote URLs require async fetch; call load_remote_sources() after load_all()
+                    info!(source = %name, "Remote source deferred — call load_remote_sources() to fetch");
                 }
             }
         }
@@ -227,11 +227,11 @@ impl RuleManager {
     }
 
     /// Import rules from a remote URL (async; requires a tokio runtime).
+    ///
+    /// Tries YAML then JSON parsers in order.  Use `import_from_url_with_format`
+    /// when the remote content format is known ahead of time.
     pub async fn import_from_url(&mut self, url: &str) -> Result<usize> {
-        let response = reqwest::get(url)
-            .await
-            .with_context(|| format!("Failed to fetch {url}"))?;
-        let content = response.text().await?;
+        let content = fetch_remote_content(url).await?;
 
         // Try YAML first, then JSON
         let rules = super::formats::yaml::parse(&content)
@@ -239,14 +239,70 @@ impl RuleManager {
             .with_context(|| format!("Failed to parse rules from {url}"))?;
 
         let count = rules.len();
-        {
-            let mut reg = self.registry.write();
-            for rule in rules {
-                reg.insert(rule);
-            }
-        }
+        self.insert_rules(rules);
         info!(url, rules = count, "Imported rules from URL");
         Ok(count)
+    }
+
+    /// Import rules from a remote URL using the given format hint.
+    ///
+    /// Unlike `import_from_url`, this method uses the configured `format` to
+    /// select the parser directly instead of falling back through YAML/JSON.
+    pub async fn import_from_url_with_format(&mut self, url: &str, format: RuleFormat) -> Result<usize> {
+        let content = fetch_remote_content(url).await?;
+
+        let rules = parse_rules(&content, format)
+            .with_context(|| format!("Failed to parse {} rules from {url}", format.as_str()))?;
+
+        let count = rules.len();
+        self.insert_rules(rules);
+        info!(url, rules = count, format = format.as_str(), "Imported rules from URL");
+        Ok(count)
+    }
+
+    /// Load all configured `RemoteUrl` sources asynchronously.
+    ///
+    /// Fetches and parses each `RemoteUrl` entry from `self.sources`, inserting
+    /// the resulting rules into the registry.  This is the primary way to
+    /// activate remote sources; it can be called standalone (e.g. `rules update`)
+    /// or after `load_all()` when a full rule reload is needed.
+    ///
+    /// Returns one entry per remote source: `(name, result)`.  Failures do not
+    /// abort the loop — every configured source is attempted regardless.
+    pub async fn load_remote_sources(&mut self) -> Vec<(String, Result<usize>)> {
+        // Collect metadata upfront to avoid simultaneous borrow of self.sources
+        // and &mut self in import_from_url_with_format.
+        let remote_meta: Vec<(String, String, RuleFormat)> = self
+            .sources
+            .iter()
+            .filter_map(|s| {
+                if let RuleSource::RemoteUrl { name, url, format, .. } = s {
+                    Some((name.clone(), url.clone(), *format))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut results = Vec::with_capacity(remote_meta.len());
+        for (name, url, format) in remote_meta {
+            let result = self.import_from_url_with_format(&url, format).await;
+            match &result {
+                Ok(count) => info!(source = %name, count, "Loaded remote rule source"),
+                Err(e) => warn!(source = %name, error = %e, "Failed to load remote rule source"),
+            }
+            results.push((name, result));
+        }
+        results
+    }
+
+    // ── Private insert helper ─────────────────────────────────────────────────
+
+    fn insert_rules(&self, rules: Vec<Rule>) {
+        let mut reg = self.registry.write();
+        for rule in rules {
+            reg.insert(rule);
+        }
     }
 
     /// Export all enabled rules in the given format.
@@ -344,4 +400,83 @@ impl RuleManager {
 fn load_file(path: &Path, format: RuleFormat) -> Result<Vec<Rule>> {
     let content = std::fs::read_to_string(path).with_context(|| format!("Cannot read {}", path.display()))?;
     parse_rules(&content, format).with_context(|| format!("Failed to parse {}", path.display()))
+}
+
+/// Maximum allowed response body size for remote rule sources (10 MiB).
+const MAX_RULES_RESPONSE_SIZE: u64 = 10 * 1024 * 1024;
+
+/// Fetch the text content of a remote URL with SSRF protection.
+///
+/// Safety measures applied:
+/// - URL is validated against private/reserved IP ranges before fetching.
+/// - The HTTP client is pinned to the IPs resolved at validation time via
+///   `resolve_to_addrs`, closing the DNS-rebinding TOCTOU window.
+/// - HTTP redirects are disabled to prevent redirect-based SSRF.
+/// - A 30-second total timeout and 10-second connect timeout cap slow connections.
+/// - Response body is capped at [`MAX_RULES_RESPONSE_SIZE`] to prevent OOM.
+///
+/// Returns the response body as a UTF-8 string.
+async fn fetch_remote_content(url: &str) -> Result<String> {
+    // Validate the URL against SSRF targets (private IPs, loopback, IMDS, etc.)
+    // before opening any network connection.  The returned `validated_url` and
+    // `resolved_addrs` are used below to pin the client and close the
+    // DNS-rebinding TOCTOU gap.
+    let (validated_url, resolved_addrs) = waf_common::url_validator::validate_public_url_with_ips(url)
+        .with_context(|| format!("Remote rule URL failed SSRF validation: {url}"))?;
+
+    let mut builder = reqwest::Client::builder()
+        // Disable all redirects — a redirect could point to an internal endpoint.
+        .redirect(reqwest::redirect::Policy::none())
+        // Total request timeout (connect + read).
+        .timeout(std::time::Duration::from_secs(30))
+        // Connection establishment timeout only.
+        .connect_timeout(std::time::Duration::from_secs(10));
+
+    // Pin the client to the IPs validated above.  Only applies when the URL
+    // contains a DNS hostname; IP-literal URLs return an empty `resolved_addrs`.
+    // Re-use the already-parsed `validated_url` to extract the host, avoiding
+    // a redundant parse and removing the need to import `url` directly in this
+    // crate.
+    if !resolved_addrs.is_empty()
+        && let Some(host) = validated_url.host_str()
+    {
+        builder = builder.resolve_to_addrs(host, &resolved_addrs);
+    }
+
+    let client = builder
+        .build()
+        .with_context(|| "Failed to build SSRF-safe HTTP client")?;
+
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .with_context(|| format!("Failed to fetch {url}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        anyhow::bail!("Remote source returned HTTP {status} for {url}");
+    }
+
+    // Reject responses that advertise a body larger than the cap.
+    if let Some(len) = response.content_length()
+        && len > MAX_RULES_RESPONSE_SIZE
+    {
+        anyhow::bail!("Remote rules response too large: {len} bytes (max {MAX_RULES_RESPONSE_SIZE})");
+    }
+
+    let body = response
+        .text()
+        .await
+        .with_context(|| format!("Failed to read response body from {url}"))?;
+
+    // Double-check the actual body length after download (Content-Length may be absent).
+    if body.len() as u64 > MAX_RULES_RESPONSE_SIZE {
+        anyhow::bail!(
+            "Remote rules body too large: {} bytes (max {MAX_RULES_RESPONSE_SIZE})",
+            body.len()
+        );
+    }
+
+    Ok(body)
 }

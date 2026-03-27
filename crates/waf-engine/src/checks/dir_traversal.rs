@@ -38,7 +38,10 @@ static TRAVERSAL_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)[A-Za-z]:\\",
     ]) {
         Ok(set) => set,
-        Err(e) => panic!("BUG: directory traversal regex set failed to compile: {e}"),
+        Err(e) => {
+            tracing::error!("BUG: directory traversal regex set failed to compile: {e}");
+            RegexSet::empty()
+        }
     }
 });
 

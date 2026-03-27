@@ -12,6 +12,7 @@ use base64::Engine as _;
 use quinn::Connection;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::WebPkiClientVerifier;
+use rustls_pki_types::pem::PemObject as _;
 use tracing::{debug, info, warn};
 
 use crate::node::{NodeState, PeerInfo};
@@ -56,12 +57,11 @@ impl ClusterServer {
             .build()
             .context("failed to build client cert verifier")?;
 
-        let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut self.node_cert_pem.as_bytes())
+        let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(self.node_cert_pem.as_bytes())
             .collect::<Result<Vec<_>, _>>()
             .context("failed to parse node cert PEM")?;
 
-        let key: PrivateKeyDer<'static> = rustls_pemfile::private_key(&mut self.node_key_pem.as_bytes())
-            .context("failed to read node key PEM")?
+        let key: PrivateKeyDer<'static> = PrivateKeyDer::from_pem_slice(self.node_key_pem.as_bytes())
             .context("no private key found in node key PEM")?;
 
         let mut tls_config = rustls::ServerConfig::builder()

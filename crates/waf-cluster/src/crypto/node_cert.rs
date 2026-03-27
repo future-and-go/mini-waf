@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result};
 use rcgen::{CertificateParams, KeyPair, PKCS_ED25519};
+use rustls_pki_types::pem::PemObject as _;
 use time::OffsetDateTime;
 use tracing::info;
 
@@ -61,15 +62,14 @@ impl NodeCertificate {
 
     /// Parse the node cert PEM into DER bytes for use in rustls cert chains.
     pub fn cert_chain_der(&self) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
-        rustls_pemfile::certs(&mut self.cert_pem.as_bytes())
+        rustls::pki_types::CertificateDer::pem_slice_iter(self.cert_pem.as_bytes())
             .collect::<Result<Vec<_>, _>>()
             .context("failed to parse node certificate chain PEM")
     }
 
     /// Parse the node private key PEM into a `PrivateKeyDer` for rustls.
     pub fn private_key_der(&self) -> Result<rustls::pki_types::PrivateKeyDer<'static>> {
-        rustls_pemfile::private_key(&mut self.key_pem.as_bytes())
-            .context("failed to read node private key PEM")?
+        rustls::pki_types::PrivateKeyDer::from_pem_slice(self.key_pem.as_bytes())
             .context("no private key found in node key PEM")
     }
 }

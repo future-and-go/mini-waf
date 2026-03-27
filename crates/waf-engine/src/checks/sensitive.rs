@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use dashmap::DashMap;
+use tracing;
 
 use waf_common::{DetectionResult, Phase, RequestCtx};
 
@@ -68,27 +69,26 @@ impl HostPatterns {
 
 // ── Built-in automaton ────────────────────────────────────────────────────────
 
-fn builtin_ac() -> Arc<AhoCorasick> {
-    // SAFETY: BUILTIN_PATTERNS are compile-time constant string literals.
-    // If any pattern fails to compile it is a code bug that must be caught
-    // during development, not at runtime.
-    let ac = match AhoCorasickBuilder::new()
+fn builtin_ac() -> Option<Arc<AhoCorasick>> {
+    match AhoCorasickBuilder::new()
         .match_kind(MatchKind::LeftmostFirst)
         .ascii_case_insensitive(true)
         .build(BUILTIN_PATTERNS)
     {
-        Ok(ac) => ac,
-        Err(e) => panic!("BUG: builtin sensitive patterns failed to compile: {e}"),
-    };
-    Arc::new(ac)
+        Ok(ac) => Some(Arc::new(ac)),
+        Err(e) => {
+            tracing::error!("BUG: builtin sensitive patterns failed to compile: {e}");
+            None
+        }
+    }
 }
 
 // ── SensitiveCheck ───────────────────────────────────────────────────────────
 
 /// WAF checker for sensitive word / data-leak detection.
 pub struct SensitiveCheck {
-    /// Global built-in patterns
-    builtin: Arc<AhoCorasick>,
+    /// Global built-in patterns (None if compile failed — WAF degrades gracefully)
+    builtin: Option<Arc<AhoCorasick>>,
     /// Per-host patterns: `host_code` → `HostPatterns`
     per_host: Arc<DashMap<String, HostPatterns>>,
 }
@@ -116,8 +116,9 @@ impl SensitiveCheck {
     }
 
     fn scan(&self, text: &str, host_code: &str) -> Option<String> {
-        // Check built-in patterns
-        if let Some(m) = self.builtin.find(text)
+        // Check built-in patterns (skipped gracefully if automaton failed to compile)
+        if let Some(ac) = &self.builtin
+            && let Some(m) = ac.find(text)
             && let Some(pat) = BUILTIN_PATTERNS.get(m.pattern().as_usize())
         {
             return Some((*pat).to_string());

@@ -28,6 +28,7 @@ notify = { workspace = true }
 ip2region = { git = "https://github.com/lionsoul2014/ip2region.git", branch = "master" }
 arc-swap = "1"
 parking_lot = { workspace = true }
+libinjectionrs = "0.1"
 
 [lints]
 workspace = true

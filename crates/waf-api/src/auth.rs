@@ -4,14 +4,13 @@
 ///   POST /api/auth/login   — returns `access_token` + `refresh_token`
 ///   POST /api/auth/logout  — revokes the `refresh_token`
 ///   POST /api/auth/refresh — exchanges `refresh_token` for a new `access_token`
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
 };
-use axum::extract::ConnectInfo;
 use axum::{Json, extract::State};
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
@@ -108,14 +107,12 @@ pub struct RefreshRequest {
 
 pub async fn login(
     State(state): State<Arc<AppState>>,
-    connect_info: Option<ConnectInfo<SocketAddr>>,
+    axum::extract::ConnectInfo(peer_addr): axum::extract::ConnectInfo<SocketAddr>,
     Json(req): Json<LoginRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Enforce login-specific rate limit (stricter than general API)
     if let Some(ref limiter) = state.login_rate_limiter {
-        let ip = connect_info
-            .as_ref()
-            .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |ci| ci.0.ip());
+        let ip = peer_addr.ip();
         if !limiter.check(ip) {
             return Err(ApiError::TooManyRequests(
                 "Too many login attempts, please try again later".into(),

@@ -62,7 +62,10 @@ static XSS_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)<\s*(svg|math)[\s/>]",
     ]) {
         Ok(set) => set,
-        Err(e) => panic!("BUG: XSS regex set failed to compile: {e}"),
+        Err(e) => {
+            tracing::error!("BUG: XSS regex set failed to compile: {e}");
+            RegexSet::empty()
+        }
     }
 });
 

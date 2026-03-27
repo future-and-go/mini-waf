@@ -557,17 +557,25 @@ async fn run_rules_cmd(cmd: RulesCommands, config: &AppConfig) -> anyhow::Result
         RulesCommands::Update => {
             println!("Fetching remote rule sources...");
             let mut manager = RuleManager::new(&config.rules);
-            // Load remote sources — import_from_url handles network fetching
-            for source in &config.rules.sources {
-                if let Some(url) = &source.url {
-                    print!("  {} ({}) ... ", source.name, url);
-                    match manager.import_from_url(url).await {
-                        Ok(n) => println!("{n} rules"),
-                        Err(e) => println!("ERROR: {e}"),
+            let results = manager.load_remote_sources().await;
+            if results.is_empty() {
+                println!("No remote rule sources configured.");
+            } else {
+                let mut had_error = false;
+                for (name, result) in &results {
+                    match result {
+                        Ok(n) => println!("  {name}: {n} rules loaded"),
+                        Err(e) => {
+                            eprintln!("  {name}: ERROR: {e}");
+                            had_error = true;
+                        }
                     }
                 }
+                if had_error {
+                    anyhow::bail!("One or more remote sources failed to load");
+                }
+                println!("Done.");
             }
-            println!("Done.");
         }
 
         RulesCommands::Search { query } => {
