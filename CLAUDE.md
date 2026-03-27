@@ -14,7 +14,7 @@
 ## Build & Test
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test
 cargo build --release
 ```

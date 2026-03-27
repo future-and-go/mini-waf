@@ -13,7 +13,10 @@
 
 ## Build
 ```bash
-cargo test && cargo build --release
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace
+cargo build --release
 ```
 
 ## Docker

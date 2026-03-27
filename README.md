@@ -16,6 +16,11 @@ PRX-WAF is a production-ready Web Application Firewall proxy built on [Pingora](
 
 - **Pingora reverse proxy** — HTTP/1.1, HTTP/2, HTTP/3 via QUIC (Quinn); weighted round-robin load balancing
 - **10+ attack detection checkers** — SQL injection, XSS, RFI/LFI, SSRF, path traversal, command injection, scanner detection, protocol violations
+- **libinjection-based SQLi/XSS detection** — battle-tested libinjection fingerprint engine for accurate SQL injection and XSS detection with low false-positive rates
+- **SSRF protection** — URL validation with public-IP enforcement and scheme-allowlist modes; blocks requests to RFC-1918 / loopback / link-local addresses
+- **DNS rebinding guard** — IP pinning after initial DNS resolution prevents mid-request DNS rebinding attacks
+- **Iterative URL decoding** — up to 3 rounds of percent-decoding before analysis, preventing double/triple-encoding bypass techniques
+- **Remote rule source loading** — async fetch of rule sources with configurable size limits and timeouts; fails safe on unreachable sources
 - **CC/DDoS protection** — sliding-window rate limiting per IP with configurable thresholds
 - **Rhai scripting engine** — write custom detection rules in a sandboxed scripting language
 - **OWASP CRS rule support** — load and manage OWASP Core Rule Set in YAML format
@@ -49,12 +54,12 @@ cd prx-waf
 docker compose up -d
 
 # Admin UI: http://localhost:9527
-# Default credentials: admin / admin  (change immediately)
+# Default credentials: admin / admin123  (change immediately)
 ```
 
 ### Manual Build
 
-**Prerequisites:** Rust 1.82+, PostgreSQL 16+
+**Prerequisites:** Rust 1.86+, PostgreSQL 16+
 
 ```bash
 # Clone
@@ -89,7 +94,7 @@ Options:
 Commands:
   run          Start proxy + management API (blocks forever)
   migrate      Run database migrations only
-  seed-admin   Create default admin user (admin/admin)
+  seed-admin   Create default admin user (admin/admin123)
   crowdsec     CrowdSec integration management
   rules        Rule management (list, load, validate, hot-reload)
   sources      Rule source management (add, remove, sync)
@@ -354,7 +359,7 @@ The management API listens on `127.0.0.1:9527` by default. All endpoints (except
 POST /api/auth/login
 Content-Type: application/json
 
-{"username": "admin", "password": "admin", "totp_code": "123456"}
+{"username": "admin", "password": "admin123", "totp_code": "123456"}
 
 → {"token": "eyJ...", "refresh_token": "..."}
 ```
@@ -470,9 +475,4 @@ cd web/admin-ui && npm install && npm run build
 
 ## License
 
-Licensed under either of
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT License ([LICENSE-MIT](LICENSE-MIT))
-
-at your option.
+Licensed under the Apache License, Version 2.0 ([LICENSE](LICENSE)).

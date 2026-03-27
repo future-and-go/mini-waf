@@ -7,6 +7,90 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.0] — 2026-03-27
+
+### Security
+
+- Eliminate 8 `panic!` calls in LazyLock regex initializers — replaced with
+  `tracing::error!` + safe degradation (`RegexSet::empty()`) so a malformed
+  compiled-in pattern never crashes the process.
+- Add SSRF protection for Webhook and CrowdSec URLs with dual-mode validation
+  (`url_validator.rs`): `validate_public_url()` resolves DNS and rejects RFC-1918
+  / loopback / link-local / multicast addresses; `validate_scheme_only()` for
+  contexts where DNS resolution is not yet available.
+- Implement DNS rebinding guard using `resolve_to_addrs()` IP pinning — the
+  resolved address set is cached and re-validated on each outbound connection to
+  defeat time-of-check / time-of-use DNS rebinding attacks.
+- Add iterative URL decoding (`url_decode_recursive`) to prevent double / triple
+  encoding bypass of WAF rules (e.g., `%2527` → `%27` → `'`).
+- Harden remote rule fetching: redirect following disabled, 30 s connect/read
+  timeout enforced, response body capped at 10 MB.
+- Add Admin API security middleware: IP allowlist enforcement, per-IP rate
+  limiting, and strict security response headers (`X-Frame-Options`,
+  `X-Content-Type-Options`, `Referrer-Policy`, `Content-Security-Policy`).
+- Add login rate limiting (per-IP, configurable) and WebSocket upgrade IP
+  allowlist to the Admin UI server.
+- Fix cluster peer registration fencing: stale peer records are evicted before a
+  new node with the same ID is accepted, preventing split-brain from rapid
+  restart cycles.
+- Fix XFF trusted-proxy CIDR validation: malformed CIDR strings in
+  `trusted_proxies` now produce a config error at startup instead of a runtime
+  panic.
+- Fix rule deletion memory sync: rule removal now performs an atomic swap of the
+  in-memory `RuleRegistry` so in-flight requests never observe a partially
+  updated rule set.
+
+### Added
+
+- `detect_sqli` and `detect_xss` operators via the `libinjectionrs` pure-Rust
+  crate — OWASP CRS core rules `CRS-942100` (SQL injection) and `CRS-941100`
+  (XSS) are now fully evaluated at runtime instead of being silently skipped.
+- Async `load_remote_sources()` method on `RuleRegistry` / `RemoteUrl` rule
+  sources: remote rule sets are fetched in the background after startup so cold
+  boot latency is unaffected.
+- `url_validator` module (`waf-engine/src/security/url_validator.rs`) exposing
+  `validate_public_url()` and `validate_scheme_only()`.
+- `.cargo/audit.toml` policy file that suppresses known upstream transitive
+  dependency advisories originating from the Pingora crate family (documented
+  with justification comments).
+- 116 new regression tests (suite total: 243) covering SSRF validation, encoding
+  bypass, SQLi/XSS detection, cluster fencing, and dependency-upgrade
+  compatibility.
+
+### Changed
+
+#### Dependency Upgrades
+
+- **wasmtime**: 23.0.3 → 43.0.0 — resolves 5 published CVEs in the WASM
+  runtime.
+- **axum**: 0.7 → 0.8.8; **axum-extra**: 0.9 → 0.12 — aligns with the current
+  stable axum ecosystem.
+- **tower**: 0.4 → 0.5.3; **tower-http**: 0.5 → 0.6.8.
+- **jsonwebtoken**: 9 → 10, switching to the `rust_crypto` backend to remove
+  the OpenSSL dependency from the JWT path.
+- **reqwest**: 0.12 → 0.13.
+- **tokio-tungstenite**: 0.23 → 0.26.
+- **toml**: 0.8 → 1.1.
+- **serde_yaml**: deprecated 0.9 → **serde_yaml_ng** 0.10.
+- **rustls-pemfile**: unmaintained crate replaced with the built-in PEM parser
+  from **rustls-pki-types**.
+- **sqlx**: set `default-features = false` to drop the unused `rsa` transitive
+  dependency from the build graph.
+
+### Fixed
+
+- Remote URL rule sources were silently skipped in `load_all()` due to a missing
+  async dispatch path — they are now loaded via `load_remote_sources()` after
+  startup and on each scheduled refresh.
+- OWASP CRS rules that use the `detect_sqli` / `detect_xss` operators were
+  silently skipped because the operator was unregistered — the `libinjectionrs`
+  integration now registers both operators at engine initialisation.
+- Dead peer automatic eviction in cluster mode: peers that fail the phi-accrual
+  threshold and do not reconnect within the configured grace period are now
+  removed from the peer table and from the Admin UI node list.
+
+---
+
 ## [0.1.0-rc.1] — 2026-03-16
 
 ### Added

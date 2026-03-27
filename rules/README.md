@@ -103,6 +103,33 @@ rules/
 │   ├── 2024-recent.yaml       ← 2024 high-profile CVEs
 │   └── 2025-recent.yaml       ← 2025 high-profile CVEs
 │
+├── advanced/                  ← Advanced attack detection
+│   ├── README.md
+│   ├── ssrf.yaml              ← Server-Side Request Forgery
+│   ├── xxe.yaml               ← XML External Entity injection
+│   ├── ssti.yaml              ← Server-Side Template Injection
+│   ├── deserialization.yaml   ← Insecure deserialization
+│   ├── prototype-pollution.yaml ← JavaScript prototype pollution
+│   └── webshell-upload.yaml   ← Webshell upload attempts
+│
+├── bot-detection/             ← Bot and crawler detection
+│   ├── README.md
+│   ├── crawlers.yaml          ← Known web crawlers and scrapers
+│   ├── scraping.yaml          ← Automated scraping behavior
+│   └── credential-stuffing.yaml ← Credential stuffing detection
+│
+├── geoip/                     ← Geographic IP blocking rules
+│   ├── README.md
+│   └── country-blocklist.yaml ← Block requests by country code
+│
+├── owasp-api/                 ← OWASP API Security Top 10 rules
+│   ├── README.md
+│   ├── broken-auth.yaml       ← API1: Broken Object Level Authorization
+│   ├── data-exposure.yaml     ← API3: Excessive Data Exposure
+│   ├── injection.yaml         ← API8: Injection
+│   ├── mass-assignment.yaml   ← API6: Mass Assignment
+│   └── rate-abuse.yaml        ← API4: Lack of Resources & Rate Limiting
+│
 ├── custom/                    ← Site-specific / application rules
 │   ├── README.md
 │   └── example.yaml           ← Annotated example rules
@@ -444,11 +471,15 @@ Current rule inventory (as of the last sync):
 
 | Source       | Files | Rules | Description                        |
 |--------------|-------|-------|------------------------------------|
-| OWASP CRS    | 21    | 310   | OWASP ModSecurity Core Rule Set v4 |
+| OWASP CRS    | 24    | 274   | OWASP ModSecurity Core Rule Set v4 |
 | ModSecurity  | 4     | 46    | ModSecurity community rules        |
-| CVE Patches  | 7     | 39    | Targeted CVE virtual patches       |
-| Custom       | 1     | 3     | Example / template rules           |
-| **Total**    | **33**| **398**| |
+| CVE Patches  | 7     | 43    | Targeted CVE virtual patches       |
+| Advanced     | 6     | 77    | SSRF, XXE, SSTI, deserialization, prototype pollution, webshell upload |
+| Bot Detection| 3     | 42    | Crawlers, scraping, credential stuffing |
+| GeoIP        | 1     | 2     | Geographic IP blocking             |
+| OWASP API    | 5     | 64    | OWASP API Security Top 10          |
+| Custom       | 1     | 8     | Example / template rules           |
+| **Total**    | **51**| **556**| |
 
 ---
 
