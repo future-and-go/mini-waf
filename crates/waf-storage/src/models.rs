@@ -432,6 +432,29 @@ pub struct StatsOverview {
     pub top_rules: Vec<TopEntry>,
     pub top_countries: Vec<TopEntry>,
     pub top_isps: Vec<TopEntry>,
+    /// Distinct client IPs seen in `security_events`.
+    pub unique_attackers: i64,
+    /// Events grouped by attack category derived from `rule_id` prefix.
+    pub category_breakdown: Vec<TopEntry>,
+    /// Events grouped by enforcement action (block / log / allow / challenge).
+    pub action_breakdown: Vec<TopEntry>,
+    /// Last N security events for the recent activity feed.
+    pub recent_events: Vec<RecentEvent>,
+}
+
+/// Compact security event entry for the dashboard live feed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecentEvent {
+    pub ts: DateTime<Utc>,
+    pub client_ip: String,
+    pub host_code: String,
+    pub method: String,
+    pub path: String,
+    pub rule_id: Option<String>,
+    pub rule_name: String,
+    pub action: String,
+    pub category: String,
+    pub country: Option<String>,
 }
 
 /// `GeoIP` distribution statistics
