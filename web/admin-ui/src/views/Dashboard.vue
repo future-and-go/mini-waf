@@ -93,7 +93,7 @@ function connectWs() {
   if (!token) return
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const host = location.host
-  ws = new WebSocket(`${proto}://${host}/ws/events?token=${token}`)
+  ws = new WebSocket(`${proto}://${host}/ws/events`, [`bearer.${token}`])
   ws.onopen = () => { wsConnected.value = true }
   ws.onclose = () => {
     wsConnected.value = false

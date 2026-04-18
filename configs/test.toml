@@ -1,0 +1,51 @@
+[proxy]
+listen_addr     = "0.0.0.0:80"
+listen_addr_tls = "0.0.0.0:443"
+
+[api]
+listen_addr = "0.0.0.0:9527"
+
+[storage]
+database_url    = "postgresql://prx_waf:prx_waf@postgres:5432/prx_waf"
+max_connections = 20
+
+[cache]
+enabled          = true
+max_size_mb      = 256
+default_ttl_secs = 60
+max_ttl_secs     = 3600
+
+[http3]
+enabled     = false
+listen_addr = "0.0.0.0:443"
+
+[security]
+admin_ip_allowlist      = []
+max_request_body_bytes  = 10485760
+api_rate_limit_rps      = 0
+cors_origins            = []
+
+# ── Upstream: OWASP Juice Shop ────────────────────────────────────────────────
+# ZAP scans http://test-prx-waf:80 → Host header = "test-prx-waf"
+[[hosts]]
+host        = "test-prx-waf"
+port        = 80
+remote_host = "juice-shop"
+remote_port = 3000
+guard_status = true
+
+# Accessed from host machine via localhost:16880
+[[hosts]]
+host        = "localhost"
+port        = 80
+remote_host = "juice-shop"
+remote_port = 3000
+guard_status = true
+
+# Accessed via juice-shop hostname directly (e.g. /etc/hosts override)
+[[hosts]]
+host        = "juice-shop"
+port        = 80
+remote_host = "juice-shop"
+remote_port = 3000
+guard_status = true

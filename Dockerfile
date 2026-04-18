@@ -45,6 +45,9 @@ RUN cargo build --release 2>/dev/null || true
 # Now copy the real source tree
 COPY . .
 
+# Overwrite the local dist with the freshly built frontend (RustEmbed embeds at compile time)
+COPY --from=frontend-builder /ui/dist ./web/admin-ui/dist/
+
 # Rebuild with real source (only changed crates will be recompiled)
 RUN cargo build --release -p prx-waf
 

@@ -215,7 +215,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X } from 'lucide-vue-next'
 import Layout from '../components/Layout.vue'
-import axios from 'axios'
+import api from '../api'
 
 useI18n()
 
@@ -310,7 +310,7 @@ function actionClass(action: string) {
 async function loadRules() {
   loading.value = true
   try {
-    const { data } = await axios.get('/api/rules/registry')
+    const { data } = await api.get('/api/rules/registry')
     rules.value = data.rules ?? []
   } catch {
     // Demo: show built-in rule stubs
@@ -328,7 +328,7 @@ async function loadRules() {
 async function reloadRules() {
   loading.value = true
   try {
-    await axios.post('/api/rules/reload')
+    await api.post('/api/rules/reload')
     await loadRules()
   } catch (e) {
     console.error('Reload failed', e)
@@ -340,7 +340,7 @@ async function reloadRules() {
 async function toggleRule(rule: Rule) {
   const newState = !rule.enabled
   try {
-    await axios.patch(`/api/rules/registry/${rule.id}`, { enabled: newState })
+    await api.patch(`/api/rules/registry/${rule.id}`, { enabled: newState })
     rule.enabled = newState
   } catch {
     rule.enabled = newState // optimistic
@@ -349,7 +349,7 @@ async function toggleRule(rule: Rule) {
 
 async function importRules() {
   try {
-    await axios.post('/api/rules/import', { source: importSource.value, format: importFormat.value })
+    await api.post('/api/rules/import', { source: importSource.value, format: importFormat.value })
     showImportModal.value = false
     await loadRules()
   } catch (e) {

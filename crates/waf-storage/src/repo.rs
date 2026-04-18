@@ -53,7 +53,7 @@ impl Database {
                 created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11,
+                $7, $8, $9::inet, $10, $11,
                 $12, $13, $14,
                 false, 0,
                 $15, $15
@@ -92,7 +92,7 @@ impl Database {
                 guard_status = COALESCE($5, guard_status),
                 remote_host = COALESCE($6, remote_host),
                 remote_port = COALESCE($7, remote_port),
-                remote_ip = COALESCE($8, remote_ip),
+                remote_ip = COALESCE($8::inet, remote_ip),
                 cert_file = COALESCE($9, cert_file),
                 key_file = COALESCE($10, key_file),
                 remarks = COALESCE($11, remarks),

@@ -10,7 +10,9 @@
 
 PRX-WAF is a production-ready Web Application Firewall proxy built on [Pingora](https://github.com/cloudflare/pingora) (Cloudflare's Rust HTTP proxy library). It combines multi-phase attack detection, a Rhai scripting engine, ModSecurity rule support, CrowdSec integration, WASM plugins, and a Vue 3 admin UI into a single deployable binary.
 
+
 ---
+
 
 ## Features
 
