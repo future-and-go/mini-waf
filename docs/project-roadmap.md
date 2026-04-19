@@ -1,0 +1,390 @@
+# Project Roadmap
+
+## Release History & Status
+
+### v0.1.0-rc.1 (2026-03-16) — Complete
+
+**Cluster Foundation (P1–P5)**
+- [x] QUIC mTLS transport (quinn + rustls + rcgen)
+- [x] Raft-lite leader election with phi-accrual failure detection
+- [x] Rule sync (incremental changelog + full snapshot)
+- [x] Admin UI cluster dashboard (4 new pages)
+- [x] docker-compose cluster setup (3-node, 1 main + 2 workers)
+- [x] End-to-end integration tests (20+ cluster scenarios)
+
+**Core WAF**
+- [x] 16-phase detection pipeline
+- [x] 51 built-in rules (OWASP CRS, CVE patches, advanced patterns)
+- [x] WASM plugin system (wasmtime 23)
+- [x] Rhai custom rule scripting
+- [x] CrowdSec bouncer + AppSec integration
+- [x] PostgreSQL persistence layer
+- [x] Vue 3 admin UI (19 pages)
+
+---
+
+### v0.2.0 (2026-03-27) — Complete ✓
+
+**Status**: Production-ready, all acceptance criteria met
+
+**Security Hardening**
+- [x] 8 panic-capable unwrapping → safe degradation (panic elimination)
+- [x] SSRF protection (url_validator module, DNS rebinding guard)
+- [x] Iterative URL decoding (up to 3 rounds, encoding bypass prevention)
+- [x] Remote rule source hardening (30s timeout, 10MB size limit, no redirects)
+- [x] Admin API security middleware (IP allowlist, rate limiting, security headers)
+- [x] Login rate limiting (per-IP configurable)
+- [x] WebSocket IP allowlist
+- [x] Cluster peer fencing (stale peer eviction)
+- [x] XFF trusted-proxy CIDR validation (config error, not runtime panic)
+- [x] Rule deletion atomic swap (RuleRegistry in-memory sync)
+
+**Rule Engine Enhancements**
+- [x] libinjectionrs integration (detect_sqli, detect_xss operators)
+- [x] OWASP CRS rule operators now fully evaluated (CRS-942100, CRS-941100)
+- [x] Remote rule source async loading (background fetch post-startup)
+- [x] Rule source URL validation (public IP only, no RFC-1918)
+
+**Dependency Upgrades (Security + Compatibility)**
+- [x] wasmtime: 23.0.3 → 43.0.0 (5 CVEs fixed)
+- [x] axum: 0.7 → 0.8.8
+- [x] tower: 0.4 → 0.5.3
+- [x] jsonwebtoken: 9 → 10 (OpenSSL → rust_crypto)
+- [x] reqwest: 0.12 → 0.13
+- [x] tokio-tungstenite: 0.23 → 0.26
+- [x] serde_yaml: 0.9 → serde_yaml_ng 0.10
+- [x] sqlx: set default-features = false (drop rsa dep)
+
+**Testing & Quality**
+- [x] 116 new regression tests (suite total: 243)
+- [x] SSRF validation tests
+- [x] Encoding bypass prevention tests
+- [x] SQLi/XSS detection tests
+- [x] Cluster peer fencing tests
+- [x] Dependency upgrade compatibility tests
+- [x] Zero unaddressed high/critical CVEs
+
+**Deliverables**
+- [x] Release notes (CHANGELOG.md)
+- [x] Security advisory (panic elimination, SSRF guard)
+- [x] Build & test automation (CI passing)
+- [x] Documentation (architecture, deployment, code standards)
+
+**Metrics v0.2.0**
+- Regression test coverage: 243 tests (↑116 from v0.1)
+- Security issues fixed: 10 (8 panics, SSRF, DNS rebinding, encoding bypass)
+- Performance: <0.5ms per request (99th percentile, unchanged)
+- Cluster stability: 3-node election <500ms (unchanged)
+
+---
+
+## v0.3.0 (Proposed — Q3 2026)
+
+**Theme**: Observability & Developer Experience
+
+### Metrics & Monitoring
+- [ ] Prometheus `/metrics` endpoint (counter, gauge, histogram types)
+- [ ] Metrics exported:
+  - `prx_waf_requests_total` (counter, by host + rule_id)
+  - `prx_waf_blocked_requests_total` (counter, by rule_id)
+  - `prx_waf_request_duration_ms` (histogram, P50/P95/P99)
+  - `prx_waf_rule_matches_total` (counter, per rule_id)
+  - `prx_waf_backend_latency_ms` (histogram)
+  - `prx_waf_cache_hit_ratio` (gauge)
+  - `prx_waf_cluster_election_time_ms` (histogram)
+- [ ] Grafana dashboard templates (JSON)
+- [ ] Alert examples (Prometheus rules)
+
+### Distributed Tracing
+- [ ] OpenTelemetry integration (optional, off by default)
+- [ ] Trace propagation (W3C Trace Context)
+- [ ] Spans: HTTP request, rule eval, database query
+- [ ] Exporter: Jaeger, Zipkin, Datadog
+- [ ] Admin UI: trace correlation with security events
+
+### Admin UI Testing
+- [ ] Vitest + Vue Test Utils (unit tests)
+- [ ] Cypress (E2E tests)
+- [ ] Target: >80% code coverage (views + components)
+- [ ] Accessibility tests (axe-core)
+
+### Documentation Enhancements
+- [ ] API reference (70+ endpoints, all documented)
+- [ ] Operator runbooks (troubleshooting, incident response)
+- [ ] Performance tuning guide
+- [ ] Security best practices
+- [ ] Multi-language docs (at least: EN, ZH, RU)
+
+### Performance Baseline
+- Target: <3ms added latency (99th percentile, vs <5ms today)
+- Target: >15,000 RPS per node (vs >10,000 today)
+- Profiling: continuous benchmarks in CI
+
+### Quality
+- [ ] Code coverage: >85% (unit + integration)
+- [ ] Zero panics in any code path
+- [ ] Zero high/critical security issues
+- [ ] Full audit of all dependencies (cargo-audit + cargo-deny)
+
+**Effort Estimate**: 120–150 engineer-hours (or ~30 Claude-hours)
+
+---
+
+## v1.0.0 (Proposed — Q4 2026 or early 2027)
+
+**Theme**: Advanced Features & Enterprise Scale
+
+### WASM Plugin Sync
+- [ ] Binary plugin distribution to worker nodes
+- [ ] Plugin versioning (semantic)
+- [ ] Plugin marketplace (community-curated list)
+- [ ] Plugin update mechanism (no downtime)
+- [ ] Sandboxing enhancements (memory limits, CPU time budgets)
+
+### Multi-Region Clustering
+- [ ] Cross-datacenter clustering (georeplicated)
+- [ ] Region-aware traffic routing (failover to healthy region)
+- [ ] Bandwidth-efficient sync (delta compression)
+- [ ] Latency-optimized election (region-aware quorum)
+
+### Machine Learning (Optional)
+- [ ] Anomaly detection (request pattern, traffic baseline)
+- [ ] Bot detection ML model (decision tree or shallow NN)
+- [ ] False positive reduction (feedback loop)
+
+### Kubernetes Native
+- [ ] Operator CRDs (Helm-installable)
+  - `WAFCluster` — cluster topology
+  - `WAFHost` — vhost proxy config
+  - `WAFRule` — custom rule definition
+- [ ] Auto-scaling policy (HPA integration)
+- [ ] Health probes (liveness, readiness, startup)
+- [ ] NetworkPolicy templates
+
+### Enterprise Features
+- [ ] SAML/OIDC authentication (vs JWT-only)
+- [ ] Multi-tenancy (per-customer namespace + RBAC)
+- [ ] Customer-specific rule sets
+- [ ] Compliance reporting (SOC2, PCI-DSS)
+- [ ] Audit log retention policies
+
+### API v2
+- [ ] GraphQL endpoint (alternative to REST)
+- [ ] Server-sent events (SSE) as WebSocket alternative
+- [ ] gRPC interface (for high-performance integrations)
+
+### Performance Target
+- [ ] <2ms added latency (99th percentile)
+- [ ] >20,000 RPS per node
+- [ ] <100ms cluster consensus latency (multi-region)
+
+**Effort Estimate**: 200+ engineer-hours (very large scope)
+
+---
+
+## Future Considerations (Post-v1)
+
+### IPv6 Support
+- Full IPv6 support (currently IPv4-only)
+- Dual-stack proxy
+- IPv6 geolocation
+
+### Edge Computing
+- CloudFlare Workers integration
+- Fastly Compute integration
+- Deploy WAF rules to CDN edge
+
+### AI-Powered Rules
+- Natural language rule authoring (GPT + semantic parsing)
+- Auto-remediation (auto-tuning rule thresholds)
+- Attack prediction (threat modeling)
+
+### Advanced Integrations
+- Splunk integration (log streaming)
+- Datadog integration (metrics + traces)
+- AWS WAF federation
+- Azure WAF federation
+
+### Hardware Accelerators
+- GPU-accelerated regex matching
+- FPGA-optimized rule evaluation
+- Intel QuickAssist for encryption
+
+### Developer Tools
+- WAF rule testing framework (pytest-style)
+- Local dev environment (docker-compose + tester)
+- Browser extension for rule debugging
+- VS Code extension for rule editing
+
+---
+
+## Priority Alignment
+
+### P0 (Must-Have, Blocking Release)
+- [x] v0.2.0: Security hardening (panics, SSRF, encoding bypass)
+- [ ] v0.3.0: Observability (metrics, tracing)
+- [ ] v1.0.0: Kubernetes operator (enterprise requirement)
+
+### P1 (High Value, Quick ROI)
+- [x] Clustering (v0.1)
+- [ ] Admin UI testing (v0.3)
+- [ ] Multi-region clustering (v1.0)
+- [ ] WASM plugin sync (v1.0)
+
+### P2 (Nice-to-Have, Lower Priority)
+- [ ] IPv6 (post-v1)
+- [ ] Edge computing (post-v1)
+- [ ] AI rules (post-v1)
+- [ ] Hardware accelerators (post-v1)
+
+### P3 (Deferred, Community-Contributed)
+- [ ] OIDC/SAML (v1.0, but can defer)
+- [ ] Splunk integration (v1.0+)
+- [ ] Developer tools (v1.0+)
+
+---
+
+## Known Limitations
+
+### v0.2.0
+
+| Limitation | Impact | Workaround | Target Fix |
+|-----------|--------|-----------|-----------|
+| WASM plugins not synced to workers | Workers lack plugin features | Run plugins on main only, or accept feature gap | v1.0 |
+| IPv4-only | No IPv6 support | Use IPv4 upstream, add IPv6 reverse proxy | v0.3 or v1.0 |
+| Single-region clustering | Can't cross-datacenter | Use separate clusters per region | v1.0 |
+| Per-node rate limiting | No shared CC counters | Accept per-node limits | v1.0 |
+| No distributed tracing | Hard to debug requests | Parse logs manually | v0.3 |
+| No API v2 (GraphQL) | REST-only | Continue using REST | v1.0 |
+
+---
+
+## Dependency Upgrade Plan
+
+### Q2 2026 (Monthly)
+- [ ] Check cargo-audit for CVEs
+- [ ] Review cargo-deny output
+- [ ] Plan upgrades (minor + patch)
+- [ ] Test upgrade compatibility
+
+### Q3 2026 (Major Version Candidates)
+- [ ] Tokio: 1.x → follow latest (1.40+)
+- [ ] Pingora: 0.8 → 0.9+
+- [ ] Axum: 0.8 → 0.9+ (if available)
+- [ ] wasmtime: 43 → latest (stay current)
+
+### Deprecation Policy
+- **MSRV**: Rust 1.86 (2024 Edition)
+- **Support**: Latest stable + 1 minor version back
+- **Deprecation notice**: Minimum 1 release ahead
+
+---
+
+## Success Metrics (By Release)
+
+### v0.2.0
+- [x] 0 unaddressed high/critical CVEs
+- [x] 243 regression tests passing
+- [x] <0.5ms request latency (99th percentile)
+- [x] <500ms cluster election
+- [x] 100% uptime in staging (1-week burn-in)
+
+### v0.3.0 (Proposed)
+- [ ] Prometheus metrics exported successfully
+- [ ] OpenTelemetry traces in Jaeger
+- [ ] Admin UI unit test coverage >80%
+- [ ] E2E test suite >50 scenarios
+- [ ] Documentation: 100+ pages
+- [ ] <3ms request latency (99th percentile)
+- [ ] >15,000 RPS/node in production
+
+### v1.0.0 (Proposed)
+- [ ] Kubernetes operator deployable via Helm
+- [ ] Multi-region cluster tested (DR failover <1min)
+- [ ] WASM plugins synced to all workers
+- [ ] Enterprise customer deployments (>3)
+- [ ] <2ms request latency (99th percentile)
+- [ ] >20,000 RPS/node in production
+
+---
+
+## Community Contribution Areas
+
+**Welcome contributions from community:**
+1. **Rule Pack**: Additional OWASP/vendor rule sets
+2. **Integrations**: Splunk, Datadog, Prometheus exporters
+3. **Localization**: Additional language translations (currently 11 locales)
+4. **Documentation**: Guides, tutorials, troubleshooting
+5. **WASM Plugins**: Community plugin marketplace
+6. **Performance**: Benchmarking, optimization tips
+
+**Not for community (core team only):**
+1. Clustering protocol changes
+2. Election algorithm
+3. Core WAF engine phases
+4. Security-critical paths
+
+---
+
+## Version Support Matrix
+
+| Version | Released | Support Ends | Status |
+|---------|----------|--------------|--------|
+| **v0.1.0-rc.1** | 2026-03-16 | 2026-06-30 | Bug fixes only |
+| **v0.2.0** | 2026-03-27 | 2026-09-30 | Active support |
+| **v0.3.0** | TBD Q3 2026 | TBD Q4 2027 | Planned |
+| **v1.0.0** | TBD Q4 2026 | TBD Q4 2028 | Planned |
+
+---
+
+## Milestones (Gantt-style)
+
+```
+Q1 2026 [===========]                                 (v0.2.0 released, security hardening complete)
+         └─ Clustering P1–P5 ✓
+         └─ SSRF/DNS guard ✓
+         └─ 243 regression tests ✓
+
+Q2 2026            [=================]                 (v0.3.0 planning & design)
+         └─ Observability design
+         └─ Metrics framework
+         └─ Distributed tracing design
+         └─ Admin UI test strategy
+
+Q3 2026                         [=====================] (v0.3.0 implementation)
+         └─ Prometheus metrics
+         └─ OpenTelemetry integration
+         └─ Admin UI tests (Vitest + Cypress)
+         └─ Operator docs
+
+Q4 2026                                      [=============================] (v0.3.0 RC + v1.0.0 start)
+         └─ v0.3.0 RC testing
+         └─ WASM plugin sync design
+         └─ Multi-region clustering design
+         └─ Kubernetes operator start
+
+Q1 2027                                                          [===========] (v1.0.0 implementation)
+         └─ Kubernetes operator (Helm)
+         └─ Multi-region clustering
+         └─ WASM plugin binary sync
+         └─ Enterprise features (SAML/OIDC)
+
+Q2 2027                                                                      [==========] (v1.0.0 RC)
+         └─ Multi-region cluster testing
+         └─ Operator testing in EKS/GKE
+         └─ Performance optimization
+         └─ Documentation
+
+Q3+ 2027                                                                                [future releases]
+```
+
+---
+
+## Feedback & Questions
+
+**How to submit feedback:**
+1. GitHub Issues (bugs, feature requests)
+2. GitHub Discussions (ideas, feedback)
+3. Security issues: security@openprx.dev
+
+**Roadmap review cycle:** Quarterly (Q-end review + next-Q planning)
