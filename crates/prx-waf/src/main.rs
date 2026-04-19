@@ -1261,6 +1261,9 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
     server.bootstrap();
 
     let mut proxy = WafProxy::new(router, engine);
+    // Share counters with AppState so the /api/stats/overview endpoint reflects live traffic
+    proxy.request_counter = Arc::clone(&api_state.request_counter);
+    proxy.blocked_counter = Arc::clone(&api_state.blocked_counter);
     proxy.trust_proxy_headers = config.proxy.trust_proxy_headers;
     proxy.trusted_proxies = config
         .proxy

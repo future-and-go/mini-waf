@@ -7,7 +7,7 @@ use axum::http::{
 };
 use axum::{
     Router, middleware,
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
 };
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
@@ -38,6 +38,7 @@ use crate::security::{admin_ip_check_middleware, list_audit_log, rate_limit_midd
 use crate::state::AppState;
 use crate::static_files::static_handler;
 use crate::stats::{stats_geo, stats_overview, stats_timeseries};
+use crate::rules_api::{get_rule_registry, import_rules, reload_rule_registry, toggle_rule};
 use crate::tunnels::{create_tunnel, delete_tunnel, list_tunnels, ws_tunnel};
 use crate::websocket::{ws_events, ws_logs};
 
@@ -162,6 +163,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/cache/key", delete(cache_flush_key))
         // Phase 5: Audit log
         .route("/api/audit-log", get(list_audit_log))
+        // Rule registry (YAML filesystem scanner)
+        .route("/api/rules/registry", get(get_rule_registry))
+        .route("/api/rules/registry/{id}", patch(toggle_rule))
+        .route("/api/rules/reload", post(reload_rule_registry))
+        .route("/api/rules/import", post(import_rules))
         // Phase 7: Cluster
         .route("/api/cluster/status", get(cluster_status))
         .route("/api/cluster/nodes", get(list_cluster_nodes))

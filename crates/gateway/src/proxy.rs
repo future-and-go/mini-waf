@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -26,6 +27,12 @@ pub struct WafProxy {
     /// When non-empty and `trust_proxy_headers` is true, only XFF headers
     /// from connections originating within these ranges are honoured.
     pub trusted_proxies: Vec<ipnet::IpNet>,
+    /// Shared request counter (cloned from `AppState.request_counter`).
+    /// Incremented once per HTTP request after WAF inspection.
+    pub request_counter: Arc<AtomicU64>,
+    /// Shared blocked counter (cloned from `AppState.blocked_counter`).
+    /// Incremented when a request is denied by the WAF.
+    pub blocked_counter: Arc<AtomicU64>,
 }
 
 impl WafProxy {
@@ -36,6 +43,8 @@ impl WafProxy {
             engine,
             trust_proxy_headers: false,
             trusted_proxies: Vec::new(),
+            request_counter: Arc::new(AtomicU64::new(0)),
+            blocked_counter: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -129,6 +138,12 @@ impl ProxyHttp for WafProxy {
     }
 
     async fn upstream_peer(&self, session: &mut Session, ctx: &mut GatewayCtx) -> pingora_core::Result<Box<HttpPeer>> {
+        // Count every real HTTP request that reaches the proxy layer.
+        // `upstream_peer` is guaranteed to run once per request after Pingora
+        // has parsed the headers, so this gives an accurate live total that
+        // the Dashboard `Total Requests` KPI reads via `AppState`.
+        self.request_counter.fetch_add(1, Ordering::Relaxed);
+
         let host_header = session
             .get_header("host")
             .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
@@ -183,6 +198,7 @@ impl ProxyHttp for WafProxy {
         let decision = self.engine.inspect(&mut request_ctx).await;
 
         if !decision.is_allowed() {
+            self.blocked_counter.fetch_add(1, Ordering::Relaxed);
             match &decision.action {
                 WafAction::Block { status, body } => {
                     warn!(
@@ -262,6 +278,7 @@ impl ProxyHttp for WafProxy {
         let decision = self.engine.inspect(&mut request_ctx).await;
 
         if !decision.is_allowed() {
+            self.blocked_counter.fetch_add(1, Ordering::Relaxed);
             match &decision.action {
                 WafAction::Block {
                     status,

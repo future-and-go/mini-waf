@@ -33,6 +33,8 @@ axum = { workspace = true }
 futures-util = { workspace = true }
 ipnet = { workspace = true }
 parking_lot = { workspace = true }
+serde_yaml = { workspace = true }
+sqlx = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true, features = ["util"] }
