@@ -39,8 +39,8 @@
         <div class="space-y-2 text-sm text-gray-600">
           <p>API endpoint: <code class="bg-gray-100 px-1 rounded">http://&lt;host&gt;:9527</code></p>
           <p>Admin UI: <code class="bg-gray-100 px-1 rounded">http://&lt;host&gt;:9527/ui/</code></p>
-          <p>WebSocket events: <code class="bg-gray-100 px-1 rounded">ws://&lt;host&gt;:9527/ws/events?token=JWT</code></p>
-          <p>WebSocket logs: <code class="bg-gray-100 px-1 rounded">ws://&lt;host&gt;:9527/ws/logs?token=JWT</code></p>
+          <p>WebSocket events: <code class="bg-gray-100 px-1 rounded">ws://&lt;host&gt;:9527/ws/events</code> <span class="text-gray-400">(protocol: bearer.JWT)</span></p>
+          <p>WebSocket logs: <code class="bg-gray-100 px-1 rounded">ws://&lt;host&gt;:9527/ws/logs</code> <span class="text-gray-400">(protocol: bearer.JWT)</span></p>
           <p class="text-xs text-gray-400 mt-3">
             Set <code class="bg-gray-100 px-1 rounded">JWT_SECRET</code> and
             <code class="bg-gray-100 px-1 rounded">MASTER_KEY</code> environment variables

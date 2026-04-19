@@ -1,5 +1,16 @@
-# ─── Stage 1: Builder ────────────────────────────────────────────────────────
-FROM rust:1.86-slim-bookworm AS builder
+# ─── Stage 0: Frontend Builder ───────────────────────────────────────────────
+FROM node:22-slim AS frontend-builder
+
+WORKDIR /ui
+
+COPY web/admin-ui/package.json web/admin-ui/package-lock.json* ./
+RUN npm ci --ignore-scripts
+
+COPY web/admin-ui/ ./
+RUN npm run build
+
+# ─── Stage 1: Rust Builder ────────────────────────────────────────────────────
+FROM rust:1.91-slim-bookworm AS builder
 
 WORKDIR /build
 
@@ -7,6 +18,8 @@ WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
+    cmake \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy workspace manifests first to cache dependencies
@@ -32,6 +45,9 @@ RUN cargo build --release 2>/dev/null || true
 # Now copy the real source tree
 COPY . .
 
+# Overwrite the local dist with the freshly built frontend (RustEmbed embeds at compile time)
+COPY --from=frontend-builder /ui/dist ./web/admin-ui/dist/
+
 # Rebuild with real source (only changed crates will be recompiled)
 RUN cargo build --release -p prx-waf
 
@@ -52,7 +68,7 @@ COPY --from=builder /build/target/release/prx-waf /usr/local/bin/prx-waf
 # Copy default config, OWASP rules, and frontend dist
 COPY configs/   /app/configs/
 COPY rules/     /app/rules/
-COPY --from=builder /build/web/admin-ui/dist /app/web/admin-ui/dist
+COPY --from=frontend-builder /ui/dist /app/web/admin-ui/dist
 
 RUN chmod +x /usr/local/bin/prx-waf
 

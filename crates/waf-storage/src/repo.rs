@@ -8,9 +8,9 @@ use crate::models::{
     Certificate, CreateAdminUser, CreateCertificate, CreateCrowdSecEvent, CreateCustomRule, CreateHost, CreateIpRule,
     CreateLbBackend, CreateNotificationConfig, CreateSecurityEvent, CreateSensitivePattern, CreateTunnel,
     CreateUrlRule, CreateWasmPlugin, CrowdSecConfigRow, CrowdSecEventQuery, CrowdSecEventRow, CustomRule, GeoDistEntry,
-    GeoStats, Host, HotlinkConfig, LbBackend, NotificationConfig, NotificationLog, RefreshToken, SecurityEvent,
-    SecurityEventQuery, SensitivePattern, StatsOverview, TimeSeriesPoint, TopEntry, TunnelRow, UpdateCertificatePem,
-    UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
+    GeoStats, Host, HotlinkConfig, LbBackend, NotificationConfig, NotificationLog, RecentEvent, RefreshToken,
+    SecurityEvent, SecurityEventQuery, SensitivePattern, StatsOverview, TimeSeriesPoint, TopEntry, TunnelRow,
+    UpdateCertificatePem, UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
 };
 
 impl Database {
@@ -53,7 +53,7 @@ impl Database {
                 created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11,
+                $7, $8, $9::inet, $10, $11,
                 $12, $13, $14,
                 false, 0,
                 $15, $15
@@ -92,7 +92,7 @@ impl Database {
                 guard_status = COALESCE($5, guard_status),
                 remote_host = COALESCE($6, remote_host),
                 remote_port = COALESCE($7, remote_port),
-                remote_ip = COALESCE($8, remote_ip),
+                remote_ip = COALESCE($8::inet, remote_ip),
                 cert_file = COALESCE($9, cert_file),
                 key_file = COALESCE($10, key_file),
                 remarks = COALESCE($11, remarks),
@@ -956,6 +956,161 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
 
+        // Distinct attackers (unique client IPs that have triggered any event)
+        let unique_attackers: i64 =
+            sqlx::query_scalar("SELECT COUNT(DISTINCT client_ip)::bigint FROM security_events")
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(0);
+
+        // Attack category breakdown — derived from `rule_id` prefix with a
+        // deterministic CASE expression so the dashboard can render a pie chart
+        // without needing a new column.  Covers both built-in checker prefixes
+        // (SQLI-, XSS-, RCE-, TRAV-, SCAN-, BOT-, CC-) and YAML rule prefixes
+        // (CRS-, ADV-, API-, MODSEC-, CVE-, GEO-, CUSTOM-).
+        let category_breakdown: Vec<TopEntry> = sqlx::query(
+            "SELECT category AS entry_key, COUNT(*)::bigint AS cnt FROM ( \
+                SELECT CASE \
+                    WHEN rule_id LIKE 'SQLI-%'        THEN 'sqli' \
+                    WHEN rule_id LIKE 'XSS-%'         THEN 'xss' \
+                    WHEN rule_id LIKE 'RCE-%'         THEN 'rce' \
+                    WHEN rule_id LIKE 'TRAV-%'        THEN 'path-traversal' \
+                    WHEN rule_id LIKE 'SCAN-%'        THEN 'scanner' \
+                    WHEN rule_id LIKE 'BOT-%'         THEN 'bot' \
+                    WHEN rule_id LIKE 'CC-%'          THEN 'cc-ddos' \
+                    WHEN rule_id LIKE 'ADV-SSRF%'     THEN 'ssrf' \
+                    WHEN rule_id LIKE 'ADV-SSTI%'     THEN 'ssti' \
+                    WHEN rule_id LIKE 'ADV-%'         THEN 'advanced' \
+                    WHEN rule_id LIKE 'CRS-RESP%'     THEN 'data-leakage' \
+                    WHEN rule_id LIKE 'CRS-%'         THEN 'owasp-crs' \
+                    WHEN rule_id LIKE 'API-MASS%'     THEN 'mass-assignment' \
+                    WHEN rule_id LIKE 'API-%'         THEN 'api-security' \
+                    WHEN rule_id LIKE 'MODSEC-RESP%'  THEN 'web-shell' \
+                    WHEN rule_id LIKE 'MODSEC-%'      THEN 'modsecurity' \
+                    WHEN rule_id LIKE 'CVE-%'         THEN 'cve' \
+                    WHEN rule_id LIKE 'GEO-%'         THEN 'geo-blocking' \
+                    WHEN rule_id LIKE 'CUSTOM-%'      THEN 'custom' \
+                    WHEN rule_id LIKE 'IP-%'          THEN 'ip-rule' \
+                    WHEN rule_id LIKE 'URL-%'         THEN 'url-rule' \
+                    WHEN rule_id LIKE 'SENS-%'        THEN 'sensitive-data' \
+                    WHEN rule_id LIKE 'HOTLINK-%'     THEN 'anti-hotlink' \
+                    WHEN rule_id LIKE 'OWASP-942%'    THEN 'sqli' \
+                    WHEN rule_id LIKE 'OWASP-941%'    THEN 'xss' \
+                    WHEN rule_id LIKE 'OWASP-930%'    THEN 'lfi' \
+                    WHEN rule_id LIKE 'OWASP-931%'    THEN 'rfi' \
+                    WHEN rule_id LIKE 'OWASP-932%'    THEN 'rce' \
+                    WHEN rule_id LIKE 'OWASP-933%'    THEN 'php-injection' \
+                    WHEN rule_id LIKE 'OWASP-913%'    THEN 'scanner' \
+                    ELSE 'other' \
+                END AS category \
+                FROM security_events \
+                WHERE rule_id IS NOT NULL \
+             ) s \
+             GROUP BY category \
+             ORDER BY cnt DESC \
+             LIMIT 20",
+        )
+        .map(|row: sqlx::postgres::PgRow| {
+            use sqlx::Row;
+            TopEntry {
+                key: row.get("entry_key"),
+                count: row.get("cnt"),
+            }
+        })
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+
+        // Action breakdown (block / log / allow / challenge ...) for a quick
+        // enforcement-mix pie chart.
+        let action_breakdown: Vec<TopEntry> = sqlx::query(
+            "SELECT action AS entry_key, COUNT(*)::bigint AS cnt \
+             FROM security_events \
+             GROUP BY action \
+             ORDER BY cnt DESC",
+        )
+        .map(|row: sqlx::postgres::PgRow| {
+            use sqlx::Row;
+            TopEntry {
+                key: row.get("entry_key"),
+                count: row.get("cnt"),
+            }
+        })
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+
+        // Last 20 security events for the activity feed. Category is derived
+        // inline by the same CASE expression so the API consumer does not have
+        // to duplicate the mapping.
+        let recent_events: Vec<RecentEvent> = sqlx::query(
+            "SELECT \
+                created_at AS ts, \
+                client_ip, \
+                host_code, \
+                method, \
+                path, \
+                rule_id, \
+                rule_name, \
+                action, \
+                COALESCE(geo_info->>'country', '') AS country, \
+                CASE \
+                    WHEN rule_id LIKE 'SQLI-%'        THEN 'sqli' \
+                    WHEN rule_id LIKE 'XSS-%'         THEN 'xss' \
+                    WHEN rule_id LIKE 'RCE-%'         THEN 'rce' \
+                    WHEN rule_id LIKE 'TRAV-%'        THEN 'path-traversal' \
+                    WHEN rule_id LIKE 'SCAN-%'        THEN 'scanner' \
+                    WHEN rule_id LIKE 'BOT-%'         THEN 'bot' \
+                    WHEN rule_id LIKE 'CC-%'          THEN 'cc-ddos' \
+                    WHEN rule_id LIKE 'ADV-SSRF%'     THEN 'ssrf' \
+                    WHEN rule_id LIKE 'ADV-SSTI%'     THEN 'ssti' \
+                    WHEN rule_id LIKE 'ADV-%'         THEN 'advanced' \
+                    WHEN rule_id LIKE 'CRS-RESP%'     THEN 'data-leakage' \
+                    WHEN rule_id LIKE 'CRS-%'         THEN 'owasp-crs' \
+                    WHEN rule_id LIKE 'API-MASS%'     THEN 'mass-assignment' \
+                    WHEN rule_id LIKE 'API-%'         THEN 'api-security' \
+                    WHEN rule_id LIKE 'MODSEC-RESP%'  THEN 'web-shell' \
+                    WHEN rule_id LIKE 'MODSEC-%'      THEN 'modsecurity' \
+                    WHEN rule_id LIKE 'CVE-%'         THEN 'cve' \
+                    WHEN rule_id LIKE 'GEO-%'         THEN 'geo-blocking' \
+                    WHEN rule_id LIKE 'CUSTOM-%'      THEN 'custom' \
+                    WHEN rule_id LIKE 'IP-%'          THEN 'ip-rule' \
+                    WHEN rule_id LIKE 'URL-%'         THEN 'url-rule' \
+                    WHEN rule_id LIKE 'SENS-%'        THEN 'sensitive-data' \
+                    WHEN rule_id LIKE 'HOTLINK-%'     THEN 'anti-hotlink' \
+                    WHEN rule_id LIKE 'OWASP-942%'    THEN 'sqli' \
+                    WHEN rule_id LIKE 'OWASP-941%'    THEN 'xss' \
+                    WHEN rule_id LIKE 'OWASP-930%'    THEN 'lfi' \
+                    WHEN rule_id LIKE 'OWASP-931%'    THEN 'rfi' \
+                    WHEN rule_id LIKE 'OWASP-932%'    THEN 'rce' \
+                    WHEN rule_id LIKE 'OWASP-933%'    THEN 'php-injection' \
+                    WHEN rule_id LIKE 'OWASP-913%'    THEN 'scanner' \
+                    ELSE 'other' \
+                END AS category \
+             FROM security_events \
+             ORDER BY created_at DESC \
+             LIMIT 20",
+        )
+        .map(|row: sqlx::postgres::PgRow| {
+            use sqlx::Row;
+            let country_str: String = row.get("country");
+            RecentEvent {
+                ts: row.get("ts"),
+                client_ip: row.get("client_ip"),
+                host_code: row.get("host_code"),
+                method: row.get("method"),
+                path: row.get("path"),
+                rule_id: row.get("rule_id"),
+                rule_name: row.get("rule_name"),
+                action: row.get("action"),
+                category: row.get("category"),
+                country: if country_str.is_empty() { None } else { Some(country_str) },
+            }
+        })
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+
         Ok(StatsOverview {
             total_requests,
             total_blocked,
@@ -965,6 +1120,10 @@ impl Database {
             top_rules,
             top_countries,
             top_isps: top_isp_list,
+            unique_attackers,
+            category_breakdown,
+            action_breakdown,
+            recent_events,
         })
     }
 

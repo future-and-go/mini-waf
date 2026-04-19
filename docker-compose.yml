@@ -24,7 +24,7 @@ services:
   prx-waf:
     build:
       context: .
-      dockerfile: Dockerfile.prebuilt
+      dockerfile: Dockerfile
     container_name: prx-waf
     restart: unless-stopped
     depends_on:
