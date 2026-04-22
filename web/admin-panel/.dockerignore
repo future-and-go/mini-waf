@@ -1,0 +1,11 @@
+node_modules
+dist
+.vite
+.tmp
+*.log
+.DS_Store
+.git
+.env
+.env.*
+README.md
+MIGRATION_RECIPE.md
