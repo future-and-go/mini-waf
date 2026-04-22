@@ -7,6 +7,7 @@ use axum::http::{
 };
 use axum::{
     Router, middleware,
+    response::Redirect,
     routing::{delete, get, patch, post},
 };
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
@@ -207,9 +208,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .layer(middleware::from_fn_with_state(state.clone(), admin_ip_check_middleware))
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit_middleware));
 
-    // Serve the embedded Vue 3 admin UI at /ui/*
+    // Serve the embedded React admin panel (Refine + AntD) at /ui/*.
+    // Root `/` redirects to `/ui/` so visitors hitting the bare host land on
+    // the dashboard instead of a 404. `/ui` without trailing slash also
+    // normalises to `/ui/` for consistent asset resolution.
     let ui_routes = Router::new()
-        .route("/ui", get(static_handler))
+        .route("/", get(|| async { Redirect::permanent("/ui/") }))
+        .route("/ui", get(|| async { Redirect::permanent("/ui/") }))
         .route("/ui/", get(static_handler))
         .route("/ui/{*path}", get(static_handler));
 

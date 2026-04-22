@@ -1,5 +1,3 @@
-version: "3.9"
-
 # PRX-WAF 3-node cluster setup.
 #
 # USAGE:
@@ -85,7 +83,7 @@ services:
       - ./configs:/app/configs:ro
       - ./rules:/app/rules:ro
       - ./data:/app/data:ro
-      - ./web/admin-ui/dist:/app/web/admin-ui/dist:ro
+      - ./web/admin-panel/dist:/app/web/admin-panel/dist:ro
       - cluster_certs:/certs:ro
     command:
       - "/usr/local/bin/prx-waf"
@@ -134,7 +132,7 @@ services:
       - ./configs:/app/configs:ro
       - ./rules:/app/rules:ro
       - ./data:/app/data:ro
-      - ./web/admin-ui/dist:/app/web/admin-ui/dist:ro
+      - ./web/admin-panel/dist:/app/web/admin-panel/dist:ro
       - cluster_certs:/certs:ro
     command:
       - "/usr/local/bin/prx-waf"
@@ -181,7 +179,7 @@ services:
       - ./configs:/app/configs:ro
       - ./rules:/app/rules:ro
       - ./data:/app/data:ro
-      - ./web/admin-ui/dist:/app/web/admin-ui/dist:ro
+      - ./web/admin-panel/dist:/app/web/admin-panel/dist:ro
       - cluster_certs:/certs:ro
     command:
       - "/usr/local/bin/prx-waf"

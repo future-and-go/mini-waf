@@ -1,12 +1,15 @@
 # ─── Stage 0: Frontend Builder ───────────────────────────────────────────────
+# Builds the React/Refine/AntD admin panel (web/admin-panel).
+# Output dist/ is embedded into the Rust binary via `rust_embed` in
+# crates/waf-api/src/static_files.rs and served at /ui/* by prx-waf itself.
 FROM node:22-slim AS frontend-builder
 
 WORKDIR /ui
 
-COPY web/admin-ui/package.json web/admin-ui/package-lock.json* ./
+COPY web/admin-panel/package.json web/admin-panel/package-lock.json* ./
 RUN npm ci --ignore-scripts
 
-COPY web/admin-ui/ ./
+COPY web/admin-panel/ ./
 RUN npm run build
 
 # ─── Stage 1: Rust Builder ────────────────────────────────────────────────────
@@ -46,7 +49,7 @@ RUN cargo build --release 2>/dev/null || true
 COPY . .
 
 # Overwrite the local dist with the freshly built frontend (RustEmbed embeds at compile time)
-COPY --from=frontend-builder /ui/dist ./web/admin-ui/dist/
+COPY --from=frontend-builder /ui/dist ./web/admin-panel/dist/
 
 # Rebuild with real source (only changed crates will be recompiled)
 RUN cargo build --release -p prx-waf
@@ -68,7 +71,7 @@ COPY --from=builder /build/target/release/prx-waf /usr/local/bin/prx-waf
 # Copy default config, OWASP rules, and frontend dist
 COPY configs/   /app/configs/
 COPY rules/     /app/rules/
-COPY --from=frontend-builder /ui/dist /app/web/admin-ui/dist
+COPY --from=frontend-builder /ui/dist /app/web/admin-panel/dist
 
 RUN chmod +x /usr/local/bin/prx-waf
 

@@ -1,4 +1,5 @@
-/// Serve the embedded Vue 3 admin UI from /ui/* (SPA with fallback to index.html).
+/// Serve the embedded React admin panel (Refine + AntD) from /ui/*.
+/// SPA with fallback to index.html for client-side routing.
 use axum::{
     body::Body,
     http::{StatusCode, Uri, header},
@@ -7,7 +8,7 @@ use axum::{
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
-#[folder = "../../web/admin-ui/dist/"]
+#[folder = "../../web/admin-panel/dist/"]
 struct Assets;
 
 pub async fn static_handler(uri: Uri) -> Response {
@@ -71,7 +72,7 @@ fn serve_asset(path: &str) -> Response {
                 None => Response::builder()
                     .status(StatusCode::NOT_FOUND)
                     .body(Body::from(
-                        "Admin UI not found. Run: cd web/admin-ui && npm install && npm run build",
+                        "Admin UI not found. Run: cd web/admin-panel && npm install && npm run build",
                     ))
                     .unwrap_or_default(),
             }

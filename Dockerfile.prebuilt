@@ -12,7 +12,7 @@ COPY target/release/prx-waf /usr/local/bin/prx-waf
 COPY configs/   /app/configs/
 COPY rules/     /app/rules/
 COPY data/      /app/data/
-COPY web/admin-ui/dist /app/web/admin-ui/dist
+COPY web/admin-panel/dist /app/web/admin-panel/dist
 COPY migrations/ /app/migrations/
 
 RUN chmod +x /usr/local/bin/prx-waf

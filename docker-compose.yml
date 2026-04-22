@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ── PostgreSQL database ──────────────────────────────────────────────────────
   postgres:
@@ -40,7 +38,7 @@ services:
     ports:
       - "16880:80"    # HTTP proxy
       - "16843:443"   # HTTPS proxy
-      - "16827:9527"  # Management API + Admin UI
+      - "16827:9527"  # Management API + Admin Panel (embedded React/Refine SPA at /ui/)
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9527/health || exit 1"]
       interval: 30s
@@ -53,6 +51,10 @@ services:
       nofile:
         soft: 65535
         hard: 65535
+
+  # NOTE: The admin panel (web/admin-panel — React/Refine/AntD) is now embedded
+  # directly into the prx-waf binary via `rust_embed` and served at
+  # http://localhost:16827/ui/. No standalone nginx container is needed.
 
 volumes:
   postgres_data:
