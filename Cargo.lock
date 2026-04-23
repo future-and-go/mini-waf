@@ -5113,6 +5113,7 @@ dependencies = [
  "serde_yaml_ng",
  "tokio",
  "tracing",
+ "url",
  "uuid",
  "waf-common",
  "waf-storage",

@@ -34,11 +34,11 @@ use crate::notifications::{
     create_notification, delete_notification, list_notifications, notification_log, test_notification,
 };
 use crate::plugins::{delete_plugin, disable_plugin, enable_plugin, list_plugins, upload_plugin};
+use crate::rules_api::{get_rule_registry, import_rules, reload_rule_registry, toggle_rule};
 use crate::security::{admin_ip_check_middleware, list_audit_log, rate_limit_middleware, security_headers_middleware};
 use crate::state::AppState;
 use crate::static_files::static_handler;
 use crate::stats::{stats_geo, stats_overview, stats_timeseries};
-use crate::rules_api::{get_rule_registry, import_rules, reload_rule_registry, toggle_rule};
 use crate::tunnels::{create_tunnel, delete_tunnel, list_tunnels, ws_tunnel};
 use crate::websocket::{ws_events, ws_logs};
 
