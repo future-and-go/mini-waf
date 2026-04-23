@@ -1,7 +1,7 @@
 ---
 name: SQLi Detection Enhancement
 date: 2026-04-22
-status: draft
+status: active
 blockedBy: []
 blocks: []
 brainstorm: plans/reports/brainstorm-260422-2244-sqli-detection-enhancement.md
@@ -29,8 +29,8 @@ Meet acceptance criteria: classic, blind, time-based, UNION-based SQLi across UR
 | Phase | File | Status |
 |-------|------|--------|
 | 01 | [phase-01-patterns-and-modularize.md](phase-01-patterns-and-modularize.md) | DONE |
-| 02 | [phase-02-json-and-query-param.md](phase-02-json-and-query-param.md) | todo |
-| 03 | [phase-03-header-scan-and-config.md](phase-03-header-scan-and-config.md) | todo |
+| 02 | [phase-02-json-and-query-param.md](phase-02-json-and-query-param.md) | DONE |
+| 03 | [phase-03-header-scan-and-config.md](phase-03-header-scan-and-config.md) | in-progress |
 | 04 | [phase-04-bench-and-tests.md](phase-04-bench-and-tests.md) | todo |
 
 ## Dependencies

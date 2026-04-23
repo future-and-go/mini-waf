@@ -1,6 +1,7 @@
 use waf_common::{DetectionResult, Phase, RequestCtx};
 
 use super::sql_injection_patterns::{SQLI_DESCS, SQLI_SET};
+use super::sql_injection_scanners::{scan_json_body, scan_query_params};
 use super::{Check, request_targets};
 
 /// SQL injection detection checker.
@@ -24,6 +25,40 @@ impl Check for SqlInjectionCheck {
             return None;
         }
 
+        // 1. Per-parameter query string scan for precise attribution
+        if !ctx.query.is_empty() {
+            if let Some((location, idx)) = scan_query_params(&ctx.query, &SQLI_SET) {
+                let desc = SQLI_DESCS.get(idx).copied().unwrap_or("SQL Injection pattern");
+                return Some(DetectionResult {
+                    rule_id: Some(format!("SQLI-{:03}", idx + 1)),
+                    rule_name: "SQL Injection".to_string(),
+                    phase: Phase::SqlInjection,
+                    detail: format!("{desc} detected in {location}"),
+                });
+            }
+        }
+
+        // 2. JSON body scan if Content-Type indicates JSON
+        if !ctx.body_preview.is_empty() {
+            let is_json = ctx
+                .headers
+                .get("content-type")
+                .map(|ct| ct.contains("application/json"))
+                .unwrap_or(false);
+            if is_json {
+                if let Some((location, idx)) = scan_json_body(&ctx.body_preview, &SQLI_SET) {
+                    let desc = SQLI_DESCS.get(idx).copied().unwrap_or("SQL Injection pattern");
+                    return Some(DetectionResult {
+                        rule_id: Some(format!("SQLI-{:03}", idx + 1)),
+                        rule_name: "SQL Injection".to_string(),
+                        phase: Phase::SqlInjection,
+                        detail: format!("{desc} detected in {location}"),
+                    });
+                }
+            }
+        }
+
+        // 3. Fallback: generic scan (path, raw query, cookie, non-JSON body)
         for (location, value) in request_targets(ctx) {
             let matches = SQLI_SET.matches(&value);
             if matches.matched_any() {
@@ -110,5 +145,42 @@ mod tests {
         let mut ctx = make_ctx("id=1 UNION SELECT 1,2,3--", "");
         Arc::make_mut(&mut ctx.host_config).defense_config.sqli = false;
         assert!(checker.check(&ctx).is_none(), "Should skip when disabled");
+    }
+
+    #[test]
+    fn detects_json_nested_sqli() {
+        let checker = SqlInjectionCheck::new();
+        let mut ctx = make_ctx("", r#"{"user":{"name":"' OR '1'='1'"}}"#);
+        ctx.headers
+            .insert("content-type".to_string(), "application/json".to_string());
+        let result = checker.check(&ctx);
+        assert!(result.is_some(), "Should detect SQLi in JSON body");
+        let detail = result.unwrap().detail;
+        assert!(
+            detail.contains("body.user.name"),
+            "Should attribute to JSON path: {detail}"
+        );
+    }
+
+    #[test]
+    fn detects_query_param_sqli() {
+        let checker = SqlInjectionCheck::new();
+        let ctx = make_ctx("id=1+UNION+SELECT+1,2", "");
+        let result = checker.check(&ctx);
+        assert!(result.is_some(), "Should detect SQLi in query param");
+        let detail = result.unwrap().detail;
+        assert!(detail.contains("query.id"), "Should attribute to query param: {detail}");
+    }
+
+    #[test]
+    fn json_malformed_falls_back_to_raw() {
+        let checker = SqlInjectionCheck::new();
+        let mut ctx = make_ctx("", "not json ' OR '1'='1'");
+        ctx.headers
+            .insert("content-type".to_string(), "application/json".to_string());
+        let result = checker.check(&ctx);
+        assert!(result.is_some(), "Should fallback to raw body scan");
+        let detail = result.unwrap().detail;
+        assert!(detail.contains("body"), "Should detect in raw body: {detail}");
     }
 }
