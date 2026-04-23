@@ -30,7 +30,7 @@ Meet acceptance criteria: classic, blind, time-based, UNION-based SQLi across UR
 |-------|------|--------|
 | 01 | [phase-01-patterns-and-modularize.md](phase-01-patterns-and-modularize.md) | DONE |
 | 02 | [phase-02-json-and-query-param.md](phase-02-json-and-query-param.md) | DONE |
-| 03 | [phase-03-header-scan-and-config.md](phase-03-header-scan-and-config.md) | in-progress |
+| 03 | [phase-03-header-scan-and-config.md](phase-03-header-scan-and-config.md) | DONE |
 | 04 | [phase-04-bench-and-tests.md](phase-04-bench-and-tests.md) | todo |
 
 ## Dependencies
