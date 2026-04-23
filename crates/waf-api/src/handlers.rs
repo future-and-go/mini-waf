@@ -348,6 +348,14 @@ pub async fn reload_rules(State(state): State<Arc<AppState>>) -> ApiResult<Json<
     Ok(Json(json!({ "success": true, "data": "Rules reloaded" })))
 }
 
+pub async fn reload_sqli_scan_config(
+    State(state): State<Arc<AppState>>,
+    Json(cfg): Json<waf_common::config::SqliScanConfig>,
+) -> ApiResult<Json<Value>> {
+    state.engine.reload_sqli_scan_config(cfg);
+    Ok(Json(json!({ "success": true, "data": "SQLi scan config reloaded" })))
+}
+
 // ─── Custom Rules ─────────────────────────────────────────────────────────────
 
 pub async fn list_custom_rules(
