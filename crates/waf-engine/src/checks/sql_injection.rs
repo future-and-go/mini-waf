@@ -1,62 +1,7 @@
-use std::sync::LazyLock;
-
-use regex::RegexSet;
 use waf_common::{DetectionResult, Phase, RequestCtx};
 
+use super::sql_injection_patterns::{SQLI_DESCS, SQLI_SET};
 use super::{Check, request_targets};
-
-/// Pattern descriptions aligned by index with `SQLI_SET` patterns.
-static SQLI_DESCS: &[&str] = &[
-    "UNION SELECT injection",
-    "comment-based injection (-- / #)",
-    "stacked query injection (;DROP/DELETE/...)",
-    "time-based blind injection (SLEEP/BENCHMARK/WAITFOR)",
-    "xp_cmdshell execution",
-    "INFORMATION_SCHEMA enumeration",
-    "OR/AND always-true tautology",
-    "LOAD_FILE() read",
-    "INTO OUTFILE/DUMPFILE write",
-    "hex-encoded string injection (0x...)",
-    "quoted string escape (')",
-    "MySQL/MSSQL system table enumeration",
-];
-
-// SAFETY: All patterns are compile-time string literals. If any pattern fails
-// to compile it is a code bug that must be caught in development, not at runtime.
-static SQLI_SET: LazyLock<RegexSet> = LazyLock::new(|| {
-    match RegexSet::new([
-        // UNION … SELECT
-        r"(?i)\bunion\b[\s/\*]+select\b",
-        // Comment sequences followed by DML keywords
-        r"(?i)(--|#|/\*[\s\S]*?\*/)[\s]*?(select|union|drop|insert|update|delete|exec|xp_)",
-        // Stacked queries: '; <keyword>
-        r"(?i)'[\s]*;[\s]*(drop|delete|insert|update|exec|select|truncate)\b",
-        // Time-based blind
-        r"(?i)\b(sleep|benchmark|waitfor[\s]+delay|pg_sleep)\s*\(",
-        // xp_cmdshell
-        r"(?i)\bxp_cmdshell\b",
-        // INFORMATION_SCHEMA / sys.tables / sysobjects
-        r"(?i)\b(information_schema|sys\.(tables|columns|databases)|sysobjects|sysusers)\b",
-        // OR/AND tautologies
-        r"(?i)\b(or|and)\b[\s]+'[^']*'[\s]*=[\s]*'[^']*'",
-        // LOAD_FILE()
-        r"(?i)\bload_file\s*\(",
-        // INTO OUTFILE / DUMPFILE
-        r"(?i)\binto[\s]+(outfile|dumpfile)\b",
-        // Hex literals 0x41…
-        r"(?i)0x[0-9a-f]{4,}",
-        // Single-quote escapes common in error-based injection
-        r"'[\s]*(or|and|union|select|drop|insert|update|delete)\b",
-        // MySQL/MSSQL catalog tables
-        r"(?i)\b(mysql\.(user|db)|master\.\.(sysdatabases|sysobjects))\b",
-    ]) {
-        Ok(set) => set,
-        Err(e) => {
-            tracing::error!("BUG: SQL injection regex set failed to compile: {e}");
-            RegexSet::empty()
-        }
-    }
-});
 
 /// SQL injection detection checker.
 pub struct SqlInjectionCheck;
