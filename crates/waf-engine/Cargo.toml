@@ -36,6 +36,11 @@ url = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "sql_injection"
+harness = false
 
 [lints]
 workspace = true
