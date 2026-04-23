@@ -10,6 +10,8 @@ use waf_storage::{
 
 use crate::block_page::render_block_page;
 use crate::checker::{RuleStore, check_ip_blacklist, check_ip_whitelist, check_url_blacklist, check_url_whitelist};
+use waf_common::config::SqliScanConfig;
+
 use crate::checks::{
     AntiHotlinkCheck, BotCheck, CcCheck, Check, DirTraversalCheck, GeoCheck, OWASPCheck, RceCheck, ScannerCheck,
     SensitiveCheck, SqlInjectionCheck, XssCheck,
@@ -49,6 +51,8 @@ pub struct WafEngine {
     owasp: Arc<OWASPCheck>,
     /// GeoIP-based access control check (Phase 17).
     geo_check: Arc<GeoCheck>,
+    /// SQL injection checker (stored separately for config hot-reload)
+    sqli_check: Arc<SqlInjectionCheck>,
     // ── Phase 6: `CrowdSec` ───────────────────────────────────────────────────
     /// Bouncer checker (set once after engine construction via `set_crowdsec`)
     crowdsec_checker: OnceLock<Arc<CrowdSecChecker>>,
@@ -66,20 +70,24 @@ pub struct WafEngine {
 
 impl WafEngine {
     pub fn new(db: Arc<Database>, config: WafEngineConfig) -> Self {
+        Self::with_sqli_config(db, config, SqliScanConfig::default())
+    }
+
+    pub fn with_sqli_config(db: Arc<Database>, config: WafEngineConfig, sqli_cfg: SqliScanConfig) -> Self {
         let store = Arc::new(RuleStore::new(Arc::clone(&db)));
         let custom_rules = Arc::new(CustomRulesEngine::new());
         let sensitive = Arc::new(SensitiveCheck::new());
         let hotlink = Arc::new(AntiHotlinkCheck::new());
         let owasp = Arc::new(OWASPCheck::new());
         let geo_check = Arc::new(GeoCheck::new());
+        let sqli_check = Arc::new(SqlInjectionCheck::with_config(sqli_cfg));
 
-        // Build the Phase 5-11 checker pipeline.
+        // Build the Phase 5-11 checker pipeline (SQLi handled separately for hot-reload).
         // CC runs first to shed flood traffic before expensive pattern checks.
         let checkers: Vec<Box<dyn Check>> = vec![
             Box::new(CcCheck::new()),
             Box::new(ScannerCheck::new()),
             Box::new(BotCheck::new()),
-            Box::new(SqlInjectionCheck::new()),
             Box::new(XssCheck::new()),
             Box::new(RceCheck::new()),
             Box::new(DirTraversalCheck::new()),
@@ -95,6 +103,7 @@ impl WafEngine {
             checkers,
             owasp,
             geo_check,
+            sqli_check,
             crowdsec_checker: OnceLock::new(),
             appsec_client: OnceLock::new(),
             community_checker: OnceLock::new(),
@@ -135,6 +144,11 @@ impl WafEngine {
     /// Return a reference to the `GeoCheck` so callers can load rules.
     pub const fn geo_check(&self) -> &Arc<GeoCheck> {
         &self.geo_check
+    }
+
+    /// Hot-reload `SQLi` scan configuration without restarting.
+    pub fn reload_sqli_scan_config(&self, cfg: SqliScanConfig) {
+        self.sqli_check.reload_config(cfg);
     }
 
     /// Reload all rules from the database
@@ -317,6 +331,23 @@ impl WafEngine {
                 self.report_community_signal(ctx, &decision);
                 return decision;
             }
+        }
+
+        // ── SQLi check (separate for hot-reload support) ─────────────────────
+        if let Some(result) = self.sqli_check.check(ctx) {
+            let rule_name = result.rule_name.clone();
+            let decision = if ctx.host_config.log_only_mode {
+                WafDecision {
+                    action: WafAction::LogOnly,
+                    result: Some(result),
+                }
+            } else {
+                let body = render_block_page(ctx, &rule_name);
+                WafDecision::block(403, Some(body), result)
+            };
+            self.log_security_event(ctx, &decision);
+            self.report_community_signal(ctx, &decision);
+            return decision;
         }
 
         // ── Phase 16b: CrowdSec AppSec — async per-request check ──────────────
