@@ -52,13 +52,17 @@ services:
       ADMIN_PASSWORD: admin123
       RUST_LOG: info
     volumes:
-      - ../../configs:/app/configs:ro
+      # Only mount the rules folder — prx-waf only reads the config file
+      # passed via --config, so we don't need the production configs/ tree.
+      # Mounting e2e.toml at a top-level path (not under /app/configs/)
+      # avoids the "read-only file system" error you get when bind-mounting
+      # a single file inside another read-only bind-mounted directory.
       - ../../rules:/app/rules:ro
-      - ./configs/e2e.toml:/app/configs/e2e.toml:ro
+      - ./configs/e2e.toml:/app/e2e.toml:ro
     command:
       - "/usr/local/bin/prx-waf"
       - "--config"
-      - "/app/configs/e2e.toml"
+      - "/app/e2e.toml"
       - "run"
     ports:
       - "16880:80"
