@@ -283,9 +283,15 @@ fn main() -> anyhow::Result<()> {
     // (which happens here via transitive dependencies — Cargo.lock contains
     // both). Installing explicitly at startup picks `ring` deterministically
     // and avoids the worker-thread panic that disables the cluster QUIC
-    // transport (and therefore /api/cluster/status). `install_default` returns
-    // `Err` if a provider was already installed — fine, ignore.
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // transport (and therefore /api/cluster/status). The cluster transport
+    // ALSO uses `builder_with_provider(ring)` directly, so even if this call
+    // races with another initialiser the cluster bring-up still works. We
+    // emit a stderr breadcrumb here so the container log makes it obvious
+    // whether this exact binary contains the fix.
+    match rustls::crypto::ring::default_provider().install_default() {
+        Ok(()) => eprintln!("rustls: installed ring as the process-default CryptoProvider"),
+        Err(_) => eprintln!("rustls: another CryptoProvider was already installed (ignored)"),
+    }
 
     tracing_subscriber::registry()
         .with(fmt::layer())

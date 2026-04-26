@@ -125,14 +125,19 @@ log "step 4: verifying node roles"
 # Helper that fetches /api/cluster/status with auth, captures both HTTP code
 # and body, and dumps the raw response to stderr for debugging when assertions
 # fail. The `-w "\n%{http_code}"` trick separates body and code without jq.
+#
+# CRITICAL: the diagnostic prints MUST go to stderr (>&2). The caller wraps
+# this function in `$(...)` which captures stdout into a variable; if the
+# logs went to stdout the caller would receive "[12:34:56] body: ..." mixed
+# with the JSON body, breaking the role/node_id regex parsers downstream.
 fetch_status() {
     local url="$1" body code resp
     resp=$(curl -sk --max-time 10 -H "$AUTH_HDR" -w '\n%{http_code}' "$url/api/cluster/status" || echo $'\n000')
     code="${resp##*$'\n'}"
     body="${resp%$'\n'*}"
-    log "  GET $url/api/cluster/status -> HTTP $code"
-    log "  body: ${body:0:400}"
-    echo "$body"
+    echo "[$(date +%H:%M:%S)]   GET $url/api/cluster/status -> HTTP $code" >&2
+    echo "[$(date +%H:%M:%S)]   body: ${body:0:400}" >&2
+    printf '%s' "$body"
 }
 
 STATUS_A=$(fetch_status "$NODE_A_API")

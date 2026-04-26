@@ -87,8 +87,8 @@ assert_http_status "stats.geo"       "200" "${AUTH[@]}" "$ADMIN/api/stats/geo"
 
 # ── 5) Rule registry + reload ───────────────────────────────────────────────
 REG=$(http_get "${AUTH[@]}" "$ADMIN/api/rules/registry")
-# awk gsub avoids `grep -o … | wc -l` which exits 1 under pipefail on no-match.
-RULES=$(awk -v s="$REG" 'BEGIN{ n=gsub(/"id"/, "", s); print n }')
+# Stream via stdin to avoid `awk -v s=…` ARG_MAX overflow on large registries.
+RULES=$(printf '%s' "$REG" | awk '{ n+=gsub(/"id"/, "") } END { print n+0 }')
 if (( RULES > 20 )); then
     pass "rules.registry" "$RULES rules"
 else
