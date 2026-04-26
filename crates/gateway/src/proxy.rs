@@ -171,10 +171,15 @@ impl ProxyHttp for WafProxy {
         let use_tls = host_config.ssl;
 
         ctx.upstream_addr = Some(upstream_addr.clone());
-        ctx.host_config = Some(Arc::clone(&host_config));
-
-        let request_ctx = self.build_request_ctx(session, Arc::clone(&host_config));
-        ctx.request_ctx = Some(request_ctx);
+        // host_config and request_ctx may already have been populated by
+        // request_filter when running WAF inspection — only build a fresh one
+        // if that path didn't run (e.g. health-check shortcut).
+        if ctx.host_config.is_none() {
+            ctx.host_config = Some(Arc::clone(&host_config));
+        }
+        if ctx.request_ctx.is_none() {
+            ctx.request_ctx = Some(self.build_request_ctx(session, Arc::clone(&host_config)));
+        }
 
         info!("Proxying {} → {}", host_header, upstream_addr);
 
@@ -183,6 +188,26 @@ impl ProxyHttp for WafProxy {
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut GatewayCtx) -> pingora_core::Result<bool> {
+        // Pingora calls request_filter BEFORE upstream_peer, so the original
+        // code path saw `ctx.request_ctx == None` and skipped WAF inspection
+        // entirely for any request whose body never reached the
+        // request_body_filter (i.e. all GETs and bodyless POSTs). That
+        // bypassed every URL/header/UA-based rule — sqlmap UA, log4shell
+        // headers, query-string SQLi etc. all sailed through. Resolve the
+        // host and build the request context HERE so the WAF runs first,
+        // then upstream_peer reuses what we put into ctx.
+        if ctx.request_ctx.is_none() {
+            let host_header = session
+                .get_header("host")
+                .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+                .unwrap_or("")
+                .to_string();
+            if let Some(host_config) = self.router.resolve(&host_header) {
+                ctx.host_config = Some(Arc::clone(&host_config));
+                ctx.request_ctx = Some(self.build_request_ctx(session, host_config));
+            }
+        }
+
         let mut request_ctx = match &ctx.request_ctx {
             Some(c) => c.clone(),
             None => return Ok(false),
