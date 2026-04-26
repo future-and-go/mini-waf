@@ -10,6 +10,13 @@ on:
         description: "Comma-separated list of suites to run (rules-engine,gateway,waf-api,cluster) — empty = all"
         required: false
         default: ""
+  # TEMPORARY — auto-trigger on push to the e2e-test feature branch so GitHub
+  # registers the workflow (workflow_dispatch returns 404 until the file has
+  # existed on the default branch OR run at least once via another trigger).
+  # Remove this `push:` block after merging to main.
+  push:
+    branches:
+      - feature/e2e-test
 
 permissions:
   contents: read
