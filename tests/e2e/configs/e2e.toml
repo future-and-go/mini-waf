@@ -21,7 +21,8 @@ default_ttl_secs = 30
 max_ttl_secs     = 300
 
 [http3]
-enabled = false
+enabled     = false
+listen_addr = "0.0.0.0:443"
 
 [security]
 admin_ip_allowlist     = []

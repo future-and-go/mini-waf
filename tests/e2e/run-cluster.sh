@@ -40,11 +40,11 @@ e2e_init "cluster"
 LOG_FILE="$E2E_OUT_DIR/e2e-cluster.log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-cleanup() {
-    log "[cluster] cleanup"
-    $COMPOSE "${COMPOSE_FILES[@]}" down -v 2>/dev/null || true
-}
-trap cleanup EXIT
+# NOTE: do NOT install an EXIT trap that tears down the cluster — the
+# enclosing GitHub Actions job has its own `Tear down` step (if: always())
+# AND a `Cluster logs (always)` step that runs AFTER this script. If we
+# tear down here, the workflow's logs step runs against a vanished cluster
+# and prints nothing useful (the very situation that hid the original bug).
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
