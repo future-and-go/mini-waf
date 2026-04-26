@@ -1,0 +1,271 @@
+name: Nightly E2E
+
+on:
+  schedule:
+    # 18:00 UTC == 01:00 ICT (Asia/Bangkok) every day.
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: "Comma-separated list of suites to run (rules-engine,gateway,waf-api,cluster) — empty = all"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: nightly-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── 1) Build the prx-waf release binary once and share via artifact ────────
+  # Pinned to ubuntu-22.04 (glibc 2.35) so the produced binary runs inside
+  # the Dockerfile.prebuilt base image (debian:bookworm-slim, glibc 2.36).
+  # ubuntu-latest currently resolves to ubuntu-24.04 (glibc 2.39) which
+  # links symbols (GLIBC_2.38) absent from bookworm and fails at runtime.
+  build:
+    name: Build release binary
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nightly-e2e
+
+      - name: Build prx-waf (release)
+        run: cargo build --release -p prx-waf
+
+      - name: Verify binary runs in deployment container (glibc compat)
+        run: |
+          docker run --rm \
+            -v "$PWD/target/release/prx-waf:/prx-waf:ro" \
+            debian:bookworm-slim \
+            /bin/sh -c "apt-get update -qq >/dev/null && apt-get install -qq -y libssl3 ca-certificates >/dev/null && /prx-waf --help" \
+            >/dev/null
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: prx-waf-bin
+          path: target/release/prx-waf
+          retention-days: 7
+          if-no-files-found: error
+
+  # ── 2a) Rule Engine suite ──────────────────────────────────────────────────
+  rules-engine:
+    name: Rules Engine E2E
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ inputs.suites == '' || contains(inputs.suites, 'rules-engine') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: prx-waf-bin, path: target/release }
+      - run: chmod +x target/release/prx-waf tests/e2e/*.sh
+
+      - name: Prepare workspace for Dockerfile.prebuilt
+        run: mkdir -p data web/admin-panel/dist
+
+      - name: Start E2E stack
+        run: docker compose -f tests/e2e/docker-compose.e2e.yml up -d --build
+
+      - name: Run rules-engine suite
+        run: bash tests/e2e/run-rules-engine.sh
+        continue-on-error: true
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f tests/e2e/docker-compose.e2e.yml logs --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f tests/e2e/docker-compose.e2e.yml down -v
+
+      - name: Upload suite artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-rules-engine
+          path: tests/e2e/out/rules-engine
+          retention-days: 14
+
+  # ── 2b) Gateway suite ──────────────────────────────────────────────────────
+  gateway:
+    name: Gateway E2E
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ inputs.suites == '' || contains(inputs.suites, 'gateway') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: prx-waf-bin, path: target/release }
+      - run: chmod +x target/release/prx-waf tests/e2e/*.sh
+
+      - name: Prepare workspace for Dockerfile.prebuilt
+        run: mkdir -p data web/admin-panel/dist
+
+      - name: Start E2E stack
+        run: docker compose -f tests/e2e/docker-compose.e2e.yml up -d --build
+
+      - name: Run gateway suite
+        run: bash tests/e2e/run-gateway.sh
+        continue-on-error: true
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f tests/e2e/docker-compose.e2e.yml logs --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f tests/e2e/docker-compose.e2e.yml down -v
+
+      - name: Upload suite artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-gateway
+          path: tests/e2e/out/gateway
+          retention-days: 14
+
+  # ── 2c) WAF API suite ──────────────────────────────────────────────────────
+  waf-api:
+    name: WAF API E2E
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ inputs.suites == '' || contains(inputs.suites, 'waf-api') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: prx-waf-bin, path: target/release }
+      - run: chmod +x target/release/prx-waf tests/e2e/*.sh
+
+      - name: Prepare workspace for Dockerfile.prebuilt
+        run: mkdir -p data web/admin-panel/dist
+
+      - name: Start E2E stack
+        run: docker compose -f tests/e2e/docker-compose.e2e.yml up -d --build
+
+      - name: Run waf-api suite
+        run: bash tests/e2e/run-api.sh
+        continue-on-error: true
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f tests/e2e/docker-compose.e2e.yml logs --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f tests/e2e/docker-compose.e2e.yml down -v
+
+      - name: Upload suite artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-waf-api
+          path: tests/e2e/out/waf-api
+          retention-days: 14
+
+  # ── 2d) Cluster suite (3-node bootstrap, election, sync) ───────────────────
+  cluster:
+    name: Cluster E2E
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: ${{ inputs.suites == '' || contains(inputs.suites, 'cluster') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: prx-waf-bin, path: target/release }
+      - run: chmod +x target/release/prx-waf tests/e2e/*.sh tests/e2e-cluster.sh
+
+      - name: Prepare workspace for Dockerfile.prebuilt
+        run: mkdir -p data web/admin-panel/dist
+
+      - name: Run cluster suite
+        env:
+          COMPOSE_CMD: "docker compose"
+        run: bash tests/e2e/run-cluster.sh
+        continue-on-error: true
+
+      - name: Cluster logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.cluster.yml logs --tail=200 || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.cluster.yml down -v || true
+
+      - name: Upload suite artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-cluster
+          path: tests/e2e/out/cluster
+          retention-days: 14
+
+  # ── 3) Aggregate report (always runs, even if some suites failed) ──────────
+  report:
+    name: Aggregated Report
+    needs: [rules-engine, gateway, waf-api, cluster]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all suite artefacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage suite results
+        run: |
+          mkdir -p tests/e2e/out
+          for s in rules-engine gateway waf-api cluster; do
+            if [[ -d "artifacts/e2e-$s" ]]; then
+              mv "artifacts/e2e-$s" "tests/e2e/out/$s"
+            fi
+          done
+          ls -la tests/e2e/out || true
+
+      - name: Render aggregated report
+        run: bash tests/e2e/render-report.sh tests/e2e/out tests/e2e/out/aggregated
+        continue-on-error: true
+
+      - name: Publish JUnit results to Checks tab
+        if: always()
+        uses: mikepenz/action-junit-report@v5
+        with:
+          report_paths: "tests/e2e/out/**/junit.xml"
+          check_name: "Nightly E2E Tests"
+          require_tests: false
+          detailed_summary: true
+
+      - name: Upload aggregated HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: tests/e2e/out/aggregated
+          retention-days: 30
+
+      - name: Fail job if any suite failed
+        run: |
+          [[ -f tests/e2e/out/aggregated/summary.md ]] || { echo "no aggregated summary"; exit 1; }
+          if grep -q "^# ❌" tests/e2e/out/aggregated/summary.md; then
+            echo "Nightly E2E reported failures — see summary above."
+            exit 1
+          fi

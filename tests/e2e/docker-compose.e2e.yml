@@ -1,0 +1,76 @@
+# Minimal compose stack for nightly E2E suites (rules-engine / gateway / api).
+# Reuses Dockerfile.prebuilt so the workflow builds the binary once with cargo
+# cache and shares it across suites.
+#
+# Run from repo root:
+#   cargo build --release -p prx-waf
+#   docker compose -f tests/e2e/docker-compose.e2e.yml up -d
+#
+# The cluster suite uses the existing docker-compose.cluster.yml.
+
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    container_name: e2e-postgres
+    environment:
+      POSTGRES_USER: prx_waf
+      POSTGRES_PASSWORD: prx_waf
+      POSTGRES_DB: prx_waf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prx_waf -d prx_waf"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [e2e_net]
+
+  httpbin:
+    # mccutchen/go-httpbin is a maintained Go re-implementation of httpbin;
+    # we tell it to bind on port 80 inside the network so the WAF config
+    # can reference the canonical HTTP port. The image is distroless so we
+    # rely on `service_started` for ordering instead of a shell healthcheck.
+    image: docker.io/mccutchen/go-httpbin:v2
+    container_name: e2e-httpbin
+    command: ["-port=80"]
+    networks: [e2e_net]
+
+  prx-waf:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.prebuilt
+    container_name: e2e-prx-waf
+    depends_on:
+      postgres:
+        condition: service_healthy
+      httpbin:
+        condition: service_started
+    environment:
+      JWT_SECRET: e2e-test-secret-not-for-production
+      DATABASE_URL: postgresql://prx_waf:prx_waf@postgres:5432/prx_waf
+      # Seeds the default admin with a deterministic password so the suites
+      # can authenticate; never use this value outside CI.
+      ADMIN_PASSWORD: admin123
+      RUST_LOG: info
+    volumes:
+      - ../../configs:/app/configs:ro
+      - ../../rules:/app/rules:ro
+      - ./configs/e2e.toml:/app/configs/e2e.toml:ro
+    command:
+      - "/usr/local/bin/prx-waf"
+      - "--config"
+      - "/app/configs/e2e.toml"
+      - "run"
+    ports:
+      - "16880:80"
+      - "16827:9527"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9527/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      start_period: 20s
+      retries: 10
+    cap_add: [NET_ADMIN]
+    networks: [e2e_net]
+
+networks:
+  e2e_net:
+    driver: bridge
