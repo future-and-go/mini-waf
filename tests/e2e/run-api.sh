@@ -31,7 +31,8 @@ assert_http_status "auth.unauthenticated-rejected" "401" "$ADMIN/api/hosts"
 LOGIN=$(http_get -X POST "$ADMIN/api/auth/login" \
     -H "Content-Type: application/json" \
     -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASS\"}")
-TOKEN=$(echo "$LOGIN" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "")
+# Login response shape: { "success": true, "data": { "access_token": "...", "refresh_token": "..." } }
+TOKEN=$(echo "$LOGIN" | grep -o '"access_token":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "")
 
 if [[ -z "$TOKEN" ]]; then
     fail "auth.login" "no token in response: $LOGIN"
