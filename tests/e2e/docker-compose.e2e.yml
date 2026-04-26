@@ -24,11 +24,12 @@ services:
     networks: [e2e_net]
 
   httpbin:
-    # mccutchen/go-httpbin is a maintained Go re-implementation of httpbin;
-    # we tell it to bind on port 80 inside the network so the WAF config
-    # can reference the canonical HTTP port. The image is distroless so we
-    # rely on `service_started` for ordering instead of a shell healthcheck.
-    image: docker.io/mccutchen/go-httpbin:v2
+    # mccutchen/go-httpbin is a maintained Go re-implementation of httpbin.
+    # NOTE: The image does NOT publish a `v2` major-version tag — only
+    # `latest` and full versions like `2.22.1`. Pin to a known-good version
+    # for reproducibility. Distroless image so we use `service_started`
+    # ordering instead of a shell healthcheck.
+    image: docker.io/mccutchen/go-httpbin:2.22.1
     container_name: e2e-httpbin
     command: ["-port=80"]
     networks: [e2e_net]
