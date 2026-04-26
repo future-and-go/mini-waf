@@ -27,7 +27,7 @@ use crate::handlers::{
     delete_certificate, delete_custom_rule, delete_host, delete_lb_backend, delete_sensitive_pattern, get_host,
     get_hotlink_config, get_status, list_allow_ips, list_allow_urls, list_attack_logs, list_block_ips, list_block_urls,
     list_certificates, list_custom_rules, list_hosts, list_lb_backends, list_security_events, list_sensitive_patterns,
-    reload_rules, update_host, upload_certificate, upsert_hotlink_config,
+    reload_rules, reload_sqli_scan_config, update_host, upload_certificate, upsert_hotlink_config,
 };
 use crate::health::health_check;
 use crate::middleware::require_auth;
@@ -35,11 +35,11 @@ use crate::notifications::{
     create_notification, delete_notification, list_notifications, notification_log, test_notification,
 };
 use crate::plugins::{delete_plugin, disable_plugin, enable_plugin, list_plugins, upload_plugin};
+use crate::rules_api::{get_rule_registry, import_rules, reload_rule_registry, toggle_rule};
 use crate::security::{admin_ip_check_middleware, list_audit_log, rate_limit_middleware, security_headers_middleware};
 use crate::state::AppState;
 use crate::static_files::static_handler;
 use crate::stats::{stats_geo, stats_overview, stats_timeseries};
-use crate::rules_api::{get_rule_registry, import_rules, reload_rule_registry, toggle_rule};
 use crate::tunnels::{create_tunnel, delete_tunnel, list_tunnels, ws_tunnel};
 use crate::websocket::{ws_events, ws_logs};
 
@@ -105,6 +105,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/status", get(get_status))
         // Rule reload
         .route("/api/reload", post(reload_rules))
+        // SQLi scan config hot-reload
+        .route("/api/sqli-scan/reload", post(reload_sqli_scan_config))
         // Phase 3: Custom rules
         .route(
             "/api/custom-rules",

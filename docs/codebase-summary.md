@@ -48,7 +48,9 @@ prx-waf/
 │   │   │   ├── cc_limiter.rs  # Rate limiting (sliding window)
 │   │   │   ├── scanner.rs     # Scanner detection (fingerprints)
 │   │   │   ├── bot.rs         # Bot detection (UA, headless)
-│   │   │   ├── sqli.rs        # SQL injection (libinjectionrs + regex)
+│   │   │   ├── sql_injection.rs          # SQL injection main check
+│   │   │   ├── sql_injection_patterns.rs # 19 patterns (SQLI-001..019)
+│   │   │   ├── sql_injection_scanners.rs # Scanner helpers (Phase 02+)
 │   │   │   ├── xss.rs         # XSS (libinjectionrs + regex)
 │   │   │   ├── rce.rs         # Command injection
 │   │   │   ├── traversal.rs   # Directory traversal
