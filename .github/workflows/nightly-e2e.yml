@@ -49,6 +49,15 @@ jobs:
         with:
           shared-key: nightly-e2e
 
+      # rust_embed (#[folder = "../../web/admin-panel/dist/"]) requires the
+      # admin-panel dist folder to exist at compile time. We don't need the
+      # UI for E2E so an empty placeholder is enough — rust_embed compiles
+      # the struct with zero embedded assets and the binary still runs.
+      - name: Create admin-panel dist placeholder
+        run: |
+          mkdir -p web/admin-panel/dist
+          : > web/admin-panel/dist/.gitkeep
+
       - name: Build prx-waf (release)
         run: cargo build --release -p prx-waf
 
