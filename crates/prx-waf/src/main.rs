@@ -1162,10 +1162,30 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
 
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
 
+    // Build the cluster node BEFORE init_async so its NodeState can be plugged
+    // into AppState while we still own a mutable handle to it. The actual
+    // cluster runtime is spawned later (after the API server is up).
+    let cluster_node = if let Some(cluster_cfg) = config.cluster.clone() {
+        if cluster_cfg.enabled {
+            match waf_cluster::ClusterNode::new(cluster_cfg) {
+                Ok(node) => Some(node),
+                Err(e) => {
+                    tracing::error!("Failed to create cluster node: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let cluster_state_for_api = cluster_node.as_ref().map(waf_cluster::ClusterNode::state);
+
     // `_shutdown_guards` holds the watch senders that signal background workers
     // to stop.  They are dropped automatically when `run_server` returns (after
     // `server.run_forever()` exits), which sends the shutdown signal.
-    let (engine, router, api_state, _shutdown_guards) = rt.block_on(init_async(config))?;
+    let (engine, router, api_state, _shutdown_guards) = rt.block_on(init_async(config, cluster_state_for_api))?;
 
     // Start the management API in a background thread
     let api_listen = config.api.listen_addr.clone();
@@ -1247,10 +1267,9 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
         });
     }
 
-    // Optionally start cluster node
-    if let Some(cluster_cfg) = config.cluster.clone()
-        && cluster_cfg.enabled
-    {
+    // Spawn the cluster node we built earlier (its NodeState is already wired
+    // into AppState above).
+    if let Some(node) = cluster_node {
         std::thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
                 Ok(rt) => rt,
@@ -1260,13 +1279,8 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
                 }
             };
             rt.block_on(async move {
-                match waf_cluster::ClusterNode::new(cluster_cfg) {
-                    Ok(node) => {
-                        if let Err(e) = node.run().await {
-                            tracing::error!("Cluster node error: {e}");
-                        }
-                    }
-                    Err(e) => tracing::error!("Failed to create cluster node: {e}"),
+                if let Err(e) = node.run().await {
+                    tracing::error!("Cluster node error: {e}");
                 }
             });
         });
@@ -1333,6 +1347,7 @@ struct ShutdownGuards {
 /// Async initialization: database, engine, rules, Phases 5 & 6
 async fn init_async(
     config: &AppConfig,
+    cluster_state: Option<Arc<waf_cluster::NodeState>>,
 ) -> anyhow::Result<(Arc<WafEngine>, Arc<HostRouter>, Arc<AppState>, ShutdownGuards)> {
     info!("Connecting to database...");
     let db = Arc::new(Database::connect(&config.storage.database_url, config.storage.max_connections).await?);
@@ -1424,6 +1439,12 @@ async fn init_async(
 
     // Build app state
     let mut api_state = AppState::new(Arc::clone(&db), Arc::clone(&engine), Arc::clone(&router))?;
+
+    // Plug the cluster's NodeState into AppState so /api/cluster/status,
+    // /api/cluster/nodes etc. can read role / term / peers. Without this the
+    // API's cluster_state stays None and every /api/cluster/* route returns
+    // 404 "cluster not enabled" — the smoking gun we observed on the e2e run.
+    api_state.cluster_state = cluster_state;
 
     // Apply security configuration
     api_state.cors_origins = config.security.cors_origins.clone();

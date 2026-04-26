@@ -66,12 +66,14 @@ assert_http_status "body-inspect.xss-json-post" "403" \
     --data '{"comment":"<script>alert(1)</script>"}' \
     "$PROXY/post"
 
-# Benign POST must succeed. NOTE: libinjection's heuristic SQLi detector
-# false-positives on JSON-like strings with quotes+colons, so we use a tiny
-# plain-text body instead — 'abc' has nothing for any detector to latch on.
+# Benign POST must succeed. Use a typical form-urlencoded login-style body
+# with bog-standard "name=hello" — neither libinjection nor any of the OWASP
+# CRS regex rules match it. (Earlier attempts with JSON {"hello":"world"}
+# and plain "abc" hit false-positives in libinjection / various paranoia-1
+# rules.)
 assert_http_status "body-inspect.benign-post" "200" \
-    -X POST -H "Content-Type: text/plain" \
-    --data 'abc' \
+    -X POST -H "Content-Type: application/x-www-form-urlencoded" \
+    --data 'name=hello' \
     "$PROXY/post"
 
 # ── 5) Response cache (second hit should be served quickly) ─────────────────
