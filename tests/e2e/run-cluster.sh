@@ -122,18 +122,31 @@ sleep 10
 
 log "step 4: verifying node roles"
 
-STATUS_A=$(curl -sk --max-time 10 -H "$AUTH_HDR" "$NODE_A_API/api/cluster/status" || echo "")
+# Helper that fetches /api/cluster/status with auth, captures both HTTP code
+# and body, and dumps the raw response to stderr for debugging when assertions
+# fail. The `-w "\n%{http_code}"` trick separates body and code without jq.
+fetch_status() {
+    local url="$1" body code resp
+    resp=$(curl -sk --max-time 10 -H "$AUTH_HDR" -w '\n%{http_code}' "$url/api/cluster/status" || echo $'\n000')
+    code="${resp##*$'\n'}"
+    body="${resp%$'\n'*}"
+    log "  GET $url/api/cluster/status -> HTTP $code"
+    log "  body: ${body:0:400}"
+    echo "$body"
+}
+
+STATUS_A=$(fetch_status "$NODE_A_API")
 ROLE_A=$(get_role "$STATUS_A")
 log "  node-a role=$ROLE_A"
 assert_contains "cluster.node-a.status-has-node_id" '"node_id"' "$STATUS_A"
 assert_eq "cluster.node-a.role" "Main" "$ROLE_A"
 
-STATUS_B=$(curl -sk --max-time 10 -H "$AUTH_HDR" "$NODE_B_API/api/cluster/status" || echo "")
+STATUS_B=$(fetch_status "$NODE_B_API")
 ROLE_B=$(get_role "$STATUS_B")
 log "  node-b role=$ROLE_B"
 assert_eq "cluster.node-b.role" "Worker" "$ROLE_B"
 
-STATUS_C=$(curl -sk --max-time 10 -H "$AUTH_HDR" "$NODE_C_API/api/cluster/status" || echo "")
+STATUS_C=$(fetch_status "$NODE_C_API")
 ROLE_C=$(get_role "$STATUS_C")
 log "  node-c role=$ROLE_C"
 assert_eq "cluster.node-c.role" "Worker" "$ROLE_C"
@@ -148,9 +161,9 @@ $COMPOSE "${COMPOSE_FILES[@]}" stop node-a >/dev/null 2>&1 || true
 log "  waiting 25s for new main to be elected"
 sleep 25
 
-STATUS_B2=$(curl -sk --max-time 10 -H "$AUTH_HDR" "$NODE_B_API/api/cluster/status" || echo "")
+STATUS_B2=$(fetch_status "$NODE_B_API")
 ROLE_B2=$(get_role "$STATUS_B2")
-STATUS_C2=$(curl -sk --max-time 10 -H "$AUTH_HDR" "$NODE_C_API/api/cluster/status" || echo "")
+STATUS_C2=$(fetch_status "$NODE_C_API")
 ROLE_C2=$(get_role "$STATUS_C2")
 log "  after election: node-b=$ROLE_B2 node-c=$ROLE_C2"
 
@@ -172,7 +185,12 @@ else
 fi
 
 sleep 5
-STATUS_A2=$(curl -sk --max-time 10 -H "$AUTH_HDR" "$NODE_A_API/api/cluster/status" || echo "")
+# Re-login because the original token was issued by the (now-stopped-then-restarted)
+# node-a — the JWT itself is still valid (same secret) but we want a fresh one
+# anyway in case any session state was lost.
+TOKEN=$(login_token "$NODE_A_API")
+[[ -n "$TOKEN" ]] && AUTH_HDR="Authorization: Bearer $TOKEN"
+STATUS_A2=$(fetch_status "$NODE_A_API")
 ROLE_A2=$(get_role "$STATUS_A2")
 log "  node-a role after rejoin=$ROLE_A2"
 # After rejoin node-a may be Worker (a new main was already elected) or Main
