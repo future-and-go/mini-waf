@@ -52,10 +52,11 @@ AUTH=( -H "Authorization: Bearer $TOKEN" )
 
 # ── 3) Rule registry must enumerate every category ──────────────────────────
 REGISTRY=$(http_get "${AUTH[@]}" "$ADMIN/api/rules/registry")
-# Count occurrences of "id" via awk's gsub — single-process, returns 0 on
-# no-match, so we sidestep the `grep | wc` pipeline failure under `pipefail`
-# that would otherwise kill the whole suite before e2e_finalize ran.
-RULE_COUNT=$(awk -v s="$REGISTRY" 'BEGIN{ n=gsub(/"id"/, "", s); print n }')
+# Stream the registry to awk via stdin — passing it as `awk -v s=...` blew
+# up with "Argument list too long" because the registry can be hundreds of
+# kilobytes (way above ARG_MAX). Stdin has no such limit. gsub returns 0 on
+# no-match so this is also pipefail-safe.
+RULE_COUNT=$(printf '%s' "$REGISTRY" | awk '{ n+=gsub(/"id"/, "") } END { print n+0 }')
 log "rule registry exposes $RULE_COUNT rules"
 if [[ "$RULE_COUNT" -gt 0 ]]; then
     pass "registry.populated" "$RULE_COUNT rules"

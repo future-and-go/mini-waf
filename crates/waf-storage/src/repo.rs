@@ -364,8 +364,15 @@ impl Database {
         .fetch_one(&self.pool)
         .await?;
 
+        // NOTE: `attack_logs.client_ip` is INET in the schema but `AttackLog.client_ip`
+        // is `String` in Rust — sqlx validates the column->Rust mapping at prepare
+        // time and errors with "unsupported type" if we just `SELECT *`. Cast to
+        // TEXT here so the prepared-statement type check sees a textual column.
         let rows = sqlx::query_as::<_, AttackLog>(
-            r"SELECT * FROM attack_logs
+            r"SELECT id, host_code, host, client_ip::TEXT AS client_ip, method, path,
+                      query, rule_id, rule_name, action, phase, detail,
+                      request_headers, geo_info, created_at
+               FROM attack_logs
                WHERE ($1::text IS NULL OR host_code = $1)
                  AND ($2::text IS NULL OR client_ip = $2)
                  AND ($3::text IS NULL OR action = $3)
