@@ -35,22 +35,27 @@ fi
 pass "waf.health"
 
 # ── 2) Login (rules registry endpoint requires JWT) ─────────────────────────
-TOKEN=$(http_get -X POST "$ADMIN/api/auth/login" \
+LOGIN=$(http_get -X POST "$ADMIN/api/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASS\"}" \
-    | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "")
+    -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASS\"}")
+# Login response: { "success": true, "data": { "access_token": "...", ... } }
+TOKEN=$(echo "$LOGIN" | grep -o '"access_token":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "")
 
 if [[ -z "$TOKEN" ]]; then
     fail "auth.login" "could not obtain JWT (admin seed missing?)"
-else
-    pass "auth.login"
+    e2e_finalize || true
+    exit 1
 fi
+pass "auth.login"
 
 AUTH=( -H "Authorization: Bearer $TOKEN" )
 
 # ── 3) Rule registry must enumerate every category ──────────────────────────
 REGISTRY=$(http_get "${AUTH[@]}" "$ADMIN/api/rules/registry")
-RULE_COUNT=$(echo "$REGISTRY" | grep -o '"id"' | wc -l | tr -d ' ')
+# Count occurrences of "id" via awk's gsub — single-process, returns 0 on
+# no-match, so we sidestep the `grep | wc` pipeline failure under `pipefail`
+# that would otherwise kill the whole suite before e2e_finalize ran.
+RULE_COUNT=$(awk -v s="$REGISTRY" 'BEGIN{ n=gsub(/"id"/, "", s); print n }')
 log "rule registry exposes $RULE_COUNT rules"
 if [[ "$RULE_COUNT" -gt 0 ]]; then
     pass "registry.populated" "$RULE_COUNT rules"

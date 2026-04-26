@@ -277,6 +277,16 @@ enum GeoIpCommands {
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 fn main() -> anyhow::Result<()> {
+    // Install the rustls process-wide `CryptoProvider`.
+    //
+    // rustls 0.23 panics on first use if both `ring` and `aws-lc-rs` are linked
+    // (which happens here via transitive dependencies — Cargo.lock contains
+    // both). Installing explicitly at startup picks `ring` deterministically
+    // and avoids the worker-thread panic that disables the cluster QUIC
+    // transport (and therefore /api/cluster/status). `install_default` returns
+    // `Err` if a provider was already installed — fine, ignore.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(

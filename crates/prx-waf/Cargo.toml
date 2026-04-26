@@ -28,5 +28,11 @@ ipnet = { workspace = true }
 pingora-core = { workspace = true }
 pingora-proxy = { workspace = true }
 
+# Direct rustls dep so we can call `install_default()` at the top of `main()`.
+# Without this the process panics later when a worker thread first uses TLS,
+# because both `ring` and `aws-lc-rs` are linked via transitive deps and
+# rustls 0.23+ refuses to auto-pick a CryptoProvider in that case.
+rustls = { workspace = true }
+
 [lints]
 workspace = true
