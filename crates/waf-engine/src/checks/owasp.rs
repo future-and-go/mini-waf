@@ -109,6 +109,13 @@ enum YamlValue {
 
 // ── Compiled rule ─────────────────────────────────────────────────────────────
 
+/// Headers that identify the *destination* of the request, not user-controlled
+/// payload data — `field: "all"` rules must skip these or they FP on legit
+/// requests (e.g. SSRF rules tripping on `Host: localhost:8080`).
+fn is_routing_header(name: &str) -> bool {
+    matches!(name, "host" | ":authority")
+}
+
 enum CompiledMatcher {
     Regex(Regex),
     Contains(String),
@@ -139,12 +146,22 @@ impl CompiledRule {
             CompiledMatcher::Regex(re) => {
                 match self.field.as_str() {
                     "all" => {
-                        // Check path, query, body, headers
+                        // Check path, query, body, headers — but EXCLUDE the
+                        // Host header (and HTTP/2 :authority pseudo-header).
+                        // Host is the destination of the request, not user-
+                        // controlled input that could carry an attack payload.
+                        // Including it fires e.g. SSRF rules on every request
+                        // to "localhost:8080" or any internal hostname, making
+                        // the WAF unusable on private deployments. ModSecurity
+                        // / OWASP CRS recommend `!REQUEST_HEADERS:Host` for
+                        // exactly this reason.
                         let body = String::from_utf8_lossy(&ctx.body_preview);
                         re.is_match(&ctx.path)
                             || re.is_match(&ctx.query)
                             || re.is_match(&body)
-                            || ctx.headers.values().any(|v| re.is_match(v))
+                            || ctx.headers.iter()
+                                .filter(|(k, _)| !is_routing_header(k))
+                                .any(|(_, v)| re.is_match(v))
                     }
                     _ => field_val.as_ref().is_some_and(|v| re.is_match(v)),
                 }
@@ -200,7 +217,9 @@ impl CompiledRule {
                         let body_str = String::from_utf8_lossy(&ctx.body_preview);
                         detect_with_decode(&body_str)
                     }
-                    || ctx.headers.values().any(|v| detect_with_decode(v))
+                    || ctx.headers.iter()
+                        .filter(|(k, _)| !is_routing_header(k))
+                        .any(|(_, v)| detect_with_decode(v))
             }
             _ => self.get_field(ctx).as_ref().is_some_and(|v| detect_with_decode(v)),
         }
