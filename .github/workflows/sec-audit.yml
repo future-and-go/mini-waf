@@ -38,9 +38,19 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      # Run cargo-audit directly instead of `rustsec/audit-check@v2`. That
+      # action publishes findings via the GitHub Checks API, which is NOT
+      # available to workflows running on a fork (GitHub returns
+      # "Resource not accessible by integration"). Forks can still see the
+      # vulnerability list in the workflow log, and the audit.toml ignore
+      # list keeps the exit code deterministic.
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+      - name: Run cargo-audit
+        # `--ignore` advisories come from .cargo/audit.toml automatically.
+        # `--deny warnings` would be too strict given how many transitive
+        # advisories we already silence in audit.toml; let the toml drive.
+        run: cargo audit
 
   deny:
     name: License & Supply Chain
@@ -51,6 +61,8 @@ jobs:
         checks:
           - advisories
           - bans licenses sources
+    # advisories check is informational only — we already track the upstream
+    # ignore list in deny.toml. bans/licenses/sources MUST stay green.
     continue-on-error: ${{ matrix.checks == 'advisories' }}
     steps:
       - uses: actions/checkout@v4
