@@ -229,10 +229,23 @@ pub struct DefenseConfig {
     /// OWASP CRS paranoia level (1-4, default 1 = most permissive)
     #[serde(default = "default_owasp_paranoia")]
     pub owasp_paranoia: u8,
+    /// Block scripted HTTP clients (curl, python-requests, go-http-client,
+    /// libwww-perl) by their User-Agent. Default `false` because these are
+    /// extremely common in legitimate traffic — health checks, internal
+    /// service calls, automation scripts, container orchestrators, CI
+    /// pipelines. Enable only on hosts that are guaranteed to be reached
+    /// exclusively by browsers (e.g. a public-facing web app with no API
+    /// surface). Real attack-tool detection (sqlmap, nikto, nuclei, …) is
+    /// always on regardless of this flag.
+    #[serde(default = "bool_false")]
+    pub block_scripted_clients: bool,
 }
 
 const fn bool_true() -> bool {
     true
+}
+const fn bool_false() -> bool {
+    false
 }
 const fn default_cc_rps() -> f64 {
     100.0
@@ -266,6 +279,7 @@ impl Default for DefenseConfig {
             cc_burst: default_cc_burst(),
             cc_ban_threshold: default_cc_ban_threshold(),
             cc_ban_duration_secs: default_cc_ban_duration_secs(),
+            block_scripted_clients: false,
             owasp_paranoia: default_owasp_paranoia(),
         }
     }
