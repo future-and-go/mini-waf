@@ -289,37 +289,50 @@ pub struct OWASPCheck {
 }
 
 impl OWASPCheck {
-    /// Create by loading rules from `rules/owasp-crs/` relative to the
-    /// current working directory.  Falls back to the minimal embedded rule
-    /// set if the directory is absent or yields zero compiled rules.
+    /// Create by loading rules from `rules/` relative to the current working
+    /// directory. Walks the directory tree so all rule families ship out of
+    /// the box: `owasp-crs/`, `advanced/`, `cve-patches/`, `custom/`,
+    /// `bot-detection/`, `modsecurity/`, `geoip/`, `owasp-api/`. Falls back
+    /// to the minimal embedded rule set if `rules/` is absent or yields
+    /// zero compiled rules.
     pub fn new() -> Self {
-        let dir = Path::new("rules/owasp-crs");
+        let dir = Path::new("rules");
         if dir.is_dir() {
             let loaded = Self::from_directory(dir);
             if loaded.rule_count() > 0 {
+                tracing::info!("OWASP CRS: loaded {} rules from rules/", loaded.rule_count());
                 return loaded;
             }
-            warn!("rules/owasp-crs/ exists but yielded 0 rules; using embedded fallback");
+            warn!("rules/ exists but yielded 0 rules; using embedded fallback");
         } else {
-            debug!("rules/owasp-crs/ not found; using embedded OWASP rule fallback");
+            debug!("rules/ not found; using embedded OWASP rule fallback");
         }
         Self::from_yaml(EMBEDDED_RULES_YAML)
     }
 
-    /// Load all `.yaml` files from a directory, merging their rule lists.
+    /// Load all `.yaml` files from `dir` recursively, merging their rule lists.
     pub fn from_directory(dir: &Path) -> Self {
         let mut rules = Vec::new();
+        Self::walk_directory(dir, &mut rules);
+        Self { rules }
+    }
 
+    /// Recursive helper: walk `dir`, loading every `.yaml` file's rules.
+    fn walk_directory(dir: &Path, rules: &mut Vec<CompiledRule>) {
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(err) => {
-                warn!("Cannot read OWASP rules dir {}: {err}", dir.display());
-                return Self { rules };
+                warn!("Cannot read rules dir {}: {err}", dir.display());
+                return;
             }
         };
 
         for entry in entries.flatten() {
             let path = entry.path();
+            if path.is_dir() {
+                Self::walk_directory(&path, rules);
+                continue;
+            }
             if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
                 continue;
             }
@@ -330,10 +343,12 @@ impl OWASPCheck {
                     continue;
                 }
             };
+            // Skip files that aren't rule sets — `sync-config.yaml`, indexes,
+            // etc. share the directory but don't follow the `RuleSet` shape.
             let ruleset: RuleSet = match serde_yaml::from_str(&content) {
                 Ok(r) => r,
                 Err(e) => {
-                    warn!("Failed to parse {}: {e}", path.display());
+                    debug!("Skipping {} (not a rule set): {e}", path.display());
                     continue;
                 }
             };
@@ -343,10 +358,12 @@ impl OWASPCheck {
                     rules.push(cr);
                 }
             }
-            debug!("Loaded {} rules from {}", rules.len() - count_before, path.display());
+            debug!(
+                "Loaded {} rules from {}",
+                rules.len() - count_before,
+                path.display()
+            );
         }
-
-        Self { rules }
     }
 
     /// Create from a YAML string (single-document, `RuleSet` format).
