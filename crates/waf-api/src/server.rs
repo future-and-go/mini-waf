@@ -27,7 +27,7 @@ use crate::handlers::{
     delete_certificate, delete_custom_rule, delete_host, delete_lb_backend, delete_sensitive_pattern, get_host,
     get_hotlink_config, get_status, list_allow_ips, list_allow_urls, list_attack_logs, list_block_ips, list_block_urls,
     list_certificates, list_custom_rules, list_hosts, list_lb_backends, list_security_events, list_sensitive_patterns,
-    reload_rules, update_host, upload_certificate, upsert_hotlink_config,
+    reload_rules, reload_sqli_scan_config, update_host, upload_certificate, upsert_hotlink_config,
 };
 use crate::health::health_check;
 use crate::middleware::require_auth;
@@ -105,6 +105,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/status", get(get_status))
         // Rule reload
         .route("/api/reload", post(reload_rules))
+        // SQLi scan config hot-reload
+        .route("/api/sqli-scan/reload", post(reload_sqli_scan_config))
         // Phase 3: Custom rules
         .route(
             "/api/custom-rules",
