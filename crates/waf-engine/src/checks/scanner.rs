@@ -35,10 +35,6 @@ static SCANNER_UA_DESCS: &[&str] = &[
     "Wapiti (web app vulnerability scanner)",
     "Hydra (login brute-forcer)",
     "Medusa (login brute-forcer)",
-    "curl (non-browser HTTP client)",
-    "Python Requests library",
-    "Go HTTP client",
-    "libwww-perl (Perl HTTP lib)",
     "headless Chrome / Puppeteer / Selenium",
     "PhantomJS",
     "Scrapy (web scraper)",
@@ -77,11 +73,6 @@ static SCANNER_UA_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)\bwapiti\b",
         r"(?i)\bhydra\b",
         r"(?i)\bmedusa\b",
-        // Generic HTTP tool UAs — low-level / scripted
-        r"(?i)^curl/",
-        r"(?i)^python-requests/",
-        r"(?i)^go-http-client/",
-        r"(?i)^libwww-perl/",
         r"(?i)(headlesschrome|headless chrome|puppeteer|selenium|webdriver)",
         r"(?i)\bphantomjs\b",
         r"(?i)\bscrapy\b",
@@ -89,6 +80,40 @@ static SCANNER_UA_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         Ok(set) => set,
         Err(e) => {
             tracing::error!("BUG: scanner UA regex set failed to compile: {e}");
+            RegexSet::empty()
+        }
+    }
+});
+
+/// Description text aligned with `SCRIPTED_CLIENT_UA_SET` patterns by index.
+static SCRIPTED_CLIENT_UA_DESCS: &[&str] = &[
+    "curl (non-browser HTTP client)",
+    "Python Requests library",
+    "Go HTTP client",
+    "libwww-perl (Perl HTTP lib)",
+    "wget (non-browser HTTP client)",
+    "Apache HttpClient (Java)",
+    "Node.js HTTP client",
+];
+
+/// Generic scripted-HTTP-client UAs. These are gated behind
+/// `DefenseConfig.block_scripted_clients` because they are extremely
+/// common in legitimate traffic (health checks, internal services, CI,
+/// automation). Operators who run a strictly browser-only public site
+/// can opt in to block them.
+static SCRIPTED_CLIENT_UA_SET: LazyLock<RegexSet> = LazyLock::new(|| {
+    match RegexSet::new([
+        r"(?i)^curl/",
+        r"(?i)^python-requests/",
+        r"(?i)^go-http-client/",
+        r"(?i)^libwww-perl/",
+        r"(?i)^wget/",
+        r"(?i)^apache-httpclient/",
+        r"(?i)^node-fetch/|^axios/|^got\s|^undici",
+    ]) {
+        Ok(set) => set,
+        Err(e) => {
+            tracing::error!("BUG: scripted-client UA regex set failed to compile: {e}");
             RegexSet::empty()
         }
     }
@@ -117,6 +142,9 @@ impl Check for ScannerCheck {
 
         let ua = ctx.headers.get("user-agent").map_or("", String::as_str);
 
+        // Always check the real attack-tool list (sqlmap / nikto / nuclei /
+        // headless browsers / etc.). These are unambiguously malicious so
+        // they're never gated by config.
         let matches = SCANNER_UA_SET.matches(ua);
         if matches.matched_any() {
             let idx = matches.iter().next().unwrap_or(0);
@@ -127,6 +155,22 @@ impl Check for ScannerCheck {
                 phase: Phase::Scanner,
                 detail: format!("{desc} User-Agent detected"),
             });
+        }
+
+        // Optionally check generic scripted-client UAs (curl, python-requests,
+        // go-http-client, …). Off by default — see DefenseConfig docs.
+        if ctx.host_config.defense_config.block_scripted_clients {
+            let matches = SCRIPTED_CLIENT_UA_SET.matches(ua);
+            if matches.matched_any() {
+                let idx = matches.iter().next().unwrap_or(0);
+                let desc = SCRIPTED_CLIENT_UA_DESCS.get(idx).copied().unwrap_or("scripted-client");
+                return Some(DetectionResult {
+                    rule_id: Some(format!("SCRIPT-{:03}", idx + 1)),
+                    rule_name: "Scripted Client".to_string(),
+                    phase: Phase::Scanner,
+                    detail: format!("{desc} User-Agent detected (block_scripted_clients=true)"),
+                });
+            }
         }
 
         None
@@ -142,7 +186,7 @@ mod tests {
     use std::sync::Arc;
     use waf_common::{DefenseConfig, HostConfig};
 
-    fn make_ctx(ua: &str) -> RequestCtx {
+    fn make_ctx_with(ua: &str, block_scripted: bool) -> RequestCtx {
         let mut headers = HashMap::new();
         if !ua.is_empty() {
             headers.insert("user-agent".to_string(), ua.to_string());
@@ -163,12 +207,18 @@ mod tests {
             host_config: Arc::new(HostConfig {
                 defense_config: DefenseConfig {
                     scan: true,
+                    block_scripted_clients: block_scripted,
                     ..DefenseConfig::default()
                 },
                 ..HostConfig::default()
             }),
             geo: None,
         }
+    }
+
+    fn make_ctx(ua: &str) -> RequestCtx {
+        // Default: block_scripted_clients=false (production default).
+        make_ctx_with(ua, false)
     }
 
     #[test]
@@ -186,16 +236,64 @@ mod tests {
     }
 
     #[test]
-    fn detects_python_requests() {
-        let checker = ScannerCheck::new();
-        let ctx = make_ctx("python-requests/2.28.0");
-        assert!(checker.check(&ctx).is_some());
-    }
-
-    #[test]
     fn allows_regular_browser() {
         let checker = ScannerCheck::new();
         let ctx = make_ctx("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0");
         assert!(checker.check(&ctx).is_none());
+    }
+
+    #[test]
+    fn allows_curl_by_default() {
+        // curl is used for health checks, internal services, CI, etc. — never
+        // block when block_scripted_clients is the default (false).
+        let checker = ScannerCheck::new();
+        let ctx = make_ctx("curl/8.5.0");
+        assert!(checker.check(&ctx).is_none());
+    }
+
+    #[test]
+    fn allows_python_requests_by_default() {
+        let checker = ScannerCheck::new();
+        let ctx = make_ctx("python-requests/2.28.0");
+        assert!(checker.check(&ctx).is_none());
+    }
+
+    #[test]
+    fn allows_go_http_client_by_default() {
+        let checker = ScannerCheck::new();
+        let ctx = make_ctx("Go-http-client/2.0");
+        assert!(checker.check(&ctx).is_none());
+    }
+
+    #[test]
+    fn blocks_curl_when_strict_mode_enabled() {
+        // Operator opts in via DefenseConfig.block_scripted_clients=true
+        // (e.g. browser-only public site). curl is then flagged.
+        let checker = ScannerCheck::new();
+        let ctx = make_ctx_with("curl/8.5.0", true);
+        let result = checker.check(&ctx).expect("strict mode should block curl");
+        assert_eq!(result.rule_name, "Scripted Client");
+        assert!(result.detail.contains("curl"));
+    }
+
+    #[test]
+    fn blocks_python_requests_when_strict_mode_enabled() {
+        let checker = ScannerCheck::new();
+        let ctx = make_ctx_with("python-requests/2.28.0", true);
+        let result = checker.check(&ctx).expect("strict mode should block python-requests");
+        assert_eq!(result.rule_name, "Scripted Client");
+    }
+
+    #[test]
+    fn real_attack_tools_blocked_regardless_of_strict_mode() {
+        // sqlmap is always blocked, never gated on block_scripted_clients.
+        let checker = ScannerCheck::new();
+        for strict in [false, true] {
+            let ctx = make_ctx_with("sqlmap/1.7.6", strict);
+            let result = checker.check(&ctx).unwrap_or_else(|| {
+                panic!("sqlmap UA should always be blocked (strict={strict})");
+            });
+            assert_eq!(result.rule_name, "Scanner");
+        }
     }
 }

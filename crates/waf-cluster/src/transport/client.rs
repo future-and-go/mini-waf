@@ -57,7 +57,13 @@ impl ClusterClient {
     }
 
     /// Build the rustls `ClientConfig` with mTLS (client cert + CA root).
+    ///
+    /// Pinned to `ring` to avoid the rustls 0.23 ambiguous-CryptoProvider
+    /// panic when both `ring` and `aws-lc-rs` are linked transitively. See
+    /// the equivalent comment in `transport::server::build_tls_config`.
     fn build_tls_config(&self) -> Result<rustls::ClientConfig> {
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+
         let mut root_store = rustls::RootCertStore::empty();
         root_store
             .add(self.ca_cert_der.clone())
@@ -70,7 +76,9 @@ impl ClusterClient {
         let key: PrivateKeyDer<'static> = PrivateKeyDer::from_pem_slice(self.node_key_pem.as_bytes())
             .context("no private key found in node key PEM")?;
 
-        let mut tls_config = rustls::ClientConfig::builder()
+        let mut tls_config = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .context("failed to set safe TLS protocol versions")?
             .with_root_certificates(root_store)
             .with_client_auth_cert(certs, key)
             .context("invalid node TLS certificate or key for client config")?;

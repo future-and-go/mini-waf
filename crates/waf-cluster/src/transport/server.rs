@@ -47,13 +47,23 @@ impl ClusterServer {
     }
 
     /// Build the rustls `ServerConfig` with mTLS client cert verification.
+    ///
+    /// Both `WebPkiClientVerifier::builder` and `rustls::ServerConfig::builder`
+    /// would otherwise pull the *process-default* `CryptoProvider`; with both
+    /// `ring` and `aws-lc-rs` linked transitively (Cargo.lock contains both),
+    /// rustls 0.23 panics with "could not automatically determine the
+    /// process-level `CryptoProvider`" on a worker thread before the cluster
+    /// gets a chance to register its `cluster_state`. We pin `ring` here
+    /// explicitly so the TLS bring-up never depends on global state.
     fn build_tls_config(&self) -> Result<rustls::ServerConfig> {
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+
         let mut root_store = rustls::RootCertStore::empty();
         root_store
             .add(self.ca_cert_der.clone())
             .context("failed to add CA cert to root store")?;
 
-        let client_verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
+        let client_verifier = WebPkiClientVerifier::builder_with_provider(Arc::new(root_store), Arc::clone(&provider))
             .build()
             .context("failed to build client cert verifier")?;
 
@@ -64,7 +74,9 @@ impl ClusterServer {
         let key: PrivateKeyDer<'static> = PrivateKeyDer::from_pem_slice(self.node_key_pem.as_bytes())
             .context("no private key found in node key PEM")?;
 
-        let mut tls_config = rustls::ServerConfig::builder()
+        let mut tls_config = rustls::ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .context("failed to set safe TLS protocol versions")?
             .with_client_cert_verifier(client_verifier)
             .with_single_cert(certs, key)
             .context("invalid node TLS certificate or key")?;

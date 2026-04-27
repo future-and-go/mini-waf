@@ -245,6 +245,18 @@ pub struct HostEntry {
     pub guard_status: Option<bool>,
     pub cert_file: Option<String>,
     pub key_file: Option<String>,
+    /// OWASP CRS rule pipeline. Defaults to `true` for TOML-declared hosts
+    /// (operators expect a sensible "WAF on" baseline) — the DB admin UI
+    /// keeps its own opt-in toggle.
+    #[serde(default)]
+    pub owasp_set: Option<bool>,
+    /// When `true`, also block generic scripted HTTP clients (curl,
+    /// python-requests, go-http-client, libwww-perl, wget, …) by their
+    /// User-Agent. Off by default — these are common in legitimate traffic
+    /// (health checks, internal services, automation, CI). Enable only on
+    /// hosts reached exclusively by browsers.
+    #[serde(default)]
+    pub block_scripted_clients: Option<bool>,
 }
 
 /// Response caching configuration
