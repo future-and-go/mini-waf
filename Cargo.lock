@@ -3254,6 +3254,7 @@ dependencies = [
  "pingora-core",
  "pingora-proxy",
  "regex",
+ "rustls",
  "tokio",
  "tracing",
  "tracing-subscriber",

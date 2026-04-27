@@ -1,0 +1,24 @@
+# Compose override for the nightly E2E cluster suite.
+#
+# Layered on top of docker-compose.cluster.yml via:
+#   docker compose -f docker-compose.cluster.yml -f tests/e2e/cluster-override.yml ...
+#
+# Purpose: inject a deterministic ADMIN_PASSWORD so the test harness can log
+# in via /api/auth/login. The base compose intentionally lets prx-waf seed a
+# random admin password (production-safe default), which makes automated
+# verification impossible. We override that here without touching the
+# production compose file.
+#
+# All three nodes share the same Postgres in the base compose, so seeding the
+# admin user once on any node propagates to all (it's an idempotent upsert).
+
+services:
+  node-a:
+    environment:
+      ADMIN_PASSWORD: admin123
+  node-b:
+    environment:
+      ADMIN_PASSWORD: admin123
+  node-c:
+    environment:
+      ADMIN_PASSWORD: admin123
