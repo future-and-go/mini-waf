@@ -277,6 +277,22 @@ enum GeoIpCommands {
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 fn main() -> anyhow::Result<()> {
+    // Install the rustls process-wide `CryptoProvider`.
+    //
+    // rustls 0.23 panics on first use if both `ring` and `aws-lc-rs` are linked
+    // (which happens here via transitive dependencies — Cargo.lock contains
+    // both). Installing explicitly at startup picks `ring` deterministically
+    // and avoids the worker-thread panic that disables the cluster QUIC
+    // transport (and therefore /api/cluster/status). The cluster transport
+    // ALSO uses `builder_with_provider(ring)` directly, so even if this call
+    // races with another initialiser the cluster bring-up still works. We
+    // emit a stderr breadcrumb here so the container log makes it obvious
+    // whether this exact binary contains the fix.
+    match rustls::crypto::ring::default_provider().install_default() {
+        Ok(()) => eprintln!("rustls: installed ring as the process-default CryptoProvider"),
+        Err(_) => eprintln!("rustls: another CryptoProvider was already installed (ignored)"),
+    }
+
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(
@@ -1146,10 +1162,30 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
 
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
 
+    // Build the cluster node BEFORE init_async so its NodeState can be plugged
+    // into AppState while we still own a mutable handle to it. The actual
+    // cluster runtime is spawned later (after the API server is up).
+    let cluster_node = if let Some(cluster_cfg) = config.cluster.clone() {
+        if cluster_cfg.enabled {
+            match waf_cluster::ClusterNode::new(cluster_cfg) {
+                Ok(node) => Some(node),
+                Err(e) => {
+                    tracing::error!("Failed to create cluster node: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let cluster_state_for_api = cluster_node.as_ref().map(waf_cluster::ClusterNode::state);
+
     // `_shutdown_guards` holds the watch senders that signal background workers
     // to stop.  They are dropped automatically when `run_server` returns (after
     // `server.run_forever()` exits), which sends the shutdown signal.
-    let (engine, router, api_state, _shutdown_guards) = rt.block_on(init_async(config))?;
+    let (engine, router, api_state, _shutdown_guards) = rt.block_on(init_async(config, cluster_state_for_api))?;
 
     // Start the management API in a background thread
     let api_listen = config.api.listen_addr.clone();
@@ -1231,10 +1267,9 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
         });
     }
 
-    // Optionally start cluster node
-    if let Some(cluster_cfg) = config.cluster.clone()
-        && cluster_cfg.enabled
-    {
+    // Spawn the cluster node we built earlier (its NodeState is already wired
+    // into AppState above).
+    if let Some(node) = cluster_node {
         std::thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
                 Ok(rt) => rt,
@@ -1244,13 +1279,8 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
                 }
             };
             rt.block_on(async move {
-                match waf_cluster::ClusterNode::new(cluster_cfg) {
-                    Ok(node) => {
-                        if let Err(e) = node.run().await {
-                            tracing::error!("Cluster node error: {e}");
-                        }
-                    }
-                    Err(e) => tracing::error!("Failed to create cluster node: {e}"),
+                if let Err(e) = node.run().await {
+                    tracing::error!("Cluster node error: {e}");
                 }
             });
         });
@@ -1317,6 +1347,7 @@ struct ShutdownGuards {
 /// Async initialization: database, engine, rules, Phases 5 & 6
 async fn init_async(
     config: &AppConfig,
+    cluster_state: Option<Arc<waf_cluster::NodeState>>,
 ) -> anyhow::Result<(Arc<WafEngine>, Arc<HostRouter>, Arc<AppState>, ShutdownGuards)> {
     info!("Connecting to database...");
     let db = Arc::new(Database::connect(&config.storage.database_url, config.storage.max_connections).await?);
@@ -1387,8 +1418,16 @@ async fn init_async(
 
     // Register hosts from config file
     for entry in &config.hosts {
-        use waf_common::HostConfig;
+        use waf_common::{DefenseConfig, HostConfig};
         let code = format!("cfg-{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]);
+        // Per-host defense profile. Defaults to "WAF on" baseline for
+        // TOML-declared hosts (OWASP CRS enabled, scripted-client blocking
+        // off). Both flags are overridable per host via the [[hosts]] table.
+        let defense_config = DefenseConfig {
+            owasp_set: entry.owasp_set.unwrap_or(true),
+            block_scripted_clients: entry.block_scripted_clients.unwrap_or(false),
+            ..DefenseConfig::default()
+        };
         let cfg = Arc::new(HostConfig {
             code,
             host: entry.host.clone(),
@@ -1399,6 +1438,7 @@ async fn init_async(
             remote_port: entry.remote_port,
             cert_file: entry.cert_file.clone(),
             key_file: entry.key_file.clone(),
+            defense_config,
             ..HostConfig::default()
         });
         router.register(&cfg);
@@ -1408,6 +1448,12 @@ async fn init_async(
 
     // Build app state
     let mut api_state = AppState::new(Arc::clone(&db), Arc::clone(&engine), Arc::clone(&router))?;
+
+    // Plug the cluster's NodeState into AppState so /api/cluster/status,
+    // /api/cluster/nodes etc. can read role / term / peers. Without this the
+    // API's cluster_state stays None and every /api/cluster/* route returns
+    // 404 "cluster not enabled" — the smoking gun we observed on the e2e run.
+    api_state.cluster_state = cluster_state;
 
     // Apply security configuration
     api_state.cors_origins = config.security.cors_origins.clone();

@@ -109,6 +109,30 @@ enum YamlValue {
 
 // ── Compiled rule ─────────────────────────────────────────────────────────────
 
+/// Headers that identify the *destination* of the request, not user-controlled
+/// payload data — `field: "all"` rules must skip these or they FP on legit
+/// requests (e.g. SSRF rules tripping on `Host: localhost:8080`).
+///
+/// Also skip `accept` (content negotiation, value `*/*` triggers some weird
+/// regexes) and connection-management headers that aren't attacker-controlled.
+fn is_routing_header(name: &str) -> bool {
+    matches!(
+        name,
+        "host"
+            | ":authority"
+            | ":method"
+            | ":path"
+            | ":scheme"
+            | "accept"
+            | "accept-encoding"
+            | "accept-language"
+            | "connection"
+            | "content-length"
+            | "x-forwarded-host"
+            | "x-real-ip"
+    )
+}
+
 enum CompiledMatcher {
     Regex(Regex),
     Contains(String),
@@ -139,14 +163,77 @@ impl CompiledRule {
             CompiledMatcher::Regex(re) => {
                 match self.field.as_str() {
                     "all" => {
-                        // Check path, query, body, headers
+                        // Check path, query, body, headers — but EXCLUDE the
+                        // Host header (and HTTP/2 :authority pseudo-header).
+                        // Host is the destination of the request, not user-
+                        // controlled input that could carry an attack payload.
+                        // Including it fires e.g. SSRF rules on every request
+                        // to "localhost:8080" or any internal hostname, making
+                        // the WAF unusable on private deployments. ModSecurity
+                        // / OWASP CRS recommend `!REQUEST_HEADERS:Host` for
+                        // exactly this reason.
+                        //
+                        // Also try the URL-decoded variant of every value: a
+                        // `--data-urlencode q={{7*7}}` request lands here as
+                        // `q=%7B%7B7%2A7%7D%7D`, and rules like ADV-SSTI-001
+                        // match the literal `{{...}}` after decoding.
+                        // libinjection's `detect_injection` already does this
+                        // for the DetectSqli/DetectXss matchers; the regex
+                        // path needs the same treatment to avoid trivial
+                        // URL-encoding bypasses.
                         let body = String::from_utf8_lossy(&ctx.body_preview);
-                        re.is_match(&ctx.path)
-                            || re.is_match(&ctx.query)
-                            || re.is_match(&body)
-                            || ctx.headers.values().any(|v| re.is_match(v))
+                        let test_with_decoded = |label: &str, raw: &str| -> bool {
+                            if re.is_match(raw) {
+                                tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on {}: {}", label, raw);
+                                return true;
+                            }
+                            let decoded = url_decode(raw);
+                            if decoded != raw && re.is_match(&decoded) {
+                                tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on {}(decoded): {}", label, decoded);
+                                return true;
+                            }
+                            let recursive = url_decode_recursive(raw);
+                            if recursive != decoded && re.is_match(&recursive) {
+                                tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on {}(decoded-recursive): {}", label, recursive);
+                                return true;
+                            }
+                            false
+                        };
+                        if test_with_decoded("path", &ctx.path) {
+                            return true;
+                        }
+                        if test_with_decoded("query", &ctx.query) {
+                            return true;
+                        }
+                        if test_with_decoded("body", &body) {
+                            return true;
+                        }
+                        for (k, v) in &ctx.headers {
+                            if is_routing_header(k) {
+                                continue;
+                            }
+                            if test_with_decoded(&format!("header.{k}"), v) {
+                                return true;
+                            }
+                        }
+                        false
                     }
-                    _ => field_val.as_ref().is_some_and(|v| re.is_match(v)),
+                    // Single-field regex — also try URL-decoded so attackers
+                    // can't trivially evade with `%`-encoding.
+                    _ => match field_val.as_ref() {
+                        Some(v) => {
+                            if re.is_match(v) {
+                                return true;
+                            }
+                            let decoded = url_decode(v);
+                            if decoded != *v && re.is_match(&decoded) {
+                                return true;
+                            }
+                            let recursive = url_decode_recursive(v);
+                            recursive != decoded && re.is_match(&recursive)
+                        }
+                        None => false,
+                    },
                 }
             }
             CompiledMatcher::Contains(s) => field_val.as_ref().is_some_and(|v| v.contains(s.as_str())),
@@ -200,7 +287,11 @@ impl CompiledRule {
                         let body_str = String::from_utf8_lossy(&ctx.body_preview);
                         detect_with_decode(&body_str)
                     }
-                    || ctx.headers.values().any(|v| detect_with_decode(v))
+                    || ctx
+                        .headers
+                        .iter()
+                        .filter(|(k, _)| !is_routing_header(k))
+                        .any(|(_, v)| detect_with_decode(v))
             }
             _ => self.get_field(ctx).as_ref().is_some_and(|v| detect_with_decode(v)),
         }
@@ -233,37 +324,50 @@ pub struct OWASPCheck {
 }
 
 impl OWASPCheck {
-    /// Create by loading rules from `rules/owasp-crs/` relative to the
-    /// current working directory.  Falls back to the minimal embedded rule
-    /// set if the directory is absent or yields zero compiled rules.
+    /// Create by loading rules from `rules/` relative to the current working
+    /// directory. Walks the directory tree so all rule families ship out of
+    /// the box: `owasp-crs/`, `advanced/`, `cve-patches/`, `custom/`,
+    /// `bot-detection/`, `modsecurity/`, `geoip/`, `owasp-api/`. Falls back
+    /// to the minimal embedded rule set if `rules/` is absent or yields
+    /// zero compiled rules.
     pub fn new() -> Self {
-        let dir = Path::new("rules/owasp-crs");
+        let dir = Path::new("rules");
         if dir.is_dir() {
             let loaded = Self::from_directory(dir);
             if loaded.rule_count() > 0 {
+                tracing::info!("OWASP CRS: loaded {} rules from rules/", loaded.rule_count());
                 return loaded;
             }
-            warn!("rules/owasp-crs/ exists but yielded 0 rules; using embedded fallback");
+            warn!("rules/ exists but yielded 0 rules; using embedded fallback");
         } else {
-            debug!("rules/owasp-crs/ not found; using embedded OWASP rule fallback");
+            debug!("rules/ not found; using embedded OWASP rule fallback");
         }
         Self::from_yaml(EMBEDDED_RULES_YAML)
     }
 
-    /// Load all `.yaml` files from a directory, merging their rule lists.
+    /// Load all `.yaml` files from `dir` recursively, merging their rule lists.
     pub fn from_directory(dir: &Path) -> Self {
         let mut rules = Vec::new();
+        Self::walk_directory(dir, &mut rules);
+        Self { rules }
+    }
 
+    /// Recursive helper: walk `dir`, loading every `.yaml` file's rules.
+    fn walk_directory(dir: &Path, rules: &mut Vec<CompiledRule>) {
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(err) => {
-                warn!("Cannot read OWASP rules dir {}: {err}", dir.display());
-                return Self { rules };
+                warn!("Cannot read rules dir {}: {err}", dir.display());
+                return;
             }
         };
 
         for entry in entries.flatten() {
             let path = entry.path();
+            if path.is_dir() {
+                Self::walk_directory(&path, rules);
+                continue;
+            }
             if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
                 continue;
             }
@@ -274,10 +378,12 @@ impl OWASPCheck {
                     continue;
                 }
             };
+            // Skip files that aren't rule sets — `sync-config.yaml`, indexes,
+            // etc. share the directory but don't follow the `RuleSet` shape.
             let ruleset: RuleSet = match serde_yaml::from_str(&content) {
                 Ok(r) => r,
                 Err(e) => {
-                    warn!("Failed to parse {}: {e}", path.display());
+                    debug!("Skipping {} (not a rule set): {e}", path.display());
                     continue;
                 }
             };
@@ -289,8 +395,6 @@ impl OWASPCheck {
             }
             debug!("Loaded {} rules from {}", rules.len() - count_before, path.display());
         }
-
-        Self { rules }
     }
 
     /// Create from a YAML string (single-document, `RuleSet` format).
