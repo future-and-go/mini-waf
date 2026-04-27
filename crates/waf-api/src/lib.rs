@@ -1,6 +1,5 @@
 pub mod auth;
 pub mod cache_api;
-pub mod rules_api;
 pub mod cluster;
 pub mod crowdsec;
 pub mod error;
@@ -9,6 +8,7 @@ pub mod health;
 pub mod middleware;
 pub mod notifications;
 pub mod plugins;
+pub mod rules_api;
 pub mod security;
 pub mod server;
 pub mod state;

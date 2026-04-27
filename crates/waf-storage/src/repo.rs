@@ -974,11 +974,10 @@ impl Database {
         .await?;
 
         // Distinct attackers (unique client IPs that have triggered any event)
-        let unique_attackers: i64 =
-            sqlx::query_scalar("SELECT COUNT(DISTINCT client_ip)::bigint FROM security_events")
-                .fetch_one(&self.pool)
-                .await
-                .unwrap_or(0);
+        let unique_attackers: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT client_ip)::bigint FROM security_events")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
 
         // Attack category breakdown — derived from `rule_id` prefix with a
         // deterministic CASE expression so the dashboard can render a pie chart
@@ -1121,7 +1120,11 @@ impl Database {
                 rule_name: row.get("rule_name"),
                 action: row.get("action"),
                 category: row.get("category"),
-                country: if country_str.is_empty() { None } else { Some(country_str) },
+                country: if country_str.is_empty() {
+                    None
+                } else {
+                    Some(country_str)
+                },
             }
         })
         .fetch_all(&self.pool)
