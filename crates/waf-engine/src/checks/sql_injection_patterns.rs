@@ -44,6 +44,11 @@ const _: () = assert!(SQLI_DESCS.len() == 19);
 ///
 /// SAFETY: All patterns are compile-time string literals. If any pattern fails
 /// to compile it is a code bug that must be caught in development, not at runtime.
+// `expect` here is sound: every pattern is a compile-time literal. Failure
+// would mean the binary cannot start, which is exactly what we want during
+// development. The workspace-wide `clippy::expect_used = deny` lint is
+// scoped-allowed for this single static.
+#[allow(clippy::expect_used)]
 pub static SQLI_SET: LazyLock<RegexSet> = LazyLock::new(|| {
     RegexSet::new([
         // === Classic patterns (SQLI-001 to SQLI-012) ===
