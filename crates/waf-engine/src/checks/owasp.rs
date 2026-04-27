@@ -172,35 +172,68 @@ impl CompiledRule {
                         // the WAF unusable on private deployments. ModSecurity
                         // / OWASP CRS recommend `!REQUEST_HEADERS:Host` for
                         // exactly this reason.
+                        //
+                        // Also try the URL-decoded variant of every value: a
+                        // `--data-urlencode q={{7*7}}` request lands here as
+                        // `q=%7B%7B7%2A7%7D%7D`, and rules like ADV-SSTI-001
+                        // match the literal `{{...}}` after decoding.
+                        // libinjection's `detect_injection` already does this
+                        // for the DetectSqli/DetectXss matchers; the regex
+                        // path needs the same treatment to avoid trivial
+                        // URL-encoding bypasses.
                         let body = String::from_utf8_lossy(&ctx.body_preview);
-                        // info! so the matched rule + matched location is
-                        // visible in default container logs without needing
-                        // RUST_LOG=debug — invaluable when a rule fires
-                        // unexpectedly on a benign request.
-                        if re.is_match(&ctx.path) {
-                            tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on path: {}", ctx.path);
+                        let test_with_decoded = |label: &str, raw: &str| -> bool {
+                            if re.is_match(raw) {
+                                tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on {}: {}", label, raw);
+                                return true;
+                            }
+                            let decoded = url_decode(raw);
+                            if decoded != raw && re.is_match(&decoded) {
+                                tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on {}(decoded): {}", label, decoded);
+                                return true;
+                            }
+                            let recursive = url_decode_recursive(raw);
+                            if recursive != decoded && re.is_match(&recursive) {
+                                tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on {}(decoded-recursive): {}", label, recursive);
+                                return true;
+                            }
+                            false
+                        };
+                        if test_with_decoded("path", &ctx.path) {
                             return true;
                         }
-                        if re.is_match(&ctx.query) {
-                            tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on query: {}", ctx.query);
+                        if test_with_decoded("query", &ctx.query) {
                             return true;
                         }
-                        if re.is_match(&body) {
-                            tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on body: {}", body);
+                        if test_with_decoded("body", &body) {
                             return true;
                         }
                         for (k, v) in &ctx.headers {
                             if is_routing_header(k) {
                                 continue;
                             }
-                            if re.is_match(v) {
-                                tracing::info!(rule = %self.id, name = %self.name, header = %k, value = %v, "WAF rule fired on header");
+                            if test_with_decoded(&format!("header.{k}"), v) {
                                 return true;
                             }
                         }
                         false
                     }
-                    _ => field_val.as_ref().is_some_and(|v| re.is_match(v)),
+                    // Single-field regex — also try URL-decoded so attackers
+                    // can't trivially evade with `%`-encoding.
+                    _ => match field_val.as_ref() {
+                        Some(v) => {
+                            if re.is_match(v) {
+                                return true;
+                            }
+                            let decoded = url_decode(v);
+                            if decoded != *v && re.is_match(&decoded) {
+                                return true;
+                            }
+                            let recursive = url_decode_recursive(v);
+                            recursive != decoded && re.is_match(&recursive)
+                        }
+                        None => false,
+                    },
                 }
             }
             CompiledMatcher::Contains(s) => field_val.as_ref().is_some_and(|v| v.contains(s.as_str())),

@@ -38,7 +38,8 @@ DIAG_CODE="${DIAG##*$'\n'}"
 DIAG_BODY="${DIAG%$'\n'*}"
 log "diag GET / HTTP $DIAG_CODE"
 if [[ "$DIAG_CODE" != "200" ]]; then
-    DIAG_RULE=$(echo "$DIAG_BODY" | grep -oE 'Reason:</strong>[^<]*' | sed 's|Reason:</strong>||; s/^ *//' | head -1)
+    # awk over grep — set -e + pipefail kills the script when grep finds no match.
+    DIAG_RULE=$(printf '%s' "$DIAG_BODY" | awk -F'Reason:</strong>' 'NF>1 { sub(/<.*/,"",$2); sub(/^ */,"",$2); print $2; exit }')
     log "  blocked by rule: ${DIAG_RULE:-<unknown>}"
     log "  body excerpt: ${DIAG_BODY:0:400}"
 fi
