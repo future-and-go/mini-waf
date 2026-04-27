@@ -29,6 +29,9 @@ pub struct AppConfig {
     /// Cluster configuration — None means standalone mode (default)
     #[serde(default)]
     pub cluster: Option<ClusterConfig>,
+    /// `SQLi` scanner configuration (header scanning, size limits)
+    #[serde(default)]
+    pub sqli_scan: SqliScanConfig,
 }
 
 /// Rule source entry from configuration
@@ -468,6 +471,57 @@ impl Default for CommunityConfig {
             batch_size: default_community_batch_size(),
             flush_interval_secs: default_community_flush_interval(),
             sync_interval_secs: default_community_sync_interval(),
+        }
+    }
+}
+
+/// `SQLi` scanner configuration for header scanning and size limits.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SqliScanConfig {
+    /// Enable scanning HTTP headers for `SQLi` patterns.
+    #[serde(default = "default_true")]
+    pub scan_headers: bool,
+    /// Headers to skip (lowercase). Ignored if `header_allowlist` is non-empty.
+    #[serde(default = "default_header_denylist")]
+    pub header_denylist: Vec<String>,
+    /// If non-empty, ONLY these headers are scanned (overrides denylist).
+    #[serde(default)]
+    pub header_allowlist: Vec<String>,
+    /// Max bytes to scan per header value.
+    #[serde(default = "default_header_scan_cap")]
+    pub header_scan_cap: usize,
+    /// Max bytes to parse for JSON body.
+    #[serde(default = "default_json_parse_cap")]
+    pub json_parse_cap: usize,
+}
+
+fn default_header_denylist() -> Vec<String> {
+    vec![
+        "content-length".to_string(),
+        "content-type".to_string(),
+        "host".to_string(),
+        "connection".to_string(),
+        "accept-encoding".to_string(),
+        "cookie".to_string(),
+    ]
+}
+
+const fn default_header_scan_cap() -> usize {
+    4096
+}
+
+const fn default_json_parse_cap() -> usize {
+    256 * 1024
+}
+
+impl Default for SqliScanConfig {
+    fn default() -> Self {
+        Self {
+            scan_headers: true,
+            header_denylist: default_header_denylist(),
+            header_allowlist: Vec::new(),
+            header_scan_cap: default_header_scan_cap(),
+            json_parse_cap: default_json_parse_cap(),
         }
     }
 }
