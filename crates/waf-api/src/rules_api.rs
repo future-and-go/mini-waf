@@ -10,13 +10,13 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use axum::{
     Json,
     extract::{Path as AxumPath, State},
     http::StatusCode,
     response::IntoResponse,
 };
-use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::warn;
@@ -108,11 +108,7 @@ fn scan_yaml_rules(rules_dir: &Path) -> Vec<(String, String, Vec<YamlRuleEntry>)
     results
 }
 
-fn collect_yaml_files(
-    base: &Path,
-    dir: &Path,
-    out: &mut Vec<(String, String, Vec<YamlRuleEntry>)>,
-) {
+fn collect_yaml_files(base: &Path, dir: &Path, out: &mut Vec<(String, String, Vec<YamlRuleEntry>)>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) => {
@@ -152,10 +148,9 @@ fn collect_yaml_files(
         };
 
         // Derive a relative path label like "owasp-crs/sqli.yaml"
-        let rel = path.strip_prefix(base).map_or_else(
-            |_| path.display().to_string(),
-            |p| p.display().to_string(),
-        );
+        let rel = path
+            .strip_prefix(base)
+            .map_or_else(|_| path.display().to_string(), |p| p.display().to_string());
 
         let source = if rulefile.source.is_empty() {
             // Derive source from directory name
@@ -177,12 +172,11 @@ fn collect_yaml_files(
 /// GET /api/rules/registry — list all rules from YAML files
 pub async fn get_rule_registry(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Fetch all rule overrides from DB (global — host_id IS NULL)
-    let overrides: Vec<RuleOverrideRow> = sqlx::query_as(
-        "SELECT rule_id, enabled FROM rule_overrides WHERE host_id IS NULL",
-    )
-    .fetch_all(state.db.pool())
-    .await
-    .unwrap_or_default();
+    let overrides: Vec<RuleOverrideRow> =
+        sqlx::query_as("SELECT rule_id, enabled FROM rule_overrides WHERE host_id IS NULL")
+            .fetch_all(state.db.pool())
+            .await
+            .unwrap_or_default();
 
     let override_map: HashMap<String, bool> = overrides
         .into_iter()
@@ -264,11 +258,7 @@ pub async fn toggle_rule(
 
 /// POST /api/rules/reload — reload engine rules
 pub async fn reload_rule_registry(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
-    state
-        .engine
-        .reload_rules()
-        .await
-        .map_err(ApiError::Internal)?;
+    state.engine.reload_rules().await.map_err(ApiError::Internal)?;
     Ok(Json(json!({ "success": true, "data": "Rules reloaded" })))
 }
 
@@ -285,26 +275,18 @@ pub async fn import_rules(
 
     let path = Path::new(&req.source);
     if !path.exists() {
-        return Err(ApiError::NotFound(format!(
-            "File not found: {}",
-            req.source
-        )));
+        return Err(ApiError::NotFound(format!("File not found: {}", req.source)));
     }
 
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| ApiError::Internal(anyhow!("Cannot read file: {e}")))?;
+    let content = std::fs::read_to_string(path).map_err(|e| ApiError::Internal(anyhow!("Cannot read file: {e}")))?;
 
-    let rulefile: YamlRuleFile = serde_yaml::from_str(&content)
-        .map_err(|e| ApiError::BadRequest(format!("Invalid YAML: {e}")))?;
+    let rulefile: YamlRuleFile =
+        serde_yaml::from_str(&content).map_err(|e| ApiError::BadRequest(format!("Invalid YAML: {e}")))?;
 
     let count = rulefile.rules.len();
 
     // Trigger engine reload to pick up new files
-    state
-        .engine
-        .reload_rules()
-        .await
-        .map_err(ApiError::Internal)?;
+    state.engine.reload_rules().await.map_err(ApiError::Internal)?;
 
     Ok(Json(json!({
         "success": true,
