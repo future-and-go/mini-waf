@@ -1,4 +1,4 @@
-/// Serve the embedded React admin panel (Refine + AntD) from /ui/*.
+/// Serve the embedded React admin panel (Refine + `AntD`) from /ui/*.
 /// SPA with fallback to index.html for client-side routing.
 use axum::{
     body::Body,

@@ -287,7 +287,9 @@ impl CompiledRule {
                         let body_str = String::from_utf8_lossy(&ctx.body_preview);
                         detect_with_decode(&body_str)
                     }
-                    || ctx.headers.iter()
+                    || ctx
+                        .headers
+                        .iter()
                         .filter(|(k, _)| !is_routing_header(k))
                         .any(|(_, v)| detect_with_decode(v))
             }
@@ -391,11 +393,7 @@ impl OWASPCheck {
                     rules.push(cr);
                 }
             }
-            debug!(
-                "Loaded {} rules from {}",
-                rules.len() - count_before,
-                path.display()
-            );
+            debug!("Loaded {} rules from {}", rules.len() - count_before, path.display());
         }
     }
 
