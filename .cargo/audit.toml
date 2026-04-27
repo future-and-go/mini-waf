@@ -1,27 +1,71 @@
 # Audit policy for prx-waf
 # Advisories ignored here are from upstream transitive dependencies
-# that we cannot directly control.
+# that we cannot directly control. Keep this list in sync with deny.toml.
 
 [advisories]
 # RUSTSEC-2023-0071: rsa Marvin Attack via sqlx-mysql
-# sqlx-mysql is an optional dependency of sqlx and is NOT activated in this project
-# (prx-waf only uses postgres feature, default-features = false).
-# It appears in Cargo.lock only as a version record for the optional dep, never compiled.
-# cargo tree -i rsa returns nothing; no fix is available upstream (patched = []).
+# sqlx-mysql is an optional dependency of sqlx and is NOT activated in this
+# project (prx-waf only uses postgres feature, default-features = false).
+# It appears in Cargo.lock only as a version record, never compiled.
 #
-# RUSTSEC-2024-0437: protobuf 2.28.0 recursive parsing crash — via pingora-core -> prometheus -> protobuf
-# Waiting for Cloudflare/pingora to upgrade prometheus or switch to prost
+# RUSTSEC-2024-0437: protobuf 2.28.0 recursive parsing crash — via
+# pingora-core -> prometheus -> protobuf. Waiting for pingora 0.9.x.
 #
-# RUSTSEC-2025-0069: daemonize 0.5.0 unmaintained — via pingora-core
-# No alternative available until pingora drops this dependency
+# RUSTSEC-2024-0436: paste unmaintained — pingora transitive dep.
+# RUSTSEC-2024-0388: derivative unmaintained — pingora transitive dep.
+# RUSTSEC-2025-0069: daemonize unmaintained — pingora transitive dep.
 #
-# RUSTSEC-2024-0388: derivative 2.2.0 unmaintained — via pingora-core
-# No alternative available until pingora drops this dependency
+# RUSTSEC-2024-0438 / RUSTSEC-2025-0046 / RUSTSEC-2025-0118 /
+# RUSTSEC-2026-0020 / RUSTSEC-2026-0021: wasmtime CVEs — blocked by pingora
+# 0.8.0 pinning wasmtime; need pingora 0.9.x.
+#
+# RUSTSEC-2026-0097: rand 0.8.5 unsound only when a custom log::Logger calls
+# `rand::rng()` reentrantly during `ThreadRng` reseed. We don't have any
+# custom logger that touches rand, and trace-level logging is off in
+# production builds. Upgrade to rand 0.9 once all transitive deps support it.
+#
+# RUSTSEC-2026-0085…0096, 0103: wasmtime 43.0 family — sandbox-escape /
+# UAF / panic / data-leak issues. Fix exists in 43.0.1+ but pingora 0.8.0
+# pins us to 43.0. Resolves when pingora 0.9.x lands.
+# We do NOT execute untrusted Wasm — plugins are loaded by admin via
+# /api/plugins so the practical exploitability is low.
+#
+# RUSTSEC-2026-0098, 0104, plus rustls-webpki CRL panic:
+# rustls-webpki 0.103.10 — name-constraint validation issues. Fixed in
+# 0.103.11+, blocked by rustls 0.23 transitive pin.
+#
+# RUSTSEC-2026-0099: thin-vec UAF/double-free in IntoIter::drop when
+# element drop panics. Pulled in by rhai 1.24. The Rhai scripts we run are
+# admin-supplied with strict sandbox limits; the panic-during-drop scenario
+# requires hostile script code. Track upstream fix.
 ignore = [
     "RUSTSEC-2023-0071",
-    "RUSTSEC-2024-0437",
-    "RUSTSEC-2025-0069",
     "RUSTSEC-2024-0388",
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2024-0437",
+    "RUSTSEC-2024-0438",
+    "RUSTSEC-2025-0046",
+    "RUSTSEC-2025-0069",
+    "RUSTSEC-2025-0118",
+    "RUSTSEC-2026-0020",
+    "RUSTSEC-2026-0021",
+    "RUSTSEC-2026-0085",
+    "RUSTSEC-2026-0086",
+    "RUSTSEC-2026-0087",
+    "RUSTSEC-2026-0088",
+    "RUSTSEC-2026-0089",
+    "RUSTSEC-2026-0090",
+    "RUSTSEC-2026-0091",
+    "RUSTSEC-2026-0092",
+    "RUSTSEC-2026-0093",
+    "RUSTSEC-2026-0094",
+    "RUSTSEC-2026-0095",
+    "RUSTSEC-2026-0096",
+    "RUSTSEC-2026-0097",
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0103",
+    "RUSTSEC-2026-0104",
 ]
 informational_warnings = ["unmaintained"]
 severity_threshold = "low"
