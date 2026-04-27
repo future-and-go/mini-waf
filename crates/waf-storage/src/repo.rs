@@ -347,11 +347,13 @@ impl Database {
         let page_size = query.page_size.unwrap_or(20).clamp(1, 100);
         let offset = (page - 1) * page_size;
 
-        // Count query
+        // Count query — same INET caveat as the list query below: avoid
+        // comparing the INET column directly with a TEXT bind parameter by
+        // wrapping in `host()` which returns the address as plain TEXT.
         let total: i64 = sqlx::query_scalar(
             r"SELECT COUNT(*) FROM attack_logs
                WHERE ($1::text IS NULL OR host_code = $1)
-                 AND ($2::text IS NULL OR client_ip = $2)
+                 AND ($2::text IS NULL OR host(client_ip) = $2)
                  AND ($3::text IS NULL OR action = $3)
                  AND ($4::text IS NULL OR geo_info->>'iso_code' = $4)
                  AND ($5::text IS NULL OR geo_info->>'country' ILIKE '%' || $5 || '%')",
@@ -368,13 +370,21 @@ impl Database {
         // is `String` in Rust — sqlx validates the column->Rust mapping at prepare
         // time and errors with "unsupported type" if we just `SELECT *`. Cast to
         // TEXT here so the prepared-statement type check sees a textual column.
+        // Use postgres `host(inet)` so the result column is plain TEXT
+        // ("192.168.1.1") without any subnet-mask suffix. The `::TEXT` cast
+        // alone preserves the slash-form (e.g. "192.168.1.1/32") and some
+        // sqlx versions still trip the prepared-statement type validation
+        // because the underlying column type advertised in the result
+        // metadata is INET (the alias only renames the column, not its
+        // type). `host()` returns a real text expression so sqlx maps it
+        // straight into String with no INET deserialiser involved.
         let rows = sqlx::query_as::<_, AttackLog>(
-            r"SELECT id, host_code, host, client_ip::TEXT AS client_ip, method, path,
+            r"SELECT id, host_code, host, host(client_ip) AS client_ip, method, path,
                       query, rule_id, rule_name, action, phase, detail,
                       request_headers, geo_info, created_at
                FROM attack_logs
                WHERE ($1::text IS NULL OR host_code = $1)
-                 AND ($2::text IS NULL OR client_ip = $2)
+                 AND ($2::text IS NULL OR host(client_ip) = $2)
                  AND ($3::text IS NULL OR action = $3)
                  AND ($4::text IS NULL OR geo_info->>'iso_code' = $4)
                  AND ($5::text IS NULL OR geo_info->>'country' ILIKE '%' || $5 || '%')
