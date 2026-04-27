@@ -52,7 +52,7 @@ impl ClusterServer {
     /// would otherwise pull the *process-default* `CryptoProvider`; with both
     /// `ring` and `aws-lc-rs` linked transitively (Cargo.lock contains both),
     /// rustls 0.23 panics with "could not automatically determine the
-    /// process-level CryptoProvider" on a worker thread before the cluster
+    /// process-level `CryptoProvider`" on a worker thread before the cluster
     /// gets a chance to register its `cluster_state`. We pin `ring` here
     /// explicitly so the TLS bring-up never depends on global state.
     fn build_tls_config(&self) -> Result<rustls::ServerConfig> {
@@ -63,10 +63,9 @@ impl ClusterServer {
             .add(self.ca_cert_der.clone())
             .context("failed to add CA cert to root store")?;
 
-        let client_verifier =
-            WebPkiClientVerifier::builder_with_provider(Arc::new(root_store), Arc::clone(&provider))
-                .build()
-                .context("failed to build client cert verifier")?;
+        let client_verifier = WebPkiClientVerifier::builder_with_provider(Arc::new(root_store), Arc::clone(&provider))
+            .build()
+            .context("failed to build client cert verifier")?;
 
         let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(self.node_cert_pem.as_bytes())
             .collect::<Result<Vec<_>, _>>()
