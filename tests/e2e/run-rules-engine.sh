@@ -92,9 +92,37 @@ done
 
 # ── 4) Rule-blocking probes (each must produce HTTP 403) ────────────────────
 # Helper: assert that <args...> applied to $PROXY returns 403.
+#
+# When a probe DOESN'T return 403 we want as much context as possible in the
+# CI log so future debugging doesn't require scraping container logs:
+#   - actual HTTP status
+#   - block-page rule_name (if WAF blocked with a different status — unlikely)
+#   - upstream response excerpt (if WAF didn't block — tells us httpbin's reply)
 expect_block() {
     local name="$1"; shift
-    assert_http_status "block.$name" "403" "$@"
+    local resp code body
+    resp=$(curl -sk --max-time 10 -w '\n%{http_code}' "$@" 2>/dev/null || echo $'\n000')
+    code="${resp##*$'\n'}"
+    body="${resp%$'\n'*}"
+    if [[ "$code" == "403" ]]; then
+        pass "block.$name"
+    else
+        # Pull rule_name from the WAF block-page template if present, else
+        # show the upstream's response so we can tell whether WAF saw the
+        # request at all (200 = WAF allowed, 404 = upstream had no route, …).
+        local rule
+        rule=$(echo "$body" | grep -oE 'Reason:</strong>[^<]*' | sed 's|Reason:</strong>||; s/^ *//' | head -1)
+        log "  block.$name diagnostic:"
+        log "    expected=403 actual=$code"
+        log "    cmd: curl $*"
+        if [[ -n "$rule" ]]; then
+            log "    waf rule fired: $rule"
+        else
+            log "    waf rule fired: <none — request reached upstream>"
+            log "    upstream body excerpt: ${body:0:200}"
+        fi
+        fail "block.$name" "expected 403, got $code"
+    fi
 }
 
 # OWASP CRS — SQLi
