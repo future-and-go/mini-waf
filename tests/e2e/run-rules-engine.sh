@@ -106,23 +106,24 @@ expect_block() {
     body="${resp%$'\n'*}"
     if [[ "$code" == "403" ]]; then
         pass "block.$name"
-    else
-        # Pull rule_name from the WAF block-page template if present, else
-        # show the upstream's response so we can tell whether WAF saw the
-        # request at all (200 = WAF allowed, 404 = upstream had no route, …).
-        local rule
-        rule=$(echo "$body" | grep -oE 'Reason:</strong>[^<]*' | sed 's|Reason:</strong>||; s/^ *//' | head -1)
-        log "  block.$name diagnostic:"
-        log "    expected=403 actual=$code"
-        log "    cmd: curl $*"
-        if [[ -n "$rule" ]]; then
-            log "    waf rule fired: $rule"
-        else
-            log "    waf rule fired: <none — request reached upstream>"
-            log "    upstream body excerpt: ${body:0:200}"
-        fi
-        fail "block.$name" "expected 403, got $code"
+        return 0
     fi
+    # Extract rule_name from the WAF block-page template via awk so we don't
+    # propagate `grep`'s exit-1 when the body isn't a block page (it would be
+    # killed by `set -e -o pipefail` and abort the suite mid-run, which is
+    # exactly the bug that earlier hid every failure after the first one).
+    local rule
+    rule=$(printf '%s' "$body" | awk -F'Reason:</strong>' 'NF>1 { sub(/<.*/,"",$2); sub(/^ */,"",$2); print $2; exit }')
+    log "  block.$name diagnostic:"
+    log "    expected=403 actual=$code"
+    log "    cmd: curl $*"
+    if [[ -n "$rule" ]]; then
+        log "    waf rule fired: $rule"
+    else
+        log "    waf rule fired: <none — request reached upstream>"
+        log "    upstream body excerpt: ${body:0:200}"
+    fi
+    fail "block.$name" "expected 403, got $code"
 }
 
 # OWASP CRS — SQLi
@@ -183,7 +184,8 @@ CTRL_CODE="${CTRL_RESP##*$'\n'}"
 CTRL_BODY="${CTRL_RESP%$'\n'*}"
 log "control.benign-get HTTP $CTRL_CODE"
 if [[ "$CTRL_CODE" != "200" ]]; then
-    RULE_NAME=$(echo "$CTRL_BODY" | grep -oE 'Reason:</strong>[^<]*' | sed 's|Reason:</strong>||; s/^ *//' | head -1)
+    # awk over grep — see expect_block for why (set -e + pipefail kills on no match).
+    RULE_NAME=$(printf '%s' "$CTRL_BODY" | awk -F'Reason:</strong>' 'NF>1 { sub(/<.*/,"",$2); sub(/^ */,"",$2); print $2; exit }')
     log "  block reason: ${RULE_NAME:-<not found>}"
     log "  body excerpt: ${CTRL_BODY:0:300}"
 fi
