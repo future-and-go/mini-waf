@@ -29,6 +29,20 @@ if ! wait_health "WAF API"  "$ADMIN/health" 90; then
 fi
 pass "waf.health"
 
+# Diagnostic: probe the proxy with a vanilla GET and dump the full response.
+# When the WAF unexpectedly blocks pass-through traffic the block page
+# embeds `{{rule_name}}`, which lets us identify the misfiring rule from
+# the suite log alone (no need to scrape container logs separately).
+DIAG=$(curl -sk --max-time 10 -w '\n%{http_code}' "$PROXY/get" 2>/dev/null || echo $'\n000')
+DIAG_CODE="${DIAG##*$'\n'}"
+DIAG_BODY="${DIAG%$'\n'*}"
+log "diag GET / HTTP $DIAG_CODE"
+if [[ "$DIAG_CODE" != "200" ]]; then
+    DIAG_RULE=$(echo "$DIAG_BODY" | grep -oE 'Reason:</strong>[^<]*' | sed 's|Reason:</strong>||; s/^ *//' | head -1)
+    log "  blocked by rule: ${DIAG_RULE:-<unknown>}"
+    log "  body excerpt: ${DIAG_BODY:0:400}"
+fi
+
 # ── 1) Plain forwarding ─────────────────────────────────────────────────────
 assert_http_status "forward.get-200" "200" "$PROXY/get"
 assert_http_status "forward.headers-200" "200" "$PROXY/headers"

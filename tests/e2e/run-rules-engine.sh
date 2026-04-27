@@ -147,6 +147,18 @@ expect_block "data-leakage.backup-git"                                         "
 expect_block "bot.masscan"      -A "masscan/1.0"                                "$PROXY/get"
 
 # ── 5) Negative control: a benign request must succeed ──────────────────────
-assert_http_status "control.benign-get" "200" "$PROXY/get"
+# Diagnostic: capture full response so when this fails the block page tells
+# us EXACTLY which WAF rule fired. The default block-page template embeds
+# `{{rule_name}}` in the HTML body, so a quick grep gives us the culprit.
+CTRL_RESP=$(curl -sk --max-time 10 -w '\n%{http_code}' "$PROXY/get" 2>/dev/null || echo $'\n000')
+CTRL_CODE="${CTRL_RESP##*$'\n'}"
+CTRL_BODY="${CTRL_RESP%$'\n'*}"
+log "control.benign-get HTTP $CTRL_CODE"
+if [[ "$CTRL_CODE" != "200" ]]; then
+    RULE_NAME=$(echo "$CTRL_BODY" | grep -oE 'Reason:</strong>[^<]*' | sed 's|Reason:</strong>||; s/^ *//' | head -1)
+    log "  block reason: ${RULE_NAME:-<not found>}"
+    log "  body excerpt: ${CTRL_BODY:0:300}"
+fi
+assert_eq "control.benign-get" "200" "$CTRL_CODE"
 
 e2e_finalize
