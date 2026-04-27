@@ -1418,8 +1418,18 @@ async fn init_async(
 
     // Register hosts from config file
     for entry in &config.hosts {
-        use waf_common::HostConfig;
+        use waf_common::{DefenseConfig, HostConfig};
         let code = format!("cfg-{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]);
+        // Enable the OWASP CRS rule pipeline by default for config-loaded
+        // hosts. The DefenseConfig default has owasp_set=false (matching the
+        // legacy DB-backed admin UI's opt-in toggle), but operators who
+        // declare hosts in TOML expect a sensible "WAF on" baseline — without
+        // OWASP enabled, things like log4shell / spring4shell / SSRF would
+        // silently sail through.
+        let defense_config = DefenseConfig {
+            owasp_set: true,
+            ..DefenseConfig::default()
+        };
         let cfg = Arc::new(HostConfig {
             code,
             host: entry.host.clone(),
@@ -1430,6 +1440,7 @@ async fn init_async(
             remote_port: entry.remote_port,
             cert_file: entry.cert_file.clone(),
             key_file: entry.key_file.clone(),
+            defense_config,
             ..HostConfig::default()
         });
         router.register(&cfg);

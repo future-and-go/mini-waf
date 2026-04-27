@@ -112,8 +112,25 @@ enum YamlValue {
 /// Headers that identify the *destination* of the request, not user-controlled
 /// payload data — `field: "all"` rules must skip these or they FP on legit
 /// requests (e.g. SSRF rules tripping on `Host: localhost:8080`).
+///
+/// Also skip `accept` (content negotiation, value `*/*` triggers some weird
+/// regexes) and connection-management headers that aren't attacker-controlled.
 fn is_routing_header(name: &str) -> bool {
-    matches!(name, "host" | ":authority")
+    matches!(
+        name,
+        "host"
+            | ":authority"
+            | ":method"
+            | ":path"
+            | ":scheme"
+            | "accept"
+            | "accept-encoding"
+            | "accept-language"
+            | "connection"
+            | "content-length"
+            | "x-forwarded-host"
+            | "x-real-ip"
+    )
 }
 
 enum CompiledMatcher {
@@ -156,12 +173,32 @@ impl CompiledRule {
                         // / OWASP CRS recommend `!REQUEST_HEADERS:Host` for
                         // exactly this reason.
                         let body = String::from_utf8_lossy(&ctx.body_preview);
-                        re.is_match(&ctx.path)
-                            || re.is_match(&ctx.query)
-                            || re.is_match(&body)
-                            || ctx.headers.iter()
-                                .filter(|(k, _)| !is_routing_header(k))
-                                .any(|(_, v)| re.is_match(v))
+                        // info! so the matched rule + matched location is
+                        // visible in default container logs without needing
+                        // RUST_LOG=debug — invaluable when a rule fires
+                        // unexpectedly on a benign request.
+                        if re.is_match(&ctx.path) {
+                            tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on path: {}", ctx.path);
+                            return true;
+                        }
+                        if re.is_match(&ctx.query) {
+                            tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on query: {}", ctx.query);
+                            return true;
+                        }
+                        if re.is_match(&body) {
+                            tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on body: {}", body);
+                            return true;
+                        }
+                        for (k, v) in &ctx.headers {
+                            if is_routing_header(k) {
+                                continue;
+                            }
+                            if re.is_match(v) {
+                                tracing::info!(rule = %self.id, name = %self.name, header = %k, value = %v, "WAF rule fired on header");
+                                return true;
+                            }
+                        }
+                        false
                     }
                     _ => field_val.as_ref().is_some_and(|v| re.is_match(v)),
                 }

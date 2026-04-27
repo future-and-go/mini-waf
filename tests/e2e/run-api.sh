@@ -79,7 +79,14 @@ assert_http_status "block-ips.list" "200" "${AUTH[@]}" "$ADMIN/api/block-ips"
 assert_http_status "block-urls.list" "200" "${AUTH[@]}" "$ADMIN/api/block-urls"
 
 # ── 4) Logs + stats ─────────────────────────────────────────────────────────
-assert_http_status "attack-logs"     "200" "${AUTH[@]}" "$ADMIN/api/attack-logs"
+# Fetch attack-logs separately first so we can log the response body if it
+# fails — the bare assert_http_status only sees the status code which makes
+# diagnosing 500s opaque (sqlx error messages live in the body).
+ATTACK_RESP=$(curl -sk --max-time 10 -w '\n%{http_code}' "${AUTH[@]}" "$ADMIN/api/attack-logs" 2>/dev/null || echo $'\n000')
+ATTACK_CODE="${ATTACK_RESP##*$'\n'}"
+ATTACK_BODY="${ATTACK_RESP%$'\n'*}"
+log "attack-logs HTTP $ATTACK_CODE — body: ${ATTACK_BODY:0:400}"
+assert_eq "attack-logs" "200" "$ATTACK_CODE"
 assert_http_status "security-events" "200" "${AUTH[@]}" "$ADMIN/api/security-events"
 assert_http_status "stats.overview"  "200" "${AUTH[@]}" "$ADMIN/api/stats/overview"
 assert_http_status "stats.timeseries" "200" "${AUTH[@]}" "$ADMIN/api/stats/timeseries"

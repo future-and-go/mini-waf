@@ -226,9 +226,28 @@ impl ProxyHttp for WafProxy {
             self.blocked_counter.fetch_add(1, Ordering::Relaxed);
             match &decision.action {
                 WafAction::Block { status, body } => {
+                    let (rule_id, rule_name, phase, detail) = decision
+                        .result
+                        .as_ref()
+                        .map(|r| {
+                            (
+                                r.rule_id.clone().unwrap_or_default(),
+                                r.rule_name.clone(),
+                                r.phase.to_string(),
+                                r.detail.clone(),
+                            )
+                        })
+                        .unwrap_or_default();
                     warn!(
-                        "WAF blocked request: ip={} path={} host={}",
-                        request_ctx.client_ip, request_ctx.path, request_ctx.host,
+                        rule_id = %rule_id,
+                        rule_name = %rule_name,
+                        phase = %phase,
+                        detail = %detail,
+                        method = %request_ctx.method,
+                        path = %request_ctx.path,
+                        host = %request_ctx.host,
+                        ua = %request_ctx.headers.get("user-agent").cloned().unwrap_or_default(),
+                        "WAF blocked request",
                     );
                     let status_code = *status;
                     let body_str = body.clone().unwrap_or_else(|| "Access Denied".to_string());
