@@ -11,21 +11,53 @@ feature-depth = 1
 yanked = "deny"
 unmaintained = "all"
 unsound = "workspace"
-# Review all ignores by: 2026-06-01
+# Review all ignores by: 2026-06-01.
+# Keep this list trimmed to advisories that still resolve against the
+# current Cargo.lock — cargo-deny errors on `advisory-not-detected`. If a
+# transitive dep gets bumped past an advisory, drop the entry here.
 ignore = [
-    # protobuf 2.28.0 DoS — blocked by pingora 0.8.0 pinning prometheus 0.13 (uses protobuf v2)
-    # pingora main branch already upgraded, waiting for 0.9.x release
+    # rsa Marvin timing sidechannel — advertised via sqlx-mysql which is an
+    # OPTIONAL feature we never enable (default-features=false; only the
+    # `postgres` feature is on). The vulnerable code is never compiled.
+    { id = "RUSTSEC-2023-0071", reason = "rsa via sqlx-mysql: feature not enabled" },
+    # protobuf 2.28.0 DoS — blocked by pingora 0.8.0 pinning prometheus 0.13.
     { id = "RUSTSEC-2024-0437", reason = "protobuf: blocked by pingora 0.8.0, awaiting pingora 0.9.x" },
-    # Unmaintained transitive deps — no replacement available
+    # Unmaintained transitive deps via pingora.
     { id = "RUSTSEC-2025-0069", reason = "daemonize: pingora transitive dep" },
     { id = "RUSTSEC-2024-0388", reason = "derivative: pingora transitive dep" },
-    { id = "RUSTSEC-2024-0436", reason = "paste: pingora transitive dep" },
-    # wasmtime CVEs — blocked by pingora 0.8.0, needs pingora upgrade
-    { id = "RUSTSEC-2024-0438", reason = "wasmtime: Windows device names, blocked by pingora" },
-    { id = "RUSTSEC-2025-0046", reason = "wasmtime: fd_renumber panic, blocked by pingora" },
-    { id = "RUSTSEC-2025-0118", reason = "wasmtime: shared memory unsound, blocked by pingora" },
-    { id = "RUSTSEC-2026-0020", reason = "wasmtime: WASI resource exhaustion, blocked by pingora" },
-    { id = "RUSTSEC-2026-0021", reason = "wasmtime: WASI HTTP fields panic, blocked by pingora" },
+    # ── 2026-04 wasmtime 43.0 family — fixed in 43.0.1+, blocked by pingora
+    # 0.8.0 transitive pin. We do not run untrusted Wasm: plugins are
+    # admin-uploaded via /api/plugins.
+    { id = "RUSTSEC-2026-0085", reason = "wasmtime Winch sandbox-escape: blocked by pingora pin" },
+    { id = "RUSTSEC-2026-0086", reason = "wasmtime Cranelift aarch64 sandbox-escape: blocked by pingora pin" },
+    { id = "RUSTSEC-2026-0087", reason = "wasmtime pooling-allocator data leak: blocked by pingora pin" },
+    { id = "RUSTSEC-2026-0088", reason = "wasmtime Winch table.fill panic: blocked by pingora pin" },
+    { id = "RUSTSEC-2026-0089", reason = "wasmtime Linker UAF: blocked by pingora pin" },
+    { id = "RUSTSEC-2026-0090", reason = "wasmtime Winch table.grow masking: blocked by pingora pin" },
+    { id = "RUSTSEC-2026-0091", reason = "wasmtime component-model OOB write: blocked by pingora pin" },
+    { id = "RUSTSEC-2026-0092", reason = "wasmtime UTF-16/latin1 OOB read: blocked by pingora pin" },
+    { id = "RUSTSEC-2026-0093", reason = "wasmtime f64x2.splat OOB load: blocked by pingora pin" },
+    { id = "RUSTSEC-2026-0094", reason = "wasmtime flags lift panic: blocked by pingora pin" },
+    { id = "RUSTSEC-2026-0095", reason = "wasmtime component-model transcode: blocked by pingora pin" },
+    { id = "RUSTSEC-2026-0096", reason = "wasmtime UTF-16 misalign panic: blocked by pingora pin" },
+    { id = "RUSTSEC-2026-0103", reason = "wasmtime 64-bit table data leak: blocked by pingora pin" },
+    # rand 0.8.5 unsoundness — only triggers when a custom log::Logger calls
+    # `rand::rng()` reentrantly during `ThreadRng` reseed. We have no custom
+    # logger that touches rand. Upgrade to rand 0.9 when all transitive deps
+    # support it.
+    { id = "RUSTSEC-2026-0097", reason = "rand: requires pathological custom-logger setup we don't have" },
+    # rustls-webpki name-constraint validation issues — fixed in 0.103.11+,
+    # blocked by rustls 0.23 transitive pin. We use rustls for QUIC mTLS
+    # cluster transport with our own CA, so attacker-controlled cert chains
+    # are not a vector here.
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki: wildcard name constraint, irrelevant to cluster mTLS" },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki: URI name constraint, irrelevant to cluster mTLS" },
+    # thin-vec UAF/double-free in IntoIter::drop when element-drop panics.
+    # Pulled in via rhai 1.24 for our custom-rule scripting. Rhai scripts
+    # are admin-uploaded and sandboxed — the panic-during-drop scenario
+    # requires hostile script code which would be a separate access-control
+    # failure first.
+    { id = "RUSTSEC-2026-0099", reason = "thin-vec via rhai: requires hostile script in admin-controlled context" },
 ]
 
 [licenses]
