@@ -32,14 +32,34 @@ use crate::transport::server::ClusterServer;
 ///
 /// Create with [`ClusterNode::new`] and then call [`ClusterNode::run`] inside a
 /// dedicated tokio runtime (usually a background `std::thread`).
+///
+/// The internal `NodeState` is built eagerly in `new()` and exposed via
+/// [`ClusterNode::state`] so callers (e.g. the management API) can plug the
+/// SAME state into their `AppState` BEFORE the cluster is spawned. Without
+/// this hand-off the API's `cluster_state` slot stays `None` and every
+/// `/api/cluster/*` route returns 404 "cluster not enabled".
 pub struct ClusterNode {
     config: ClusterConfig,
+    node_state: Arc<NodeState>,
 }
 
 impl ClusterNode {
-    /// Create a cluster node from configuration.
-    pub const fn new(config: ClusterConfig) -> Result<Self> {
-        Ok(Self { config })
+    /// Create a cluster node from configuration. Builds the shared `NodeState`
+    /// up front so it can be handed to the API layer before `run()` consumes
+    /// `self`.
+    pub fn new(config: ClusterConfig) -> Result<Self> {
+        let storage_mode = StorageMode::Full;
+        let node_state = Arc::new(
+            NodeState::new(config.clone(), storage_mode).context("failed to initialise cluster node state")?,
+        );
+        Ok(Self { config, node_state })
+    }
+
+    /// Get a shared handle to this node's state. Hand this to `AppState` so
+    /// `/api/cluster/status`, `/api/cluster/nodes` etc. can read role / peers /
+    /// term while the cluster runs.
+    pub fn state(&self) -> Arc<NodeState> {
+        Arc::clone(&self.node_state)
     }
 
     /// Start the cluster node: generate or load certificates, launch QUIC server,
@@ -49,12 +69,9 @@ impl ClusterNode {
     pub async fn run(self) -> Result<()> {
         let listen_addr: SocketAddr = self.config.listen_addr.parse().context("invalid cluster listen_addr")?;
 
-        // ── NodeState (resolves node_id before cert generation) ──────────────
-
-        let storage_mode = StorageMode::Full;
-        let node_state = Arc::new(
-            NodeState::new(self.config.clone(), storage_mode).context("failed to initialise cluster node state")?,
-        );
+        // ── NodeState (already built in new(); keep a local Arc for the rest
+        // of this function so the existing logic compiles unchanged) ─────────
+        let node_state = Arc::clone(&self.node_state);
 
         // ── Certificate setup ─────────────────────────────────────────────────
 
