@@ -280,9 +280,7 @@ mod tests {
     fn blocks_python_requests_when_strict_mode_enabled() {
         let checker = ScannerCheck::new();
         let ctx = make_ctx_with("python-requests/2.28.0", true);
-        let result = checker
-            .check(&ctx)
-            .expect("strict mode should block python-requests");
+        let result = checker.check(&ctx).expect("strict mode should block python-requests");
         assert_eq!(result.rule_name, "Scripted Client");
     }
 

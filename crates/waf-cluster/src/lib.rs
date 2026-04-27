@@ -49,9 +49,8 @@ impl ClusterNode {
     /// `self`.
     pub fn new(config: ClusterConfig) -> Result<Self> {
         let storage_mode = StorageMode::Full;
-        let node_state = Arc::new(
-            NodeState::new(config.clone(), storage_mode).context("failed to initialise cluster node state")?,
-        );
+        let node_state =
+            Arc::new(NodeState::new(config.clone(), storage_mode).context("failed to initialise cluster node state")?);
         Ok(Self { config, node_state })
     }
 
