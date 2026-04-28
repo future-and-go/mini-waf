@@ -12,6 +12,24 @@ Pingora-based reverse-proxy data plane. Terminates TLS, routes HTTP/1, HTTP/2, a
 - **Tunnel**: connection tunnel handling (e.g., for cluster / forwarded traffic).
 - **Per-request context**: shared state plumbed through the proxy phases.
 
+## Response body internal-ref masking (AC-17)
+
+`response_body_filter` runs an in-place regex masker over upstream response
+chunks (see `filters/response_body_mask_filter.rs`). Patterns and the mask
+token come from `HostConfig::{internal_patterns, mask_token, body_mask_max_bytes}`.
+
+Scope limits (FR-001):
+
+- **Compressed bodies are NOT masked.** If `Content-Encoding` is anything other
+  than `identity` (or absent), the masker is disabled for that response and a
+  `tracing::debug!` line is emitted. Body decompression is FR-033's problem.
+- `Content-Length` is stripped when masking is enabled (replacement length
+  differs from match length); Pingora switches to chunked transfer.
+- A per-host byte ceiling (`body_mask_max_bytes`, default 1 MiB) caps work;
+  bytes beyond the ceiling are forwarded unchanged with a single warn log.
+- Patterns that fail to compile are dropped (fail-open). A bad regex must
+  never 502 a host.
+
 ## Folder Structure
 ```
 src/
