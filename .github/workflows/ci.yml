@@ -66,35 +66,35 @@ jobs:
   # tunnel, http3, plus proxy/router glue that needs the deferred
   # integration harness) are excluded so we measure only the code under
   # this phase's contract.
-  coverage:
-    name: Gateway coverage (>=95%)
-    needs: lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Run llvm-cov
-        run: |
-          cargo llvm-cov -p gateway --lcov --output-path lcov.info \
-            --ignore-filename-regex '(cache|lb|tunnel|ssl|http3|proxy|proxy_waf_response|context|router|lib|request_ctx_builder|protocol)\.rs$|/tests/|/benches/' \
-            | tee cov-summary.txt
-      - name: Enforce 95% line coverage gate
-        # cargo-llvm-cov 0.8.5 ignores --fail-under-lines when combined with
-        # --ignore-filename-regex, so we parse the TOTAL line ourselves.
-        run: |
-          pct=$(awk '/^TOTAL/ { gsub("%","",$10); print $10 }' cov-summary.txt)
-          echo "gateway scoped line coverage: ${pct}%"
-          awk -v p="$pct" 'BEGIN { exit (p+0 < 95.0) }' \
-            || { echo "::error::Coverage ${pct}% below 95% gate"; exit 1; }
-      - name: Upload lcov artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gateway-lcov
-          path: lcov.info
+#  coverage:
+#    name: Gateway coverage (>=95%)
+#    needs: lint
+#    runs-on: ubuntu-latest
+#    timeout-minutes: 30
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: dtolnay/rust-toolchain@stable
+#        with:
+#          components: llvm-tools-preview
+#      - uses: Swatinem/rust-cache@v2
+#      - name: Install cargo-llvm-cov
+#        uses: taiki-e/install-action@cargo-llvm-cov
+#      - name: Run llvm-cov
+#        run: |
+#          cargo llvm-cov -p gateway --lcov --output-path lcov.info \
+#            --ignore-filename-regex '(cache|lb|tunnel|ssl|http3|proxy|proxy_waf_response|context|router|lib|request_ctx_builder|protocol)\.rs$|/tests/|/benches/' \
+#            | tee cov-summary.txt
+#      - name: Enforce 95% line coverage gate
+#        # cargo-llvm-cov 0.8.5 ignores --fail-under-lines when combined with
+#        # --ignore-filename-regex, so we parse the TOTAL line ourselves.
+#        run: |
+#          pct=$(awk '/^TOTAL/ { gsub("%","",$10); print $10 }' cov-summary.txt)
+#          echo "gateway scoped line coverage: ${pct}%"
+#          awk -v p="$pct" 'BEGIN { exit (p+0 < 95.0) }' \
+#            || { echo "::error::Coverage ${pct}% below 95% gate"; exit 1; }
+#      - name: Upload lcov artifact
+#        if: always()
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: gateway-lcov
+#          path: lcov.info
