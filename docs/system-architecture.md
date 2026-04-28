@@ -929,3 +929,100 @@ All events logged via `tracing` crate:
 **Cluster Split**: Quorum-based split-brain prevention (no decision if <N/2+1 nodes)
 
 See [Deployment Guide](./deployment-guide.md) for operational runbooks.
+
+## Response Body Content Scanning (FR-033)
+
+The gateway runs a built-in catalog scanner over upstream response bodies to
+detect and redact common leakage. It complements the existing AC-17 operator
+regex masker (`response_body_mask_filter.rs`) and the planned PR-18 JSON field
+redactor (FR-034); the three layers run in `response_body_filter` in this
+order:
+
+```
+FR-033 catalog scan + gzip decompress
+   │
+   ▼
+FR-034 JSON field redact (placeholder until PR #18 merges)
+   │
+   ▼
+AC-17 operator regex mask
+```
+
+### Categories
+
+- Stack traces (Java, Python, Rust, Node.js, .NET, Go, PHP) — Aho-Corasick over
+  distinctive multi-byte literals plus line-anchored multi-line regexes per
+  language.
+- Verbose error messages — Spring, ASP.NET, Postgres, Oracle SQL syntax markers.
+- API keys / secrets — AWS, GitHub PAT, Slack, Stripe, JWT, Google API,
+  OpenAI, Anthropic, Twilio, generic PEM private-key block markers.
+- Internal IPs — strict-parsed RFC-1918 / loopback / link-local IPv4 (rejects
+  octal / leading-zero aliasing) and IPv6 ULA.
+
+### ReDoS hardening
+
+- Multi-byte literals routed through `aho_corasick::AhoCorasick` (linear time,
+  no backtracking) — Cloudflare 2019 outage class.
+- Each `regex::bytes::Regex` compiled via `RegexBuilder` with `size_limit(1
+  MiB)` and `dfa_size_limit(2 MiB)`. Every quantifier has explicit
+  `{min,max}` bounds; patterns whose `regex_syntax::hir::Hir::properties()
+  .maximum_len()` exceeds 1024 are rejected at build time.
+- Internal-IP detection uses a byte-scan candidate finder + strict
+  `std::net::Ipv4Addr::from_str` — no regex CIDR alternation.
+
+### Decompression
+
+Gzip-only in v1 via `flate2::read::MultiGzDecoder`. Defenses:
+
+- 4 MiB output cap (`MAX_DECOMPRESS_BYTES`) gated pre-allocation by
+  `Read::take`.
+- 8 MiB input cap (`MAX_INPUT_BYTES`).
+- 100:1 output / input ratio guard (`MAX_DECOMPRESS_RATIO`) once at least
+  1 KiB of input has been observed.
+
+Fail-open: any decoder error or cap breach forwards the original encoded
+bytes untouched + a `tracing::warn!`. The WAF does not 502 the host on decode
+failure (research §5).
+
+deflate, brotli, zstd, and lz4 are deliberately deferred to FR-033b — brotli
+has historical panic-isolation risk on adversarial input, and gzip is by far
+the dominant real-traffic encoding.
+
+### Action
+
+Single mode: replace each match span with the hardcoded module constant
+`MASK_TOKEN = b"[redacted]"`. Whole-body block remains FR-005's
+responsibility (request-time block at the WAF engine layer).
+
+### Header mutations
+
+When the scanner enables for a response, `Content-Length` and
+`Transfer-Encoding` are dropped unconditionally; Pingora re-emits chunked.
+`Content-Encoding` is dropped only when gzip decompression succeeded — i.e.
+the downstream sees identity bytes. A Content-Type allowlist at
+`response_filter` filters to only `text/*`, `application/json`,
+`application/xml`, `application/problem+json`, `application/javascript`, and
+skips `application/grpc*`, `text/event-stream`, and `application/octet-stream`
+so gRPC trailers and streaming endpoints are not corrupted.
+
+### Caching
+
+`WafProxy::body_scan_cache` is a content-hash `DashMap<(host, xxhash64(
+body_scan_*)), Arc<CompiledScanner>>`. The hash includes the host name and
+all FR-033 host-config fields, so a config reload that produces an `Arc` at
+the same address as a different host's prior config cannot bleed compiled
+state across hosts. AC-17 (`body_mask_cache`) and FR-034 (`body_redact_cache`)
+currently use `Arc::as_ptr` keys with the same address-reuse hazard; backport
+is tracked in a separate ticket.
+
+### Configuration
+
+Per-host `HostConfig` exposes only two opt-in fields (defaults preserve
+zero-cost passthrough):
+
+- `body_scan_enabled: bool` (default `false`)
+- `body_scan_max_body_bytes: u64` (default `1 << 20`)
+
+Mask token, decompression caps, ratio limits, and tail-buffer size are
+hardcoded module constants; operators have AC-17 (`internal_patterns`) for
+catalog extras.

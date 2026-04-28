@@ -27,9 +27,10 @@ use crate::context::{BODY_PREVIEW_LIMIT, GatewayCtx};
 use crate::ctx_builder::RequestCtxBuilder;
 use crate::error_page::ErrorPageFactory;
 use crate::filters::{
-    CompiledMask, RequestForwardedHostFilter, RequestForwardedProtoFilter, RequestHopByHopFilter,
-    RequestHostPolicyFilter, RequestRealIpFilter, RequestXffFilter, ResponseHeaderBlocklistFilter,
-    ResponseLocationRewriter, ResponseServerPolicyFilter, ResponseViaStripFilter, apply_body_mask_chunk,
+    CompiledMask, CompiledScanner, DecoderChain, RequestForwardedHostFilter, RequestForwardedProtoFilter,
+    RequestHopByHopFilter, RequestHostPolicyFilter, RequestRealIpFilter, RequestXffFilter, ResponseEncoding,
+    ResponseHeaderBlocklistFilter, ResponseLocationRewriter, ResponseServerPolicyFilter, ResponseViaStripFilter,
+    apply_body_mask_chunk, apply_body_scan_chunk, parse_encoding, scanner_config_hash,
 };
 use crate::pipeline::{FilterCtx, RequestFilterChain, ResponseFilterChain};
 use crate::protocol::{ProtoCounters, detect_from_session};
@@ -61,6 +62,13 @@ pub struct WafProxy {
     /// FR-002: tier policy registry. When `None`, every request defaults to
     /// `Tier::CatchAll` + permissive policy (boot-time safety).
     pub tier_registry: Option<Arc<TierPolicyRegistry>>,
+    /// FR-033: per-host compiled scanner cache, keyed by content-hash
+    /// `(host_name, xxhash64(body_scan_*))` so config reload doesn't risk
+    /// pointer-address reuse bleeding across hosts (red-team #6).
+    /// Bounded via `moka::sync::Cache` (max 256 entries, 1 h TTL) so config
+    /// churn cannot grow the cache without bound (red-team review H2).
+    /// AC-17 / FR-034 caches inherit the same hazard; backport tracked separately.
+    pub body_scan_cache: moka::sync::Cache<(String, u64), Arc<CompiledScanner>>,
 }
 
 impl WafProxy {
@@ -78,6 +86,10 @@ impl WafProxy {
             response_chain: Arc::new(build_response_chain()),
             body_mask_cache: Arc::new(DashMap::new()),
             tier_registry: None,
+            body_scan_cache: moka::sync::Cache::builder()
+                .max_capacity(256)
+                .time_to_live(std::time::Duration::from_hours(1))
+                .build(),
         }
     }
 
@@ -104,6 +116,21 @@ impl WafProxy {
         self.body_mask_cache.insert(key, Arc::clone(&compiled));
         compiled
     }
+
+    /// FR-033: resolve (and lazily compile) the content scanner for a given
+    /// host. Cache key is `(host_name, xxhash64(body_scan_* fields))` —
+    /// content-hashed so a config reload that produces an `Arc` at the same
+    /// address as a different host's prior config cannot bleed (red-team #6).
+    fn resolve_scanner(&self, hc: &Arc<HostConfig>) -> Arc<CompiledScanner> {
+        let cfg_hash = scanner_config_hash(hc.body_scan_enabled, hc.body_scan_max_body_bytes);
+        let key = (hc.host.clone(), cfg_hash);
+        if let Some(existing) = self.body_scan_cache.get(&key) {
+            return existing;
+        }
+        let compiled = Arc::new(CompiledScanner::build(hc.body_scan_max_body_bytes));
+        self.body_scan_cache.insert(key, Arc::clone(&compiled));
+        compiled
+    }
 }
 
 /// Map a Pingora error to the HTTP status used by [`ErrorPageFactory`].
@@ -124,6 +151,35 @@ fn error_to_status(e: &pingora_core::Error) -> u16 {
         },
         ErrorSource::Internal | ErrorSource::Unset => 500,
     }
+}
+
+/// FR-033: gate the body content scanner on a Content-Type allowlist so we
+/// never corrupt gRPC trailers, server-sent event streams, or arbitrary
+/// binary payloads. Allowed: textual + JSON / XML / JS bodies.
+///
+/// Missing `Content-Type` defaults to *not* scannable. Upstream responses
+/// without a declared media type may legitimately be binary (protobuf,
+/// images, octet-stream), and running text-shaped regex over arbitrary
+/// bytes risks false positives (random byte sequences shaped like dotted-
+/// quad IPs) plus body corruption from in-place redaction.
+fn response_content_type_scannable(resp: &pingora_http::ResponseHeader) -> bool {
+    let Some(ct) = resp.headers.get("content-type").and_then(|v| v.to_str().ok()) else {
+        tracing::debug!("body-scan: skipping response without Content-Type header");
+        return false;
+    };
+    let main = ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    if main.starts_with("application/grpc") || main == "text/event-stream" || main == "application/octet-stream" {
+        return false;
+    }
+    if main.starts_with("text/")
+        || main == "application/json"
+        || main == "application/xml"
+        || main == "application/problem+json"
+        || main == "application/javascript"
+    {
+        return true;
+    }
+    false
 }
 
 /// Build the default response-side filter chain (AC-15, 16, 18).
@@ -355,9 +411,51 @@ impl ProxyHttp for WafProxy {
             };
             self.response_chain.apply_all(upstream_response, &fctx)?;
 
+            // FR-033: decide whether the response-body content scanner runs.
+            // Gated by Content-Type allowlist + Content-Encoding (gzip / identity).
+            // When enabled, drop Content-Length and Transfer-Encoding
+            // unconditionally (red-team #9) so Pingora re-emits chunked.
+            // Drop Content-Encoding only if we successfully attached a decoder.
+            if hc.body_scan_enabled {
+                let scanner = self.resolve_scanner(hc);
+                let ct_ok = response_content_type_scannable(upstream_response);
+                let ce_header = upstream_response
+                    .headers
+                    .get("content-encoding")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("");
+                let encoding = parse_encoding(ce_header);
+                if ct_ok && !scanner.is_noop() {
+                    match encoding {
+                        ResponseEncoding::Identity => {
+                            ctx.body_scan.enabled = true;
+                            ctx.body_scan.decoder = None;
+                            let _ = upstream_response.remove_header("content-length");
+                            let _ = upstream_response.remove_header("transfer-encoding");
+                        }
+                        ResponseEncoding::Gzip => {
+                            ctx.body_scan.enabled = true;
+                            ctx.body_scan.decoder = Some(DecoderChain::new());
+                            let _ = upstream_response.remove_header("content-length");
+                            let _ = upstream_response.remove_header("transfer-encoding");
+                            let _ = upstream_response.remove_header("content-encoding");
+                        }
+                        ResponseEncoding::Unsupported => {
+                            debug!(
+                                encoding = ce_header,
+                                "body-scan: skipping unsupported content-encoding (fail-open)"
+                            );
+                        }
+                    }
+                }
+            }
+
+            // FR-034 (PR #18) inserts here when merged: JSON field redactor
+            // operates on plaintext after FR-033 has decompressed.
+
             // AC-17: decide whether body masking will run for this response.
             // Identity (or absent) Content-Encoding only — compressed bodies
-            // are out of scope for FR-001 (FR-033 will add decompression).
+            // are out of scope for FR-001 (FR-033 owns decompression).
             let identity = upstream_response
                 .headers
                 .get("content-encoding")
@@ -390,14 +488,24 @@ impl ProxyHttp for WafProxy {
     where
         Self::CTX: Send + Sync,
     {
-        if !ctx.body_mask.enabled {
-            return Ok(None);
-        }
-        let Some(hc) = &ctx.host_config else {
+        let Some(hc) = ctx.host_config.clone() else {
             return Ok(None);
         };
-        let compiled = self.resolve_mask(hc);
-        apply_body_mask_chunk(&mut ctx.body_mask, &compiled, body, end_of_stream);
+
+        // FR-033 runs FIRST so PR-18 (FR-034) and AC-17 see plaintext.
+        if ctx.body_scan.enabled {
+            let scanner = self.resolve_scanner(&hc);
+            let host_label: &str = hc.host.as_str();
+            apply_body_scan_chunk(&mut ctx.body_scan, &scanner, body, end_of_stream, host_label);
+        }
+
+        // FR-034 (PR #18) inserts here when merged: apply_redact_chunk(...)
+
+        // AC-17 — operator regex masker on (now-plaintext) bytes.
+        if ctx.body_mask.enabled {
+            let compiled = self.resolve_mask(&hc);
+            apply_body_mask_chunk(&mut ctx.body_mask, &compiled, body, end_of_stream);
+        }
         Ok(None)
     }
 
@@ -446,5 +554,58 @@ impl ProxyHttp for WafProxy {
                 ctx.upstream_addr.as_deref().unwrap_or("unknown"),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod content_type_scannable_tests {
+    use super::response_content_type_scannable;
+    use pingora_http::ResponseHeader;
+
+    fn build(ct: Option<&str>) -> ResponseHeader {
+        let mut resp = ResponseHeader::build(200, None).expect("BUG: ResponseHeader::build(200) is infallible");
+        if let Some(v) = ct {
+            let _ = resp.append_header("content-type", v);
+        }
+        resp
+    }
+
+    #[test]
+    fn missing_content_type_defaults_false() {
+        let resp = build(None);
+        assert!(
+            !response_content_type_scannable(&resp),
+            "missing CT must fail-closed (skip scan)"
+        );
+    }
+
+    #[test]
+    fn text_html_with_charset_allowed() {
+        let resp = build(Some("text/html; charset=utf-8"));
+        assert!(response_content_type_scannable(&resp));
+    }
+
+    #[test]
+    fn application_json_allowed() {
+        let resp = build(Some("application/json"));
+        assert!(response_content_type_scannable(&resp));
+    }
+
+    #[test]
+    fn octet_stream_blocked() {
+        let resp = build(Some("application/octet-stream"));
+        assert!(!response_content_type_scannable(&resp));
+    }
+
+    #[test]
+    fn grpc_variants_blocked() {
+        let resp = build(Some("application/grpc+proto"));
+        assert!(!response_content_type_scannable(&resp));
+    }
+
+    #[test]
+    fn event_stream_blocked() {
+        let resp = build(Some("text/event-stream"));
+        assert!(!response_content_type_scannable(&resp));
     }
 }
