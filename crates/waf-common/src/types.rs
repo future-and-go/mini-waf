@@ -160,6 +160,47 @@ pub struct HostConfig {
     pub log_only_mode: bool,
     /// Custom HTML block page template; placeholders: `{{req_id}}`, `{{rule_name}}`, `{{client_ip}}`
     pub block_page_template: Option<String>,
+    /// Whether to preserve the client's `Host` header when proxying upstream.
+    /// When `true` (default, transparent), the upstream sees the original `Host`.
+    /// When `false`, `Host` is rewritten to `remote_host` (AC-25 rewrite mode).
+    #[serde(default = "default_preserve_host")]
+    pub preserve_host: bool,
+    /// AC-16: when `true`, scrub the `Server` response header.
+    /// Default `false` keeps backend `Server` byte-identical (preserves AC-04).
+    #[serde(default)]
+    pub strip_server_header: bool,
+    /// AC-15: extra response headers to strip on the way out.
+    /// Matched case-insensitively. `via` is always stripped via a dedicated filter.
+    #[serde(default = "default_header_blocklist")]
+    pub header_blocklist: Vec<String>,
+    /// AC-17: regex patterns whose matches in identity-encoded response bodies
+    /// are replaced with [`mask_token`]. Empty disables body masking. Patterns
+    /// are validated at config load; invalid regexes are dropped (fail-open).
+    #[serde(default)]
+    pub internal_patterns: Vec<String>,
+    /// AC-17: replacement token written in place of every matched substring.
+    #[serde(default = "default_mask_token")]
+    pub mask_token: String,
+    /// AC-17: hard ceiling on bytes scanned per response. Beyond this, the
+    /// remainder is forwarded untouched with a `tracing::warn!`.
+    #[serde(default = "default_body_mask_max_bytes")]
+    pub body_mask_max_bytes: u64,
+}
+
+const fn default_preserve_host() -> bool {
+    true
+}
+
+fn default_header_blocklist() -> Vec<String> {
+    vec!["x-powered-by-waf".to_string(), "x-waf-version".to_string()]
+}
+
+fn default_mask_token() -> String {
+    "[redacted]".to_string()
+}
+
+const fn default_body_mask_max_bytes() -> u64 {
+    1024 * 1024
 }
 
 impl Default for HostConfig {
@@ -183,6 +224,12 @@ impl Default for HostConfig {
             defense_config: DefenseConfig::default(),
             log_only_mode: false,
             block_page_template: None,
+            preserve_host: true,
+            strip_server_header: false,
+            header_blocklist: default_header_blocklist(),
+            internal_patterns: Vec::new(),
+            mask_token: default_mask_token(),
+            body_mask_max_bytes: default_body_mask_max_bytes(),
         }
     }
 }

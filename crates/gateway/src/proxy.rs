@@ -1,42 +1,65 @@
-use std::collections::HashMap;
+//! Pingora [`ProxyHttp`] implementation that wires WAF inspection and filter
+//! chains into the proxy lifecycle.
+//!
+//! All context construction is delegated to [`RequestCtxBuilder`].
+//! All filter execution is delegated to [`RequestFilterChain`] /
+//! [`ResponseFilterChain`] (populated by phases 02–04).
+//! WAF response helpers live in [`super::proxy_waf_response`].
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use dashmap::DashMap;
 use tracing::{debug, info, warn};
-use uuid::Uuid;
 
 use pingora_core::upstreams::peer::HttpPeer;
-use pingora_proxy::{ProxyHttp, Session};
+use pingora_proxy::{FailToProxy, ProxyHttp, Session};
 
-use waf_common::{HostConfig, RequestCtx, WafAction};
+use waf_common::HostConfig;
 use waf_engine::WafEngine;
 
 use crate::context::{BODY_PREVIEW_LIMIT, GatewayCtx};
+use crate::ctx_builder::RequestCtxBuilder;
+use crate::error_page::ErrorPageFactory;
+use crate::filters::{
+    CompiledMask, RequestForwardedHostFilter, RequestForwardedProtoFilter, RequestHopByHopFilter,
+    RequestHostPolicyFilter, RequestRealIpFilter, RequestXffFilter, ResponseHeaderBlocklistFilter,
+    ResponseLocationRewriter, ResponseServerPolicyFilter, ResponseViaStripFilter, apply_body_mask_chunk,
+};
+use crate::pipeline::{FilterCtx, RequestFilterChain, ResponseFilterChain};
+use crate::protocol::{ProtoCounters, detect_from_session};
+use crate::proxy_waf_response::{write_waf_body_decision, write_waf_decision};
 use crate::router::HostRouter;
 
-/// Pingora-based reverse proxy with WAF integration
+/// Pingora-based reverse proxy with WAF integration and filter chains.
 pub struct WafProxy {
     pub router: Arc<HostRouter>,
     pub engine: Arc<WafEngine>,
     /// Whether to trust X-Forwarded-For headers for client IP extraction.
-    /// Should only be `true` when running behind a trusted reverse proxy.
     pub trust_proxy_headers: bool,
-    /// Parsed trusted proxy CIDR ranges (from config).
-    /// When non-empty and `trust_proxy_headers` is true, only XFF headers
-    /// from connections originating within these ranges are honoured.
+    /// Parsed trusted proxy CIDR ranges.
     pub trusted_proxies: Vec<ipnet::IpNet>,
-    /// Shared request counter (cloned from `AppState.request_counter`).
-    /// Incremented once per HTTP request after WAF inspection.
+    /// Total request counter (cloned from `AppState`).
     pub request_counter: Arc<AtomicU64>,
-    /// Shared blocked counter (cloned from `AppState.blocked_counter`).
-    /// Incremented when a request is denied by the WAF.
+    /// Blocked request counter (cloned from `AppState`).
     pub blocked_counter: Arc<AtomicU64>,
+    /// Per-protocol counters (AC-22 transparency proof). Shared with the
+    /// HTTP/3 listener so QUIC traffic increments the same struct.
+    pub proto_counters: Arc<ProtoCounters>,
+    /// Ordered chain of upstream request filters (populated by phases 02–04).
+    pub request_chain: Arc<RequestFilterChain>,
+    /// Ordered chain of response filters (populated by phases 02–03).
+    pub response_chain: Arc<ResponseFilterChain>,
+    /// AC-17: per-host compiled mask cache, keyed by `Arc<HostConfig>` pointer
+    /// identity. Compiled lazily on first body chunk; survives until config reload.
+    pub body_mask_cache: Arc<DashMap<usize, Arc<CompiledMask>>>,
 }
 
 impl WafProxy {
-    #[allow(clippy::missing_const_for_fn)] // Vec::new() is not const in all contexts
+    #[allow(clippy::missing_const_for_fn)]
     pub fn new(router: Arc<HostRouter>, engine: Arc<WafEngine>) -> Self {
         Self {
             router,
@@ -45,88 +68,86 @@ impl WafProxy {
             trusted_proxies: Vec::new(),
             request_counter: Arc::new(AtomicU64::new(0)),
             blocked_counter: Arc::new(AtomicU64::new(0)),
+            proto_counters: ProtoCounters::new(),
+            request_chain: Arc::new(build_request_chain()),
+            response_chain: Arc::new(build_response_chain()),
+            body_mask_cache: Arc::new(DashMap::new()),
         }
     }
 
-    /// Extract client IP from session.
-    ///
-    /// Only reads X-Forwarded-For when `trust_proxy_headers` is enabled
-    /// **and** the TCP peer address falls within `trusted_proxies` (or the
-    /// list is empty, which means "trust any peer" for backwards compat).
-    /// Otherwise always uses the TCP peer address.
-    fn extract_client_ip(&self, session: &Session) -> std::net::IpAddr {
-        // Always resolve peer address first
-        let peer_ip = session.client_addr().and_then(|a| a.as_inet()).map_or(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-            std::net::SocketAddr::ip,
-        );
-
-        if self.trust_proxy_headers {
-            // When a trusted_proxies list is configured, only honour XFF from
-            // connections that originate within those CIDR ranges.
-            let peer_trusted =
-                self.trusted_proxies.is_empty() || self.trusted_proxies.iter().any(|net| net.contains(&peer_ip));
-
-            if peer_trusted
-                && let Some(xff) = session.get_header("x-forwarded-for")
-                && let Ok(s) = std::str::from_utf8(xff.as_bytes())
-                && let Some(first) = s.split(',').next()
-                && let Ok(ip) = first.trim().parse()
-            {
-                return ip;
-            }
+    /// Resolve (and lazily compile) the mask config for a given host.
+    /// Cache key is the `Arc<HostConfig>` pointer; identical configs across
+    /// requests reuse the same compiled regex.
+    fn resolve_mask(&self, hc: &Arc<HostConfig>) -> Arc<CompiledMask> {
+        let key = Arc::as_ptr(hc) as usize;
+        if let Some(existing) = self.body_mask_cache.get(&key) {
+            return Arc::clone(&existing);
         }
-
-        peer_ip
+        let compiled = Arc::new(CompiledMask::build(
+            &hc.internal_patterns,
+            &hc.mask_token,
+            hc.body_mask_max_bytes,
+        ));
+        self.body_mask_cache.insert(key, Arc::clone(&compiled));
+        compiled
     }
+}
 
-    /// Build a `RequestCtx` from the Pingora session
-    fn build_request_ctx(&self, session: &Session, host_config: Arc<HostConfig>) -> RequestCtx {
-        let client_ip = self.extract_client_ip(session);
-        let client_port = session
-            .client_addr()
-            .and_then(|a| a.as_inet())
-            .map_or(0, std::net::SocketAddr::port);
-
-        let method = session.req_header().method.to_string();
-        let uri = session.req_header().uri.clone();
-        let path = uri.path().to_string();
-        let query = uri.query().unwrap_or("").to_string();
-
-        let host = host_config.host.clone();
-        let port = host_config.port;
-
-        // Extract headers as HashMap
-        let mut headers = HashMap::new();
-        for (name, value) in &session.req_header().headers {
-            if let Ok(v) = std::str::from_utf8(value.as_bytes()) {
-                headers.insert(name.as_str().to_lowercase(), v.to_string());
-            }
-        }
-
-        // Parse Content-Length for informational purposes
-        let content_length = headers
-            .get("content-length")
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(0);
-
-        RequestCtx {
-            req_id: Uuid::new_v4().to_string(),
-            client_ip,
-            client_port,
-            method,
-            host,
-            port,
-            path,
-            query,
-            headers,
-            body_preview: Bytes::new(),
-            content_length,
-            is_tls: false,
-            host_config,
-            geo: None, // populated by WafEngine::inspect when GeoIP is enabled
-        }
+/// Map a Pingora error to the HTTP status used by [`ErrorPageFactory`].
+///
+/// Mirrors the default `fail_to_proxy` mapping but lives in gateway code so we
+/// can render a neutral body. `0` means "downstream is already gone — do not
+/// attempt to write a response."
+fn error_to_status(e: &pingora_core::Error) -> u16 {
+    use pingora_core::{ErrorSource, ErrorType};
+    if let ErrorType::HTTPStatus(code) = e.etype() {
+        return *code;
     }
+    match e.esource() {
+        ErrorSource::Upstream => 502,
+        ErrorSource::Downstream => match e.etype() {
+            ErrorType::WriteError | ErrorType::ReadError | ErrorType::ConnectionClosed => 0,
+            _ => 400,
+        },
+        ErrorSource::Internal | ErrorSource::Unset => 500,
+    }
+}
+
+/// Build the default response-side filter chain (AC-15, 16, 18).
+///
+/// Order:
+/// 1. `via-strip` — unconditional removal.
+/// 2. `server-policy` — passthrough (default) or strip.
+/// 3. `location-rewrite` — rewrite internal-host redirects.
+/// 4. `header-blocklist` — drop configured leak headers last so anything
+///    a prior filter leaves behind still gets scrubbed.
+fn build_response_chain() -> ResponseFilterChain {
+    let mut chain = ResponseFilterChain::new();
+    chain.register(Arc::new(ResponseViaStripFilter));
+    chain.register(Arc::new(ResponseServerPolicyFilter));
+    chain.register(Arc::new(ResponseLocationRewriter));
+    chain.register(Arc::new(ResponseHeaderBlocklistFilter));
+    chain
+}
+
+/// Build the default request-side filter chain.
+///
+/// Order is significant:
+/// 1. `xff` / `real-ip` / `forwarded-proto` — populate forwarded metadata.
+/// 2. `forwarded-host` — captures the ORIGINAL `Host` (must run before host-policy).
+/// 3. `host-policy` — applies `Preserve` or `Rewrite(remote_host)` per host config.
+/// 4. `hop-by-hop` — strips RFC 7230 hop headers + Connection-tokens last,
+///    so any header *we* added (e.g. `Connection: upgrade` for WS) is preserved
+///    by the WS-aware branch.
+fn build_request_chain() -> RequestFilterChain {
+    let mut chain = RequestFilterChain::new();
+    chain.register(Arc::new(RequestXffFilter));
+    chain.register(Arc::new(RequestRealIpFilter));
+    chain.register(Arc::new(RequestForwardedProtoFilter));
+    chain.register(Arc::new(RequestForwardedHostFilter));
+    chain.register(Arc::new(RequestHostPolicyFilter));
+    chain.register(Arc::new(RequestHopByHopFilter));
+    chain
 }
 
 #[async_trait]
@@ -138,10 +159,6 @@ impl ProxyHttp for WafProxy {
     }
 
     async fn upstream_peer(&self, session: &mut Session, ctx: &mut GatewayCtx) -> pingora_core::Result<Box<HttpPeer>> {
-        // Count every real HTTP request that reaches the proxy layer.
-        // `upstream_peer` is guaranteed to run once per request after Pingora
-        // has parsed the headers, so this gives an accurate live total that
-        // the Dashboard `Total Requests` KPI reads via `AppState`.
         self.request_counter.fetch_add(1, Ordering::Relaxed);
 
         let host_header = session
@@ -159,7 +176,6 @@ impl ProxyHttp for WafProxy {
             )
         })?;
 
-        // Check if the site is started
         if !host_config.start_status {
             return Err(pingora_core::Error::explain(
                 pingora_core::ErrorType::ConnectProxyFailure,
@@ -171,31 +187,33 @@ impl ProxyHttp for WafProxy {
         let use_tls = host_config.ssl;
 
         ctx.upstream_addr = Some(upstream_addr.clone());
-        // host_config and request_ctx may already have been populated by
-        // request_filter when running WAF inspection — only build a fresh one
-        // if that path didn't run (e.g. health-check shortcut).
         if ctx.host_config.is_none() {
             ctx.host_config = Some(Arc::clone(&host_config));
         }
         if ctx.request_ctx.is_none() {
-            ctx.request_ctx = Some(self.build_request_ctx(session, Arc::clone(&host_config)));
+            ctx.request_ctx = Some(
+                RequestCtxBuilder::new(session, self.trust_proxy_headers, &self.trusted_proxies)
+                    .with_host_config(Arc::clone(&host_config))
+                    .build(),
+            );
         }
 
         info!("Proxying {} → {}", host_header, upstream_addr);
-
-        let peer = HttpPeer::new(&upstream_addr, use_tls, host_config.remote_host.clone());
-        Ok(Box::new(peer))
+        Ok(Box::new(HttpPeer::new(
+            &upstream_addr,
+            use_tls,
+            host_config.remote_host.clone(),
+        )))
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut GatewayCtx) -> pingora_core::Result<bool> {
-        // Pingora calls request_filter BEFORE upstream_peer, so the original
-        // code path saw `ctx.request_ctx == None` and skipped WAF inspection
-        // entirely for any request whose body never reached the
-        // request_body_filter (i.e. all GETs and bodyless POSTs). That
-        // bypassed every URL/header/UA-based rule — sqlmap UA, log4shell
-        // headers, query-string SQLi etc. all sailed through. Resolve the
-        // host and build the request context HERE so the WAF runs first,
-        // then upstream_peer reuses what we put into ctx.
+        // AC-22: tag protocol once and bump the per-protocol counter so every
+        // request through the Pingora listener (H1/H2/WS-upgrade) is accounted
+        // for. H3 traffic increments the same struct from `http3.rs`.
+        ctx.protocol = detect_from_session(session);
+        self.proto_counters.record(ctx.protocol);
+
+        // Build request context early so WAF runs before upstream_peer.
         if ctx.request_ctx.is_none() {
             let host_header = session
                 .get_header("host")
@@ -204,80 +222,44 @@ impl ProxyHttp for WafProxy {
                 .to_string();
             if let Some(host_config) = self.router.resolve(&host_header) {
                 ctx.host_config = Some(Arc::clone(&host_config));
-                ctx.request_ctx = Some(self.build_request_ctx(session, host_config));
+                ctx.request_ctx = Some(
+                    RequestCtxBuilder::new(session, self.trust_proxy_headers, &self.trusted_proxies)
+                        .with_host_config(host_config)
+                        .build(),
+                );
             }
         }
 
-        let mut request_ctx = match &ctx.request_ctx {
-            Some(c) => c.clone(),
-            None => return Ok(false),
+        let host_for_log = ctx
+            .request_ctx
+            .as_ref()
+            .map_or_else(|| "<unknown>".to_string(), |c| c.host.clone());
+
+        // FAIL-CLOSED: never bypass WAF when context is missing (AC-22).
+        let mut request_ctx = if let Some(c) = &ctx.request_ctx {
+            c.clone()
+        } else {
+            self.blocked_counter.fetch_add(1, Ordering::Relaxed);
+            warn!(host = %host_for_log, "fail-closed: missing request context, returning 503");
+            let accept = session
+                .get_header("accept")
+                .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+                .map(str::to_string);
+            let (headers, body) = ErrorPageFactory::render(503, accept.as_deref())?;
+            session.write_response_header(Box::new(headers), false).await?;
+            session.write_response_body(Some(body), true).await?;
+            return Ok(true);
         };
 
-        // Handle health check endpoint
         if request_ctx.path == "/health" && request_ctx.method == "GET" {
             let _ = session.respond_error(200).await;
             return Ok(true);
         }
 
-        // Run WAF inspection (ctx is &mut so the engine can enrich it with GeoIP)
         let decision = self.engine.inspect(&mut request_ctx).await;
-
-        if !decision.is_allowed() {
-            self.blocked_counter.fetch_add(1, Ordering::Relaxed);
-            match &decision.action {
-                WafAction::Block { status, body } => {
-                    let (rule_id, rule_name, phase, detail) = decision
-                        .result
-                        .as_ref()
-                        .map(|r| {
-                            (
-                                r.rule_id.clone().unwrap_or_default(),
-                                r.rule_name.clone(),
-                                r.phase.to_string(),
-                                r.detail.clone(),
-                            )
-                        })
-                        .unwrap_or_default();
-                    warn!(
-                        rule_id = %rule_id,
-                        rule_name = %rule_name,
-                        phase = %phase,
-                        detail = %detail,
-                        method = %request_ctx.method,
-                        path = %request_ctx.path,
-                        host = %request_ctx.host,
-                        ua = %request_ctx.headers.get("user-agent").cloned().unwrap_or_default(),
-                        "WAF blocked request",
-                    );
-                    let status_code = *status;
-                    let body_str = body.clone().unwrap_or_else(|| "Access Denied".to_string());
-
-                    // Build a simple HTTP 403 response
-                    let response = pingora_http::ResponseHeader::build(status_code, None)?;
-                    session.write_response_header(Box::new(response), false).await?;
-                    let body_bytes = Bytes::from(body_str);
-                    session.write_response_body(Some(body_bytes), true).await?;
-                    return Ok(true);
-                }
-                WafAction::Redirect { url } => {
-                    let mut response = pingora_http::ResponseHeader::build(302, None)?;
-                    response.insert_header("location", url.as_str())?;
-                    session.write_response_header(Box::new(response), true).await?;
-                    return Ok(true);
-                }
-                _ => {}
-            }
-        }
-
-        Ok(false)
+        write_waf_decision(session, &decision, &request_ctx, &self.blocked_counter).await
     }
 
-    /// Buffer the first [`BODY_PREVIEW_LIMIT`] bytes of the request body and
-    /// run WAF body-content inspection once enough data is available.
-    ///
-    /// This callback is invoked for each body chunk *before* it is forwarded
-    /// to the upstream.  We buffer up to 64 KiB and then run a supplementary
-    /// WAF check so that `SQLi` / XSS / RCE patterns in POST bodies are caught.
     async fn request_body_filter(
         &self,
         session: &mut Session,
@@ -285,12 +267,9 @@ impl ProxyHttp for WafProxy {
         end_of_stream: bool,
         ctx: &mut GatewayCtx,
     ) -> pingora_core::Result<()> {
-        // Only buffer when we have a request context and haven't inspected yet
         if ctx.body_inspected {
             return Ok(());
         }
-
-        // Accumulate body bytes up to the preview limit
         if let Some(chunk) = body {
             let remaining = BODY_PREVIEW_LIMIT.saturating_sub(ctx.body_buf.len());
             if remaining > 0 {
@@ -300,66 +279,145 @@ impl ProxyHttp for WafProxy {
                 }
             }
         }
-
-        // Run body WAF check when we have enough data or at end of stream
         let should_inspect = ctx.body_buf.len() >= BODY_PREVIEW_LIMIT || (end_of_stream && !ctx.body_buf.is_empty());
-
         if !should_inspect {
             return Ok(());
         }
-
         ctx.body_inspected = true;
-
-        // Build a RequestCtx clone with body_preview populated
         let mut request_ctx = match &ctx.request_ctx {
             Some(c) => c.clone(),
             None => return Ok(()),
         };
-
         request_ctx.body_preview = Bytes::copy_from_slice(&ctx.body_buf);
-
-        // Run WAF inspection with body content
         let decision = self.engine.inspect(&mut request_ctx).await;
+        write_waf_body_decision(session, &decision, &request_ctx, &self.blocked_counter).await
+    }
 
-        if !decision.is_allowed() {
-            self.blocked_counter.fetch_add(1, Ordering::Relaxed);
-            match &decision.action {
-                WafAction::Block {
-                    status,
-                    body: block_body,
-                } => {
-                    warn!(
-                        "WAF blocked request (body): ip={} path={} host={}",
-                        request_ctx.client_ip, request_ctx.path, request_ctx.host,
-                    );
-                    let status_code = *status;
-                    let body_str = block_body.clone().unwrap_or_else(|| "Access Denied".to_string());
+    async fn upstream_request_filter(
+        &self,
+        session: &mut Session,
+        upstream_request: &mut pingora_http::RequestHeader,
+        ctx: &mut Self::CTX,
+    ) -> pingora_core::Result<()>
+    where
+        Self::CTX: Send + Sync,
+    {
+        if let (Some(req_ctx), Some(hc)) = (&ctx.request_ctx, &ctx.host_config) {
+            // peer_ip is the IMMEDIATE TCP peer (not the resolved client).
+            // The two differ when trust_proxy_headers=true and the peer is
+            // a trusted proxy: client_ip then comes from XFF, while peer_ip
+            // remains the proxy's IP. XFF append-mode (AC-14) needs peer_ip.
+            let peer_ip = session
+                .client_addr()
+                .and_then(|a| a.as_inet())
+                .map_or(req_ctx.client_ip, std::net::SocketAddr::ip);
+            let fctx = FilterCtx {
+                request_ctx: req_ctx,
+                host_config: hc,
+                peer_ip,
+                is_tls: req_ctx.is_tls,
+            };
+            self.request_chain.apply_all(upstream_request, &fctx)?;
+        }
+        Ok(())
+    }
 
-                    let response = pingora_http::ResponseHeader::build(status_code, None)?;
-                    session.write_response_header(Box::new(response), false).await?;
-                    let body_bytes = Bytes::from(body_str);
-                    session.write_response_body(Some(body_bytes), true).await?;
+    async fn response_filter(
+        &self,
+        _session: &mut Session,
+        upstream_response: &mut pingora_http::ResponseHeader,
+        ctx: &mut Self::CTX,
+    ) -> pingora_core::Result<()>
+    where
+        Self::CTX: Send + Sync,
+    {
+        if let (Some(req_ctx), Some(hc)) = (&ctx.request_ctx, &ctx.host_config) {
+            let fctx = FilterCtx {
+                request_ctx: req_ctx,
+                host_config: hc,
+                peer_ip: req_ctx.client_ip,
+                is_tls: req_ctx.is_tls,
+            };
+            self.response_chain.apply_all(upstream_response, &fctx)?;
 
-                    return Err(pingora_core::Error::explain(
-                        pingora_core::ErrorType::HTTPStatus(status_code),
-                        "WAF blocked request body",
-                    ));
-                }
-                WafAction::Redirect { url } => {
-                    let mut response = pingora_http::ResponseHeader::build(302, None)?;
-                    response.insert_header("location", url.as_str())?;
-                    session.write_response_header(Box::new(response), true).await?;
-
-                    return Err(pingora_core::Error::explain(
-                        pingora_core::ErrorType::HTTPStatus(302),
-                        "WAF redirected request",
-                    ));
-                }
-                _ => {}
+            // AC-17: decide whether body masking will run for this response.
+            // Identity (or absent) Content-Encoding only — compressed bodies
+            // are out of scope for FR-001 (FR-033 will add decompression).
+            let identity = upstream_response
+                .headers
+                .get("content-encoding")
+                .and_then(|v| v.to_str().ok())
+                .is_none_or(|v| {
+                    let v = v.trim();
+                    v.is_empty() || v.eq_ignore_ascii_case("identity")
+                });
+            let compiled = self.resolve_mask(hc);
+            if identity && !compiled.is_noop() {
+                ctx.body_mask.enabled = true;
+                // Replacement length differs from match length — body length is
+                // no longer fixed. Drop Content-Length so Pingora switches to
+                // chunked encoding.
+                let _ = upstream_response.remove_header("content-length");
+            } else if !compiled.is_noop() {
+                debug!("body-mask: skipping non-identity content-encoding");
             }
         }
-
         Ok(())
+    }
+
+    fn response_body_filter(
+        &self,
+        _session: &mut Session,
+        body: &mut Option<Bytes>,
+        end_of_stream: bool,
+        ctx: &mut Self::CTX,
+    ) -> pingora_core::Result<Option<Duration>>
+    where
+        Self::CTX: Send + Sync,
+    {
+        if !ctx.body_mask.enabled {
+            return Ok(None);
+        }
+        let Some(hc) = &ctx.host_config else {
+            return Ok(None);
+        };
+        let compiled = self.resolve_mask(hc);
+        apply_body_mask_chunk(&mut ctx.body_mask, &compiled, body, end_of_stream);
+        Ok(None)
+    }
+
+    /// AC-19: render a neutral, content-negotiated error page (no Pingora fingerprint).
+    ///
+    /// Maps the error to an HTTP status using the same heuristics as the trait
+    /// default, then writes our own headers+body so the response is free of any
+    /// Pingora-default markers (`Server: pingora/...`, default HTML page, etc.).
+    async fn fail_to_proxy(&self, session: &mut Session, e: &pingora_core::Error, _ctx: &mut Self::CTX) -> FailToProxy
+    where
+        Self::CTX: Send + Sync,
+    {
+        let code = error_to_status(e);
+        if code > 0 {
+            let accept = session
+                .get_header("accept")
+                .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+                .map(str::to_string);
+            match ErrorPageFactory::render(code, accept.as_deref()) {
+                Ok((headers, body)) => {
+                    if let Err(write_err) = session.write_response_header(Box::new(headers), false).await {
+                        warn!("failed to write error header to downstream: {write_err}");
+                    } else if let Err(write_err) = session.write_response_body(Some(body), true).await {
+                        warn!("failed to write error body to downstream: {write_err}");
+                    }
+                }
+                Err(render_err) => {
+                    warn!("error-page render failed: {render_err}");
+                }
+            }
+        }
+        FailToProxy {
+            error_code: code,
+            can_reuse_downstream: false,
+        }
     }
 
     async fn logging(&self, _session: &mut Session, _error: Option<&pingora_core::Error>, ctx: &mut GatewayCtx) {

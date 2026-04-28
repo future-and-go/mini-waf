@@ -1205,11 +1205,17 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
         });
     });
 
+    // Per-protocol counters (AC-22). Constructed once and shared across the
+    // Pingora proxy (H1/H2/WS) and the QUIC listener (H3) so a single struct
+    // accounts for every accepted request regardless of protocol.
+    let proto_counters = gateway::ProtoCounters::new();
+
     // Optionally start HTTP/3 listener
     if config.http3.enabled {
         let h3_config = config.http3.clone();
         let h3_engine = Arc::clone(&engine);
         let h3_router = Arc::clone(&router);
+        let h3_counters = Arc::clone(&proto_counters);
         std::thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
                 Ok(rt) => rt,
@@ -1258,6 +1264,7 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
                     h3_config.upstream_tls_verify,
                     Arc::clone(&h3_engine),
                     Arc::clone(&h3_router),
+                    Arc::clone(&h3_counters),
                 )
                 .await
                 {
@@ -1294,6 +1301,8 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
     // Share counters with AppState so the /api/stats/overview endpoint reflects live traffic
     proxy.request_counter = Arc::clone(&api_state.request_counter);
     proxy.blocked_counter = Arc::clone(&api_state.blocked_counter);
+    // AC-22: same per-protocol counter struct as the H3 listener.
+    proxy.proto_counters = Arc::clone(&proto_counters);
     proxy.trust_proxy_headers = config.proxy.trust_proxy_headers;
     proxy.trusted_proxies = config
         .proxy
@@ -1323,6 +1332,13 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
     server.add_service(proxy_service);
 
     info!("Proxy listening on {}", config.proxy.listen_addr);
+    // AC-22 / phase-05: the Pingora HTTP service shares a single ALPN-aware
+    // listener for H1+H2 when TLS is configured (`add_tls_with_settings`).
+    // The `add_tcp` path used here is plaintext, so h2 is only reachable via
+    // h2c prior-knowledge; h2-over-TLS depends on an upstream listener
+    // wrapper that advertises `h2,http/1.1`. Logged here to make the
+    // protocol surface visible at startup.
+    info!("ALPN: H1/H2 served via shared Pingora listener (plaintext H1 + h2c)");
     info!("Management API listening on {}", config.api.listen_addr);
     if config.http3.enabled {
         info!("HTTP/3 (QUIC) listener on {}", config.http3.listen_addr);
