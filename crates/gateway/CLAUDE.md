@@ -16,14 +16,22 @@ Pingora-based reverse-proxy data plane. Terminates TLS, routes HTTP/1, HTTP/2, a
 ```
 src/
 ├── lib.rs
-├── proxy.rs     # Pingora ProxyHttp impl
-├── router.rs    # Host/path → upstream routing
-├── lb.rs        # Load balancer
-├── ssl.rs       # ACME + TLS cert management
-├── http3.rs     # QUIC/H3 listener
-├── cache.rs     # Response cache (moka)
-├── tunnel.rs    # Tunnel forwarder
-└── context.rs   # Per-request context
+├── proxy.rs               # Pingora ProxyHttp impl, orchestrates phases
+├── proxy_waf_response.rs  # Response building utilities
+├── pipeline/              # Filter chains (request & response)
+│   ├── mod.rs
+│   ├── request_filter_chain.rs
+│   └── response_filter_chain.rs
+├── ctx_builder/           # Request context construction
+│   ├── mod.rs
+│   └── request_ctx_builder.rs
+├── router.rs              # Host/path → upstream routing
+├── lb.rs                  # Load balancer
+├── ssl.rs                 # ACME + TLS cert management
+├── http3.rs               # QUIC/H3 listener
+├── cache.rs               # Response cache (moka)
+├── tunnel.rs              # Tunnel forwarder
+└── context.rs             # Per-request context structs
 ```
 
 ## Dependencies

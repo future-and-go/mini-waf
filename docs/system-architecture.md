@@ -21,6 +21,8 @@
         │  - Load balancing (round-robin) │
         │  - Response caching (moka LRU)  │
         │  - Health checks                │
+        │  - RequestFilter chain (phase01)│
+        │  - ResponseFilter chain (phase01)
         └────────────────┬────────────────┘
                          │
         ┌────────────────▼────────────────┐
