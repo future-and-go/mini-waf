@@ -25,7 +25,7 @@ Close all 25 ACs (AC-01..AC-25). Refactor `crates/gateway/src/proxy.rs` (current
 | 02 | [phase-02-request-transforms.md](phase-02-request-transforms.md) | filters/request-*, host-policy | completed | AC-12, 13, 14, 20, 25 |
 | 03 | [phase-03-response-transforms.md](phase-03-response-transforms.md) | filters/response-*, error-page-factory | completed | AC-15, 16, 18, 19 |
 | 04 | [phase-04-body-outbound-filter.md](phase-04-body-outbound-filter.md) | filters/body-mask | completed | AC-17 |
-| 05 | [phase-05-protocol-matrix.md](phase-05-protocol-matrix.md) | http3.rs, lib.rs, listener wiring | pending | AC-08, 09, 10, 11, 22 |
+| 05 | [phase-05-protocol-matrix.md](phase-05-protocol-matrix.md) | protocol.rs, http3.rs, proxy.rs, main.rs | code-complete | AC-08, 09, 10, 11, 22 |
 | 06 | [phase-06-test-harness-coverage.md](phase-06-test-harness-coverage.md) | tests/fr001_*.rs, synthetic-backend | pending | All (verification) |
 | 07 | [phase-07-perf-leak-validation.md](phase-07-perf-leak-validation.md) | bench/, leak-sweep | pending | AC-21, 24, leak sweep |
 
@@ -48,6 +48,7 @@ Phase deps: 01 blocks 02..05. 06 blocks merge. 07 final gate.
 **Phase 02:** completed 2026-04-28 — 5 filters + 1 strategy + chain wiring. 16 unit tests, all 373 workspace tests pass; clippy clean. Closes AC-12, 13, 14, 20, 25.
 **Phase 03:** completed 2026-04-28 — 4 response filters + 2 strategies + ErrorPageFactory + `fail_to_proxy` override. 16 unit tests; 395/395 workspace pass; clippy clean. Closes AC-15, 16, 18, 19. `cargo-llvm-cov` coverage gate deferred to CI.
 **Phase 04:** completed 2026-04-28 — streaming `response_body_mask_filter` (combined alternation `regex::bytes::Regex`, tail-buffered straddle), `BodyMaskState` on `GatewayCtx`, lazy per-host compiled cache on `WafProxy`. 8 unit tests; 403/403 workspace pass; clippy clean. Closes AC-17. KISS: skipped speculative `body-filter-chain.rs` until FR-033 needs a second body filter.
+**Phase 05:** code-complete 2026-04-28 — new `protocol.rs` (`Protocol` enum + `ProtoCounters` struct + session detection), `proto_counters: Arc<ProtoCounters>` on `WafProxy`, tagged & incremented in `request_filter`, H3 path bumps the same struct, ALPN/protocol-surface log line at startup. 2 unit tests; clippy clean. Integration tests (H1/H2c/H3/WS handshake) deferred to phase-06 per plan. Documented scope: pipeline filter chains stay H1/H2-only by design; H3 still WAF-inspected via `engine.inspect()` so AC-22 no-bypass holds.
 
 ## Coverage strategy
 

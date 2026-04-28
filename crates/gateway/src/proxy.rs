@@ -30,6 +30,7 @@ use crate::filters::{
     ResponseLocationRewriter, ResponseServerPolicyFilter, ResponseViaStripFilter, apply_body_mask_chunk,
 };
 use crate::pipeline::{FilterCtx, RequestFilterChain, ResponseFilterChain};
+use crate::protocol::{ProtoCounters, detect_from_session};
 use crate::proxy_waf_response::{write_waf_body_decision, write_waf_decision};
 use crate::router::HostRouter;
 
@@ -45,6 +46,9 @@ pub struct WafProxy {
     pub request_counter: Arc<AtomicU64>,
     /// Blocked request counter (cloned from `AppState`).
     pub blocked_counter: Arc<AtomicU64>,
+    /// Per-protocol counters (AC-22 transparency proof). Shared with the
+    /// HTTP/3 listener so QUIC traffic increments the same struct.
+    pub proto_counters: Arc<ProtoCounters>,
     /// Ordered chain of upstream request filters (populated by phases 02–04).
     pub request_chain: Arc<RequestFilterChain>,
     /// Ordered chain of response filters (populated by phases 02–03).
@@ -64,6 +68,7 @@ impl WafProxy {
             trusted_proxies: Vec::new(),
             request_counter: Arc::new(AtomicU64::new(0)),
             blocked_counter: Arc::new(AtomicU64::new(0)),
+            proto_counters: ProtoCounters::new(),
             request_chain: Arc::new(build_request_chain()),
             response_chain: Arc::new(build_response_chain()),
             body_mask_cache: Arc::new(DashMap::new()),
@@ -202,6 +207,12 @@ impl ProxyHttp for WafProxy {
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut GatewayCtx) -> pingora_core::Result<bool> {
+        // AC-22: tag protocol once and bump the per-protocol counter so every
+        // request through the Pingora listener (H1/H2/WS-upgrade) is accounted
+        // for. H3 traffic increments the same struct from `http3.rs`.
+        ctx.protocol = detect_from_session(session);
+        self.proto_counters.record(ctx.protocol);
+
         // Build request context early so WAF runs before upstream_peer.
         if ctx.request_ctx.is_none() {
             let host_header = session

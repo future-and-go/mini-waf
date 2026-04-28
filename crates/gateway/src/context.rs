@@ -3,6 +3,8 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use waf_common::{HostConfig, RequestCtx};
 
+use crate::protocol::Protocol;
+
 /// Maximum request body bytes buffered for WAF inspection (64 KiB).
 pub const BODY_PREVIEW_LIMIT: usize = 64 * 1024;
 
@@ -23,6 +25,9 @@ pub struct GatewayCtx {
     pub body_inspected: bool,
     /// AC-17: streaming state for the response body internal-ref masker.
     pub body_mask: BodyMaskState,
+    /// Phase-05: wire protocol detected at session start. Tagged once in
+    /// `request_filter` and consumed for per-protocol observability.
+    pub protocol: Protocol,
 }
 
 /// Per-response state for the streaming body masker (AC-17).
