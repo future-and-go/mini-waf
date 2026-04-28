@@ -6,6 +6,7 @@ pub mod crowdsec;
 pub mod engine;
 pub mod geoip;
 pub mod geoip_updater;
+pub mod outbound;
 pub mod plugins;
 pub mod rules;
 
@@ -22,6 +23,7 @@ pub use crowdsec::{
 pub use engine::{WafEngine, WafEngineConfig};
 pub use geoip::{GeoIpService, cache_policy_from_str};
 pub use geoip_updater::{UpdateResult, XdbUpdater, spawn_auto_updater};
+pub use outbound::{HeaderFilter, OutboundConfigError};
 pub use plugins::{PluginAction, PluginInfo, PluginManager, WasmPlugin};
 pub use rules::engine::{CustomRule, CustomRulesEngine};
 pub use rules::formats::{ExportFormat, RuleFormat, ValidationError};

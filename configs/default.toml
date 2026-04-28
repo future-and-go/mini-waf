@@ -106,3 +106,42 @@ cors_origins = []
 # batch_size = 50        # Number of signals to buffer before flushing
 # flush_interval_secs = 30   # Flush buffer even when batch_size not reached
 # sync_interval_secs = 300   # Blocklist sync interval (default: 5 minutes)
+
+# ── FR-035: Outbound Header Leak Prevention ──────────────────────────────────
+# Strip leaky response headers (server fingerprint, debug, internal, error
+# detail) before they reach the client. Detection categories are hard-coded
+# in waf-engine; this section only decides which categories are active.
+# Disabled by default — opt in by setting enabled = true.
+#
+# Standards: OWASP ASVS V14.4, CWE-200 / CWE-209, RFC 9110 §7.6.
+#
+# [outbound]
+# enabled = false
+#
+# [outbound.headers]
+# strip_server_info             = true   # Server, X-Powered-By, X-Runtime, X-Generator, X-OWA-Version, MS-Author-Via, MicrosoftSharePointTeamServices, Liferay-Portal, X-Mod-Pagespeed
+# strip_debug_headers           = true   # X-Debug-*, X-Internal-*, X-Backend-*, X-Real-IP, X-Forwarded-Server
+# strip_error_detail            = true   # X-Error-*, X-Exception-*, X-Stack-*, X-Trace-*, X-Application-Trace-*, X-DotNet-Version-*, X-Exception-Class
+# strip_php_fingerprint         = true   # X-PHP-Version, X-PHP-Response-Code (ref CVE-2024-4577 PHP-CGI banner-driven scans)
+# strip_aspnet_fingerprint      = true   # X-AspNet-Version, X-AspNetMvc-Version, X-SourceFiles (ref CVE-2017-7269)
+# strip_framework_fingerprint   = true   # X-Drupal-*, X-Magento-*, X-Pingback, X-Application-Context, X-Rack-Cache (ref Drupalgeddon, Spring4Shell)
+# strip_cdn_internal            = true   # X-Varnish, X-Amz-Cf-Id, X-Amz-Cf-Pop, X-Akamai-*, X-Fastly-Request-Id (on by default — this WAF is the public edge; flip false if you intentionally proxy CDN debug data)
+# detect_pii_in_values          = false  # Regex-scan VALUES for email / credit card / SSN / phone / RFC-1918 IP / JWT / AWS key / Google API key / Slack token / GitHub PAT (off — adds per-header regex cost; capped at 8 KiB)
+# strip_session_headers_on_pii_match = false  # When ON together with detect_pii_in_values, also strip Set-Cookie / ETag / Authorization on PII match (off — avoids killing session on regex false-positive)
+# strip_headers                 = []     # Extra exact header names (case-insensitive)
+# strip_prefixes                = []     # Extra header-name prefixes (case-insensitive)
+#
+# ── Allowlist (preserves built-ins from being stripped) ──
+# Headers preserved even when matched by an active family toggle or by the
+# `strip_headers` extras list. Use to keep built-ins your app legitimately
+# needs to expose. Beats every strip rule EXCEPT the unconditional CRLF strip
+# (RFC 9110 §5.5) and the hop-by-hop guard (RFC 9110 §7.6.1).
+# preserve_headers              = []     # e.g. ["server"] — keep `Server` even with strip_server_info=true
+# preserve_prefixes             = []     # e.g. ["x-debug-trace-"] — keep this prefix family
+#
+# ── PII tuning (only relevant when detect_pii_in_values = true) ──
+# [outbound.headers.pii]
+# disable_builtin   = []        # Names: email | credit_card | ssn | phone | ipv4_private |
+#                               # jwt | aws_key | google_api_key | slack_token | github_pat
+# extra_patterns    = []        # Custom regexes, compiled at startup. Invalid → startup error.
+# max_scan_bytes    = 8192      # Hard cap on per-value scan length (DoS guard). 0 = no cap.

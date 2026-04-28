@@ -236,6 +236,28 @@ After Phase 16:
    └─ Wait for client to solve challenge before allowing
 ```
 
+### Outbound Phase — Response Header Sanitization (FR-035)
+
+When a request is allowed and an upstream response arrives, Pingora invokes
+`WafProxy::response_filter` (after the cache layer). If `[outbound] enabled`
+is true, the configured `HeaderFilter` walks every response header and
+strips:
+
+- **Server-fingerprint** headers — `Server`, `X-Powered-By`, `X-AspNet-Version`,
+  `X-AspNetMvc-Version`, `X-Runtime`, `X-Version`, `X-Generator`.
+- **Debug / internal** headers — any name with prefix `X-Debug-`, `X-Internal-`,
+  `X-Backend-`, `X-Real-IP`, `X-Forwarded-Server`.
+- **Error-detail** headers — any name with prefix `X-Error-`, `X-Exception-`,
+  `X-Stack-`, `X-Trace-`.
+- Optionally: any header whose VALUE matches a PII regex (email, credit card,
+  SSN, phone, RFC-1918 IP, JWT). Off by default — adds regex cost per header.
+
+Operator-supplied exact names and prefixes (`strip_headers`, `strip_prefixes`)
+extend the built-in lists. Matching is case-insensitive (RFC 9110 §5.1).
+Security headers (HSTS, CSP, X-Frame-Options, etc.) are never stripped.
+
+Standards: OWASP ASVS V14.4, CWE-200, CWE-209, RFC 9110 §7.6, NIST SP 800-53 SI-11.
+
 ---
 
 ## Component Interaction

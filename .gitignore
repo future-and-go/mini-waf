@@ -18,3 +18,9 @@ __pycache__/
 .idea
 .repomixignore
 release-manifest.json
+.claude
+.gitnexus
+.kiro
+.cargo
+.opencode
+AGENTS.md
