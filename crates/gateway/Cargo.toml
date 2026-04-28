@@ -47,6 +47,13 @@ serde_json = { workspace = true }
 base64 = { workspace = true }
 futures-util = { workspace = true }
 
+# FR-033 response body content scanner
+aho-corasick = { workspace = true }
+# FR-033 gzip decompression. Pinned to 1.x (red-team #11) — tracks workspace ecosystem.
+flate2 = "1"
+regex-syntax = "0.8"
+twox-hash = { version = "2", default-features = false, features = ["xxhash64"] }
+
 # Valkey/Redis async client — only compiled when the `valkey` feature is enabled.
 # Feature set + version are pinned in the workspace root Cargo.toml; we only
 # inherit + re-declare optionality so the `dep:fred` feature gate below works.
@@ -66,6 +73,7 @@ tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
 toml = { workspace = true }
 tokio-test = "0.4"
+static_assertions = "1.1"
 
 [[bench]]
 name = "tier_classifier_bench"

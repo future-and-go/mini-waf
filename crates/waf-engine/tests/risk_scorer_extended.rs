@@ -78,6 +78,7 @@ fn ctx_with(ip: IpAddr, headers: HashMap<String, String>) -> RequestCtx {
             internal_patterns: vec![],
             mask_token: "[X]".into(),
             body_mask_max_bytes: 1_000_000,
+            ..Default::default()
         }),
         geo: None,
         tier: Tier::CatchAll,
