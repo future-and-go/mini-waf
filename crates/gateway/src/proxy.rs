@@ -14,15 +14,17 @@ use bytes::Bytes;
 use tracing::{debug, info, warn};
 
 use pingora_core::upstreams::peer::HttpPeer;
-use pingora_proxy::{ProxyHttp, Session};
+use pingora_proxy::{FailToProxy, ProxyHttp, Session};
 
 use waf_engine::WafEngine;
 
 use crate::context::{BODY_PREVIEW_LIMIT, GatewayCtx};
 use crate::ctx_builder::RequestCtxBuilder;
+use crate::error_page::ErrorPageFactory;
 use crate::filters::{
     RequestForwardedHostFilter, RequestForwardedProtoFilter, RequestHopByHopFilter, RequestHostPolicyFilter,
-    RequestRealIpFilter, RequestXffFilter,
+    RequestRealIpFilter, RequestXffFilter, ResponseHeaderBlocklistFilter, ResponseLocationRewriter,
+    ResponseServerPolicyFilter, ResponseViaStripFilter,
 };
 use crate::pipeline::{FilterCtx, RequestFilterChain, ResponseFilterChain};
 use crate::proxy_waf_response::{write_waf_body_decision, write_waf_decision};
@@ -57,9 +59,46 @@ impl WafProxy {
             request_counter: Arc::new(AtomicU64::new(0)),
             blocked_counter: Arc::new(AtomicU64::new(0)),
             request_chain: Arc::new(build_request_chain()),
-            response_chain: Arc::new(ResponseFilterChain::new()),
+            response_chain: Arc::new(build_response_chain()),
         }
     }
+}
+
+/// Map a Pingora error to the HTTP status used by [`ErrorPageFactory`].
+///
+/// Mirrors the default `fail_to_proxy` mapping but lives in gateway code so we
+/// can render a neutral body. `0` means "downstream is already gone — do not
+/// attempt to write a response."
+fn error_to_status(e: &pingora_core::Error) -> u16 {
+    use pingora_core::{ErrorSource, ErrorType};
+    if let ErrorType::HTTPStatus(code) = e.etype() {
+        return *code;
+    }
+    match e.esource() {
+        ErrorSource::Upstream => 502,
+        ErrorSource::Downstream => match e.etype() {
+            ErrorType::WriteError | ErrorType::ReadError | ErrorType::ConnectionClosed => 0,
+            _ => 400,
+        },
+        ErrorSource::Internal | ErrorSource::Unset => 500,
+    }
+}
+
+/// Build the default response-side filter chain (AC-15, 16, 18).
+///
+/// Order:
+/// 1. `via-strip` — unconditional removal.
+/// 2. `server-policy` — passthrough (default) or strip.
+/// 3. `location-rewrite` — rewrite internal-host redirects.
+/// 4. `header-blocklist` — drop configured leak headers last so anything
+///    a prior filter leaves behind still gets scrubbed.
+fn build_response_chain() -> ResponseFilterChain {
+    let mut chain = ResponseFilterChain::new();
+    chain.register(Arc::new(ResponseViaStripFilter));
+    chain.register(Arc::new(ResponseServerPolicyFilter));
+    chain.register(Arc::new(ResponseLocationRewriter));
+    chain.register(Arc::new(ResponseHeaderBlocklistFilter));
+    chain
 }
 
 /// Build the default request-side filter chain.
@@ -167,11 +206,13 @@ impl ProxyHttp for WafProxy {
         } else {
             self.blocked_counter.fetch_add(1, Ordering::Relaxed);
             warn!(host = %host_for_log, "fail-closed: missing request context, returning 503");
-            let response = pingora_http::ResponseHeader::build(503, None)?;
-            session.write_response_header(Box::new(response), false).await?;
-            session
-                .write_response_body(Some(Bytes::from_static(b"Service Unavailable")), true)
-                .await?;
+            let accept = session
+                .get_header("accept")
+                .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+                .map(str::to_string);
+            let (headers, body) = ErrorPageFactory::render(503, accept.as_deref())?;
+            session.write_response_header(Box::new(headers), false).await?;
+            session.write_response_body(Some(body), true).await?;
             return Ok(true);
         };
 
@@ -265,6 +306,40 @@ impl ProxyHttp for WafProxy {
             self.response_chain.apply_all(upstream_response, &fctx)?;
         }
         Ok(())
+    }
+
+    /// AC-19: render a neutral, content-negotiated error page (no Pingora fingerprint).
+    ///
+    /// Maps the error to an HTTP status using the same heuristics as the trait
+    /// default, then writes our own headers+body so the response is free of any
+    /// Pingora-default markers (`Server: pingora/...`, default HTML page, etc.).
+    async fn fail_to_proxy(&self, session: &mut Session, e: &pingora_core::Error, _ctx: &mut Self::CTX) -> FailToProxy
+    where
+        Self::CTX: Send + Sync,
+    {
+        let code = error_to_status(e);
+        if code > 0 {
+            let accept = session
+                .get_header("accept")
+                .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+                .map(str::to_string);
+            match ErrorPageFactory::render(code, accept.as_deref()) {
+                Ok((headers, body)) => {
+                    if let Err(write_err) = session.write_response_header(Box::new(headers), false).await {
+                        warn!("failed to write error header to downstream: {write_err}");
+                    } else if let Err(write_err) = session.write_response_body(Some(body), true).await {
+                        warn!("failed to write error body to downstream: {write_err}");
+                    }
+                }
+                Err(render_err) => {
+                    warn!("error-page render failed: {render_err}");
+                }
+            }
+        }
+        FailToProxy {
+            error_code: code,
+            can_reuse_downstream: false,
+        }
     }
 
     async fn logging(&self, _session: &mut Session, _error: Option<&pingora_core::Error>, ctx: &mut GatewayCtx) {

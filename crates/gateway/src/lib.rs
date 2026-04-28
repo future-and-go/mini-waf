@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod context;
 pub mod ctx_builder;
+pub mod error_page;
 pub mod filters;
 pub mod http3;
 pub mod lb;

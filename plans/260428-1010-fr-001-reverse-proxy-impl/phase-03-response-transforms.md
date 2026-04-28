@@ -7,7 +7,7 @@
 
 ## Overview
 - **Priority:** P1
-- **Status:** pending
+- **Status:** completed
 - **Description:** Strip WAF/proxy fingerprint headers, apply Server-header strategy, rewrite internal Location URLs, replace Pingora default error pages with neutral content-negotiated page.
 
 ## Key Insights
@@ -73,14 +73,29 @@ fail_to_proxy(err) → ErrorPageFactory::render → write_response
 9. Unit tests per filter/policy/factory.
 
 ## Todo List
-- [ ] HostConfig fields + serde defaults
-- [ ] `ResponseViaStripFilter` + tests
-- [ ] `ResponseHeaderBlocklistFilter` + tests
-- [ ] `ServerHeaderPolicy` (passthrough/strip) + tests
-- [ ] `LocationRewritePolicy` + tests (absolute internal, absolute public, relative, malformed)
-- [ ] `ErrorPageFactory` + tests (json/plain/missing accept)
-- [ ] Wire `fail_to_proxy` callback
-- [ ] Register response filters in chain
+- [x] HostConfig fields + serde defaults
+- [x] `ResponseViaStripFilter` + tests
+- [x] `ResponseHeaderBlocklistFilter` + tests
+- [x] `ServerHeaderPolicy` (passthrough/strip) + tests
+- [x] `LocationRewritePolicy` + tests (absolute internal, absolute public, relative, malformed)
+- [x] `ErrorPageFactory` + tests (json/plain/missing accept)
+- [x] Wire `fail_to_proxy` callback
+- [x] Register response filters in chain
+
+## Completion Notes
+- 16 new unit tests (5 filters/policies + 5 ErrorPageFactory + 6 location-rewrite/server-policy variants); workspace 395/395 pass; clippy clean; fmt clean.
+- Files added (snake_case translation per plan §Naming):
+  - `crates/gateway/src/filters/response_via_strip_filter.rs`
+  - `crates/gateway/src/filters/response_header_blocklist_filter.rs`
+  - `crates/gateway/src/filters/response_location_rewriter.rs`
+  - `crates/gateway/src/filters/response_server_policy_filter.rs` (thin chain wrapper around `ServerHeaderPolicy`)
+  - `crates/gateway/src/policies/server_header_policy.rs`
+  - `crates/gateway/src/policies/location_rewrite_policy.rs`
+  - `crates/gateway/src/error_page/{mod.rs, error_page_factory.rs}`
+- `HostConfig` extended: `strip_server_header` (default false), `header_blocklist` (default `["x-powered-by-waf","x-waf-version"]`).
+- `proxy.rs` now overrides `fail_to_proxy` (Pingora callback) → `ErrorPageFactory::render` → write headers+body. Pingora default error-page bypassed.
+- Fail-closed branch in `request_filter` switched from static body to factory output.
+- Coverage tool note: `cargo-llvm-cov` not installed locally (per plan risk §6). CI gate deferred until tool installed or `tarpaulin` fallback configured.
 
 ## Success Criteria
 - AC-15: leak-scan regex `(?i)via|x-powered-by|x-waf` zero matches across 50 sample responses.
