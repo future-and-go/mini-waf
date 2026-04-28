@@ -108,10 +108,11 @@ Phase 7: Bot Detection
 
 ```
 Phase 8: SQL Injection (SQLi)
-├─ Parse request body + query string
+├─ Parse request body + query string (up to 256KB JSON)
 ├─ Run libinjectionrs detect_sqli fingerprint engine
-├─ Check compiled SQLi regex patterns
-├─ If SQL keywords + quotes/comments detected → BLOCK
+├─ Check 19 modular regex patterns (SQLI-001..019: classic, blind, error-based)
+├─ Apply SqliScanConfig (header/JSON toggles, denylist/allowlist, 4KB header cap)
+├─ If SQL injection payload detected → BLOCK
 └─ else → continue to Phase 9
 
 Phase 9: Cross-Site Scripting (XSS)
@@ -806,6 +807,35 @@ Server A (main)              Server B (worker)         Server C (worker)
                   PostgreSQL (primary, 5432)
               (backed up to standby servers)
 ```
+
+---
+
+## Testing & Validation Pipeline
+
+### E2E Test Suite (1,812 LOC)
+
+**Orchestrator**: `tests/e2e-cluster.sh` (main runner)
+
+**5 Modular Test Runners**
+1. **rules-engine.sh** — YAML/ModSec/JSON rule parsing, schema validation
+2. **gateway.sh** — HTTP/1.1, HTTP/2, HTTP/3 (QUIC), load balancing, SSL termination
+3. **api.sh** — REST endpoints, JWT/TOTP auth, rate limiting, CRUD operations
+4. **cluster.sh** — QUIC mTLS, leader election, rule sync, failover scenarios, peer fencing
+5. **report-renderer.sh** — Artifact generation (JUnit, JSON, Markdown, HTML)
+
+**Coverage**
+- 63+ acceptance tests for SQLi (all pattern types, encoding bypasses)
+- Cluster failover tests (main node death, partition recovery)
+- Rule sync tests (incremental + full snapshot)
+- Performance benchmarks (p99 latency, throughput)
+
+**Artifacts**: JUnit XML (CI integration), JSON (programmatic), Markdown (human-readable), HTML (visual dashboard)
+
+### Rust Integration Tests
+
+- Unit tests in-line (per module)
+- Integration fixtures in `tests/common/`
+- Chaos tests: network simulation, node kill, partition tolerance
 
 ---
 

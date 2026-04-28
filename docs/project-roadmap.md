@@ -56,6 +56,8 @@
 - [x] sqlx: set default-features = false (drop rsa dep)
 
 **Testing & Quality**
+- [x] E2E test suite (1,812 LOC): 5 shell runners (rules-engine, gateway, api, cluster, report-renderer)
+- [x] 63+ SQLi acceptance tests (19 patterns, encoding bypasses, false positives)
 - [x] 116 new regression tests (suite total: 243)
 - [x] SSRF validation tests
 - [x] Encoding bypass prevention tests
@@ -71,7 +73,9 @@
 - [x] Documentation (architecture, deployment, code standards)
 
 **Metrics v0.2.0**
-- Regression test coverage: 243 tests (↑116 from v0.1)
+- Regression test coverage: 243 tests (↑116 from v0.1); E2E suite 1,812 LOC with 5 modular runners
+- SQLi modularization: 19 patterns (SQLI-001..019), 3 scanner modules (classic/blind/error-based)
+- SQLi benchmarks: p99 <500µs clean traffic, <1ms malicious payloads
 - Security issues fixed: 10 (8 panics, SSRF, DNS rebinding, encoding bypass)
 - Performance: <0.5ms per request (99th percentile, unchanged)
 - Cluster stability: 3-node election <500ms (unchanged)
