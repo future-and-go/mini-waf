@@ -50,11 +50,7 @@ pub fn detect_from_session(session: &Session) -> Protocol {
     if is_ws_upgrade {
         return Protocol::Websocket;
     }
-    if session.is_http2() {
-        Protocol::H2
-    } else {
-        Protocol::H1
-    }
+    if session.is_http2() { Protocol::H2 } else { Protocol::H1 }
 }
 
 /// Per-protocol request counters. Cloned across `WafProxy` and the H3
