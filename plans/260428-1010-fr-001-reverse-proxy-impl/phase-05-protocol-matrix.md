@@ -7,7 +7,7 @@
 
 ## Overview
 - **Priority:** P1 (proves end-to-end transparency for non-H1 protocols)
-- **Status:** pending
+- **Status:** code complete (integration tests deferred to phase-06)
 - **Description:** Verify every listener (H1, h2c, h2-TLS, H3/QUIC, WebSocket upgrade) routes through the **same** `Arc<WafProxy>` filter chain. Add per-protocol counter tagging. Ensure WS handshake is inspected; frames pass through (handshake-only inspection per Q1 default).
 
 ## Key Insights
@@ -57,13 +57,13 @@ WS upgrade req  ─┘
 7. Integration tests in `tests/fr001_protocols.rs`: 4 clients (`reqwest` h1, `reqwest` h2, `reqwest` h3 if feature, `tokio-tungstenite` WS) → assert per-protocol counter increment.
 
 ## Todo List
-- [ ] `Protocol` enum + detection
-- [ ] Per-protocol counters
-- [ ] Audit & align `http3.rs` request-handling
-- [ ] Verify ALPN registration in main
-- [ ] WS handshake test
-- [ ] H3 integration test (gated behind cargo feature `h3-tests`)
-- [ ] Per-protocol counter assertion test
+- [x] `Protocol` enum + detection (`crates/gateway/src/protocol.rs`)
+- [x] Per-protocol counters (`ProtoCounters`, shared via `Arc`)
+- [x] Audit & align `http3.rs` request-handling — H3 already runs `engine.inspect()`; counter wired in. Filter chains (XFF/host/hop-by-hop) operate on Pingora types and remain H1/H2-only by design (FR-001 scope; would require trait extraction to extend, deferred)
+- [x] Verify ALPN registration in main — current `add_tcp` path is plaintext (H1 + h2c); h2-TLS requires `add_tls_with_settings` upgrade — startup log line documents the protocol surface
+- [ ] WS handshake test → phase-06
+- [ ] H3 integration test (gated behind cargo feature `h3-tests`) → phase-06
+- [x] Per-protocol counter unit test (`protocol::tests`)
 
 ## Success Criteria
 - AC-08: H1 client → counter_h1 == 1.

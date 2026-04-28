@@ -39,5 +39,10 @@ ipnet = { workspace = true }
 url = { workspace = true }
 regex = { workspace = true }
 
+[dev-dependencies]
+axum = { workspace = true }
+tower = { workspace = true }
+serde_json = { workspace = true }
+
 [lints]
 workspace = true

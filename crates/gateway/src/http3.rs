@@ -20,6 +20,7 @@ use uuid::Uuid;
 use waf_common::{RequestCtx, WafAction};
 use waf_engine::WafEngine;
 
+use crate::protocol::{ProtoCounters, Protocol};
 use crate::router::HostRouter;
 
 // ─── Alt-Svc header value ─────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ pub async fn start_http3_server(
     upstream_tls_verify: bool,
     engine: Arc<WafEngine>,
     router: Arc<HostRouter>,
+    proto_counters: Arc<ProtoCounters>,
 ) -> anyhow::Result<()> {
     let tls_config = build_tls_config(&cert_pem, &key_pem)?;
     let quic_config = quinn::crypto::rustls::QuicServerConfig::try_from(tls_config)
@@ -82,10 +84,11 @@ pub async fn start_http3_server(
         let verify_tls = upstream_tls_verify;
         let eng = Arc::clone(&engine);
         let rtr = Arc::clone(&router);
+        let counters = Arc::clone(&proto_counters);
         tokio::spawn(async move {
             match incoming.await {
                 Ok(conn) => {
-                    if let Err(e) = handle_quic_connection(conn, upstream, verify_tls, eng, rtr).await {
+                    if let Err(e) = handle_quic_connection(conn, upstream, verify_tls, eng, rtr, counters).await {
                         warn!("HTTP/3 connection error: {e}");
                     }
                 }
@@ -104,6 +107,7 @@ async fn handle_quic_connection(
     upstream_tls_verify: bool,
     engine: Arc<WafEngine>,
     router: Arc<HostRouter>,
+    proto_counters: Arc<ProtoCounters>,
 ) -> anyhow::Result<()> {
     let peer = conn.remote_address();
     debug!(%peer, "HTTP/3 connection accepted");
@@ -125,8 +129,13 @@ async fn handle_quic_connection(
                 let client = client.clone();
                 let eng = Arc::clone(&engine);
                 let rtr = Arc::clone(&router);
+                let counters = Arc::clone(&proto_counters);
                 let remote = peer;
                 tokio::spawn(async move {
+                    // AC-22: every accepted H3 request is counted exactly once,
+                    // BEFORE WAF inspection — bumping after a block would
+                    // under-count blocked H3 traffic and break the invariant.
+                    counters.record(Protocol::H3);
                     // h3 0.0.8: use resolver.resolve_request() to get (req, stream)
                     match resolver.resolve_request().await {
                         Ok((req, stream)) => {
