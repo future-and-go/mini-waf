@@ -95,4 +95,9 @@ mod tests {
         RequestForwardedHostFilter.apply(&mut req, &f).expect("apply");
         assert!(req.headers.get("x-forwarded-host").is_none());
     }
+
+    #[test]
+    fn name_is_stable() {
+        assert_eq!(RequestForwardedHostFilter.name(), "request-forwarded-host");
+    }
 }

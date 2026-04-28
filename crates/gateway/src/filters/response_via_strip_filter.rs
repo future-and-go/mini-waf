@@ -78,4 +78,9 @@ mod tests {
         ResponseViaStripFilter.apply(&mut resp, &fctx).expect("apply");
         assert!(resp.headers.get("via").is_none());
     }
+
+    #[test]
+    fn name_is_stable() {
+        assert_eq!(ResponseViaStripFilter.name(), "response-via-strip");
+    }
 }

@@ -82,4 +82,9 @@ mod tests {
         RequestRealIpFilter.apply(&mut req, &fctx).expect("apply");
         assert_eq!(req.headers.get("x-real-ip").unwrap().as_bytes(), b"203.0.113.9");
     }
+
+    #[test]
+    fn name_is_stable() {
+        assert_eq!(RequestRealIpFilter.name(), "request-real-ip");
+    }
 }

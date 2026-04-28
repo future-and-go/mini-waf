@@ -79,4 +79,9 @@ mod tests {
         RequestForwardedProtoFilter.apply(&mut req, &fctx).expect("apply");
         assert_eq!(req.headers.get("x-forwarded-proto").unwrap().as_bytes(), b"http");
     }
+
+    #[test]
+    fn name_is_stable() {
+        assert_eq!(RequestForwardedProtoFilter.name(), "request-forwarded-proto");
+    }
 }

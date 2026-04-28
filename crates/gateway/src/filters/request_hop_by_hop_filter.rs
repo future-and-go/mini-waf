@@ -167,4 +167,9 @@ mod tests {
         assert_eq!(req.headers.get("upgrade").unwrap().as_bytes(), b"websocket");
         assert_eq!(req.headers.get("connection").unwrap().as_bytes(), b"upgrade");
     }
+
+    #[test]
+    fn name_is_stable() {
+        assert_eq!(RequestHopByHopFilter.name(), "request-hop-by-hop");
+    }
 }

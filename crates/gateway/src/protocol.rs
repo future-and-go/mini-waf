@@ -127,4 +127,14 @@ mod tests {
         assert_eq!(Protocol::H3.as_str(), "h3");
         assert_eq!(Protocol::Websocket.as_str(), "ws");
     }
+
+    #[test]
+    fn new_returns_zeroed_counters() {
+        let c = ProtoCounters::new();
+        assert_eq!(c.get(Protocol::H1), 0);
+        assert_eq!(c.get(Protocol::H2), 0);
+        assert_eq!(c.get(Protocol::H3), 0);
+        assert_eq!(c.get(Protocol::Websocket), 0);
+        assert_eq!(c.total(), 0);
+    }
 }

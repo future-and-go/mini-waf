@@ -89,4 +89,9 @@ mod tests {
         ResponseHeaderBlocklistFilter.apply(&mut resp, &fctx).expect("apply");
         assert!(resp.headers.get("x-powered-by-waf").is_some());
     }
+
+    #[test]
+    fn name_is_stable() {
+        assert_eq!(ResponseHeaderBlocklistFilter.name(), "response-header-blocklist");
+    }
 }
