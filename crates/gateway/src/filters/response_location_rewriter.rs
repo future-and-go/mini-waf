@@ -110,4 +110,9 @@ mod tests {
         let resp = run(true, None);
         assert!(resp.headers.get("location").is_none());
     }
+
+    #[test]
+    fn name_is_stable() {
+        assert_eq!(ResponseLocationRewriter.name(), "response-location-rewrite");
+    }
 }

@@ -1589,6 +1589,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "bytes",
  "chrono",
  "dashmap",
@@ -1611,8 +1612,10 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "serde",
+ "serde_json",
  "sha2",
  "tokio",
+ "tower",
  "tracing",
  "url",
  "uuid",

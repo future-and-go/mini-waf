@@ -54,3 +54,31 @@ src/
 
 ## Dependencies
 Depends on `waf-common`, `waf-engine`, `waf-storage`. Pulls `pingora-*`, `quinn`, `h3`, `rustls`, `instant-acme`, `rcgen`, `moka`, `reqwest`.
+
+## Testing & coverage (FR-001 phase-06)
+
+Unit tests live inline (`#[cfg(test)] mod tests` per file) under `filters/`,
+`policies/`, `error_page/`, `pipeline/`, `ctx_builder/`, plus `protocol.rs`.
+Run them with:
+
+```bash
+cargo test -p gateway
+```
+
+CI enforces a 95% line-coverage gate on those scoped files via
+[`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov). Reproduce locally:
+
+```bash
+cargo install cargo-llvm-cov --locked       # one-time
+rustup component add llvm-tools-preview     # one-time
+
+cargo llvm-cov -p gateway \
+  --ignore-filename-regex '(cache|lb|tunnel|ssl|http3|proxy|proxy_waf_response|context|router|lib|request_ctx_builder|protocol)\.rs$|/tests/|/benches/' \
+  --fail-under-lines 95
+```
+
+End-to-end Pingora-driven integration tests (the 17 AC-mapped suites in the
+phase-06 plan) are **deferred to phase-06b**. They require a `WafEngine` test
+seam that does not bind to a live PostgreSQL `Database`; see
+`plans/260428-1010-fr-001-reverse-proxy-impl/phase-06-test-harness-coverage.md`
+for the deferral rationale.

@@ -114,4 +114,22 @@ mod tests {
             .unwrap();
         assert_eq!(cl, body.len());
     }
+
+    #[test]
+    fn reason_for_known_statuses() {
+        for (code, want) in [
+            (400u16, "Bad Request"),
+            (403, "Forbidden"),
+            (404, "Not Found"),
+            (408, "Request Timeout"),
+            (413, "Payload Too Large"),
+            (500, "Internal Server Error"),
+            (502, "Bad Gateway"),
+            (503, "Service Unavailable"),
+            (504, "Gateway Timeout"),
+        ] {
+            let (_, body) = ErrorPageFactory::render(code, None).expect("render");
+            assert_eq!(body.as_ref(), want.as_bytes(), "status {code}");
+        }
+    }
 }
