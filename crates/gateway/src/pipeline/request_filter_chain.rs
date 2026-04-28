@@ -73,7 +73,10 @@ mod tests {
         fn apply(&self, _req: &mut RequestHeader, _fctx: &FilterCtx<'_>) -> pingora_core::Result<()> {
             self.log.lock().push(self.tag);
             if self.fail {
-                Err(pingora_core::Error::explain(pingora_core::ErrorType::InternalError, "stub"))
+                Err(pingora_core::Error::explain(
+                    pingora_core::ErrorType::InternalError,
+                    "stub",
+                ))
             } else {
                 Ok(())
             }
@@ -122,9 +125,21 @@ mod tests {
     fn runs_filters_in_registration_order() {
         let log = Arc::new(Mutex::new(Vec::new()));
         let mut chain = RequestFilterChain::default();
-        chain.register(Arc::new(Recorder { tag: "a", log: Arc::clone(&log), fail: false }));
-        chain.register(Arc::new(Recorder { tag: "b", log: Arc::clone(&log), fail: false }));
-        chain.register(Arc::new(Recorder { tag: "c", log: Arc::clone(&log), fail: false }));
+        chain.register(Arc::new(Recorder {
+            tag: "a",
+            log: Arc::clone(&log),
+            fail: false,
+        }));
+        chain.register(Arc::new(Recorder {
+            tag: "b",
+            log: Arc::clone(&log),
+            fail: false,
+        }));
+        chain.register(Arc::new(Recorder {
+            tag: "c",
+            log: Arc::clone(&log),
+            fail: false,
+        }));
 
         let (ctx, hc) = make_ctx();
         let fctx = FilterCtx {
@@ -142,9 +157,21 @@ mod tests {
     fn first_error_short_circuits() {
         let log = Arc::new(Mutex::new(Vec::new()));
         let mut chain = RequestFilterChain::new();
-        chain.register(Arc::new(Recorder { tag: "ok1", log: Arc::clone(&log), fail: false }));
-        chain.register(Arc::new(Recorder { tag: "boom", log: Arc::clone(&log), fail: true }));
-        chain.register(Arc::new(Recorder { tag: "never", log: Arc::clone(&log), fail: false }));
+        chain.register(Arc::new(Recorder {
+            tag: "ok1",
+            log: Arc::clone(&log),
+            fail: false,
+        }));
+        chain.register(Arc::new(Recorder {
+            tag: "boom",
+            log: Arc::clone(&log),
+            fail: true,
+        }));
+        chain.register(Arc::new(Recorder {
+            tag: "never",
+            log: Arc::clone(&log),
+            fail: false,
+        }));
 
         let (ctx, hc) = make_ctx();
         let fctx = FilterCtx {

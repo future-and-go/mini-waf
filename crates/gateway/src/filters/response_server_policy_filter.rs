@@ -65,7 +65,9 @@ mod tests {
         let (ctx, hc) = make_fctx(false);
         let mut resp = ResponseHeader::build(200, None).expect("build");
         resp.insert_header("server", "nginx/1.27").expect("set");
-        ResponseServerPolicyFilter.apply(&mut resp, &fctx_for(&ctx, &hc)).expect("apply");
+        ResponseServerPolicyFilter
+            .apply(&mut resp, &fctx_for(&ctx, &hc))
+            .expect("apply");
         assert_eq!(resp.headers.get("server").unwrap().as_bytes(), b"nginx/1.27");
     }
 
@@ -74,7 +76,9 @@ mod tests {
         let (ctx, hc) = make_fctx(true);
         let mut resp = ResponseHeader::build(200, None).expect("build");
         resp.insert_header("server", "nginx/1.27").expect("set");
-        ResponseServerPolicyFilter.apply(&mut resp, &fctx_for(&ctx, &hc)).expect("apply");
+        ResponseServerPolicyFilter
+            .apply(&mut resp, &fctx_for(&ctx, &hc))
+            .expect("apply");
         assert!(resp.headers.get("server").is_none());
     }
 
