@@ -22,7 +22,7 @@ Close all 25 ACs (AC-01..AC-25). Refactor `crates/gateway/src/proxy.rs` (current
 | # | File | Owner files | Status | ACs |
 |---|------|-------------|--------|-----|
 | 01 | [phase-01-foundation-refactor.md](phase-01-foundation-refactor.md) | proxy/* (split), pipeline/*, ctx-builder | completed | bug-fix is_tls, AC-22, AC-23 |
-| 02 | [phase-02-request-transforms.md](phase-02-request-transforms.md) | filters/request-*, host-policy | pending | AC-12, 13, 14, 20, 25 |
+| 02 | [phase-02-request-transforms.md](phase-02-request-transforms.md) | filters/request-*, host-policy | completed | AC-12, 13, 14, 20, 25 |
 | 03 | [phase-03-response-transforms.md](phase-03-response-transforms.md) | filters/response-*, error-page-factory | pending | AC-15, 16, 18, 19 |
 | 04 | [phase-04-body-outbound-filter.md](phase-04-body-outbound-filter.md) | filters/body-mask | pending | AC-17 |
 | 05 | [phase-05-protocol-matrix.md](phase-05-protocol-matrix.md) | http3.rs, lib.rs, listener wiring | pending | AC-08, 09, 10, 11, 22 |
@@ -45,6 +45,7 @@ Phase deps: 01 blocks 02..05. 06 blocks merge. 07 final gate.
 
 ## Completion Status
 **Phase 01:** completed 2026-04-28 — commits 5488cbf, efdf552 on main. Code review: 9.6/10. Unblocks phase 02–05.
+**Phase 02:** completed 2026-04-28 — 5 filters + 1 strategy + chain wiring. 16 unit tests, all 373 workspace tests pass; clippy clean. Closes AC-12, 13, 14, 20, 25.
 
 ## Coverage strategy
 

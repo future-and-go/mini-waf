@@ -20,6 +20,10 @@ use waf_engine::WafEngine;
 
 use crate::context::{BODY_PREVIEW_LIMIT, GatewayCtx};
 use crate::ctx_builder::RequestCtxBuilder;
+use crate::filters::{
+    RequestForwardedHostFilter, RequestForwardedProtoFilter, RequestHopByHopFilter, RequestHostPolicyFilter,
+    RequestRealIpFilter, RequestXffFilter,
+};
 use crate::pipeline::{FilterCtx, RequestFilterChain, ResponseFilterChain};
 use crate::proxy_waf_response::{write_waf_body_decision, write_waf_decision};
 use crate::router::HostRouter;
@@ -52,10 +56,30 @@ impl WafProxy {
             trusted_proxies: Vec::new(),
             request_counter: Arc::new(AtomicU64::new(0)),
             blocked_counter: Arc::new(AtomicU64::new(0)),
-            request_chain: Arc::new(RequestFilterChain::new()),
+            request_chain: Arc::new(build_request_chain()),
             response_chain: Arc::new(ResponseFilterChain::new()),
         }
     }
+}
+
+/// Build the default request-side filter chain.
+///
+/// Order is significant:
+/// 1. `xff` / `real-ip` / `forwarded-proto` — populate forwarded metadata.
+/// 2. `forwarded-host` — captures the ORIGINAL `Host` (must run before host-policy).
+/// 3. `host-policy` — applies `Preserve` or `Rewrite(remote_host)` per host config.
+/// 4. `hop-by-hop` — strips RFC 7230 hop headers + Connection-tokens last,
+///    so any header *we* added (e.g. `Connection: upgrade` for WS) is preserved
+///    by the WS-aware branch.
+fn build_request_chain() -> RequestFilterChain {
+    let mut chain = RequestFilterChain::new();
+    chain.register(Arc::new(RequestXffFilter));
+    chain.register(Arc::new(RequestRealIpFilter));
+    chain.register(Arc::new(RequestForwardedProtoFilter));
+    chain.register(Arc::new(RequestForwardedHostFilter));
+    chain.register(Arc::new(RequestHostPolicyFilter));
+    chain.register(Arc::new(RequestHopByHopFilter));
+    chain
 }
 
 #[async_trait]
@@ -195,7 +219,7 @@ impl ProxyHttp for WafProxy {
 
     async fn upstream_request_filter(
         &self,
-        _session: &mut Session,
+        session: &mut Session,
         upstream_request: &mut pingora_http::RequestHeader,
         ctx: &mut Self::CTX,
     ) -> pingora_core::Result<()>
@@ -203,10 +227,18 @@ impl ProxyHttp for WafProxy {
         Self::CTX: Send + Sync,
     {
         if let (Some(req_ctx), Some(hc)) = (&ctx.request_ctx, &ctx.host_config) {
+            // peer_ip is the IMMEDIATE TCP peer (not the resolved client).
+            // The two differ when trust_proxy_headers=true and the peer is
+            // a trusted proxy: client_ip then comes from XFF, while peer_ip
+            // remains the proxy's IP. XFF append-mode (AC-14) needs peer_ip.
+            let peer_ip = session
+                .client_addr()
+                .and_then(|a| a.as_inet())
+                .map_or(req_ctx.client_ip, std::net::SocketAddr::ip);
             let fctx = FilterCtx {
                 request_ctx: req_ctx,
                 host_config: hc,
-                peer_ip: req_ctx.client_ip,
+                peer_ip,
                 is_tls: req_ctx.is_tls,
             };
             self.request_chain.apply_all(upstream_request, &fctx)?;

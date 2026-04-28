@@ -1,9 +1,11 @@
 pub mod cache;
 pub mod context;
 pub mod ctx_builder;
+pub mod filters;
 pub mod http3;
 pub mod lb;
 pub mod pipeline;
+pub mod policies;
 pub mod proxy;
 pub mod proxy_waf_response;
 pub mod router;

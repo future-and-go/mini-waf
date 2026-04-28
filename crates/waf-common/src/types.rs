@@ -160,6 +160,15 @@ pub struct HostConfig {
     pub log_only_mode: bool,
     /// Custom HTML block page template; placeholders: `{{req_id}}`, `{{rule_name}}`, `{{client_ip}}`
     pub block_page_template: Option<String>,
+    /// Whether to preserve the client's `Host` header when proxying upstream.
+    /// When `true` (default, transparent), the upstream sees the original `Host`.
+    /// When `false`, `Host` is rewritten to `remote_host` (AC-25 rewrite mode).
+    #[serde(default = "default_preserve_host")]
+    pub preserve_host: bool,
+}
+
+const fn default_preserve_host() -> bool {
+    true
 }
 
 impl Default for HostConfig {
@@ -183,6 +192,7 @@ impl Default for HostConfig {
             defense_config: DefenseConfig::default(),
             log_only_mode: false,
             block_page_template: None,
+            preserve_host: true,
         }
     }
 }

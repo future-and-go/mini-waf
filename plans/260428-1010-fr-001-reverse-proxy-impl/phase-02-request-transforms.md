@@ -7,7 +7,7 @@
 
 ## Overview
 - **Priority:** P1
-- **Status:** pending
+- **Status:** completed
 - **Description:** Implement five request filters + one Host policy strategy. All run inside `upstream_request_filter` via the chain from phase-01. Backend sees real client IP, correct forwarded metadata, hygienic hop-by-hop headers, and the configured Host value.
 
 ## Key Insights
@@ -72,15 +72,15 @@ upstream_request_filter(req):
 10. Integration test (in phase 06) chains XFF through 2 hops.
 
 ## Todo List
-- [ ] `HostConfig.preserve_host` field
-- [ ] `HostHeaderPolicy` strategy + tests
-- [ ] `RequestXffFilter` + tests (set, append, multi-hop)
-- [ ] `RequestRealIpFilter` + tests
-- [ ] `RequestForwardedProtoFilter` + tests (TLS on/off)
-- [ ] `RequestForwardedHostFilter` + tests
-- [ ] `RequestHopByHopFilter` + tests (Connection-token names, Upgrade preservation)
-- [ ] Register all in chain
-- [ ] Unit coverage ≥ 95% on the six new files
+- [x] `HostConfig.preserve_host` field
+- [x] `HostHeaderPolicy` strategy + tests
+- [x] `RequestXffFilter` + tests (set, append, multi-hop)
+- [x] `RequestRealIpFilter` + tests
+- [x] `RequestForwardedProtoFilter` + tests (TLS on/off)
+- [x] `RequestForwardedHostFilter` + tests
+- [x] `RequestHopByHopFilter` + tests (Connection-token names, Upgrade preservation)
+- [x] Register all in chain
+- [x] Unit coverage ≥ 95% on the six new files (16 unit tests, all passing)
 
 ## Success Criteria
 - AC-12: backend mock receives `X-Forwarded-For: <client-ip>` matching curl source IP.
