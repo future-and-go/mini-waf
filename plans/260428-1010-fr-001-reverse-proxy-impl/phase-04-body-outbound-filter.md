@@ -7,7 +7,7 @@
 
 ## Overview
 - **Priority:** P2 (gate is FR-033 broader; this is the FR-001 slice)
-- **Status:** pending
+- **Status:** completed (2026-04-28)
 - **Description:** Implement `response_body_filter` ProxyHttp callback that streams chunks through a bounded regex masker driven by `host_config.internal_patterns: Vec<String>`. Out of scope: body decompression, full DOM rewriting — defer to FR-033.
 
 ## Key Insights
@@ -66,11 +66,16 @@ response_body_filter(chunk, eos):
 6. Unit tests with crafted chunks straddling pattern boundary.
 
 ## Todo List
-- [ ] HostConfig fields + regex pre-compile
-- [ ] `BodyMaskState` in `GatewayCtx`
-- [ ] `BodyMaskFilter` + tests (single chunk, multi-chunk straddle, eos flush, encoding skip, max-bytes ceiling)
-- [ ] Wire in `response_body_filter`
-- [ ] Document compressed-skip behavior in `crates/gateway/CLAUDE.md`
+- [x] HostConfig fields + regex pre-compile (lazy, cached on `WafProxy.body_mask_cache` keyed by `Arc<HostConfig>` ptr)
+- [x] `BodyMaskState` in `GatewayCtx`
+- [x] `BodyMaskFilter` + tests (8 unit tests: single chunk, multi-chunk straddle, eos flush, disabled state, empty patterns, invalid pattern, ceiling, boundary regression)
+- [x] Wire in `response_body_filter` (encoding detection + Content-Length strip in `response_filter`)
+- [x] Document compressed-skip behavior in `crates/gateway/CLAUDE.md`
+
+## Deviations from plan
+- Skipped `body-filter-chain.rs` per YAGNI/KISS — only one body filter exists today; chain abstraction will be added when FR-033 introduces a second body filter. The single filter is invoked directly from `response_body_filter`.
+- Used a single combined alternation `regex::bytes::Regex` instead of `RegexSet` because `RegexSet` only reports which patterns matched, not where — replacement requires positions.
+- `Content-Length` is stripped whenever masking is *enabled*, not only when a replacement actually occurs (the header phase runs before any body chunks are seen, so we cannot know yet).
 
 ## Success Criteria
 - AC-17: send response containing `backend.internal` and `10.0.0.5` → client receives `[redacted]` for both, identity-encoded only.

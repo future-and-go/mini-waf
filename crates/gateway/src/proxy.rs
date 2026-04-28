@@ -8,23 +8,26 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use dashmap::DashMap;
 use tracing::{debug, info, warn};
 
 use pingora_core::upstreams::peer::HttpPeer;
 use pingora_proxy::{FailToProxy, ProxyHttp, Session};
 
+use waf_common::HostConfig;
 use waf_engine::WafEngine;
 
 use crate::context::{BODY_PREVIEW_LIMIT, GatewayCtx};
 use crate::ctx_builder::RequestCtxBuilder;
 use crate::error_page::ErrorPageFactory;
 use crate::filters::{
-    RequestForwardedHostFilter, RequestForwardedProtoFilter, RequestHopByHopFilter, RequestHostPolicyFilter,
-    RequestRealIpFilter, RequestXffFilter, ResponseHeaderBlocklistFilter, ResponseLocationRewriter,
-    ResponseServerPolicyFilter, ResponseViaStripFilter,
+    CompiledMask, RequestForwardedHostFilter, RequestForwardedProtoFilter, RequestHopByHopFilter,
+    RequestHostPolicyFilter, RequestRealIpFilter, RequestXffFilter, ResponseHeaderBlocklistFilter,
+    ResponseLocationRewriter, ResponseServerPolicyFilter, ResponseViaStripFilter, apply_body_mask_chunk,
 };
 use crate::pipeline::{FilterCtx, RequestFilterChain, ResponseFilterChain};
 use crate::proxy_waf_response::{write_waf_body_decision, write_waf_decision};
@@ -46,6 +49,9 @@ pub struct WafProxy {
     pub request_chain: Arc<RequestFilterChain>,
     /// Ordered chain of response filters (populated by phases 02–03).
     pub response_chain: Arc<ResponseFilterChain>,
+    /// AC-17: per-host compiled mask cache, keyed by `Arc<HostConfig>` pointer
+    /// identity. Compiled lazily on first body chunk; survives until config reload.
+    pub body_mask_cache: Arc<DashMap<usize, Arc<CompiledMask>>>,
 }
 
 impl WafProxy {
@@ -60,7 +66,25 @@ impl WafProxy {
             blocked_counter: Arc::new(AtomicU64::new(0)),
             request_chain: Arc::new(build_request_chain()),
             response_chain: Arc::new(build_response_chain()),
+            body_mask_cache: Arc::new(DashMap::new()),
         }
+    }
+
+    /// Resolve (and lazily compile) the mask config for a given host.
+    /// Cache key is the `Arc<HostConfig>` pointer; identical configs across
+    /// requests reuse the same compiled regex.
+    fn resolve_mask(&self, hc: &Arc<HostConfig>) -> Arc<CompiledMask> {
+        let key = Arc::as_ptr(hc) as usize;
+        if let Some(existing) = self.body_mask_cache.get(&key) {
+            return Arc::clone(&existing);
+        }
+        let compiled = Arc::new(CompiledMask::build(
+            &hc.internal_patterns,
+            &hc.mask_token,
+            hc.body_mask_max_bytes,
+        ));
+        self.body_mask_cache.insert(key, Arc::clone(&compiled));
+        compiled
     }
 }
 
@@ -304,8 +328,51 @@ impl ProxyHttp for WafProxy {
                 is_tls: req_ctx.is_tls,
             };
             self.response_chain.apply_all(upstream_response, &fctx)?;
+
+            // AC-17: decide whether body masking will run for this response.
+            // Identity (or absent) Content-Encoding only — compressed bodies
+            // are out of scope for FR-001 (FR-033 will add decompression).
+            let identity = upstream_response
+                .headers
+                .get("content-encoding")
+                .and_then(|v| v.to_str().ok())
+                .is_none_or(|v| {
+                    let v = v.trim();
+                    v.is_empty() || v.eq_ignore_ascii_case("identity")
+                });
+            let compiled = self.resolve_mask(hc);
+            if identity && !compiled.is_noop() {
+                ctx.body_mask.enabled = true;
+                // Replacement length differs from match length — body length is
+                // no longer fixed. Drop Content-Length so Pingora switches to
+                // chunked encoding.
+                let _ = upstream_response.remove_header("content-length");
+            } else if !compiled.is_noop() {
+                debug!("body-mask: skipping non-identity content-encoding");
+            }
         }
         Ok(())
+    }
+
+    fn response_body_filter(
+        &self,
+        _session: &mut Session,
+        body: &mut Option<Bytes>,
+        end_of_stream: bool,
+        ctx: &mut Self::CTX,
+    ) -> pingora_core::Result<Option<Duration>>
+    where
+        Self::CTX: Send + Sync,
+    {
+        if !ctx.body_mask.enabled {
+            return Ok(None);
+        }
+        let Some(hc) = &ctx.host_config else {
+            return Ok(None);
+        };
+        let compiled = self.resolve_mask(hc);
+        apply_body_mask_chunk(&mut ctx.body_mask, &compiled, body, end_of_stream);
+        Ok(None)
     }
 
     /// AC-19: render a neutral, content-negotiated error page (no Pingora fingerprint).
