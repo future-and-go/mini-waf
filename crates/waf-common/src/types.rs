@@ -165,10 +165,22 @@ pub struct HostConfig {
     /// When `false`, `Host` is rewritten to `remote_host` (AC-25 rewrite mode).
     #[serde(default = "default_preserve_host")]
     pub preserve_host: bool,
+    /// AC-16: when `true`, scrub the `Server` response header.
+    /// Default `false` keeps backend `Server` byte-identical (preserves AC-04).
+    #[serde(default)]
+    pub strip_server_header: bool,
+    /// AC-15: extra response headers to strip on the way out.
+    /// Matched case-insensitively. `via` is always stripped via a dedicated filter.
+    #[serde(default = "default_header_blocklist")]
+    pub header_blocklist: Vec<String>,
 }
 
 const fn default_preserve_host() -> bool {
     true
+}
+
+fn default_header_blocklist() -> Vec<String> {
+    vec!["x-powered-by-waf".to_string(), "x-waf-version".to_string()]
 }
 
 impl Default for HostConfig {
@@ -193,6 +205,8 @@ impl Default for HostConfig {
             log_only_mode: false,
             block_page_template: None,
             preserve_host: true,
+            strip_server_header: false,
+            header_blocklist: default_header_blocklist(),
         }
     }
 }

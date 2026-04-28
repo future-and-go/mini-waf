@@ -36,6 +36,7 @@ rand = { workspace = true }
 rustls-pki-types = { workspace = true }
 parking_lot = { workspace = true }
 ipnet = { workspace = true }
+url = { workspace = true }
 
 [lints]
 workspace = true

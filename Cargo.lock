@@ -1613,6 +1613,7 @@ dependencies = [
  "sha2",
  "tokio",
  "tracing",
+ "url",
  "uuid",
  "waf-common",
  "waf-engine",
