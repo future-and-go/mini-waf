@@ -751,3 +751,36 @@ events_batch_size = 500  # Larger batches
 ```
 
 See [System Architecture](./system-architecture.md) for performance baselines.
+
+---
+
+## End-to-End Testing
+
+### Local Test Execution
+
+```bash
+# Run full E2E suite (rules-engine, gateway, api, cluster, report-renderer)
+./tests/e2e-cluster.sh
+
+# Outputs to tests/artifacts/:
+#   - test-results.junit.xml (CI integration)
+#   - test-results.json (programmatic parsing)
+#   - test-results.md (human-readable)
+#   - test-results.html (visual dashboard)
+```
+
+### Nightly CI Workflow
+
+GitHub Actions workflow (`.github/workflows/e2e-tests.yml`):
+- Runs on main branch nightly
+- Executes all 5 test runners in parallel
+- Artifacts published (JUnit, JSON, Markdown, HTML)
+- Failures block deployment approval
+
+### Test Coverage
+
+- **63+ SQLi acceptance tests** (pattern validation, encoding bypasses, false positives)
+- **Cluster failover scenarios** (main node death, peer recovery, split-brain prevention)
+- **Rule sync tests** (incremental updates, full snapshots, version tracking)
+- **API endpoint coverage** (CRUD, auth, rate limiting, WebSocket)
+- **Gateway protocol tests** (HTTP/1.1, HTTP/2, HTTP/3 QUIC, load balancing)

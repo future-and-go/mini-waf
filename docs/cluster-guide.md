@@ -96,7 +96,11 @@ The Cluster section (sidebar) shows:
 ### 6. Run the end-to-end test
 
 ```bash
+# Full E2E test suite (5 modular runners: rules-engine, gateway, api, cluster, report-renderer)
 ./tests/e2e-cluster.sh
+
+# Produces artifacts: tests/artifacts/{junit.xml, test-results.json, test-results.md, test-results.html}
+# Validates: YAML parsing, HTTP/2/3, API CRUD, cluster failover, rule sync
 ```
 
 ---

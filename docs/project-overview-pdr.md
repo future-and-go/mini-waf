@@ -184,9 +184,11 @@ Organizations deploying web applications face evolving threats:
 
 1. **Clustering MVP**: 3-node cluster, QUIC mTLS, leader election, rule sync — stable in production
 2. **Security Hardening**: 8 panic elimination, SSRF validation, DNS rebinding guard, API security headers
-3. **Rule Coverage**: libinjection SQLi/XSS detection active; 51 built-in rules
-4. **Regression Testing**: 243 regression tests (144 added in v0.2.0); all passing
-5. **Dependency Audit**: 0 unaddressed CVEs; wasmtime upgraded (23→43, 5 CVEs fixed)
+3. **SQLi Modularization**: 19-pattern engine (SQLI-001..019), 3 scanner modules, 63+ acceptance tests; p99 <500µs clean, <1ms malicious
+4. **E2E Test Suite**: 1,812 LOC, 5 shell runners, multi-artifact output (JUnit/JSON/Markdown/HTML)
+5. **Rule Coverage**: libinjection SQLi/XSS detection active; 51 built-in rules
+6. **Regression Testing**: 243 regression tests (116 added in v0.2.0); all passing
+7. **Dependency Audit**: 0 unaddressed CVEs; wasmtime upgraded (23→43, 5 CVEs fixed)
 
 ### v0.3.0 (Proposed — Metrics)
 

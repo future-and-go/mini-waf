@@ -48,9 +48,9 @@ prx-waf/
 │   │   │   ├── cc_limiter.rs  # Rate limiting (sliding window)
 │   │   │   ├── scanner.rs     # Scanner detection (fingerprints)
 │   │   │   ├── bot.rs         # Bot detection (UA, headless)
-│   │   │   ├── sql_injection.rs          # SQL injection main check
-│   │   │   ├── sql_injection_patterns.rs # 19 patterns (SQLI-001..019)
-│   │   │   ├── sql_injection_scanners.rs # Scanner helpers (Phase 02+)
+│   │   │   ├── sql_injection.rs          # SQL injection coordinator (libinjectionrs + pattern checks)
+│   │   │   ├── sql_injection_patterns.rs # 19 regex patterns (SQLI-001..019, classic/blind/error-based)
+│   │   │   ├── sql_injection_scanners.rs # Scanner helpers (3 modular scanners)
 │   │   │   ├── xss.rs         # XSS (libinjectionrs + regex)
 │   │   │   ├── rce.rs         # Command injection
 │   │   │   ├── traversal.rs   # Directory traversal
@@ -184,12 +184,19 @@ prx-waf/
 │   ├── package.json     # Vue 3.3.13 + Vite 5.1 + Tailwind 3.4 + axios + vue-i18n
 │   └── vite.config.ts   # Vite dev server proxy
 │
-├── tests/               # Integration + chaos tests
-│   ├── e2e-cluster.sh   # End-to-end cluster test (bash)
-│   └── *.rs             # Rust integration tests
+├── tests/               # Integration + E2E test suite (1,812 LOC)
+│   ├── e2e-cluster.sh   # Main orchestrator (5 shell runners, multi-artifact output)
+│   ├── runners/
+│   │   ├── rules-engine.sh     # Validates YAML/ModSec/JSON rule parsing
+│   │   ├── gateway.sh          # HTTP/1.1, HTTP/2, HTTP/3, load balancing
+│   │   ├── api.sh              # REST API endpoints, auth, CRUD operations
+│   │   ├── cluster.sh          # QUIC mesh, leader election, rule sync, failover
+│   │   └── report-renderer.sh  # JUnit/JSON/Markdown/HTML artifact generation
+│   └── *.rs             # Rust integration tests (63+ acceptance tests for SQLi)
 │
+├── build.rs             # Creates admin-panel/dist/ placeholder (prevents cargo failures in sandboxed CI)
 ├── Dockerfile           # 2-stage: builder + runtime
-├── Dockerfile.prebuilt  # Pre-built binary only
+├── Dockerfile.prebuilt  # Pre-built binary only (admin UI embedded via build.rs)
 ├── docker-compose.yml   # Single-node: postgres + prx-waf
 ├── docker-compose.cluster.yml # 3-node cluster + postgres
 │
@@ -399,6 +406,28 @@ prx-waf/
 | Cache hit ratio | >80% | >75% | Achieved |
 | Cluster election | <500ms (LAN) | <500ms | Achieved |
 | Full rule sync (1K rules) | <2s | <3s | Achieved |
+
+---
+
+## SQL Injection Detection Engine
+
+**Architecture**: Modular 3-part system
+- `sql_injection.rs` — Coordinator (libinjectionrs + pattern dispatch)
+- `sql_injection_patterns.rs` — 19 regex patterns (SQLI-001..019)
+- `sql_injection_scanners.rs` — Scanner modules (classic, blind, error-based)
+
+**Pattern Categories (19 total)**
+- **Classic SQLi** (SQLI-001..007): Union-based, OR-based, comment-based injection
+- **Blind SQLi** (SQLI-008..014): Boolean-based, time-based, error-based inference
+- **Error-Based** (SQLI-015..019): MSSQL, MySQL, PostgreSQL, Oracle error patterns
+
+**Configuration** (SqliScanConfig)
+- Header scan toggle (enable/disable scanning HTTP headers)
+- Denylist/allowlist for specific parameters
+- Scan caps: 4KB max header size, 256KB max JSON body
+- Criterion benchmarks: p99 <500µs clean traffic, <1ms malicious payloads
+
+**Testing**: 63+ acceptance tests covering all pattern types, encoding bypasses, false positives
 
 ---
 

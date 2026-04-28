@@ -263,6 +263,15 @@ cargo clippy -- -D warnings
 cargo fmt --all -- --check
 ```
 
+**E2E Testing**
+
+```bash
+# Full test suite (runs all 5 shell-based runners: rules-engine, gateway, api, cluster, report-renderer)
+./tests/e2e-cluster.sh
+
+# Outputs JUnit, JSON, Markdown, HTML artifacts to tests/artifacts/
+```
+
 **Run Locally**
 
 ```bash

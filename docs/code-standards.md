@@ -714,3 +714,54 @@ cargo test --all || {
 
 echo "✅ All checks passed. Ready to commit."
 ```
+
+### 6. Modularized Rule Organization
+
+**Pattern**: Split large rule evaluation into focused modules
+
+**Good** (sql_injection_patterns.rs)
+```rust
+// Each pattern file contains 3-6 related regex rules
+pub static SQLI_001: Lazy<Regex> = Lazy::new(|| {
+    // Classic UNION-based SQLi
+    Regex::new(r"(?i)union.*select").unwrap()
+});
+
+#[allow(unsafe_code)]  // Scoped: build-time regex compilation only
+pub static SQLI_BLIND: Lazy<Regex> = Lazy::new(|| {
+    // Blind SQLi inference patterns
+    Regex::new(r"(?i)(and|or)\s*\d+\s*=\s*\d+").unwrap()
+});
+```
+
+**Why**: 
+- Each pattern file self-documents its category
+- Hot-path rule eval stays allocation-free
+- Regex compilation (expensive) happens once at startup
+- Scoped `#[allow(unsafe_code)]` signals intentionality, not sloppiness
+
+### 7. Minimal Allocations in Hot Paths
+
+**Bad** (rule evaluation path)
+```rust
+fn check_sqli(body: &str) -> bool {
+    let lower = body.to_lowercase();  // ❌ Allocates
+    SQLI_PATTERN.is_match(&lower)     // ❌ Re-allocates
+}
+```
+
+**Good**
+```rust
+fn check_sqli(body: &str) -> bool {
+    SQLI_PATTERN.is_match_ignore_case(body)  // ✅ Zero allocation
+}
+
+// Or use Cow for conditional allocation:
+fn validate_header(s: &str) -> Cow<'_, str> {
+    if s.contains('\\') {
+        Cow::Owned(s.replace('\\', ""))  // ✅ Only allocate if needed
+    } else {
+        Cow::Borrowed(s)  // ✅ Zero-copy reference
+    }
+}
+```
