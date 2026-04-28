@@ -146,6 +146,10 @@ prx-waf/
 │   │   │   │   └── nonce_store.rs # NonceStore trait + MemoryNonceStore (LRU, replay detection)
 │   │   │   └── store/         # RiskStore trait + MemoryRiskStore (in-memory state machine)
 │   │   │
+│   │   ├── outbound/
+│   │   │   ├── header_filter.rs # FR-035 response header leak prevention
+│   │   │   └── mod.rs
+│   │   │
 │   │   ├── security/
 │   │   │   ├── geoip.rs       # GeoIP lookup (ip2region)
 │   │   │   └── url_validator.rs # SSRF protection, DNS rebinding guard
