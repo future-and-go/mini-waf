@@ -91,6 +91,11 @@ Complete. Merged in commit ae70bee.
 - `try_from_config` constructor ✅
 - 4+ unit tests incl. concurrent swap ✅
 - `arc-swap` dep added ✅
+## Todo
+- [x] `tier_policy_registry.rs` with `TierSnapshot` + `TierPolicyRegistry`
+- [x] `try_from_config` constructor
+- [x] 4 unit tests incl. concurrent swap
+- [x] Add `arc-swap` dep if missing
 
 ## Next
 Phase 4 — file watcher that calls `swap()` on TOML edits.
