@@ -1,0 +1,18 @@
+{
+  "_comment": "FR-003 AC-3 — wildcard operator. Blocks any /api/<segment>/admin path. '*' is segment-bounded (does not cross '/'). For DB/API import only; not consumed by the file-based YAML registry loader.",
+  "host_code": "*",
+  "name": "Block wildcard admin paths under /api/*/admin",
+  "priority": 100,
+  "enabled": true,
+  "condition_op": "and",
+  "conditions": [
+    {
+      "field": "path",
+      "operator": "wildcard",
+      "value": "/api/*/admin"
+    }
+  ],
+  "action": "block",
+  "action_status": 403,
+  "action_msg": "Admin endpoints are not publicly accessible"
+}
