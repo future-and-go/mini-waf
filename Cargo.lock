@@ -5302,6 +5302,7 @@ dependencies = [
 name = "waf-engine"
 version = "0.2.0"
 dependencies = [
+ "ahash",
  "aho-corasick",
  "anyhow",
  "arc-swap",

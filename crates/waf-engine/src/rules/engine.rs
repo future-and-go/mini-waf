@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use dashmap::DashMap;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -362,6 +363,127 @@ pub fn from_db_rule(row: &DbCustomRule) -> anyhow::Result<CustomRule> {
     })
 }
 
+// ── Recursive condition tree (storage-friendly; eval path wired in phase 04) ─
+
+/// Nested AND/OR/Not tree of raw conditions.
+///
+/// Storage path is opt-in until phase 04: legacy flat `Vec<Condition>` rules
+/// are auto-promoted to `And([Leaf,...])` (or `Or` per `condition_op`) by
+/// [`compile_rule`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConditionNode {
+    Leaf(Condition),
+    And(Vec<Self>),
+    Or(Vec<Self>),
+    Not(Box<Self>),
+}
+
+// ── Compiled (in-memory only — not serializable) ──────────────────────────────
+
+/// A rule with all heavy matchers (regex, CIDR, lookup sets) pre-compiled.
+#[derive(Debug, Clone)]
+pub struct CompiledRule {
+    pub meta: CustomRule,
+    pub root: CompiledNode,
+}
+
+#[derive(Debug, Clone)]
+pub enum CompiledNode {
+    Leaf(CompiledCondition),
+    And(Vec<Self>),
+    Or(Vec<Self>),
+    Not(Box<Self>),
+}
+
+#[derive(Debug, Clone)]
+pub struct CompiledCondition {
+    pub field: ConditionField,
+    pub matcher: Matcher,
+}
+
+/// Operator + value fused into a state pre-compiled at rule-load time.
+///
+/// `Glob` (wildcard) is reserved for phase 02; `globset` is not yet a dep.
+#[derive(Debug, Clone)]
+pub enum Matcher {
+    Eq(String),
+    Ne(String),
+    Contains(String),
+    NotContains(String),
+    StartsWith(String),
+    EndsWith(String),
+    Regex(Regex),
+    InList(ahash::AHashSet<String>),
+    NotInList(ahash::AHashSet<String>),
+    Cidr(ipnet::IpNet),
+    Gt(i64),
+    Lt(i64),
+    Gte(i64),
+    Lte(i64),
+}
+
+/// Compile a raw rule into its eval-ready form.
+///
+/// Phase 01 only consumes the legacy flat `conditions` + `condition_op`; the
+/// `match_tree` field is added in phase 04.
+pub fn compile_rule(rule: &CustomRule) -> anyhow::Result<CompiledRule> {
+    let leaves: Vec<CompiledNode> = rule
+        .conditions
+        .iter()
+        .map(|c| compile_condition(c).map(CompiledNode::Leaf))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    let root = match rule.condition_op {
+        ConditionOp::And => CompiledNode::And(leaves),
+        ConditionOp::Or => CompiledNode::Or(leaves),
+    };
+
+    Ok(CompiledRule {
+        meta: rule.clone(),
+        root,
+    })
+}
+
+/// Compile a single condition; surfaces regex/CIDR errors so the caller can
+/// decide whether to skip the rule.
+fn compile_condition(cond: &Condition) -> anyhow::Result<CompiledCondition> {
+    use ConditionValue as V;
+
+    let matcher = match (&cond.operator, &cond.value) {
+        (Operator::Eq, V::Str(s)) => Matcher::Eq(s.clone()),
+        (Operator::Ne, V::Str(s)) => Matcher::Ne(s.clone()),
+        (Operator::Contains, V::Str(s)) => Matcher::Contains(s.clone()),
+        (Operator::NotContains, V::Str(s)) => Matcher::NotContains(s.clone()),
+        (Operator::StartsWith, V::Str(s)) => Matcher::StartsWith(s.clone()),
+        (Operator::EndsWith, V::Str(s)) => Matcher::EndsWith(s.clone()),
+        (Operator::Regex, V::Str(s)) => {
+            let re = Regex::new(s).with_context(|| format!("invalid regex: {s}"))?;
+            Matcher::Regex(re)
+        }
+        (Operator::InList, V::List(l)) => Matcher::InList(l.iter().cloned().collect()),
+        (Operator::NotInList, V::List(l)) => Matcher::NotInList(l.iter().cloned().collect()),
+        (Operator::CidrMatch, V::Str(s)) => {
+            let net = s
+                .parse::<ipnet::IpNet>()
+                .with_context(|| format!("invalid CIDR: {s}"))?;
+            Matcher::Cidr(net)
+        }
+        (Operator::Gt, V::Number(n)) => Matcher::Gt(*n),
+        (Operator::Lt, V::Number(n)) => Matcher::Lt(*n),
+        (Operator::Gte, V::Number(n)) => Matcher::Gte(*n),
+        (Operator::Lte, V::Number(n)) => Matcher::Lte(*n),
+        (op, val) => {
+            anyhow::bail!("unsupported operator/value combination: {op:?} / {val:?}");
+        }
+    };
+
+    Ok(CompiledCondition {
+        field: cond.field.clone(),
+        matcher,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,5 +599,132 @@ mod tests {
 
         let ctx2 = make_ctx("/api/users/1", "GET", "1.2.3.4");
         assert!(engine.check(&ctx2).is_none());
+    }
+
+    // ── compile_rule / compile_condition ──────────────────────────────────────
+
+    fn mk_rule(op: ConditionOp, conditions: Vec<Condition>) -> CustomRule {
+        CustomRule {
+            id: "c1".into(),
+            host_code: "test".into(),
+            name: "compile".into(),
+            priority: 1,
+            enabled: true,
+            condition_op: op,
+            conditions,
+            action: RuleAction::Block,
+            action_status: 403,
+            action_msg: None,
+            script: None,
+        }
+    }
+
+    #[test]
+    fn compile_flat_and_wraps_in_and_node() {
+        let rule = mk_rule(
+            ConditionOp::And,
+            vec![
+                Condition {
+                    field: ConditionField::Path,
+                    operator: Operator::StartsWith,
+                    value: ConditionValue::Str("/admin".into()),
+                },
+                Condition {
+                    field: ConditionField::Method,
+                    operator: Operator::Eq,
+                    value: ConditionValue::Str("POST".into()),
+                },
+            ],
+        );
+
+        let compiled = compile_rule(&rule).expect("compile ok");
+        match compiled.root {
+            CompiledNode::And(ref leaves) => {
+                assert_eq!(leaves.len(), 2);
+                assert!(matches!(leaves.first(), Some(CompiledNode::Leaf(_))));
+            }
+            _ => panic!("expected And root"),
+        }
+    }
+
+    #[test]
+    fn compile_flat_or_wraps_in_or_node() {
+        let rule = mk_rule(
+            ConditionOp::Or,
+            vec![Condition {
+                field: ConditionField::Ip,
+                operator: Operator::CidrMatch,
+                value: ConditionValue::Str("10.0.0.0/8".into()),
+            }],
+        );
+
+        let compiled = compile_rule(&rule).expect("compile ok");
+        assert!(matches!(compiled.root, CompiledNode::Or(ref l) if l.len() == 1));
+    }
+
+    #[test]
+    fn compile_bad_regex_returns_err() {
+        let rule = mk_rule(
+            ConditionOp::And,
+            vec![Condition {
+                field: ConditionField::Path,
+                operator: Operator::Regex,
+                value: ConditionValue::Str("(unclosed".into()),
+            }],
+        );
+        assert!(compile_rule(&rule).is_err());
+    }
+
+    #[test]
+    fn compile_bad_cidr_returns_err() {
+        let rule = mk_rule(
+            ConditionOp::And,
+            vec![Condition {
+                field: ConditionField::Ip,
+                operator: Operator::CidrMatch,
+                value: ConditionValue::Str("not-a-cidr".into()),
+            }],
+        );
+        assert!(compile_rule(&rule).is_err());
+    }
+
+    #[test]
+    fn compile_mismatched_operator_value_returns_err() {
+        // Eq expects Str, not Number → must error rather than silently match.
+        let rule = mk_rule(
+            ConditionOp::And,
+            vec![Condition {
+                field: ConditionField::ContentLength,
+                operator: Operator::Eq,
+                value: ConditionValue::Number(42),
+            }],
+        );
+        assert!(compile_rule(&rule).is_err());
+    }
+
+    #[test]
+    fn compile_in_list_builds_hashset() {
+        let rule = mk_rule(
+            ConditionOp::And,
+            vec![Condition {
+                field: ConditionField::Method,
+                operator: Operator::InList,
+                value: ConditionValue::List(vec!["GET".into(), "POST".into(), "GET".into()]),
+            }],
+        );
+        let compiled = compile_rule(&rule).expect("compile ok");
+        match &compiled.root {
+            CompiledNode::And(leaves) => match leaves.first() {
+                Some(CompiledNode::Leaf(c)) => match &c.matcher {
+                    Matcher::InList(set) => {
+                        assert_eq!(set.len(), 2); // dedup
+                        assert!(set.contains("GET"));
+                    }
+                    _ => panic!("expected InList matcher"),
+                },
+                _ => panic!("expected leaf"),
+            },
+            _ => panic!("expected And root"),
+        }
     }
 }

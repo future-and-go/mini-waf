@@ -33,6 +33,7 @@ ed25519-dalek = { workspace = true }
 zstd = { workspace = true }
 hex = { workspace = true }
 url = { workspace = true }
+ahash = "0.8"
 
 [dev-dependencies]
 rand = { workspace = true }
