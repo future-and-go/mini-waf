@@ -6,10 +6,12 @@
 //!   - An action (Block / Allow / Log / Challenge)
 //!   - An optional Rhai script for complex evaluation logic
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use anyhow::Context as _;
 use dashmap::DashMap;
+use globset::{Glob, GlobBuilder, GlobMatcher};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -58,6 +60,7 @@ pub enum Operator {
     StartsWith,
     EndsWith,
     Regex,
+    Wildcard,
     InList,
     NotInList,
     CidrMatch,
@@ -154,8 +157,30 @@ pub struct CustomRule {
 /// priority (ascending — lower number wins).  A special key `"*"` holds
 /// global rules that apply to every host.
 pub struct CustomRulesEngine {
-    rules: DashMap<String, Vec<CustomRule>>,
+    rules: DashMap<String, Vec<RuleEntry>>,
     rhai: Arc<rhai::Engine>,
+}
+
+/// Internal storage cell: keeps the raw rule (needed for eval/script + meta) and
+/// an optional pre-compiled tree. `compiled` is `None` when compile fails — in
+/// that case we skip the rule on eval and rely on a load-time warn log.
+#[derive(Debug, Clone)]
+struct RuleEntry {
+    raw: CustomRule,
+    compiled: Option<CompiledRule>,
+}
+
+impl RuleEntry {
+    fn from_rule(rule: CustomRule) -> Self {
+        let compiled = match compile_rule(&rule) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                warn!(rule_id = %rule.id, error = %e, "Failed to compile rule; skipping");
+                None
+            }
+        };
+        Self { raw: rule, compiled }
+    }
 }
 
 impl CustomRulesEngine {
@@ -173,24 +198,29 @@ impl CustomRulesEngine {
     }
 
     /// Replace all rules for a host (sorted by priority).
-    pub fn load_host(&self, host_code: &str, mut rules: Vec<CustomRule>) {
-        rules.retain(|r| r.enabled);
-        rules.sort_by_key(|r| r.priority);
-        self.rules.insert(host_code.to_string(), rules);
+    pub fn load_host(&self, host_code: &str, rules: Vec<CustomRule>) {
+        let mut entries: Vec<RuleEntry> = rules
+            .into_iter()
+            .filter(|r| r.enabled)
+            .map(RuleEntry::from_rule)
+            .collect();
+        entries.sort_by_key(|e| e.raw.priority);
+        self.rules.insert(host_code.to_string(), entries);
     }
 
     /// Append a single rule (hot-add).
     pub fn add_rule(&self, rule: CustomRule) {
         let host_code = rule.host_code.clone();
-        let mut entry = self.rules.entry(host_code).or_default();
-        entry.push(rule);
-        entry.sort_by_key(|r| r.priority);
+        let entry = RuleEntry::from_rule(rule);
+        let mut bucket = self.rules.entry(host_code).or_default();
+        bucket.push(entry);
+        bucket.sort_by_key(|e| e.raw.priority);
     }
 
     /// Remove a rule by ID.
     pub fn remove_rule(&self, host_code: &str, rule_id: &str) {
         if let Some(mut rules) = self.rules.get_mut(host_code) {
-            rules.retain(|r| r.id != rule_id);
+            rules.retain(|e| e.raw.id != rule_id);
         }
     }
 
@@ -228,14 +258,24 @@ impl CustomRulesEngine {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    fn eval_list(&self, ctx: &RequestCtx, rules: &[CustomRule]) -> Option<DetectionResult> {
-        for rule in rules {
+    fn eval_list(&self, ctx: &RequestCtx, rules: &[RuleEntry]) -> Option<DetectionResult> {
+        for entry in rules {
+            let rule = &entry.raw;
             if !rule.enabled {
                 continue;
             }
 
+            // Eval order:
+            // 1. Rhai script overrides everything (legacy escape hatch).
+            // 2. Compiled tree path (preferred) — built once at insert time.
+            // 3. Legacy flat eval — only when compile failed and no script set.
             let matched = rule.script.as_ref().map_or_else(
-                || self.eval_conditions(ctx, &rule.conditions, &rule.condition_op),
+                || {
+                    entry.compiled.as_ref().map_or_else(
+                        || self.eval_conditions(ctx, &rule.conditions, &rule.condition_op),
+                        |compiled| eval_compiled_node(ctx, &compiled.root),
+                    )
+                },
                 |script| self.eval_script(ctx, script),
             );
 
@@ -313,25 +353,7 @@ impl CustomRulesEngine {
 
     #[allow(clippy::unused_self)]
     fn field_value(&self, ctx: &RequestCtx, field: &ConditionField) -> Option<String> {
-        match field {
-            ConditionField::Ip => Some(ctx.client_ip.to_string()),
-            ConditionField::Path => Some(ctx.path.clone()),
-            ConditionField::Query => Some(ctx.query.clone()),
-            ConditionField::Method => Some(ctx.method.clone()),
-            ConditionField::Host => Some(ctx.host.clone()),
-            ConditionField::ContentLength => Some(ctx.content_length.to_string()),
-            ConditionField::Body => Some(String::from_utf8_lossy(&ctx.body_preview).into_owned()),
-            ConditionField::Cookie => ctx.headers.get("cookie").cloned(),
-            ConditionField::UserAgent => ctx.headers.get("user-agent").cloned(),
-            ConditionField::ContentType => ctx.headers.get("content-type").cloned(),
-            ConditionField::Header(name) => ctx.headers.get(&name.to_lowercase()).cloned(),
-            // ── GeoIP fields ────────────────────────────────────────────────
-            ConditionField::GeoCountry => ctx.geo.as_ref().map(|g| g.country.clone()),
-            ConditionField::GeoIso => ctx.geo.as_ref().map(|g| g.iso_code.clone()),
-            ConditionField::GeoProvince => ctx.geo.as_ref().map(|g| g.province.clone()),
-            ConditionField::GeoCity => ctx.geo.as_ref().map(|g| g.city.clone()),
-            ConditionField::GeoIsp => ctx.geo.as_ref().map(|g| g.isp.clone()),
-        }
+        field_value(ctx, field)
     }
 }
 
@@ -414,6 +436,7 @@ pub enum Matcher {
     StartsWith(String),
     EndsWith(String),
     Regex(Regex),
+    Glob(GlobMatcher),
     InList(ahash::AHashSet<String>),
     NotInList(ahash::AHashSet<String>),
     Cidr(ipnet::IpNet),
@@ -461,6 +484,23 @@ fn compile_condition(cond: &Condition) -> anyhow::Result<CompiledCondition> {
             let re = Regex::new(s).with_context(|| format!("invalid regex: {s}"))?;
             Matcher::Regex(re)
         }
+        (Operator::Wildcard, V::Str(s)) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                anyhow::bail!("empty wildcard pattern");
+            }
+            // Bare `**` matches everything across separators — accidental footgun.
+            if trimmed == "**" {
+                anyhow::bail!("bare '**' wildcard not allowed (matches everything)");
+            }
+            // `literal_separator(true)` makes `*` segment-bounded (won't cross `/`),
+            // while `**` remains the explicit cross-segment wildcard.
+            let glob: Glob = GlobBuilder::new(trimmed)
+                .literal_separator(true)
+                .build()
+                .with_context(|| format!("invalid wildcard pattern: {s}"))?;
+            Matcher::Glob(glob.compile_matcher())
+        }
         (Operator::InList, V::List(l)) => Matcher::InList(l.iter().cloned().collect()),
         (Operator::NotInList, V::List(l)) => Matcher::NotInList(l.iter().cloned().collect()),
         (Operator::CidrMatch, V::Str(s)) => {
@@ -482,6 +522,66 @@ fn compile_condition(cond: &Condition) -> anyhow::Result<CompiledCondition> {
         field: cond.field.clone(),
         matcher,
     })
+}
+
+impl Matcher {
+    /// Single dispatch: each variant evaluates its pre-compiled state against
+    /// the resolved field string (or the request IP for CIDR).
+    pub fn matches(&self, fstr: &str, ctx_ip: IpAddr) -> bool {
+        match self {
+            Self::Eq(s) => fstr.eq_ignore_ascii_case(s),
+            Self::Ne(s) => !fstr.eq_ignore_ascii_case(s),
+            Self::Contains(s) => fstr.contains(s.as_str()),
+            Self::NotContains(s) => !fstr.contains(s.as_str()),
+            Self::StartsWith(s) => fstr.starts_with(s.as_str()),
+            Self::EndsWith(s) => fstr.ends_with(s.as_str()),
+            Self::Regex(re) => re.is_match(fstr),
+            Self::Glob(g) => g.is_match(fstr),
+            Self::InList(set) => set.contains(fstr),
+            Self::NotInList(set) => !set.contains(fstr),
+            Self::Cidr(net) => net.contains(&ctx_ip),
+            Self::Gt(n) => fstr.parse::<i64>().is_ok_and(|v| v > *n),
+            Self::Lt(n) => fstr.parse::<i64>().is_ok_and(|v| v < *n),
+            Self::Gte(n) => fstr.parse::<i64>().is_ok_and(|v| v >= *n),
+            Self::Lte(n) => fstr.parse::<i64>().is_ok_and(|v| v <= *n),
+        }
+    }
+}
+
+/// Recursive evaluator over a `CompiledNode` tree.
+fn eval_compiled_node(ctx: &RequestCtx, node: &CompiledNode) -> bool {
+    match node {
+        CompiledNode::Leaf(c) => {
+            let fval = field_value(ctx, &c.field);
+            c.matcher.matches(fval.as_deref().unwrap_or(""), ctx.client_ip)
+        }
+        CompiledNode::And(v) => v.iter().all(|n| eval_compiled_node(ctx, n)),
+        CompiledNode::Or(v) => v.iter().any(|n| eval_compiled_node(ctx, n)),
+        CompiledNode::Not(b) => !eval_compiled_node(ctx, b),
+    }
+}
+
+/// Standalone field resolver — mirrors `CustomRulesEngine::field_value`.
+/// Free function so `eval_compiled_node` need not borrow the engine.
+fn field_value(ctx: &RequestCtx, field: &ConditionField) -> Option<String> {
+    match field {
+        ConditionField::Ip => Some(ctx.client_ip.to_string()),
+        ConditionField::Path => Some(ctx.path.clone()),
+        ConditionField::Query => Some(ctx.query.clone()),
+        ConditionField::Method => Some(ctx.method.clone()),
+        ConditionField::Host => Some(ctx.host.clone()),
+        ConditionField::ContentLength => Some(ctx.content_length.to_string()),
+        ConditionField::Body => Some(String::from_utf8_lossy(&ctx.body_preview).into_owned()),
+        ConditionField::Cookie => ctx.headers.get("cookie").cloned(),
+        ConditionField::UserAgent => ctx.headers.get("user-agent").cloned(),
+        ConditionField::ContentType => ctx.headers.get("content-type").cloned(),
+        ConditionField::Header(name) => ctx.headers.get(&name.to_lowercase()).cloned(),
+        ConditionField::GeoCountry => ctx.geo.as_ref().map(|g| g.country.clone()),
+        ConditionField::GeoIso => ctx.geo.as_ref().map(|g| g.iso_code.clone()),
+        ConditionField::GeoProvince => ctx.geo.as_ref().map(|g| g.province.clone()),
+        ConditionField::GeoCity => ctx.geo.as_ref().map(|g| g.city.clone()),
+        ConditionField::GeoIsp => ctx.geo.as_ref().map(|g| g.isp.clone()),
+    }
 }
 
 #[cfg(test)]
@@ -726,5 +826,162 @@ mod tests {
             },
             _ => panic!("expected And root"),
         }
+    }
+
+    // ── Phase 02: wildcard + matcher dispatch ────────────────────────────────
+
+    #[test]
+    fn wildcard_glob_matches_segment() {
+        // AC-3: `/api/*/admin` matches `/api/v1/admin`, misses `/api/admin`.
+        let engine = CustomRulesEngine::new();
+        engine.add_rule(CustomRule {
+            id: "w1".into(),
+            host_code: "test".into(),
+            name: "wildcard".into(),
+            priority: 1,
+            enabled: true,
+            condition_op: ConditionOp::And,
+            conditions: vec![Condition {
+                field: ConditionField::Path,
+                operator: Operator::Wildcard,
+                value: ConditionValue::Str("/api/*/admin".into()),
+            }],
+            action: RuleAction::Block,
+            action_status: 403,
+            action_msg: None,
+            script: None,
+        });
+
+        assert!(engine.check(&make_ctx("/api/v1/admin", "GET", "1.2.3.4")).is_some());
+        assert!(engine.check(&make_ctx("/api/admin", "GET", "1.2.3.4")).is_none());
+    }
+
+    #[test]
+    fn wildcard_does_not_cross_slash() {
+        // `*` is segment-bounded; only `**` crosses `/`.
+        let rule = mk_rule(
+            ConditionOp::And,
+            vec![Condition {
+                field: ConditionField::Path,
+                operator: Operator::Wildcard,
+                value: ConditionValue::Str("/api/*/admin".into()),
+            }],
+        );
+        let compiled = compile_rule(&rule).expect("compile ok");
+        let CompiledNode::And(leaves) = &compiled.root else {
+            panic!("expected And");
+        };
+        let CompiledNode::Leaf(c) = leaves.first().expect("one leaf") else {
+            panic!("expected leaf");
+        };
+        let Matcher::Glob(g) = &c.matcher else {
+            panic!("expected Glob matcher");
+        };
+        assert!(g.is_match("/api/v1/admin"));
+        assert!(!g.is_match("/api/v1/v2/admin"));
+    }
+
+    #[test]
+    fn wildcard_compile_failure_returns_err() {
+        // Empty pattern.
+        let rule = mk_rule(
+            ConditionOp::And,
+            vec![Condition {
+                field: ConditionField::Path,
+                operator: Operator::Wildcard,
+                value: ConditionValue::Str(String::new()),
+            }],
+        );
+        assert!(compile_rule(&rule).is_err());
+
+        // Bare `**` rejected.
+        let rule2 = mk_rule(
+            ConditionOp::And,
+            vec![Condition {
+                field: ConditionField::Path,
+                operator: Operator::Wildcard,
+                value: ConditionValue::Str("**".into()),
+            }],
+        );
+        assert!(compile_rule(&rule2).is_err());
+
+        // Mismatched value type (List instead of Str).
+        let rule3 = mk_rule(
+            ConditionOp::And,
+            vec![Condition {
+                field: ConditionField::Path,
+                operator: Operator::Wildcard,
+                value: ConditionValue::List(vec!["a".into()]),
+            }],
+        );
+        assert!(compile_rule(&rule3).is_err());
+    }
+
+    #[test]
+    fn matcher_dispatch_table() {
+        let ip: IpAddr = "10.0.0.5".parse().unwrap();
+
+        assert!(Matcher::Eq("GET".into()).matches("get", ip));
+        assert!(!Matcher::Ne("GET".into()).matches("GET", ip));
+        assert!(Matcher::Contains("foo".into()).matches("xfoox", ip));
+        assert!(Matcher::NotContains("foo".into()).matches("bar", ip));
+        assert!(Matcher::StartsWith("/api".into()).matches("/api/v1", ip));
+        assert!(Matcher::EndsWith(".php".into()).matches("/x.php", ip));
+        assert!(Matcher::Regex(Regex::new("^a.c$").unwrap()).matches("abc", ip));
+
+        let glob = GlobBuilder::new("/api/*/x")
+            .literal_separator(true)
+            .build()
+            .unwrap()
+            .compile_matcher();
+        assert!(Matcher::Glob(glob).matches("/api/v1/x", ip));
+
+        let mut set = ahash::AHashSet::new();
+        set.insert("GET".to_string());
+        assert!(Matcher::InList(set.clone()).matches("GET", ip));
+        assert!(!Matcher::NotInList(set).matches("GET", ip));
+
+        let net: ipnet::IpNet = "10.0.0.0/8".parse().unwrap();
+        assert!(Matcher::Cidr(net).matches("", ip));
+
+        assert!(Matcher::Gt(10).matches("11", ip));
+        assert!(Matcher::Lt(10).matches("9", ip));
+        assert!(Matcher::Gte(10).matches("10", ip));
+        assert!(Matcher::Lte(10).matches("10", ip));
+    }
+
+    #[test]
+    fn compiled_path_evaluates_via_tree() {
+        // Sanity: insertion path compiles, eval_list uses compiled tree, and
+        // legacy fallback still works for unsupported combos (none here).
+        let engine = CustomRulesEngine::new();
+        engine.add_rule(CustomRule {
+            id: "p1".into(),
+            host_code: "test".into(),
+            name: "compiled path".into(),
+            priority: 1,
+            enabled: true,
+            condition_op: ConditionOp::And,
+            conditions: vec![
+                Condition {
+                    field: ConditionField::Path,
+                    operator: Operator::StartsWith,
+                    value: ConditionValue::Str("/admin".into()),
+                },
+                Condition {
+                    field: ConditionField::Method,
+                    operator: Operator::Eq,
+                    value: ConditionValue::Str("POST".into()),
+                },
+            ],
+            action: RuleAction::Block,
+            action_status: 403,
+            action_msg: None,
+            script: None,
+        });
+
+        assert!(engine.check(&make_ctx("/admin/x", "POST", "1.2.3.4")).is_some());
+        assert!(engine.check(&make_ctx("/admin/x", "GET", "1.2.3.4")).is_none());
+        assert!(engine.check(&make_ctx("/public", "POST", "1.2.3.4")).is_none());
     }
 }
