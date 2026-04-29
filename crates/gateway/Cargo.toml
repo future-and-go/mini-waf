@@ -38,6 +38,7 @@ parking_lot = { workspace = true }
 ipnet = { workspace = true }
 url = { workspace = true }
 regex = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
