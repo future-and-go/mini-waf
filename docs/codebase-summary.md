@@ -71,6 +71,10 @@ prx-waf/
 │   │   │   ├── wasm.rs        # WASM plugin manager (wasmtime)
 │   │   │   └── rhai.rs        # Rhai script engine sandbox
 │   │   │
+│   │   ├── outbound/
+│   │   │   ├── header_filter.rs # FR-035 response header leak prevention
+│   │   │   └── mod.rs
+│   │   │
 │   │   ├── security/
 │   │   │   ├── geoip.rs       # GeoIP lookup (ip2region)
 │   │   │   └── url_validator.rs # SSRF protection, DNS rebinding guard

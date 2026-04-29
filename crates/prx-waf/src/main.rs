@@ -1327,6 +1327,24 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
         );
     }
 
+    // FR-035 — wire outbound response-header filter when enabled.
+    // Fail-safe: a misconfigured filter logs and continues without outbound
+    // protection rather than aborting the proxy.
+    if config.outbound.enabled {
+        match waf_engine::HeaderFilter::try_new(&config.outbound.headers) {
+            Ok(filter) => {
+                proxy.header_filter = Some(Arc::new(filter));
+                tracing::info!("Outbound header-leak prevention (FR-035) enabled");
+            }
+            Err(e) => {
+                tracing::error!(
+                    "FR-035: outbound header filter config invalid — outbound \
+                     protection DISABLED: {e}"
+                );
+            }
+        }
+    }
+
     let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
     proxy_service.add_tcp(&config.proxy.listen_addr);
     server.add_service(proxy_service);
@@ -1474,7 +1492,7 @@ async fn init_async(
     api_state.cluster_state = cluster_state;
 
     // Apply security configuration
-    api_state.cors_origins = config.security.cors_origins.clone();
+    api_state.cors_origins.clone_from(&config.security.cors_origins);
     api_state.security_config = config.security.clone();
     if config.security.api_rate_limit_rps > 0 {
         api_state.rate_limiter = Some(waf_api::security::ApiRateLimiter::new(

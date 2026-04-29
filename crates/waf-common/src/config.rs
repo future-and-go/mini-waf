@@ -32,6 +32,9 @@ pub struct AppConfig {
     /// `SQLi` scanner configuration (header scanning, size limits)
     #[serde(default)]
     pub sqli_scan: SqliScanConfig,
+    /// FR-035 outbound response-header leak prevention. Disabled by default.
+    #[serde(default)]
+    pub outbound: OutboundConfig,
 }
 
 /// Rule source entry from configuration
@@ -335,6 +338,157 @@ impl Default for SecurityConfig {
             max_request_body_bytes: 10 * 1024 * 1024, // 10 MB
             api_rate_limit_rps: 0,
             cors_origins: Vec::new(),
+        }
+    }
+}
+
+/// FR-035 outbound protection — currently scoped to response-header leak prevention.
+///
+/// Detection categories live in code (`waf-engine::outbound::HeaderFilter`); this
+/// config decides which categories are active at runtime. Disabled by default so
+/// existing deployments see zero behavior change after upgrade.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OutboundConfig {
+    /// Master toggle. When `false`, the response-filter hook short-circuits and
+    /// adds no per-response cost.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Header-filter sub-configuration (FR-035).
+    #[serde(default)]
+    pub headers: HeaderFilterConfig,
+}
+
+/// FR-035 — response header leak prevention.
+///
+/// Built-in detection categories (server-info, debug/internal, error-detail,
+/// optional PII) are hard-coded; each is gated by an individual boolean so
+/// operators can enable only what they need. `strip_headers` /
+/// `strip_prefixes` extend the built-in lists with case-insensitive matches.
+///
+/// References: OWASP ASVS V14.4, CWE-200, CWE-209, RFC 9110 §7.6.
+#[allow(clippy::struct_excessive_bools)] // each toggle gates an independent detection category
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeaderFilterConfig {
+    /// Strip server-fingerprint headers: `Server`, `X-Powered-By`,
+    /// `X-AspNet-Version`, `X-AspNetMvc-Version`, `X-Runtime`, `X-Version`,
+    /// `X-Generator`.
+    #[serde(default = "default_true")]
+    pub strip_server_info: bool,
+    /// Strip headers with debug/internal prefixes: `X-Debug-`, `X-Internal-`,
+    /// `X-Backend-`, `X-Real-IP`, `X-Forwarded-Server`.
+    #[serde(default = "default_true")]
+    pub strip_debug_headers: bool,
+    /// Strip headers with error-detail prefixes: `X-Error-`, `X-Exception-`,
+    /// `X-Stack-`, `X-Trace-`, plus exact `X-Exception-Class`.
+    #[serde(default = "default_true")]
+    pub strip_error_detail: bool,
+    /// Strip PHP-specific fingerprint headers (`X-PHP-Version`,
+    /// `X-PHP-Response-Code`). Default on — banner exposure enabled targeted
+    /// scans for CVE-2024-4577 and prior PHP-CGI vulnerabilities.
+    #[serde(default = "default_true")]
+    pub strip_php_fingerprint: bool,
+    /// Strip ASP.NET fingerprint headers (`X-AspNet-Version`,
+    /// `X-AspNetMvc-Version`, `X-SourceFiles`). Default on —
+    /// CVE-2017-7269 and `ViewState` attacks rely on version disclosure.
+    #[serde(default = "default_true")]
+    pub strip_aspnet_fingerprint: bool,
+    /// Strip framework / CMS fingerprint headers (Drupal, Magento, Spring
+    /// Boot Actuator, `WordPress` XML-RPC, Rack). Default on — references
+    /// Drupalgeddon (CVE-2014-3704, CVE-2018-7600), `Spring4Shell`
+    /// (CVE-2022-22965).
+    #[serde(default = "default_true")]
+    pub strip_framework_fingerprint: bool,
+    /// Strip CDN / edge-layer headers (Varnish, AWS `CloudFront`, Akamai,
+    /// Fastly, Served-By). Default on for deployments where this WAF is
+    /// the public edge — any such header in an upstream response is a
+    /// topology-disclosure leak from a layer behind the backend.
+    #[serde(default = "default_true")]
+    pub strip_cdn_internal: bool,
+    /// Regex-scan header VALUES for PII (email, credit card, SSN, phone,
+    /// RFC-1918 IP, JWT, AWS access key, Google API key, Slack token,
+    /// GitHub PAT). Off by default — adds per-header regex cost.
+    #[serde(default)]
+    pub detect_pii_in_values: bool,
+    /// When ON together with `detect_pii_in_values`, also strip
+    /// `Set-Cookie`, `ETag`, and `Authorization` if their values match a
+    /// PII pattern. Off by default — avoids killing a user session on a
+    /// regex false-positive; operator opt-in for token-leak hardening.
+    #[serde(default)]
+    pub strip_session_headers_on_pii_match: bool,
+    /// Extra exact header names to strip (case-insensitive).
+    #[serde(default)]
+    pub strip_headers: Vec<String>,
+    /// Extra header-name prefixes to strip (case-insensitive).
+    #[serde(default)]
+    pub strip_prefixes: Vec<String>,
+    /// Headers preserved even when matched by an active family toggle or
+    /// the `strip_headers` extras list. Case-insensitive exact match.
+    /// Wins over every strip rule EXCEPT the unconditional CRLF strip
+    /// (RFC 9110 §5.5) and the always-on hop-by-hop guard (§7.6.1).
+    #[serde(default)]
+    pub preserve_headers: Vec<String>,
+    /// Header-name prefixes to preserve. Same precedence as
+    /// `preserve_headers`. Case-insensitive.
+    #[serde(default)]
+    pub preserve_prefixes: Vec<String>,
+    /// PII regex tuning (only relevant when `detect_pii_in_values = true`).
+    #[serde(default)]
+    pub pii: PiiConfig,
+}
+
+impl Default for HeaderFilterConfig {
+    fn default() -> Self {
+        Self {
+            strip_server_info: true,
+            strip_debug_headers: true,
+            strip_error_detail: true,
+            strip_php_fingerprint: true,
+            strip_aspnet_fingerprint: true,
+            strip_framework_fingerprint: true,
+            strip_cdn_internal: true,
+            detect_pii_in_values: false,
+            strip_session_headers_on_pii_match: false,
+            strip_headers: Vec::new(),
+            strip_prefixes: Vec::new(),
+            preserve_headers: Vec::new(),
+            preserve_prefixes: Vec::new(),
+            pii: PiiConfig::default(),
+        }
+    }
+}
+
+/// FR-035 — PII detection tuning for response header values.
+///
+/// All fields apply only when `HeaderFilterConfig::detect_pii_in_values = true`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiiConfig {
+    /// Names of built-in patterns to disable. Valid names: `email`,
+    /// `credit_card`, `ssn`, `phone`, `ipv4_private`, `jwt`, `aws_key`,
+    /// `google_api_key`, `slack_token`, `github_pat`. Unknown names cause
+    /// the filter constructor to fail at startup.
+    #[serde(default)]
+    pub disable_builtin: Vec<String>,
+    /// Additional regex patterns. Compiled once at startup; an invalid
+    /// pattern aborts filter construction. Subject to the same
+    /// `max_scan_bytes` cap as built-ins.
+    #[serde(default)]
+    pub extra_patterns: Vec<String>,
+    /// Hard cap on header-value bytes scanned by PII regexes (`DoS` guard).
+    /// `0` disables the cap (NOT recommended; logged as a warning).
+    #[serde(default = "default_pii_max_scan_bytes")]
+    pub max_scan_bytes: usize,
+}
+
+const fn default_pii_max_scan_bytes() -> usize {
+    8192
+}
+
+impl Default for PiiConfig {
+    fn default() -> Self {
+        Self {
+            disable_builtin: Vec::new(),
+            extra_patterns: Vec::new(),
+            max_scan_bytes: default_pii_max_scan_bytes(),
         }
     }
 }

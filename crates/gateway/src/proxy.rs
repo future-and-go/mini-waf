@@ -19,7 +19,7 @@ use pingora_core::upstreams::peer::HttpPeer;
 use pingora_proxy::{FailToProxy, ProxyHttp, Session};
 
 use waf_common::HostConfig;
-use waf_engine::WafEngine;
+use waf_engine::{HeaderFilter, WafEngine};
 
 use crate::tiered::TierPolicyRegistry;
 
@@ -48,6 +48,8 @@ pub struct WafProxy {
     pub request_counter: Arc<AtomicU64>,
     /// Blocked request counter (cloned from `AppState`).
     pub blocked_counter: Arc<AtomicU64>,
+    /// FR-035 outbound header-leak prevention. `None` when disabled by config.
+    pub header_filter: Option<Arc<HeaderFilter>>,
     /// Per-protocol counters (AC-22 transparency proof). Shared with the
     /// HTTP/3 listener so QUIC traffic increments the same struct.
     pub proto_counters: Arc<ProtoCounters>,
@@ -73,6 +75,7 @@ impl WafProxy {
             trusted_proxies: Vec::new(),
             request_counter: Arc::new(AtomicU64::new(0)),
             blocked_counter: Arc::new(AtomicU64::new(0)),
+            header_filter: None,
             proto_counters: ProtoCounters::new(),
             request_chain: Arc::new(build_request_chain()),
             response_chain: Arc::new(build_response_chain()),
@@ -377,6 +380,33 @@ impl ProxyHttp for WafProxy {
                 debug!("body-mask: skipping non-identity content-encoding");
             }
         }
+
+        // FR-035 — global outbound header-leak safety net.  Runs after the
+        // host's `response_chain` so per-host transforms get first say, then
+        // this catches vendor/CVE-attributed fingerprints and PII leaks the
+        // operator did not enumerate manually.  No-op when disabled.
+        if let Some(filter) = self.header_filter.as_ref() {
+            let mut to_remove: Vec<String> = Vec::new();
+            for (name, value) in &upstream_response.headers {
+                let name_str = name.as_str();
+                if filter.should_strip(name_str) {
+                    to_remove.push(name_str.to_string());
+                    continue;
+                }
+                if let Ok(val_str) = std::str::from_utf8(value.as_bytes())
+                    && filter.detect_pii_in_value(val_str).is_some()
+                {
+                    to_remove.push(name_str.to_string());
+                }
+            }
+            if !to_remove.is_empty() {
+                for name in &to_remove {
+                    upstream_response.remove_header(name.as_str());
+                }
+                debug!("Outbound: stripped {} response header(s)", to_remove.len());
+            }
+        }
+
         Ok(())
     }
 
