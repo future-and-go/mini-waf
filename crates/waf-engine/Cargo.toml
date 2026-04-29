@@ -44,5 +44,9 @@ criterion = { version = "0.5", features = ["html_reports"] }
 name = "sql_injection"
 harness = false
 
+[[bench]]
+name = "rule_eval"
+harness = false
+
 [lints]
 workspace = true
