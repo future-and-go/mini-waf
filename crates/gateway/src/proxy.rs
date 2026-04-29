@@ -21,6 +21,8 @@ use pingora_proxy::{FailToProxy, ProxyHttp, Session};
 use waf_common::HostConfig;
 use waf_engine::WafEngine;
 
+use crate::tiered::TierPolicyRegistry;
+
 use crate::context::{BODY_PREVIEW_LIMIT, GatewayCtx};
 use crate::ctx_builder::RequestCtxBuilder;
 use crate::error_page::ErrorPageFactory;
@@ -56,6 +58,9 @@ pub struct WafProxy {
     /// AC-17: per-host compiled mask cache, keyed by `Arc<HostConfig>` pointer
     /// identity. Compiled lazily on first body chunk; survives until config reload.
     pub body_mask_cache: Arc<DashMap<usize, Arc<CompiledMask>>>,
+    /// FR-002: tier policy registry. When `None`, every request defaults to
+    /// `Tier::CatchAll` + permissive policy (boot-time safety).
+    pub tier_registry: Option<Arc<TierPolicyRegistry>>,
 }
 
 impl WafProxy {
@@ -72,7 +77,15 @@ impl WafProxy {
             request_chain: Arc::new(build_request_chain()),
             response_chain: Arc::new(build_response_chain()),
             body_mask_cache: Arc::new(DashMap::new()),
+            tier_registry: None,
         }
+    }
+
+    /// Inject the tier policy registry (FR-002 phase-05). When set, every
+    /// `RequestCtx` built by this proxy carries a classified tier instead of
+    /// the boot-time `CatchAll` fallback.
+    pub fn with_tier_registry(&mut self, registry: Arc<TierPolicyRegistry>) {
+        self.tier_registry = Some(registry);
     }
 
     /// Resolve (and lazily compile) the mask config for a given host.
@@ -191,11 +204,12 @@ impl ProxyHttp for WafProxy {
             ctx.host_config = Some(Arc::clone(&host_config));
         }
         if ctx.request_ctx.is_none() {
-            ctx.request_ctx = Some(
-                RequestCtxBuilder::new(session, self.trust_proxy_headers, &self.trusted_proxies)
-                    .with_host_config(Arc::clone(&host_config))
-                    .build(),
-            );
+            let mut builder = RequestCtxBuilder::new(session, self.trust_proxy_headers, &self.trusted_proxies)
+                .with_host_config(Arc::clone(&host_config));
+            if let Some(reg) = &self.tier_registry {
+                builder = builder.with_tier_registry(reg);
+            }
+            ctx.request_ctx = Some(builder.build());
         }
 
         info!("Proxying {} → {}", host_header, upstream_addr);
@@ -222,11 +236,12 @@ impl ProxyHttp for WafProxy {
                 .to_string();
             if let Some(host_config) = self.router.resolve(&host_header) {
                 ctx.host_config = Some(Arc::clone(&host_config));
-                ctx.request_ctx = Some(
-                    RequestCtxBuilder::new(session, self.trust_proxy_headers, &self.trusted_proxies)
-                        .with_host_config(host_config)
-                        .build(),
-                );
+                let mut builder = RequestCtxBuilder::new(session, self.trust_proxy_headers, &self.trusted_proxies)
+                    .with_host_config(host_config);
+                if let Some(reg) = &self.tier_registry {
+                    builder = builder.with_tier_registry(reg);
+                }
+                ctx.request_ctx = Some(builder.build());
             }
         }
 
@@ -423,6 +438,7 @@ impl ProxyHttp for WafProxy {
     async fn logging(&self, _session: &mut Session, _error: Option<&pingora_core::Error>, ctx: &mut GatewayCtx) {
         if let Some(req_ctx) = &ctx.request_ctx {
             debug!(
+                tier = ?req_ctx.tier,
                 "Request completed: {} {} {} → upstream={}",
                 req_ctx.method,
                 req_ctx.host,
