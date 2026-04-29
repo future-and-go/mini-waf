@@ -1593,6 +1593,7 @@ dependencies = [
  "axum",
  "bytes",
  "chrono",
+ "criterion",
  "dashmap",
  "h3",
  "h3-quinn",

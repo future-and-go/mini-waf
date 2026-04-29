@@ -109,9 +109,7 @@ impl<'a> RequestCtxBuilder<'a> {
             method: &req_header.method,
             headers: &req_header.headers,
         };
-        let (tier, tier_policy) = self
-            .tier_registry
-            .map_or_else(default_tier, |r| r.classify(&parts));
+        let (tier, tier_policy) = self.tier_registry.map_or_else(default_tier, |r| r.classify(&parts));
 
         build_from_parts(
             client_ip,
