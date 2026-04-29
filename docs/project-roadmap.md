@@ -82,6 +82,24 @@
 
 ---
 
+## Unreleased (In Progress — 2026-04-29)
+
+### FR-002 — Tiered Protection
+
+Implements a four-tier request classification and per-tier policy bus that all downstream feature-requests (FR-005, FR-006, FR-009, FR-027) consume. Every request is mapped to `Critical / High / Medium / CatchAll` by a priority-sorted classifier (path-exact, path-prefix, path-regex, host-suffix, method, header matchers); the matched tier's `TierPolicy` — carrying `fail_mode`, `ddos_threshold_rps`, `cache_policy`, and `risk_thresholds` — is attached to `RequestCtx` before Phase 1 runs. The policy registry is backed by `ArcSwap` for lock-free atomic hot-swaps: the `TierConfigWatcher` thread monitors `configs/default.toml`, debounces editor-burst events (200 ms window), and publishes validated snapshots without restarting the gateway. On parse or validation failure the previous config is retained and a `tracing::warn!` is emitted; the gateway never panics on bad config.
+
+- [x] `waf-common::tier` — `Tier` enum, `TierPolicy`, `TierClassifierRule`, `TierConfig::validate()`, TOML schema
+- [x] `gateway::tiered::TierClassifier` — compiled rules, priority sort, first-match-wins
+- [x] `gateway::tiered::TierPolicyRegistry` — `ArcSwap<TierSnapshot>`, lock-free classify
+- [x] `gateway::tiered::TierConfigWatcher` — `notify`-based hot-reload, debounce, atomic swap
+- [x] `gateway::ctx_builder` — wires classifier into `RequestCtxBuilder`; `ctx.tier` set before checks
+- [x] E2E integration tests (`crates/gateway/tests/tier_e2e.rs`) — 6 tests covering all 4 tiers, default fallback, TOML round-trip, and hot-reload
+- [x] Criterion bench (`crates/gateway/benches/tier_classifier_bench.rs`) — 50-rule classify over 1000 paths
+- [x] Consumer doc (`docs/tiered-protection.md`) — API reference for FR-005/006/009/027 implementers
+- [x] Architecture diagram — Mermaid tier flow added to `docs/system-architecture.md`
+
+---
+
 ## v0.3.0 (Proposed — Q3 2026)
 
 **Theme**: Observability & Developer Experience

@@ -76,6 +76,28 @@ Tier Classification:
 
 **Wired in**: `prx-waf/src/main.rs::try_init_tier_registry()` loads config, spawns `TierConfigWatcher` for hot-reload, injects registry into gateway.
 
+#### Tier Flow Diagram
+
+```mermaid
+flowchart LR
+    A([HTTP Request]) --> B[ctx_builder]
+    B --> C{TierPolicyRegistry\n.classify}
+    C -->|"(Tier, Arc&lt;TierPolicy&gt;)"| D[RequestCtx\ntier + tier_policy]
+    D --> E[WAF Checks\nPhases 1–16]
+    E -->|Allow| F([Upstream])
+    E -->|Block| G([403 / 429])
+
+    subgraph hot-reload ["Hot-Reload (background)"]
+        H[configs/default.toml\nwatcher] -->|ArcSwap.store| C
+    end
+
+    subgraph consumers ["Downstream consumers"]
+        D -.->|ddos_threshold_rps| FR005[FR-005 DDoS]
+        D -.->|risk_thresholds| FR006[FR-006 Challenge]
+        D -.->|cache_policy| FR009[FR-009 Cache]
+    end
+```
+
 ---
 
 ### Phases 1-4: IP & URL Filtering

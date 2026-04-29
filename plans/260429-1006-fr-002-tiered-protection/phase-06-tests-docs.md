@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Phase 6 — Tests, Bench, Docs
 
 ## Context
