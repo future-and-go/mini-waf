@@ -104,6 +104,11 @@ Complete. Merged in commit 72b9e3b.
 - Clippy clean ✅
 - Files properly scoped (<200 LoC) ✅
 - `thiserror` added to deps ✅
+- Compiles clean (`cargo check -p gateway`).
+- `cargo test -p gateway tiered::` → 9/9 green.
+- `cargo clippy -p gateway --all-targets -- -D warnings` → clean.
+- LoC: compiled_rule.rs 222 (slight overshoot post-rustfmt; both files still narrowly scoped).
+- `thiserror` added to `crates/gateway/Cargo.toml` for `CompileError`.
 
 ## Next
 Phase 3 — registry that holds tier→policy and the classifier together.
