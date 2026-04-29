@@ -39,6 +39,7 @@ ipnet = { workspace = true }
 url = { workspace = true }
 regex = { workspace = true }
 thiserror = { workspace = true }
+arc-swap = "1"
 
 [dev-dependencies]
 axum = { workspace = true }

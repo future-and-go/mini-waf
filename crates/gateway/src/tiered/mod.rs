@@ -5,8 +5,10 @@
 
 pub mod compiled_rule;
 pub mod tier_classifier;
+pub mod tier_policy_registry;
 
 pub use compiled_rule::{
     CompileError, CompiledHostMatch, CompiledPathMatch, CompiledTierRule, MethodSet, compile_rule, compile_rules,
 };
 pub use tier_classifier::{RequestParts, TierClassifier};
+pub use tier_policy_registry::{SnapshotBuildError, TierPolicyRegistry, TierSnapshot};
