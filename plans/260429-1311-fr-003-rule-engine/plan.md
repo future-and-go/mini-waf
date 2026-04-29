@@ -47,7 +47,7 @@ Refactor `crates/waf-engine/src/rules/engine.rs` to introduce a recursive condit
 | 03 | [phase-03-cookie-by-name-and-ctx.md](phase-03-cookie-by-name-and-ctx.md) | waf-common, engine.rs | done | AC-6 |
 | 04 | [phase-04-nested-condition-tree.md](phase-04-nested-condition-tree.md) | engine.rs | done | AC-8 |
 | 05 | [phase-05-acceptance-tests-and-bench.md](phase-05-acceptance-tests-and-bench.md) | tests/, benches/ | pending | AC-1..8 |
-| 06 | [phase-06-docs-and-sample-rules.md](phase-06-docs-and-sample-rules.md) | rules/custom/*, docs/ | pending | n/a |
+| 06 | [phase-06-docs-and-sample-rules.md](phase-06-docs-and-sample-rules.md) | rules/custom/*, docs/ | done | n/a |
 
 ## Coverage Gate
 - `cargo llvm-cov --workspace -p waf-engine --html` ≥ 95% line coverage on `crates/waf-engine/src/rules/engine.rs` and `formats/yaml.rs`, `formats/json.rs` (custom-rule path only).
