@@ -13,6 +13,7 @@ use anyhow::Context as _;
 use dashmap::DashMap;
 use globset::{Glob, GlobBuilder, GlobMatcher};
 use regex::Regex;
+use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -20,7 +21,7 @@ use waf_common::{DetectionResult, Phase, RequestCtx};
 
 // ── Condition field ───────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConditionField {
     Ip,
@@ -28,7 +29,10 @@ pub enum ConditionField {
     Query,
     Method,
     Body,
-    Cookie,
+    /// Cookie field. `None` returns the whole `Cookie:` header (legacy /
+    /// back-compat); `Some(name)` returns the value of one cookie by name
+    /// from the parsed `RequestCtx.cookies` map. Names are case-sensitive.
+    Cookie(Option<String>),
     UserAgent,
     ContentType,
     ContentLength,
@@ -46,6 +50,95 @@ pub enum ConditionField {
     GeoCity,
     /// ISP / organization
     GeoIsp,
+}
+
+// Custom Deserialize: accepts both legacy bare strings (`"cookie"`,
+// `"path"`, …) and newtype map forms (`{cookie: "session"}`,
+// `{header: "x-foo"}`). Legacy `"cookie"` deserializes to `Cookie(None)`
+// for back-compat with existing DB rules.
+impl<'de> Deserialize<'de> for ConditionField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct FieldVisitor;
+
+        impl<'de> Visitor<'de> for FieldVisitor {
+            type Value = ConditionField;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a ConditionField (string tag or single-key map)")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                match v {
+                    "ip" => Ok(ConditionField::Ip),
+                    "path" => Ok(ConditionField::Path),
+                    "query" => Ok(ConditionField::Query),
+                    "method" => Ok(ConditionField::Method),
+                    "body" => Ok(ConditionField::Body),
+                    "cookie" => Ok(ConditionField::Cookie(None)),
+                    "user_agent" => Ok(ConditionField::UserAgent),
+                    "content_type" => Ok(ConditionField::ContentType),
+                    "content_length" => Ok(ConditionField::ContentLength),
+                    "host" => Ok(ConditionField::Host),
+                    "geo_country" => Ok(ConditionField::GeoCountry),
+                    "geo_iso" => Ok(ConditionField::GeoIso),
+                    "geo_province" => Ok(ConditionField::GeoProvince),
+                    "geo_city" => Ok(ConditionField::GeoCity),
+                    "geo_isp" => Ok(ConditionField::GeoIsp),
+                    other => Err(E::unknown_variant(
+                        other,
+                        &[
+                            "ip",
+                            "path",
+                            "query",
+                            "method",
+                            "body",
+                            "cookie",
+                            "user_agent",
+                            "content_type",
+                            "content_length",
+                            "host",
+                            "header",
+                            "geo_country",
+                            "geo_iso",
+                            "geo_province",
+                            "geo_city",
+                            "geo_isp",
+                        ],
+                    )),
+                }
+            }
+
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+                self.visit_str(&v)
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let key: String = map
+                    .next_key()?
+                    .ok_or_else(|| de::Error::custom("expected single-key map"))?;
+                let result = match key.as_str() {
+                    "header" => {
+                        let name: String = map.next_value()?;
+                        ConditionField::Header(name)
+                    }
+                    "cookie" => {
+                        let name: Option<String> = map.next_value()?;
+                        ConditionField::Cookie(name)
+                    }
+                    other => return Err(de::Error::unknown_variant(other, &["header", "cookie"])),
+                };
+                if map.next_key::<String>()?.is_some() {
+                    return Err(de::Error::custom("expected exactly one key"));
+                }
+                Ok(result)
+            }
+        }
+
+        deserializer.deserialize_any(FieldVisitor)
+    }
 }
 
 // ── Comparison operator ───────────────────────────────────────────────────────
@@ -572,7 +665,8 @@ fn field_value(ctx: &RequestCtx, field: &ConditionField) -> Option<String> {
         ConditionField::Host => Some(ctx.host.clone()),
         ConditionField::ContentLength => Some(ctx.content_length.to_string()),
         ConditionField::Body => Some(String::from_utf8_lossy(&ctx.body_preview).into_owned()),
-        ConditionField::Cookie => ctx.headers.get("cookie").cloned(),
+        ConditionField::Cookie(None) => ctx.headers.get("cookie").cloned(),
+        ConditionField::Cookie(Some(name)) => ctx.cookies.get(name).cloned(),
         ConditionField::UserAgent => ctx.headers.get("user-agent").cloned(),
         ConditionField::ContentType => ctx.headers.get("content-type").cloned(),
         ConditionField::Header(name) => ctx.headers.get(&name.to_lowercase()).cloned(),
@@ -615,6 +709,7 @@ mod tests {
             geo: None,
             tier: waf_common::tier::Tier::CatchAll,
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
+            cookies: std::collections::HashMap::new(),
         }
     }
 
@@ -983,5 +1078,96 @@ mod tests {
         assert!(engine.check(&make_ctx("/admin/x", "POST", "1.2.3.4")).is_some());
         assert!(engine.check(&make_ctx("/admin/x", "GET", "1.2.3.4")).is_none());
         assert!(engine.check(&make_ctx("/public", "POST", "1.2.3.4")).is_none());
+    }
+
+    // ── Phase 03: cookie-by-name + ctx.cookies ───────────────────────────────
+
+    fn make_ctx_with_cookies(cookie_header: &str) -> RequestCtx {
+        let mut ctx = make_ctx("/", "GET", "1.2.3.4");
+        ctx.headers.insert("cookie".into(), cookie_header.into());
+        ctx.cookies = waf_common::parse_cookie_header(cookie_header);
+        ctx
+    }
+
+    #[test]
+    fn cookie_by_name_matches_value() {
+        // AC-6: field=cookie, name=session, op=eq, value=abc must match
+        // `Cookie: session=abc; other=x`.
+        let engine = CustomRulesEngine::new();
+        engine.add_rule(CustomRule {
+            id: "ck1".into(),
+            host_code: "test".into(),
+            name: "cookie session=abc".into(),
+            priority: 1,
+            enabled: true,
+            condition_op: ConditionOp::And,
+            conditions: vec![Condition {
+                field: ConditionField::Cookie(Some("session".into())),
+                operator: Operator::Eq,
+                value: ConditionValue::Str("abc".into()),
+            }],
+            action: RuleAction::Block,
+            action_status: 403,
+            action_msg: None,
+            script: None,
+        });
+
+        assert!(engine.check(&make_ctx_with_cookies("session=abc; other=x")).is_some());
+        assert!(engine.check(&make_ctx_with_cookies("session=zzz")).is_none());
+        assert!(engine.check(&make_ctx_with_cookies("other=x")).is_none());
+    }
+
+    #[test]
+    fn cookie_no_name_returns_full_header() {
+        // Cookie(None) preserves legacy whole-header semantics.
+        let engine = CustomRulesEngine::new();
+        engine.add_rule(CustomRule {
+            id: "ck2".into(),
+            host_code: "test".into(),
+            name: "cookie contains track".into(),
+            priority: 1,
+            enabled: true,
+            condition_op: ConditionOp::And,
+            conditions: vec![Condition {
+                field: ConditionField::Cookie(None),
+                operator: Operator::Contains,
+                value: ConditionValue::Str("track=1".into()),
+            }],
+            action: RuleAction::Block,
+            action_status: 403,
+            action_msg: None,
+            script: None,
+        });
+
+        assert!(engine.check(&make_ctx_with_cookies("a=b; track=1")).is_some());
+        assert!(engine.check(&make_ctx_with_cookies("a=b")).is_none());
+    }
+
+    #[test]
+    fn cookie_legacy_string_deserializes_as_none() {
+        // DB-stored rules with legacy `"field": "cookie"` must round-trip
+        // into `Cookie(None)` — preserves back-compat for existing rules.
+        let json = r#"{"field":"cookie","operator":"contains","value":"x"}"#;
+        let cond: Condition = serde_json::from_str(json).expect("legacy parse");
+        assert!(matches!(cond.field, ConditionField::Cookie(None)));
+    }
+
+    #[test]
+    fn cookie_with_name_deserializes_from_map() {
+        // New shape: `{"cookie": "session"}` → Cookie(Some("session")).
+        let json = r#"{"field":{"cookie":"session"},"operator":"eq","value":"abc"}"#;
+        let cond: Condition = serde_json::from_str(json).expect("named parse");
+        match cond.field {
+            ConditionField::Cookie(Some(name)) => assert_eq!(name, "session"),
+            other => panic!("expected Cookie(Some), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cookie_explicit_null_deserializes_as_none() {
+        // `{"cookie": null}` is explicit form of legacy whole-header.
+        let json = r#"{"field":{"cookie":null},"operator":"contains","value":"x"}"#;
+        let cond: Condition = serde_json::from_str(json).expect("null parse");
+        assert!(matches!(cond.field, ConditionField::Cookie(None)));
     }
 }
