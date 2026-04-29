@@ -39,6 +39,7 @@ globset = "0.4"
 [dev-dependencies]
 rand = { workspace = true }
 criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
 
 [[bench]]
 name = "sql_injection"

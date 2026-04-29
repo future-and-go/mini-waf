@@ -257,6 +257,15 @@ pub struct CustomRulesEngine {
     rhai: Arc<rhai::Engine>,
 }
 
+/// Where a rule was sourced from. Tracked per `RuleEntry` so the engine
+/// can selectively wipe file-loaded rules on hot-reload without touching
+/// DB-loaded rules in the same priority bucket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuleSource {
+    Db,
+    File,
+}
+
 /// Internal storage cell: keeps the raw rule (needed for eval/script + meta) and
 /// an optional pre-compiled tree. `compiled` is `None` when compile fails — in
 /// that case we skip the rule on eval and rely on a load-time warn log.
@@ -264,10 +273,15 @@ pub struct CustomRulesEngine {
 struct RuleEntry {
     raw: CustomRule,
     compiled: Option<CompiledRule>,
+    source: RuleSource,
 }
 
 impl RuleEntry {
     fn from_rule(rule: CustomRule) -> Self {
+        Self::from_rule_with_source(rule, RuleSource::Db)
+    }
+
+    fn from_rule_with_source(rule: CustomRule, source: RuleSource) -> Self {
         let compiled = match compile_rule(&rule) {
             Ok(c) => Some(c),
             Err(e) => {
@@ -275,7 +289,11 @@ impl RuleEntry {
                 None
             }
         };
-        Self { raw: rule, compiled }
+        Self {
+            raw: rule,
+            compiled,
+            source,
+        }
     }
 }
 
@@ -304,13 +322,34 @@ impl CustomRulesEngine {
         self.rules.insert(host_code.to_string(), entries);
     }
 
-    /// Append a single rule (hot-add).
+    /// Append a single rule (hot-add). Tagged as `RuleSource::Db`.
     pub fn add_rule(&self, rule: CustomRule) {
+        self.insert_rule(rule, RuleSource::Db);
+    }
+
+    /// Append a single file-sourced rule. Tagged as `RuleSource::File` so
+    /// `clear_file_rules` can wipe it on hot-reload.
+    pub fn add_file_rule(&self, rule: CustomRule) {
+        self.insert_rule(rule, RuleSource::File);
+    }
+
+    fn insert_rule(&self, rule: CustomRule, source: RuleSource) {
         let host_code = rule.host_code.clone();
-        let entry = RuleEntry::from_rule(rule);
+        let entry = RuleEntry::from_rule_with_source(rule, source);
         let mut bucket = self.rules.entry(host_code).or_default();
         bucket.push(entry);
         bucket.sort_by_key(|e| e.raw.priority);
+    }
+
+    /// Drop every file-sourced rule across all hosts.
+    ///
+    /// Called by the hot-reload watcher before re-loading from disk so that
+    /// edits/removals don't leave stale entries behind. DB-sourced rules
+    /// in the same buckets are preserved.
+    pub fn clear_file_rules(&self) {
+        for mut bucket in self.rules.iter_mut() {
+            bucket.retain(|e| e.source != RuleSource::File);
+        }
     }
 
     /// Remove a rule by ID.
@@ -470,10 +509,9 @@ pub fn from_db_rule(row: &DbCustomRule) -> anyhow::Result<CustomRule> {
     // Detect by presence of the `match_tree` key on a top-level object.
     let (conditions, match_tree) = match &row.conditions {
         serde_json::Value::Object(map) if map.contains_key("match_tree") => {
-            let tree: ConditionNode = serde_json::from_value(
-                map.get("match_tree").cloned().unwrap_or(serde_json::Value::Null),
-            )
-            .context("parse match_tree")?;
+            let tree: ConditionNode =
+                serde_json::from_value(map.get("match_tree").cloned().unwrap_or(serde_json::Value::Null))
+                    .context("parse match_tree")?;
             (Vec::new(), Some(tree))
         }
         _ => {
@@ -642,12 +680,8 @@ pub fn compile_rule(rule: &CustomRule) -> anyhow::Result<CompiledRule> {
 fn compile_tree(node: &ConditionNode) -> anyhow::Result<CompiledNode> {
     Ok(match node {
         ConditionNode::Leaf(c) => CompiledNode::Leaf(compile_condition(c)?),
-        ConditionNode::And(b) => CompiledNode::And(
-            b.and.iter().map(compile_tree).collect::<anyhow::Result<Vec<_>>>()?,
-        ),
-        ConditionNode::Or(b) => CompiledNode::Or(
-            b.or.iter().map(compile_tree).collect::<anyhow::Result<Vec<_>>>()?,
-        ),
+        ConditionNode::And(b) => CompiledNode::And(b.and.iter().map(compile_tree).collect::<anyhow::Result<Vec<_>>>()?),
+        ConditionNode::Or(b) => CompiledNode::Or(b.or.iter().map(compile_tree).collect::<anyhow::Result<Vec<_>>>()?),
         ConditionNode::Not(b) => CompiledNode::Not(Box::new(compile_tree(&b.not)?)),
     })
 }
@@ -823,7 +857,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
-        match_tree: None,
+            match_tree: None,
         };
         engine.add_rule(rule);
 
@@ -853,7 +887,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
-        match_tree: None,
+            match_tree: None,
         };
         engine.add_rule(rule);
 
@@ -879,7 +913,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: Some(r#"method == "DELETE" && path.starts_with("/api")"#.into()),
-        match_tree: None,
+            match_tree: None,
         };
         engine.add_rule(rule);
 
@@ -905,7 +939,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
-        match_tree: None,
+            match_tree: None,
         }
     }
 
@@ -1040,7 +1074,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
-        match_tree: None,
+            match_tree: None,
         });
 
         assert!(engine.check(&make_ctx("/api/v1/admin", "GET", "1.2.3.4")).is_some());
@@ -1169,7 +1203,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
-        match_tree: None,
+            match_tree: None,
         });
 
         assert!(engine.check(&make_ctx("/admin/x", "POST", "1.2.3.4")).is_some());
@@ -1207,7 +1241,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
-        match_tree: None,
+            match_tree: None,
         });
 
         assert!(engine.check(&make_ctx_with_cookies("session=abc; other=x")).is_some());
@@ -1235,7 +1269,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
-        match_tree: None,
+            match_tree: None,
         });
 
         assert!(engine.check(&make_ctx_with_cookies("a=b; track=1")).is_some());
@@ -1387,7 +1421,11 @@ mod tests {
         let engine = ac8_engine();
         assert!(engine.check(&ac8_ctx("10.0.1.5", "/api/v1/admin", "")).is_some());
         // Also true via the cookie branch of the OR.
-        assert!(engine.check(&ac8_ctx("1.2.3.4", "/api/v1/admin", "session=bad")).is_some());
+        assert!(
+            engine
+                .check(&ac8_ctx("1.2.3.4", "/api/v1/admin", "session=bad"))
+                .is_some()
+        );
     }
 
     #[test]
@@ -1401,7 +1439,11 @@ mod tests {
     fn ac8_ft_left_false_right_true_misses() {
         // Left false (ip not in CIDR, cookie not bad), Right true: expect miss.
         let engine = ac8_engine();
-        assert!(engine.check(&ac8_ctx("1.2.3.4", "/api/v1/admin", "session=ok")).is_none());
+        assert!(
+            engine
+                .check(&ac8_ctx("1.2.3.4", "/api/v1/admin", "session=ok"))
+                .is_none()
+        );
     }
 
     #[test]
