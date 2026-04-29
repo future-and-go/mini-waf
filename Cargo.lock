@@ -5271,6 +5271,7 @@ dependencies = [
  "anyhow",
  "base64",
  "bytes",
+ "regex",
  "serde",
  "sha2",
  "thiserror 2.0.18",
