@@ -7,7 +7,6 @@ use clap::{Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
-use gateway::tiered::{DEFAULT_DEBOUNCE_MS, TierConfigWatcher, TierPolicyRegistry, try_reload as load_tier_snapshot};
 use gateway::{HostRouter, TunnelConfig, WafProxy};
 use waf_api::{AppState, start_api_server};
 use waf_common::config::{AppConfig, load_config};
