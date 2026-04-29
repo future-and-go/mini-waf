@@ -60,6 +60,46 @@ server)                         Log: security_events +
 
 ## Request Lifecycle (16-Phase Pipeline)
 
+### Pre-Phase: Tier Classification (FR-002)
+
+```
+Tier Classification:
+├─ RequestCtx populated in gateway::ctx_builder
+├─ TierPolicyRegistry::classify(&request_parts) runs
+├─ Returns (Tier, Arc<TierPolicy>) from current snapshot
+├─ ctx.tier and ctx.tier_policy set before Phase 1
+└─ All downstream phases read tier for policy-aware decisions
+   (e.g., rate-limit threshold, block action per tier)
+```
+
+**Default**: If no tier registry configured at boot, uses `Tier::CatchAll` + permissive policy (fallback mode).
+
+**Wired in**: `prx-waf/src/main.rs::try_init_tier_registry()` loads config, spawns `TierConfigWatcher` for hot-reload, injects registry into gateway.
+
+#### Tier Flow Diagram
+
+```mermaid
+flowchart LR
+    A([HTTP Request]) --> B[ctx_builder]
+    B --> C{TierPolicyRegistry\n.classify}
+    C -->|"(Tier, Arc&lt;TierPolicy&gt;)"| D[RequestCtx\ntier + tier_policy]
+    D --> E[WAF Checks\nPhases 1–16]
+    E -->|Allow| F([Upstream])
+    E -->|Block| G([403 / 429])
+
+    subgraph hot-reload ["Hot-Reload (background)"]
+        H[configs/default.toml\nwatcher] -->|ArcSwap.store| C
+    end
+
+    subgraph consumers ["Downstream consumers"]
+        D -.->|ddos_threshold_rps| FR005[FR-005 DDoS]
+        D -.->|risk_thresholds| FR006[FR-006 Challenge]
+        D -.->|cache_policy| FR009[FR-009 Cache]
+    end
+```
+
+---
+
 ### Phases 1-4: IP & URL Filtering
 
 ```
@@ -207,7 +247,14 @@ After Phase 16:
 impl ProxyHttp for WafProxy {
     async fn request_filter(&mut self, session: &mut Session) -> Result<()> {
         let req = &session.req_header;
-        let ctx = RequestCtx::from(req);
+        
+        // Build RequestCtx with tier classification (FR-002)
+        let mut builder = RequestCtxBuilder::new(session, ...);
+        if let Some(registry) = &self.tier_registry {
+            builder = builder.with_tier_registry(registry);
+        }
+        let ctx = builder.build()?;
+        // ctx.tier and ctx.tier_policy now populated from TierPolicyRegistry
         
         // Ask WafEngine to check all 16 phases
         let decision = self.engine.check(&ctx).await?;
@@ -218,7 +265,7 @@ impl ProxyHttp for WafProxy {
                 Ok(())
             },
             WafAction::Block => {
-                // Return 403
+                // Return 403 (or 429 based on tier policy)
                 session.send_response(403, "Forbidden")?;
                 Ok(())
             },

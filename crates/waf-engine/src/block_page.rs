@@ -99,6 +99,8 @@ mod tests {
             is_tls: false,
             host_config: Arc::new(HostConfig::default()),
             geo: None,
+            tier: waf_common::tier::Tier::CatchAll,
+            tier_policy: waf_common::RequestCtx::default_tier_policy(),
         }
     }
 

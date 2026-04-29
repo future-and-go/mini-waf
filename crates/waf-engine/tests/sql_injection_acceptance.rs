@@ -33,6 +33,8 @@ fn make_ctx(query: &str, body: &str, headers: HashMap<String, String>) -> Reques
         is_tls: false,
         host_config: make_host_config(),
         geo: None,
+        tier: waf_common::tier::Tier::CatchAll,
+        tier_policy: waf_common::RequestCtx::default_tier_policy(),
     }
 }
 

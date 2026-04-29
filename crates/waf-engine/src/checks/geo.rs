@@ -191,6 +191,8 @@ mod tests {
                 iso_code: iso.to_string(),
                 ..Default::default()
             }),
+            tier: waf_common::tier::Tier::CatchAll,
+            tier_policy: waf_common::RequestCtx::default_tier_policy(),
         }
     }
 
@@ -244,6 +246,8 @@ mod tests {
             is_tls: false,
             host_config,
             geo: None,
+            tier: waf_common::tier::Tier::CatchAll,
+            tier_policy: waf_common::RequestCtx::default_tier_policy(),
         };
         assert!(check.check(&ctx).is_none());
     }

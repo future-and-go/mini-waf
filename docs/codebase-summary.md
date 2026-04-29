@@ -355,6 +355,10 @@ prx-waf/
 
 ## Key Patterns & Conventions
 
+### Tiered Protection (FR-002)
+
+See [Tiered Protection Consumer Guide](./tiered-protection.md) for request classification, policy bus, and per-tier semantics.
+
 ### Error Handling
 
 - No `.unwrap()` or `.expect()` in production code (test-only)

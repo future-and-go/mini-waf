@@ -2,7 +2,9 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+use crate::tier::{Tier, TierPolicy};
 
 /// `GeoIP` information resolved from the client IP address.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -34,6 +36,27 @@ pub struct RequestCtx {
     ///
     /// `None` if `GeoIP` is disabled or the xdb file is missing.
     pub geo: Option<GeoIpInfo>,
+    /// Protection tier classified for this request (FR-002).
+    ///
+    /// Populated by `gateway::ctx_builder` via `TierPolicyRegistry::classify`
+    /// before any check consumes the value. Defaults to `Tier::CatchAll`
+    /// when no tier registry is configured (boot fallback).
+    pub tier: Tier,
+    /// Tier policy referenced from the same snapshot the tier was classified
+    /// against. Held as `Arc` so consumers can keep it across `.await` without
+    /// cloning the policy struct.
+    pub tier_policy: Arc<TierPolicy>,
+}
+
+impl RequestCtx {
+    /// Process-wide default tier policy used when no `TierPolicyRegistry` is
+    /// wired into the gateway (e.g., test fixtures, boot fallback). Cached
+    /// in a `OnceLock` so every fixture/fallback path shares the same `Arc`.
+    #[must_use]
+    pub fn default_tier_policy() -> Arc<TierPolicy> {
+        static DEFAULT: OnceLock<Arc<TierPolicy>> = OnceLock::new();
+        Arc::clone(DEFAULT.get_or_init(|| Arc::new(TierPolicy::default())))
+    }
 }
 
 /// WAF action decision

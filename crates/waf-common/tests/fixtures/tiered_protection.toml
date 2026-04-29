@@ -1,0 +1,49 @@
+# Fixture for waf-common tier tests. Mirrors design doc §7.
+
+[tiered_protection]
+default_tier = "catch_all"
+
+[[tiered_protection.classifier_rules]]
+priority = 100
+tier     = "critical"
+path     = { kind = "exact", value = "/login" }
+method   = ["POST"]
+
+[[tiered_protection.classifier_rules]]
+priority = 90
+tier     = "high"
+path     = { kind = "prefix", value = "/api/" }
+
+[[tiered_protection.classifier_rules]]
+priority = 80
+tier     = "medium"
+host     = { kind = "suffix", value = ".example.com" }
+
+[[tiered_protection.classifier_rules]]
+priority = 70
+tier     = "high"
+path     = { kind = "regex", value = "^/admin/.*$" }
+
+[tiered_protection.policies.critical]
+fail_mode          = "close"
+ddos_threshold_rps = 50
+cache_policy       = { mode = "no_cache" }
+risk_thresholds    = { allow = 20, challenge = 50, block = 70 }
+
+[tiered_protection.policies.high]
+fail_mode          = "close"
+ddos_threshold_rps = 200
+cache_policy       = { mode = "short_ttl", ttl_seconds = 5 }
+risk_thresholds    = { allow = 30, challenge = 60, block = 80 }
+
+[tiered_protection.policies.medium]
+fail_mode          = "open"
+ddos_threshold_rps = 1000
+cache_policy       = { mode = "default", ttl_seconds = 30 }
+risk_thresholds    = { allow = 40, challenge = 70, block = 90 }
+
+[tiered_protection.policies.catch_all]
+fail_mode          = "open"
+ddos_threshold_rps = 5000
+cache_policy       = { mode = "aggressive", ttl_seconds = 300 }
+risk_thresholds    = { allow = 50, challenge = 80, block = 95 }

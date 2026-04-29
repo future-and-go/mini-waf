@@ -12,6 +12,7 @@ pub mod proxy;
 pub mod proxy_waf_response;
 pub mod router;
 pub mod ssl;
+pub mod tiered;
 pub mod tunnel;
 
 pub use cache::{CacheStatsSnapshot, ResponseCache};

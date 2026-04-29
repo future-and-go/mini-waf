@@ -51,6 +51,8 @@ fn make_clean_ctx() -> RequestCtx {
         is_tls: true,
         host_config: make_host_config(),
         geo: None,
+        tier: waf_common::tier::Tier::CatchAll,
+        tier_policy: waf_common::RequestCtx::default_tier_policy(),
     }
 }
 
@@ -124,6 +126,8 @@ fn make_ctx_query(query: &str, body: &str, cfg: &Arc<HostConfig>) -> RequestCtx 
         is_tls: false,
         host_config: Arc::clone(cfg),
         geo: None,
+        tier: waf_common::tier::Tier::CatchAll,
+        tier_policy: waf_common::RequestCtx::default_tier_policy(),
     }
 }
 
@@ -145,6 +149,8 @@ fn make_ctx_header(name: &str, value: &str, cfg: &Arc<HostConfig>) -> RequestCtx
         is_tls: false,
         host_config: Arc::clone(cfg),
         geo: None,
+        tier: waf_common::tier::Tier::CatchAll,
+        tier_policy: waf_common::RequestCtx::default_tier_policy(),
     }
 }
 
@@ -166,6 +172,8 @@ fn make_ctx_json(body: &str, cfg: &Arc<HostConfig>) -> RequestCtx {
         is_tls: false,
         host_config: Arc::clone(cfg),
         geo: None,
+        tier: waf_common::tier::Tier::CatchAll,
+        tier_policy: waf_common::RequestCtx::default_tier_policy(),
     }
 }
 
