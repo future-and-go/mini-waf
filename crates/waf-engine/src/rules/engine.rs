@@ -240,6 +240,9 @@ pub struct CustomRule {
     pub action_msg: Option<String>,
     /// Optional Rhai expression that overrides `conditions` when present.
     pub script: Option<String>,
+    /// Optional nested AND/OR/Not condition tree. When `Some`, takes precedence
+    /// over the flat `conditions` + `condition_op` legacy pair at compile time.
+    pub match_tree: Option<ConditionNode>,
 }
 
 // ── Custom rules engine ───────────────────────────────────────────────────────
@@ -461,7 +464,23 @@ impl Default for CustomRulesEngine {
 use waf_storage::models::CustomRule as DbCustomRule;
 
 pub fn from_db_rule(row: &DbCustomRule) -> anyhow::Result<CustomRule> {
-    let conditions: Vec<Condition> = serde_json::from_value(row.conditions.clone()).unwrap_or_default();
+    // The `conditions` column is dual-shape:
+    //   - legacy: a JSON array of `Condition` objects.
+    //   - new:    a JSON object `{"match_tree": <ConditionNode>}`.
+    // Detect by presence of the `match_tree` key on a top-level object.
+    let (conditions, match_tree) = match &row.conditions {
+        serde_json::Value::Object(map) if map.contains_key("match_tree") => {
+            let tree: ConditionNode = serde_json::from_value(
+                map.get("match_tree").cloned().unwrap_or(serde_json::Value::Null),
+            )
+            .context("parse match_tree")?;
+            (Vec::new(), Some(tree))
+        }
+        _ => {
+            let conds: Vec<Condition> = serde_json::from_value(row.conditions.clone()).unwrap_or_default();
+            (conds, None)
+        }
+    };
 
     Ok(CustomRule {
         id: row.id.to_string(),
@@ -475,23 +494,76 @@ pub fn from_db_rule(row: &DbCustomRule) -> anyhow::Result<CustomRule> {
         action_status: u16::try_from(row.action_status).unwrap_or(403),
         action_msg: row.action_msg.clone(),
         script: row.script.clone(),
+        match_tree,
     })
 }
 
-// ── Recursive condition tree (storage-friendly; eval path wired in phase 04) ─
+// ── Recursive condition tree ─────────────────────────────────────────────────
 
 /// Nested AND/OR/Not tree of raw conditions.
 ///
-/// Storage path is opt-in until phase 04: legacy flat `Vec<Condition>` rules
-/// are auto-promoted to `And([Leaf,...])` (or `Or` per `condition_op`) by
-/// [`compile_rule`].
+/// Wire format uses key-presence disambiguation:
+/// - `{ "and": [...] }` → `And` branch
+/// - `{ "or":  [...] }` → `Or` branch
+/// - `{ "not": {...} }` → `Not` branch
+/// - bare `{ "field": ..., "operator": ..., "value": ... }` → `Leaf`
+///
+/// Legacy flat `Vec<Condition>` rules are auto-promoted to `And([Leaf,...])`
+/// (or `Or` per `condition_op`) by [`compile_rule`] when `match_tree` is `None`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(untagged)]
 pub enum ConditionNode {
+    And(AndBranch),
+    Or(OrBranch),
+    Not(NotBranch),
     Leaf(Condition),
-    And(Vec<Self>),
-    Or(Vec<Self>),
-    Not(Box<Self>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AndBranch {
+    pub and: Vec<ConditionNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrBranch {
+    pub or: Vec<ConditionNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotBranch {
+    pub not: Box<ConditionNode>,
+}
+
+/// Maximum allowed depth of a `ConditionNode` tree. Guards against
+/// adversarial deep-nested rules causing stack overflow at compile/eval time.
+pub const MAX_TREE_DEPTH: usize = 16;
+
+/// Maximum total leaf count per tree — defensive cap against blowup.
+pub const MAX_TREE_LEAVES: usize = 256;
+
+/// Validate a tree's depth and leaf count.
+///
+/// Returns `Err` if depth > [`MAX_TREE_DEPTH`] or leaves > [`MAX_TREE_LEAVES`].
+pub fn validate_tree(node: &ConditionNode) -> anyhow::Result<()> {
+    fn walk(n: &ConditionNode, depth: usize, leaves: &mut usize) -> anyhow::Result<()> {
+        if depth > MAX_TREE_DEPTH {
+            anyhow::bail!("condition tree exceeds max depth {MAX_TREE_DEPTH}");
+        }
+        match n {
+            ConditionNode::Leaf(_) => {
+                *leaves += 1;
+                if *leaves > MAX_TREE_LEAVES {
+                    anyhow::bail!("condition tree exceeds max leaves {MAX_TREE_LEAVES}");
+                }
+                Ok(())
+            }
+            ConditionNode::And(b) => b.and.iter().try_for_each(|c| walk(c, depth + 1, leaves)),
+            ConditionNode::Or(b) => b.or.iter().try_for_each(|c| walk(c, depth + 1, leaves)),
+            ConditionNode::Not(b) => walk(&b.not, depth + 1, leaves),
+        }
+    }
+    let mut leaves = 0usize;
+    walk(node, 1, &mut leaves)
 }
 
 // ── Compiled (in-memory only — not serializable) ──────────────────────────────
@@ -541,23 +613,42 @@ pub enum Matcher {
 
 /// Compile a raw rule into its eval-ready form.
 ///
-/// Phase 01 only consumes the legacy flat `conditions` + `condition_op`; the
-/// `match_tree` field is added in phase 04.
+/// Selects the compile path based on rule shape:
+/// 1. `match_tree` present → recursively compile the nested tree (preferred).
+/// 2. Otherwise → wrap legacy flat `conditions` as `And`/`Or` per `condition_op`.
 pub fn compile_rule(rule: &CustomRule) -> anyhow::Result<CompiledRule> {
-    let leaves: Vec<CompiledNode> = rule
-        .conditions
-        .iter()
-        .map(|c| compile_condition(c).map(CompiledNode::Leaf))
-        .collect::<anyhow::Result<Vec<_>>>()?;
-
-    let root = match rule.condition_op {
-        ConditionOp::And => CompiledNode::And(leaves),
-        ConditionOp::Or => CompiledNode::Or(leaves),
+    let root = if let Some(tree) = rule.match_tree.as_ref() {
+        validate_tree(tree)?;
+        compile_tree(tree)?
+    } else {
+        let leaves: Vec<CompiledNode> = rule
+            .conditions
+            .iter()
+            .map(|c| compile_condition(c).map(CompiledNode::Leaf))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        match rule.condition_op {
+            ConditionOp::And => CompiledNode::And(leaves),
+            ConditionOp::Or => CompiledNode::Or(leaves),
+        }
     };
 
     Ok(CompiledRule {
         meta: rule.clone(),
         root,
+    })
+}
+
+/// Recursively compile a `ConditionNode` tree into a `CompiledNode` tree.
+fn compile_tree(node: &ConditionNode) -> anyhow::Result<CompiledNode> {
+    Ok(match node {
+        ConditionNode::Leaf(c) => CompiledNode::Leaf(compile_condition(c)?),
+        ConditionNode::And(b) => CompiledNode::And(
+            b.and.iter().map(compile_tree).collect::<anyhow::Result<Vec<_>>>()?,
+        ),
+        ConditionNode::Or(b) => CompiledNode::Or(
+            b.or.iter().map(compile_tree).collect::<anyhow::Result<Vec<_>>>()?,
+        ),
+        ConditionNode::Not(b) => CompiledNode::Not(Box::new(compile_tree(&b.not)?)),
     })
 }
 
@@ -732,6 +823,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
+        match_tree: None,
         };
         engine.add_rule(rule);
 
@@ -761,6 +853,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
+        match_tree: None,
         };
         engine.add_rule(rule);
 
@@ -786,6 +879,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: Some(r#"method == "DELETE" && path.starts_with("/api")"#.into()),
+        match_tree: None,
         };
         engine.add_rule(rule);
 
@@ -811,6 +905,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
+        match_tree: None,
         }
     }
 
@@ -945,6 +1040,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
+        match_tree: None,
         });
 
         assert!(engine.check(&make_ctx("/api/v1/admin", "GET", "1.2.3.4")).is_some());
@@ -1073,6 +1169,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
+        match_tree: None,
         });
 
         assert!(engine.check(&make_ctx("/admin/x", "POST", "1.2.3.4")).is_some());
@@ -1110,6 +1207,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
+        match_tree: None,
         });
 
         assert!(engine.check(&make_ctx_with_cookies("session=abc; other=x")).is_some());
@@ -1137,6 +1235,7 @@ mod tests {
             action_status: 403,
             action_msg: None,
             script: None,
+        match_tree: None,
         });
 
         assert!(engine.check(&make_ctx_with_cookies("a=b; track=1")).is_some());
@@ -1169,5 +1268,213 @@ mod tests {
         let json = r#"{"field":{"cookie":null},"operator":"contains","value":"x"}"#;
         let cond: Condition = serde_json::from_str(json).expect("null parse");
         assert!(matches!(cond.field, ConditionField::Cookie(None)));
+    }
+
+    // ── Phase 04: nested AND/OR/Not condition tree ──────────────────────────
+
+    fn leaf(field: ConditionField, op: Operator, val: &str) -> ConditionNode {
+        ConditionNode::Leaf(Condition {
+            field,
+            operator: op,
+            value: ConditionValue::Str(val.into()),
+        })
+    }
+
+    fn rule_with_tree(tree: ConditionNode) -> CustomRule {
+        CustomRule {
+            id: "t1".into(),
+            host_code: "test".into(),
+            name: "tree".into(),
+            priority: 1,
+            enabled: true,
+            condition_op: ConditionOp::And,
+            conditions: Vec::new(),
+            action: RuleAction::Block,
+            action_status: 403,
+            action_msg: None,
+            script: None,
+            match_tree: Some(tree),
+        }
+    }
+
+    #[test]
+    fn tree_json_roundtrip_nested() {
+        // `(ip in CIDR OR cookie=bad) AND path~/api/*/admin`
+        let json = r#"{
+            "and": [
+              { "or": [
+                  {"field":"ip","operator":"cidr_match","value":"10.0.0.0/8"},
+                  {"field":{"cookie":"session"},"operator":"eq","value":"bad"}
+              ]},
+              {"field":"path","operator":"wildcard","value":"/api/*/admin"}
+            ]
+        }"#;
+        let tree: ConditionNode = serde_json::from_str(json).expect("parse tree");
+        let back = serde_json::to_value(&tree).expect("serialize tree");
+        // Round-trip should preserve top-level and-array length.
+        assert!(back.get("and").and_then(|v| v.as_array()).is_some_and(|a| a.len() == 2));
+    }
+
+    #[test]
+    fn tree_depth_exceeded_rejected() {
+        // Build a chain of Not nodes deeper than MAX_TREE_DEPTH.
+        let mut node = leaf(ConditionField::Path, Operator::Eq, "/x");
+        for _ in 0..=MAX_TREE_DEPTH {
+            node = ConditionNode::Not(NotBranch { not: Box::new(node) });
+        }
+        assert!(validate_tree(&node).is_err());
+    }
+
+    #[test]
+    fn tree_leaves_exceeded_rejected() {
+        let leaves = (0..=MAX_TREE_LEAVES)
+            .map(|_| leaf(ConditionField::Path, Operator::Eq, "/x"))
+            .collect();
+        let tree = ConditionNode::Or(OrBranch { or: leaves });
+        assert!(validate_tree(&tree).is_err());
+    }
+
+    #[test]
+    fn legacy_db_rule_still_compiles() {
+        // No match_tree → falls back to flat conditions wrapped in And/Or.
+        let rule = mk_rule(
+            ConditionOp::Or,
+            vec![Condition {
+                field: ConditionField::Ip,
+                operator: Operator::CidrMatch,
+                value: ConditionValue::Str("10.0.0.0/8".into()),
+            }],
+        );
+        let compiled = compile_rule(&rule).expect("compile ok");
+        assert!(matches!(compiled.root, CompiledNode::Or(ref l) if l.len() == 1));
+    }
+
+    /// AC-8 truth table: `(ip in 10.0.0.0/8 OR cookie session=bad) AND path~/api/*/admin`
+    fn ac8_tree() -> ConditionNode {
+        ConditionNode::And(AndBranch {
+            and: vec![
+                ConditionNode::Or(OrBranch {
+                    or: vec![
+                        leaf(ConditionField::Ip, Operator::CidrMatch, "10.0.0.0/8"),
+                        ConditionNode::Leaf(Condition {
+                            field: ConditionField::Cookie(Some("session".into())),
+                            operator: Operator::Eq,
+                            value: ConditionValue::Str("bad".into()),
+                        }),
+                    ],
+                }),
+                leaf(ConditionField::Path, Operator::Wildcard, "/api/*/admin"),
+            ],
+        })
+    }
+
+    fn ac8_engine() -> CustomRulesEngine {
+        let engine = CustomRulesEngine::new();
+        engine.add_rule(rule_with_tree(ac8_tree()));
+        engine
+    }
+
+    fn ac8_ctx(ip: &str, path: &str, cookie: &str) -> RequestCtx {
+        let mut ctx = make_ctx(path, "GET", ip);
+        ctx.headers.insert("cookie".into(), cookie.into());
+        ctx.cookies = waf_common::parse_cookie_header(cookie);
+        ctx
+    }
+
+    #[test]
+    fn ac8_tt_left_true_right_true_matches() {
+        // Left OR true (ip in CIDR), Right true (path matches): expect match.
+        let engine = ac8_engine();
+        assert!(engine.check(&ac8_ctx("10.0.1.5", "/api/v1/admin", "")).is_some());
+        // Also true via the cookie branch of the OR.
+        assert!(engine.check(&ac8_ctx("1.2.3.4", "/api/v1/admin", "session=bad")).is_some());
+    }
+
+    #[test]
+    fn ac8_tf_left_true_right_false_misses() {
+        // Left true, Right false (path mismatch): expect miss.
+        let engine = ac8_engine();
+        assert!(engine.check(&ac8_ctx("10.0.1.5", "/public", "")).is_none());
+    }
+
+    #[test]
+    fn ac8_ft_left_false_right_true_misses() {
+        // Left false (ip not in CIDR, cookie not bad), Right true: expect miss.
+        let engine = ac8_engine();
+        assert!(engine.check(&ac8_ctx("1.2.3.4", "/api/v1/admin", "session=ok")).is_none());
+    }
+
+    #[test]
+    fn ac8_ff_left_false_right_false_misses() {
+        // Both false: expect miss.
+        let engine = ac8_engine();
+        assert!(engine.check(&ac8_ctx("1.2.3.4", "/public", "session=ok")).is_none());
+    }
+
+    #[test]
+    fn from_db_rule_detects_match_tree_shape() {
+        use chrono::Utc;
+        use uuid::Uuid;
+        use waf_storage::models::CustomRule as DbCustomRule;
+
+        let conditions = serde_json::json!({
+            "match_tree": {
+                "and": [
+                    {"field": "path", "operator": "starts_with", "value": "/api"},
+                    {"not": {"field": "method", "operator": "eq", "value": "GET"}}
+                ]
+            }
+        });
+        let row = DbCustomRule {
+            id: Uuid::new_v4(),
+            host_code: "test".into(),
+            name: "tree-rule".into(),
+            description: None,
+            priority: 1,
+            enabled: true,
+            condition_op: "and".into(),
+            conditions,
+            action: "block".into(),
+            action_status: 403,
+            action_msg: None,
+            script: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let rule = from_db_rule(&row).expect("parse db row");
+        assert!(rule.match_tree.is_some());
+        assert!(rule.conditions.is_empty());
+        // And ensure it compiles.
+        compile_rule(&rule).expect("compile tree rule");
+    }
+
+    #[test]
+    fn from_db_rule_legacy_array_still_works() {
+        use chrono::Utc;
+        use uuid::Uuid;
+        use waf_storage::models::CustomRule as DbCustomRule;
+
+        let conditions = serde_json::json!([
+            {"field": "path", "operator": "starts_with", "value": "/admin"}
+        ]);
+        let row = DbCustomRule {
+            id: Uuid::new_v4(),
+            host_code: "test".into(),
+            name: "legacy-rule".into(),
+            description: None,
+            priority: 1,
+            enabled: true,
+            condition_op: "and".into(),
+            conditions,
+            action: "block".into(),
+            action_status: 403,
+            action_msg: None,
+            script: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let rule = from_db_rule(&row).expect("parse legacy row");
+        assert!(rule.match_tree.is_none());
+        assert_eq!(rule.conditions.len(), 1);
     }
 }
