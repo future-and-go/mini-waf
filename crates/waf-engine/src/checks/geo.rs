@@ -193,6 +193,7 @@ mod tests {
             }),
             tier: waf_common::tier::Tier::CatchAll,
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
+            cookies: std::collections::HashMap::new(),
         }
     }
 
@@ -248,6 +249,7 @@ mod tests {
             geo: None,
             tier: waf_common::tier::Tier::CatchAll,
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
+            cookies: std::collections::HashMap::new(),
         };
         assert!(check.check(&ctx).is_none());
     }

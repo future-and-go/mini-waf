@@ -1,5 +1,6 @@
 //! Rule format parsers — YAML, `ModSecurity` (`SecRule`), JSON.
 
+pub mod custom_rule_yaml;
 pub mod json;
 pub mod modsec;
 pub mod yaml;

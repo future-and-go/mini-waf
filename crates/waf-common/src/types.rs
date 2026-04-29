@@ -46,6 +46,36 @@ pub struct RequestCtx {
     /// against. Held as `Arc` so consumers can keep it across `.await` without
     /// cloning the policy struct.
     pub tier_policy: Arc<TierPolicy>,
+    /// Cookies parsed once from the `Cookie` header at ctx build time. Empty
+    /// when no `Cookie` header is present. Kept here (not lazy) so per-rule
+    /// `Cookie(name)` lookups stay O(1) without re-splitting the header.
+    /// Names are case-sensitive per RFC 6265.
+    pub cookies: HashMap<String, String>,
+}
+
+/// Parse a `Cookie:` header value into a name → value map.
+///
+/// Splits on `;`, trims whitespace, splits the first `=`. Pairs missing a
+/// name or `=` are silently dropped (defensive: malformed cookies are common
+/// and must not panic). Names are case-sensitive per RFC 6265.
+#[must_use]
+pub fn parse_cookie_header(header: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for pair in header.split(';') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+        let Some((name, value)) = pair.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        out.insert(name.to_string(), value.trim().to_string());
+    }
+    out
 }
 
 impl RequestCtx {
@@ -352,5 +382,42 @@ impl Default for DefenseConfig {
             block_scripted_clients: false,
             owasp_paranoia: default_owasp_paranoia(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_cookie_header;
+
+    #[test]
+    fn parse_cookie_header_basic() {
+        let m = parse_cookie_header("a=1; b=2");
+        assert_eq!(m.get("a").map(String::as_str), Some("1"));
+        assert_eq!(m.get("b").map(String::as_str), Some("2"));
+        assert_eq!(m.len(), 2);
+    }
+
+    #[test]
+    fn parse_cookie_header_malformed_skipped() {
+        // Pairs without `=` and pairs with empty name must be silently dropped.
+        let m = parse_cookie_header("=v; k=; valid=ok; nocookie; ; another=fine");
+        assert_eq!(m.get("k").map(String::as_str), Some(""));
+        assert_eq!(m.get("valid").map(String::as_str), Some("ok"));
+        assert_eq!(m.get("another").map(String::as_str), Some("fine"));
+        assert!(!m.contains_key(""));
+        assert!(!m.contains_key("nocookie"));
+    }
+
+    #[test]
+    fn parse_cookie_header_empty() {
+        assert!(parse_cookie_header("").is_empty());
+    }
+
+    #[test]
+    fn parse_cookie_header_case_sensitive() {
+        let m = parse_cookie_header("Session=abc; session=xyz");
+        // RFC 6265: cookie names are case-sensitive.
+        assert_eq!(m.get("Session").map(String::as_str), Some("abc"));
+        assert_eq!(m.get("session").map(String::as_str), Some("xyz"));
     }
 }

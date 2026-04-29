@@ -12,7 +12,7 @@ use bytes::Bytes;
 use pingora_proxy::Session;
 use uuid::Uuid;
 use waf_common::tier::{Tier, TierPolicy};
-use waf_common::{HostConfig, RequestCtx};
+use waf_common::{HostConfig, RequestCtx, parse_cookie_header};
 
 use crate::tiered::tier_classifier::RequestParts;
 use crate::tiered::tier_policy_registry::TierPolicyRegistry;
@@ -161,6 +161,10 @@ pub fn build_from_parts(
     tier: Tier,
     tier_policy: Arc<TierPolicy>,
 ) -> RequestCtx {
+    let cookies = headers
+        .get("cookie")
+        .map(|v| parse_cookie_header(v))
+        .unwrap_or_default();
     RequestCtx {
         req_id: Uuid::new_v4().to_string(),
         client_ip,
@@ -178,6 +182,7 @@ pub fn build_from_parts(
         geo: None,
         tier,
         tier_policy,
+        cookies,
     }
 }
 

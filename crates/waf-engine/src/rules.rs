@@ -1,4 +1,5 @@
 pub mod builtin;
+pub mod custom_file_loader;
 pub mod engine;
 pub mod formats;
 pub mod hot_reload;

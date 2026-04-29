@@ -84,6 +84,9 @@ Complete. Merged in commit 685c22a.
 **Deviations from plan:**
 - Used `std::thread` + sync `mpsc` (pattern reuse) instead of tokio task + `CancellationToken`.
 - Exposed `reload()` as `pub` for integration test synchronous driving.
+## Deviations from plan
+- Used `std::thread` + sync `mpsc` (mirroring existing `rules/hot_reload.rs`) instead of tokio task + `CancellationToken`. Plan suggested both; chose pattern reuse over the alternative. Drop the watcher to stop.
+- Made `reload()` `pub` (was `pub(crate)`) so the integration test can drive the chain synchronously without polling.
 
 ## Next
 Phase 5 — wire registry into request lifecycle.
