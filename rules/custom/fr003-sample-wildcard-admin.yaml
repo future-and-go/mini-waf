@@ -1,0 +1,17 @@
+# FR-003 AC-3 — wildcard operator (segment-bounded `*`).
+# Blocks any /api/<segment>/admin path. `*` does NOT cross `/`.
+# File-loaded via custom_file_loader; no DB row required.
+kind: custom_rule_v1
+id: fr003-sample-wildcard-admin
+host_code: "*"
+name: "Block wildcard admin paths under /api/*/admin"
+priority: 100
+enabled: true
+condition_op: and
+conditions:
+  - field: path
+    operator: wildcard
+    value: "/api/*/admin"
+action: block
+action_status: 403
+action_msg: "Admin endpoints are not publicly accessible"

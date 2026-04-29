@@ -127,6 +127,7 @@ mod tests {
             geo: None,
             tier: waf_common::tier::Tier::CatchAll,
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
+            cookies: std::collections::HashMap::new(),
         }
     }
 
