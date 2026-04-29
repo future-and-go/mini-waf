@@ -12,5 +12,5 @@ pub use compiled_rule::{
     CompileError, CompiledHostMatch, CompiledPathMatch, CompiledTierRule, MethodSet, compile_rule, compile_rules,
 };
 pub use tier_classifier::{RequestParts, TierClassifier};
-pub use tier_config_watcher::{DEFAULT_DEBOUNCE_MS, TierConfigWatcher, WatcherError};
+pub use tier_config_watcher::{DEFAULT_DEBOUNCE_MS, TierConfigWatcher, WatcherError, try_reload};
 pub use tier_policy_registry::{SnapshotBuildError, TierPolicyRegistry, TierSnapshot};

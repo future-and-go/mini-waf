@@ -74,9 +74,16 @@ TOML may host other tables. Strategy: parse the whole file, then extract `[tiere
 - [x] Watch parent dir, filter file name
 - [x] Integration test (4 scenarios: swap, malformed, missing-section, live watcher)
 
-## Deviations from plan
-- Used `std::thread` + sync `mpsc` (mirroring existing `rules/hot_reload.rs`) instead of tokio task + `CancellationToken`. Plan suggested both; chose pattern reuse over the alternative. Drop the watcher to stop.
-- Made `reload()` `pub` (was `pub(crate)`) so the integration test can drive the chain synchronously without polling.
+## Status
+Complete. Merged in commit 685c22a.
+- `tier_config_watcher.rs` ✅ with `spawn()` and debounce
+- Watch parent dir + filter file name ✅
+- Integration test (4 scenarios) ✅
+- Pattern reuse from `rules/hot_reload.rs` ✅
+
+**Deviations from plan:**
+- Used `std::thread` + sync `mpsc` (pattern reuse) instead of tokio task + `CancellationToken`.
+- Exposed `reload()` as `pub` for integration test synchronous driving.
 
 ## Next
 Phase 5 — wire registry into request lifecycle.

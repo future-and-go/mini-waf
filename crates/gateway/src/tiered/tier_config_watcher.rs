@@ -125,7 +125,11 @@ pub fn reload(path: &Path, registry: &TierPolicyRegistry) {
     }
 }
 
-fn try_reload(path: &Path) -> anyhow::Result<TierSnapshot> {
+/// Read → parse → validate → compile a tier snapshot from `path`.
+///
+/// Used at startup (one-shot bootstrap) and by the watcher's reload loop.
+/// Errors surface to the caller; the watcher logs and keeps the previous snapshot.
+pub fn try_reload(path: &Path) -> anyhow::Result<TierSnapshot> {
     let raw = std::fs::read_to_string(path)?;
     let env: TomlEnvelope = toml::from_str(&raw)?;
     let cfg = env

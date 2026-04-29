@@ -76,6 +76,24 @@ pub struct TierPolicy {
     pub risk_thresholds: RiskThresholds,
 }
 
+impl Default for TierPolicy {
+    /// Boot-time fallback policy used when no `[tiered_protection]` table is
+    /// configured. Permissive: fail-open + no rate cap + no caching. Real
+    /// production traffic always classifies through `TierPolicyRegistry`.
+    fn default() -> Self {
+        Self {
+            fail_mode: FailMode::Open,
+            ddos_threshold_rps: u32::MAX,
+            cache_policy: CachePolicy::NoCache,
+            risk_thresholds: RiskThresholds {
+                allow: 30,
+                challenge: 70,
+                block: 90,
+            },
+        }
+    }
+}
+
 /// Single classifier rule. Multi-field = AND (all conditions must match).
 /// Higher `priority` wins on ties; sort happens in Phase 2 when compiling.
 #[derive(Clone, Debug, Deserialize, Serialize)]

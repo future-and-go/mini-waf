@@ -194,17 +194,17 @@ mod tests {
                 0 => {
                     r.path = Some(PathMatch::Prefix {
                         value: format!("/p{i}"),
-                    })
+                    });
                 }
                 1 => {
                     r.path = Some(PathMatch::Regex {
                         value: format!("^/r{i}/[0-9]+$"),
-                    })
+                    });
                 }
                 2 => {
                     r.host = Some(HostMatch::Suffix {
                         value: format!(".d{i}.com"),
-                    })
+                    });
                 }
                 _ => r.method = Some(vec![HttpMethod::Get, HttpMethod::Post]),
             }

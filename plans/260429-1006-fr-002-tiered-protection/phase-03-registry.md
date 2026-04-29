@@ -85,11 +85,12 @@ WHY `try_from_config` instead of `From`: building can fail (regex compile). `Fro
 - Calling `.load_full()` per field access — call once, hold the `Arc`, then index.
 - Mutating snapshot in place — defeats atomicity. Always replace.
 
-## Todo
-- [x] `tier_policy_registry.rs` with `TierSnapshot` + `TierPolicyRegistry`
-- [x] `try_from_config` constructor
-- [x] 4 unit tests incl. concurrent swap
-- [x] Add `arc-swap` dep if missing
+## Status
+Complete. Merged in commit ae70bee.
+- `tier_policy_registry.rs` ✅ with `TierSnapshot` + `TierPolicyRegistry`
+- `try_from_config` constructor ✅
+- 4+ unit tests incl. concurrent swap ✅
+- `arc-swap` dep added ✅
 
 ## Next
 Phase 4 — file watcher that calls `swap()` on TOML edits.

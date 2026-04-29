@@ -11,7 +11,11 @@ use std::sync::Arc;
 use bytes::Bytes;
 use pingora_proxy::Session;
 use uuid::Uuid;
+use waf_common::tier::{Tier, TierPolicy};
 use waf_common::{HostConfig, RequestCtx};
+
+use crate::tiered::tier_classifier::RequestParts;
+use crate::tiered::tier_policy_registry::TierPolicyRegistry;
 
 /// Builds a [`RequestCtx`] from a Pingora session and optional host config.
 pub struct RequestCtxBuilder<'a> {
@@ -19,6 +23,7 @@ pub struct RequestCtxBuilder<'a> {
     host_config: Option<Arc<HostConfig>>,
     trust_proxy_headers: bool,
     trusted_proxies: &'a [ipnet::IpNet],
+    tier_registry: Option<&'a TierPolicyRegistry>,
 }
 
 impl<'a> RequestCtxBuilder<'a> {
@@ -32,6 +37,7 @@ impl<'a> RequestCtxBuilder<'a> {
             host_config: None,
             trust_proxy_headers,
             trusted_proxies,
+            tier_registry: None,
         }
     }
 
@@ -39,6 +45,16 @@ impl<'a> RequestCtxBuilder<'a> {
     #[must_use]
     pub fn with_host_config(mut self, hc: Arc<HostConfig>) -> Self {
         self.host_config = Some(hc);
+        self
+    }
+
+    /// Attach the tier policy registry. When set, `build()` runs the tier
+    /// classifier against the request parts and populates `tier` /
+    /// `tier_policy` from the same snapshot. Without it, those fields fall
+    /// back to `Tier::CatchAll` + `RequestCtx::default_tier_policy()`.
+    #[must_use]
+    pub const fn with_tier_registry(mut self, registry: &'a TierPolicyRegistry) -> Self {
+        self.tier_registry = Some(registry);
         self
     }
 
@@ -81,18 +97,53 @@ impl<'a> RequestCtxBuilder<'a> {
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(0);
 
+        // Tier classification — runs against the same request parts the proxy
+        // sees. Done here (ctx_builder) so every downstream check reads tier
+        // from a single, already-set field and never has to re-derive it.
+        let path_str = uri.path().to_string();
+        let host_lc = host_for_classify(&headers, &host_config);
+        let req_header = self.session.req_header();
+        let parts = RequestParts {
+            host: &host_lc,
+            path: &path_str,
+            method: &req_header.method,
+            headers: &req_header.headers,
+        };
+        let (tier, tier_policy) = self
+            .tier_registry
+            .map_or_else(default_tier, |r| r.classify(&parts));
+
         build_from_parts(
             client_ip,
             peer_addr.port(),
             self.session.req_header().method.to_string(),
-            uri.path().to_string(),
+            path_str,
             uri.query().unwrap_or("").to_string(),
             headers,
             content_length,
             is_tls,
             host_config,
+            tier,
+            tier_policy,
         )
     }
+}
+
+fn default_tier() -> (Tier, Arc<TierPolicy>) {
+    (Tier::CatchAll, RequestCtx::default_tier_policy())
+}
+
+/// Pick the host string used for classification. Prefer the lower-cased
+/// `Host` header (what the rule authors think of as "host"); fall back to
+/// the resolved `HostConfig::host` when the header is absent.
+fn host_for_classify(headers: &HashMap<String, String>, hc: &Arc<HostConfig>) -> String {
+    headers.get("host").map_or_else(
+        || hc.host.to_ascii_lowercase(),
+        |h| {
+            let trimmed = h.split(':').next().unwrap_or(h);
+            trimmed.to_ascii_lowercase()
+        },
+    )
 }
 
 /// Pure function that assembles a [`RequestCtx`] from already-extracted parts.
@@ -109,6 +160,8 @@ pub fn build_from_parts(
     content_length: u64,
     is_tls: bool,
     host_config: Arc<HostConfig>,
+    tier: Tier,
+    tier_policy: Arc<TierPolicy>,
 ) -> RequestCtx {
     RequestCtx {
         req_id: Uuid::new_v4().to_string(),
@@ -125,6 +178,8 @@ pub fn build_from_parts(
         is_tls,
         host_config,
         geo: None,
+        tier,
+        tier_policy,
     }
 }
 
@@ -188,6 +243,8 @@ mod tests {
             0,
             true, // is_tls
             hc,
+            Tier::CatchAll,
+            RequestCtx::default_tier_policy(),
         );
         assert!(ctx.is_tls, "expected is_tls = true");
         assert_eq!(ctx.host, "example.com");
@@ -207,6 +264,8 @@ mod tests {
             5,
             false, // is_tls
             hc,
+            Tier::CatchAll,
+            RequestCtx::default_tier_policy(),
         );
         assert!(!ctx.is_tls, "expected is_tls = false");
         assert_eq!(ctx.content_length, 5);
@@ -226,6 +285,8 @@ mod tests {
             0,
             false,
             hc,
+            Tier::CatchAll,
+            RequestCtx::default_tier_policy(),
         );
         // host comes from HostConfig.host, not from a header
         assert_eq!(ctx.host, "fallback.example.com");
@@ -246,6 +307,8 @@ mod tests {
             0,
             false,
             hc,
+            Tier::CatchAll,
+            RequestCtx::default_tier_policy(),
         );
         assert_eq!(ctx.client_ip, ip);
         assert_eq!(ctx.client_port, 9999);
@@ -265,9 +328,44 @@ mod tests {
             0,
             true,
             hc,
+            Tier::CatchAll,
+            RequestCtx::default_tier_policy(),
         );
         assert_eq!(ctx.client_ip, ip);
         assert!(ctx.is_tls);
+    }
+
+    #[test]
+    fn test_default_tier_is_catchall_when_no_registry() {
+        // When no `TierPolicyRegistry` is wired in, build_from_parts must
+        // populate the boot fallback so downstream consumers can read tier
+        // unconditionally without an Option.
+        let hc = make_host_config("example.com", 80, false);
+        let ctx = build_from_parts(
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            0,
+            "GET".into(),
+            "/".into(),
+            String::new(),
+            make_headers(&[]),
+            0,
+            false,
+            hc,
+            Tier::CatchAll,
+            RequestCtx::default_tier_policy(),
+        );
+        assert_eq!(ctx.tier, Tier::CatchAll);
+    }
+
+    #[test]
+    fn test_host_for_classify_strips_port_and_lowercases() {
+        let hc = make_host_config("fallback.example.com", 80, false);
+        let h = make_headers(&[("host", "API.Example.Com:8443")]);
+        assert_eq!(host_for_classify(&h, &hc), "api.example.com");
+
+        // Falls back to host_config.host when no header present.
+        let empty = make_headers(&[]);
+        assert_eq!(host_for_classify(&empty, &hc), "fallback.example.com");
     }
 
     #[test]
@@ -284,6 +382,8 @@ mod tests {
             0,
             false,
             hc,
+            Tier::CatchAll,
+            RequestCtx::default_tier_policy(),
         );
         let ctx2 = build_from_parts(
             IpAddr::V4(Ipv4Addr::UNSPECIFIED),
@@ -295,6 +395,8 @@ mod tests {
             0,
             false,
             hc2,
+            Tier::CatchAll,
+            RequestCtx::default_tier_policy(),
         );
         assert_ne!(ctx1.req_id, ctx2.req_id, "req_id must be unique per request");
     }
