@@ -7,7 +7,6 @@ use clap::{Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
-use gateway::tiered::{DEFAULT_DEBOUNCE_MS, TierConfigWatcher, TierPolicyRegistry, try_reload as load_tier_snapshot};
 use gateway::{HostRouter, TunnelConfig, WafProxy};
 use waf_api::{AppState, start_api_server};
 use waf_common::config::{AppConfig, load_config};
@@ -1374,7 +1373,9 @@ async fn init_async(
 
     // WAF engine
     let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
+    engine.set_rules_dir(std::path::PathBuf::from(&config.rules.dir));
     engine.reload_rules().await?;
+    engine.start_file_watcher();
 
     // GeoIP service
     if config.geoip.enabled {

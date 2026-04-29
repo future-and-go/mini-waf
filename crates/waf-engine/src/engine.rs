@@ -1,5 +1,6 @@
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use waf_common::{RequestCtx, WafAction, WafDecision};
@@ -19,6 +20,7 @@ use crate::checks::{
 use crate::community::{CommunityChecker, CommunityReporter, RequestInfo};
 use crate::crowdsec::{AppSecClient, AppSecResult, CrowdSecChecker, appsec_to_detection};
 use crate::geoip::GeoIpService;
+use crate::rules::custom_file_loader::CustomRuleFileWatcher;
 use crate::rules::engine::{CustomRulesEngine, from_db_rule};
 
 /// WAF engine configuration
@@ -66,6 +68,13 @@ pub struct WafEngine {
     // ── `GeoIP` ────────────────────────────────────────────────────────────────
     /// `GeoIP` lookup service (set once after engine construction via `set_geoip`)
     geoip: OnceLock<Arc<GeoIpService>>,
+    // ── FR-003 file-based custom rules ────────────────────────────────────────
+    /// Root rules directory; `<rules_dir>/custom/*.yaml` is scanned during
+    /// `reload_rules`. Set once via `set_rules_dir`; falls back to `./rules`.
+    rules_dir: OnceLock<PathBuf>,
+    /// File watcher for `<rules_dir>/custom/*.yaml` (FR-003 hot-reload).
+    /// Set lazily via `start_file_watcher`; held to keep the OS watch alive.
+    file_watcher: OnceLock<CustomRuleFileWatcher>,
 }
 
 impl WafEngine {
@@ -109,6 +118,33 @@ impl WafEngine {
             community_checker: OnceLock::new(),
             community_reporter: OnceLock::new(),
             geoip: OnceLock::new(),
+            rules_dir: OnceLock::new(),
+            file_watcher: OnceLock::new(),
+        }
+    }
+
+    /// Set the root rules directory used by the file-based custom rule
+    /// loader (FR-003). Call before `reload_rules` to take effect.
+    pub fn set_rules_dir(&self, dir: PathBuf) {
+        let _ = self.rules_dir.set(dir);
+    }
+
+    /// Start the FR-003 hot-reload watcher on `<rules_dir>/custom/`.
+    ///
+    /// Must be called after `set_rules_dir` + initial `reload_rules`. Creation
+    /// failure (e.g. permission denied on the directory) is logged and the
+    /// service continues without hot-reload — rules already loaded keep
+    /// working, the operator just has to restart to pick up edits.
+    pub fn start_file_watcher(&self) {
+        if self.file_watcher.get().is_some() {
+            return;
+        }
+        let rules_dir = self.rules_dir.get().cloned().unwrap_or_else(|| PathBuf::from("rules"));
+        match CustomRuleFileWatcher::spawn(rules_dir, Arc::clone(&self.custom_rules)) {
+            Ok(w) => {
+                let _ = self.file_watcher.set(w);
+            }
+            Err(e) => warn!(error = %e, "Custom-rule file watcher failed to start; continuing without hot-reload"),
         }
     }
 
@@ -171,6 +207,24 @@ impl WafEngine {
             for (host_code, rules) in by_host {
                 self.custom_rules.load_host(&host_code, rules);
             }
+        }
+
+        // ── FR-003: file-based custom rules ──────────────────────────────────
+        // DB load above used `load_host` which replaces buckets — so any prior
+        // file rules are already cleared. Append fresh file rules with `add_rule`;
+        // they sort into the same priority-ordered bucket as DB rules.
+        let rules_dir = self.rules_dir.get().cloned().unwrap_or_else(|| PathBuf::from("rules"));
+        match crate::rules::custom_file_loader::load_dir(&rules_dir) {
+            Ok(file_rules) => {
+                let count = file_rules.len();
+                for rule in file_rules {
+                    self.custom_rules.add_file_rule(rule);
+                }
+                if count > 0 {
+                    info!("Loaded {count} file-based custom rules from {rules_dir:?}");
+                }
+            }
+            Err(e) => warn!("Custom rule file load failed: {e}"),
         }
 
         // Reload sensitive patterns

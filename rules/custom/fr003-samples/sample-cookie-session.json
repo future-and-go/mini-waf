@@ -1,0 +1,18 @@
+{
+  "_comment": "FR-003 AC-6 — cookie-by-name. Blocks requests carrying a known-bad session cookie value. Cookie names are case-sensitive (RFC 6265). Bare 'cookie' field would match the whole Cookie: header (legacy).",
+  "host_code": "*",
+  "name": "Block requests with revoked session cookie",
+  "priority": 50,
+  "enabled": true,
+  "condition_op": "and",
+  "conditions": [
+    {
+      "field": { "cookie": "session" },
+      "operator": "in_list",
+      "value": ["revoked-abc123", "revoked-def456", "revoked-ghi789"]
+    }
+  ],
+  "action": "block",
+  "action_status": 403,
+  "action_msg": "Session has been revoked"
+}

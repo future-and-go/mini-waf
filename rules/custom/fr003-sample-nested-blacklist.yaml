@@ -1,0 +1,31 @@
+# FR-003 AC-8 — nested AND/OR/Not via match_tree.
+# Blocks (suspicious IP CIDR OR known-bad session cookie) AND non-OPTIONS
+# request hitting an admin path. match_tree takes precedence over the
+# legacy flat `conditions` array.
+kind: custom_rule_v1
+id: fr003-sample-nested-blacklist
+host_code: "*"
+name: "Nested admin blacklist: bad-source AND admin-path"
+priority: 10
+enabled: true
+condition_op: and
+conditions: []
+match_tree:
+  and:
+    - or:
+        - field: ip
+          operator: cidr_match
+          value: "10.0.0.0/8"
+        - field: { cookie: session }
+          operator: eq
+          value: bad
+    - not:
+        field: method
+        operator: eq
+        value: OPTIONS
+    - field: path
+      operator: wildcard
+      value: "/api/*/admin"
+action: block
+action_status: 403
+action_msg: "Forbidden"
