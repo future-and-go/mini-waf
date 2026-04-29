@@ -7,7 +7,6 @@ use clap::{Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
-use gateway::tiered::{DEFAULT_DEBOUNCE_MS, TierConfigWatcher, TierPolicyRegistry, try_reload as load_tier_snapshot};
 use gateway::{HostRouter, TunnelConfig, WafProxy};
 use waf_api::{AppState, start_api_server};
 use waf_common::config::{AppConfig, load_config};
@@ -324,7 +323,7 @@ fn main() -> anyhow::Result<()> {
                 .block_on(run_seed_admin(&config))?;
         }
         Commands::Run => {
-            run_server(&config, &cli.config)?;
+            run_server(&config)?;
         }
         Commands::Crowdsec(sub) => {
             tokio::runtime::Builder::new_current_thread()
@@ -1157,38 +1156,8 @@ fn app_config_to_crowdsec(config: &AppConfig) -> CrowdSecConfig {
     }
 }
 
-/// FR-002: Build the tier policy registry from `[tiered_protection]` in the
-/// main TOML config. Returns `None` (with a warn log) when the table is
-/// absent or fails to parse — the gateway then runs in fallback `CatchAll`
-/// mode instead of crashing.
-fn try_init_tier_registry(config_path: &str) -> Option<(Arc<TierPolicyRegistry>, TierConfigWatcher)> {
-    use std::path::PathBuf;
-
-    let path = PathBuf::from(config_path);
-    let snap = match load_tier_snapshot(&path) {
-        Ok(s) => s,
-        Err(e) => {
-            // Missing `[tiered_protection]` table is the expected boot path
-            // before operators opt in — log at info, not warn, to avoid noise.
-            tracing::info!(path = %path.display(), error = %e, "tier-config: not configured; using CatchAll fallback");
-            return None;
-        }
-    };
-    let registry = Arc::new(TierPolicyRegistry::new(snap));
-    match TierConfigWatcher::spawn(path.clone(), Arc::clone(&registry), DEFAULT_DEBOUNCE_MS) {
-        Ok(watcher) => {
-            info!(path = %path.display(), "tier-config: registry initialised, hot-reload watcher active");
-            Some((registry, watcher))
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "tier-config: watcher spawn failed; falling back to CatchAll");
-            None
-        }
-    }
-}
-
 /// Start the full server: async init → API server thread → Pingora proxy
-fn run_server(config: &AppConfig, config_path: &str) -> anyhow::Result<()> {
+fn run_server(config: &AppConfig) -> anyhow::Result<()> {
     use pingora_core::server::Server;
 
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
@@ -1328,17 +1297,7 @@ fn run_server(config: &AppConfig, config_path: &str) -> anyhow::Result<()> {
     let mut server = Server::new(None)?;
     server.bootstrap();
 
-    // FR-002: load the tier policy registry + spawn its hot-reload watcher.
-    // `_tier_watcher` keeps the notify watcher alive for the process lifetime.
-    let (tier_registry, _tier_watcher) = match try_init_tier_registry(config_path) {
-        Some((reg, w)) => (Some(reg), Some(w)),
-        None => (None, None),
-    };
-
     let mut proxy = WafProxy::new(router, engine);
-    if let Some(reg) = tier_registry.as_ref() {
-        proxy.with_tier_registry(Arc::clone(reg));
-    }
     // Share counters with AppState so the /api/stats/overview endpoint reflects live traffic
     proxy.request_counter = Arc::clone(&api_state.request_counter);
     proxy.blocked_counter = Arc::clone(&api_state.blocked_counter);
@@ -1414,7 +1373,9 @@ async fn init_async(
 
     // WAF engine
     let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
+    engine.set_rules_dir(std::path::PathBuf::from(&config.rules.dir));
     engine.reload_rules().await?;
+    engine.start_file_watcher();
 
     // GeoIP service
     if config.geoip.enabled {

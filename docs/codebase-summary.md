@@ -54,7 +54,7 @@ prx-waf/
 │   │   │   ├── xss.rs         # XSS (libinjectionrs + regex)
 │   │   │   ├── rce.rs         # Command injection
 │   │   │   ├── traversal.rs   # Directory traversal
-│   │   │   ├── custom.rs      # Custom rules (Rhai + JSON DSL)
+│   │   │   ├── custom.rs      # Custom rules (Rhai + JSON DSL; FR-003 Composite/Strategy compiled tree — see docs/custom-rules-syntax.md)
 │   │   │   ├── owasp.rs       # OWASP CRS rules
 │   │   │   ├── sensitive.rs   # Sensitive data (Aho-Corasick)
 │   │   │   ├── hotlink.rs     # Anti-hotlink (Referer)
@@ -169,7 +169,10 @@ prx-waf/
 │   ├── modsecurity/     # 4 ModSecurity patterns
 │   ├── bot-detection/   # 3 bot detection rules
 │   ├── geoip.yaml       # Geo-blocking template
-│   └── custom.yaml      # Custom rule template
+│   ├── custom.yaml      # Custom rule template
+│   └── custom/          # Site-specific rules (registry YAML + FR-003 file-loaded
+│                        #   *.yaml carrying `kind: custom_rule_v1`; auto-loaded
+│                        #   at startup with hot-reload — see custom-rules-syntax.md)
 │
 ├── web/admin-ui/        # Vue 3 SPA
 │   ├── src/
