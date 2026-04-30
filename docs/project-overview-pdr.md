@@ -65,8 +65,23 @@ Organizations deploying web applications face evolving threats:
 - Anti-hotlink (Referer validation)
 - CrowdSec bouncer + AppSec integration
 
+**F1.1: Tiered Protection (FR-002)** ✓
+- Per-request classification to Critical / High / Medium / CatchAll tiers
+- Priority-sorted classifier (path-exact/prefix/regex, host-suffix, method, headers)
+- Per-tier policy bus: fail_mode, ddos_threshold_rps, cache_policy, risk_thresholds
+- Hot-reload via `ArcSwap` (lock-free, zero-copy on swap)
+- Downstream consumers: FR-005 (DDoS), FR-006 (challenge), FR-009 (cache), FR-027 (TBD)
+
+**F1.2: Access Lists (FR-008)** ✓
+- Phase-0 gate: per-tier IP whitelist + blacklist (Patricia trie, dual-stack v4/v6) + per-tier Host whitelist
+- Decision order: Host gate → IP blacklist → IP whitelist (deny wins)
+- Per-tier dispatch on `full_bypass` vs `blacklist_only` strategy
+- Hot-reload from `rules/access-lists.yaml`; soft-warn ≥50k, hard-reject ≥500k entries
+- Audit fields: `access_decision`, `access_reason`, `access_match` stamped on every request
+
 **F3: Rule Management**
 - YAML, ModSecurity, JSON rule formats
+- **File-based custom rules (FR-003)**: `rules/custom/*.yaml` auto-loaded with `kind: custom_rule_v1`, per-file error isolation, 500ms debounce
 - Hot-reload without downtime
 - Version tracking and incremental sync (cluster)
 - Remote source loading (auto-update)
@@ -87,6 +102,7 @@ Organizations deploying web applications face evolving threats:
 - Rule management (enable/disable, CRUD)
 - Certificate management (Let's Encrypt, custom)
 - Custom rules (Rhai/JSON editor)
+- **Settings page**: Panel-Config API for operational policy (response filtering, trusted bypass, rate limits, auto-block)
 - Security event stream (real-time WebSocket)
 - Cluster topology view
 - Audit logging (all admin actions)
