@@ -929,3 +929,40 @@ All events logged via `tracing` crate:
 **Cluster Split**: Quorum-based split-brain prevention (no decision if <N/2+1 nodes)
 
 See [Deployment Guide](./deployment-guide.md) for operational runbooks.
+
+---
+
+## Outbound Protection
+
+### FR-034 — Sensitive Field Redaction (Response JSON Bodies)
+
+Per-host JSON field redactor that masks values whose KEYS are in a configurable
+catalog. Field-name catalogs (PCI / banking / identity / secrets / PII / PHI)
+are hard-coded in `gateway::filters::response_json_field_redactor`; per-host
+activation via `HostConfig::redact_*` fields. Operators extend the catalog
+with `redact_extra_fields[]`.
+
+Hook: Pingora `response_body_filter`, dispatched directly from
+`WafProxy::response_body_filter`. Buffers chunks until `end_of_stream` or
+`redact_max_bytes` (default 256 KiB), then parses with `serde_json`, walks
+the value tree, replaces matched values with `redact_mask_token` (default
+`***REDACTED***`), re-serialises, and emits the full body.
+
+**Composition with AC-17**: FR-034 runs first; AC-17 internal-ref masker
+then runs over the redacted output. While FR-034 is buffering, `*body` is
+set to `None` so AC-17 sees nothing.
+
+**Skip conditions**: non-identity `Content-Encoding`, non-JSON
+`Content-Type`, no-op redactor (no families on, no extras). Failure mode is
+fail-open with `tracing::warn!`. Defaults all OFF — zero behaviour change
+for hosts that don't opt in.
+
+References: PCI-DSS Req 3.4, HIPAA §164.514, OWASP API3:2023, CWE-200.
+Plan: `plans/260428-1357-GH-034-sensitive-field-redaction/`.
+
+### AC-17 — Internal-Reference Body Masking
+
+Sibling filter to FR-034. Byte-level regex value masking driven by
+`HostConfig::{internal_patterns, mask_token, body_mask_max_bytes}`. Streams
+chunk-by-chunk; suitable for masking internal hostnames, IPs, build
+identifiers in response bodies.
