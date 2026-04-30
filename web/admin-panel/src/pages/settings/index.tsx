@@ -30,7 +30,7 @@ import {
 } from "@ant-design/icons";
 import { useCustom, useCustomMutation } from "@refinedev/core";
 import type { HttpError } from "@refinedev/core";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { SystemStatus } from "../../types/api";
 import { httpClient } from "../../utils/axios";
@@ -131,6 +131,7 @@ export const SettingsPage: React.FC = () => {
   const suppressDirtyRef = useRef(false);
   const lastRevRef = useRef<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [panelUnavailable, setPanelUnavailable] = useState<string | null>(null);
 
@@ -189,13 +190,17 @@ export const SettingsPage: React.FC = () => {
   };
 
   // Apply server values to the form while suppressing onValuesChange so the
-  // programmatic update doesn't flip the dirty flag.
-  const applyToForm = (cfg: WafPanelConfig) => {
-    suppressDirtyRef.current = true;
-    form.setFieldsValue(cfg);
-    // schedule reset after AntD's internal change dispatch
-    queueMicrotask(() => { suppressDirtyRef.current = false; });
-  };
+  // programmatic update doesn't flip the dirty flag. Memoized so it can be
+  // referenced from useEffect deps without churn.
+  const applyToForm = useCallback(
+    (cfg: WafPanelConfig) => {
+      suppressDirtyRef.current = true;
+      form.setFieldsValue(cfg);
+      // reset after AntD's internal change dispatch
+      queueMicrotask(() => { suppressDirtyRef.current = false; });
+    },
+    [form],
+  );
 
   useEffect(() => {
     if (!envelope?.config) return;
@@ -209,18 +214,23 @@ export const SettingsPage: React.FC = () => {
       lastRevRef.current = envelope.revision;
       message.info(t("settings.panel.syncedFromDisk"));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [envelope, form, message, t]);
+  }, [envelope, applyToForm, message, t]);
 
   const onDiscard = async () => {
-    // Refetch first so we discard against the most recent disk state, not stale cache.
-    const r = await panelQuery.query.refetch();
-    const fresh = r.data?.data as PanelConfigEnvelope | undefined;
-    if (fresh?.config) {
-      applyToForm(fresh.config);
-      lastRevRef.current = fresh.revision;
+    setDiscarding(true);
+    try {
+      // Refetch first so we discard against the most recent disk state, not stale cache.
+      const r = await panelQuery.query.refetch();
+      // r.data = react-query result wrapper; .data = our API envelope field.
+      const fresh = r.data?.data as PanelConfigEnvelope | undefined;
+      if (fresh?.config) {
+        applyToForm(fresh.config);
+        lastRevRef.current = fresh.revision;
+      }
+      markClean();
+    } finally {
+      setDiscarding(false);
     }
-    markClean();
   };
 
   const onSavePanel = async () => {
@@ -362,7 +372,12 @@ export const SettingsPage: React.FC = () => {
                       {t("common.refresh")}
                     </Button>
                     {isDirty && (
-                      <Button size="small" onClick={onDiscard}>
+                      <Button
+                        size="small"
+                        onClick={() => void onDiscard()}
+                        loading={discarding}
+                        disabled={saving}
+                      >
                         {t("settings.panel.discard")}
                       </Button>
                     )}
@@ -371,6 +386,7 @@ export const SettingsPage: React.FC = () => {
                       size="small"
                       icon={<SaveOutlined />}
                       loading={saving}
+                      disabled={discarding}
                       onClick={() => void onSavePanel()}
                     >
                       {t("common.save")}
@@ -604,12 +620,19 @@ export const SettingsPage: React.FC = () => {
             <Row justify="end">
               <Space>
                 {isDirty && (
-                  <Button onClick={onDiscard}>{t("settings.panel.discard")}</Button>
+                  <Button
+                    onClick={() => void onDiscard()}
+                    loading={discarding}
+                    disabled={saving}
+                  >
+                    {t("settings.panel.discard")}
+                  </Button>
                 )}
                 <Button
                   type="primary"
                   icon={<SaveOutlined />}
                   loading={saving}
+                  disabled={discarding}
                   onClick={() => void onSavePanel()}
                 >
                   {t("common.save")}

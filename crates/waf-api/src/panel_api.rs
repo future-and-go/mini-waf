@@ -10,9 +10,12 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 async fn panel_revision_secs(path: &std::path::Path) -> Result<u64, ApiError> {
+    // Path validity was already enforced by the caller; failures here are
+    // server-side IO problems (file removed under us, permission glitch, …),
+    // so report them as Internal rather than BadRequest.
     let meta = tokio::fs::metadata(path)
         .await
-        .map_err(|e| ApiError::BadRequest(format!("panel config metadata: {e}")))?;
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("panel config metadata: {e}")))?;
     Ok(meta
         .modified()
         .ok()
@@ -43,10 +46,13 @@ pub async fn get_panel_config(State(state): State<Arc<AppState>>) -> ApiResult<J
     })?;
 
     let revision = panel_revision_secs(path).await?;
+    // Read failure here is server-side IO (file disappeared / permission).
     let raw = tokio::fs::read_to_string(path)
         .await
-        .map_err(|e| ApiError::BadRequest(format!("cannot read panel config file: {e}")))?;
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("read panel config file: {e}")))?;
 
+    // Parse/validation errors reflect bad on-disk content; surface as 400 so
+    // the operator sees the actual TOML mistake.
     let cfg = WafPanelConfig::from_toml_str(&raw).map_err(|e| ApiError::BadRequest(format!("{e}")))?;
 
     Ok(Json(panel_json_response(&cfg, revision, path, state.main_config_file.as_deref())))
