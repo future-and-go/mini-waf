@@ -1,0 +1,41 @@
+shadow_mode = false
+risk_allow = 51
+risk_challenge = 74
+risk_block = 75
+challenge_type = "js_challenge"
+honeypot_paths = [
+    "/.env",
+    "/.git/config",
+    "/wp-admin/install.php",
+    "/phpmyadmin",
+    "/.aws/credentials",
+    "/actuator/env",
+]
+
+[response_filtering]
+block_stack_traces = true
+json_redact_fields = [
+    "password",
+    "token",
+    "secret",
+    "api_key",
+]
+
+[trusted_waf_bypass]
+cidrs = [
+    "127.0.0.1/32",
+    "::1/128",
+]
+
+[rate_limits]
+default_rps = 100
+burst = 200
+session_expiry_secs = 3600
+global_rps = 0
+request_timeout_secs = 30
+fail_open = false
+
+[auto_block]
+enabled = false
+min_events = 5
+window_secs = 60
