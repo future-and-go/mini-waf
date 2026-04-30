@@ -8,6 +8,7 @@ use waf_engine::device_fp::DeviceIdentity;
 use waf_engine::relay::ClientIdentity;
 use waf_engine::risk::{ChallengeIssuer, ChallengeVerifier};
 
+use crate::filters::BodyRedactState;
 use crate::filters::response_body_decompressor::DecoderChain;
 use crate::protocol::Protocol;
 
@@ -114,6 +115,11 @@ pub struct GatewayCtx {
     pub body_mask: BodyMaskState,
     /// FR-033: streaming state for the response body content scanner.
     pub body_scan: BodyScanState,
+    /// FR-034: streaming state for the JSON field redactor. Composes with
+    /// `body_mask` — when both are enabled, `body_redact` runs first and the
+    /// AC-17 mask runs over the redacted output (see
+    /// `proxy::WafProxy::response_body_filter`).
+    pub body_redact: BodyRedactState,
     /// Phase-05: wire protocol detected at session start. Tagged once in
     /// `request_filter` and consumed for per-protocol observability.
     pub protocol: Protocol,
