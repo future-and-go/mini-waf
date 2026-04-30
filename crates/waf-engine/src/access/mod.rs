@@ -8,8 +8,10 @@ pub mod config;
 pub mod evaluator;
 pub mod host_gate;
 pub mod ip_table;
+pub mod reload;
 
 pub use config::{AccessConfig, AccessLists, WhitelistMode};
 pub use evaluator::{AccessDecision, AccessRequestView, BlockReason, evaluate};
 pub use host_gate::HostGate;
 pub use ip_table::IpCidrTable;
+pub use reload::{AccessReloader, DEFAULT_DEBOUNCE_MS, WatcherError};
