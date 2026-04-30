@@ -5,7 +5,7 @@
 - Crate docs: https://docs.rs/ip_network_table
 
 ## Overview
-**Priority:** P0 · **Status:** pending · **Effort:** 0.5 d
+**Priority:** P0 · **Status:** complete · **Effort:** 0.5 d
 
 Implement `IpCidrTable` — a thin **Adapter** over `ip_network_table::IpNetworkTable<()>`. Native dual-stack v4 + v6, longest-prefix wins.
 
@@ -104,12 +104,12 @@ Single IP (`192.168.1.5`) is normalised to a `/32` (v4) or `/128` (v6).
 4. **Compile-gate**: `cargo check -p waf-engine`.
 
 ## Todo List
-- [ ] Create `ip_table.rs` (≤ 100 LoC)
-- [ ] Implement `IpCidrTable::{new, insert_str, contains, len, is_empty}`
-- [ ] Implement `parse_cidr_or_ip` helper (single-IP + CIDR + dual-stack)
-- [ ] Extend `AccessLists` to own two `IpCidrTable`s
-- [ ] Build them in `AccessLists::from_yaml_str`
-- [ ] Unit tests: v4 hit, v6 hit, longest-prefix wins, miss, single-IP insert, malformed string returns error
+- [x] Create `ip_table.rs` (≤ 100 LoC)
+- [x] Implement `IpCidrTable::{new, insert_str, contains, len, is_empty}`
+- [x] Implement `parse_cidr_or_ip` helper (single-IP + CIDR + dual-stack)
+- [x] Extend `AccessLists` to own two `IpCidrTable`s
+- [x] Build them in `AccessLists::from_yaml_str`
+- [x] Unit tests: v4 hit, v6 hit, longest-prefix wins, miss, single-IP insert, malformed string returns error
 
 ## Success Criteria
 - 6 unit tests pass:
