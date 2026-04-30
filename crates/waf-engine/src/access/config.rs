@@ -15,6 +15,7 @@ use ipnet::IpNet;
 use serde::Deserialize;
 use waf_common::tier::Tier;
 
+use crate::access::host_gate::HostGate;
 use crate::access::ip_table::IpCidrTable;
 
 /// Hard cap — parser rejects YAML beyond this entry count to bound memory.
@@ -132,6 +133,7 @@ pub struct AccessLists {
     config: AccessConfig,
     ip_whitelist: IpCidrTable,
     ip_blacklist: IpCidrTable,
+    host_gate: HostGate,
 }
 
 impl AccessLists {
@@ -149,6 +151,7 @@ impl AccessLists {
             },
             ip_whitelist: IpCidrTable::new(),
             ip_blacklist: IpCidrTable::new(),
+            host_gate: HostGate::new(),
         })
     }
 
@@ -171,10 +174,18 @@ impl AccessLists {
                 .with_context(|| format!("ip_blacklist entry {entry:?}"))?;
         }
 
+        let mut host_gate = HostGate::new();
+        for (tier, hosts) in &config.host_whitelist {
+            for host in hosts {
+                host_gate.insert(*tier, host);
+            }
+        }
+
         Ok(Arc::new(Self {
             config,
             ip_whitelist,
             ip_blacklist,
+            host_gate,
         }))
     }
 
@@ -214,6 +225,12 @@ impl AccessLists {
     #[must_use]
     pub const fn ip_blacklist(&self) -> &IpCidrTable {
         &self.ip_blacklist
+    }
+
+    /// Pre-built per-tier Host allowlist. Hot-path lookup in phase-04.
+    #[must_use]
+    pub const fn host_gate(&self) -> &HostGate {
+        &self.host_gate
     }
 }
 
