@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -20,6 +21,7 @@ use pingora_proxy::{FailToProxy, ProxyHttp, Session};
 
 use waf_common::HostConfig;
 use waf_engine::WafEngine;
+use waf_engine::access::AccessLists;
 
 use crate::tiered::TierPolicyRegistry;
 
@@ -31,7 +33,7 @@ use crate::filters::{
     RequestHostPolicyFilter, RequestRealIpFilter, RequestXffFilter, ResponseHeaderBlocklistFilter,
     ResponseLocationRewriter, ResponseServerPolicyFilter, ResponseViaStripFilter, apply_body_mask_chunk,
 };
-use crate::pipeline::{FilterCtx, RequestFilterChain, ResponseFilterChain};
+use crate::pipeline::{AccessGateOutcome, AccessPhaseGate, FilterCtx, RequestFilterChain, ResponseFilterChain};
 use crate::protocol::{ProtoCounters, detect_from_session};
 use crate::proxy_waf_response::{write_waf_body_decision, write_waf_decision};
 use crate::router::HostRouter;
@@ -61,6 +63,9 @@ pub struct WafProxy {
     /// FR-002: tier policy registry. When `None`, every request defaults to
     /// `Tier::CatchAll` + permissive policy (boot-time safety).
     pub tier_registry: Option<Arc<TierPolicyRegistry>>,
+    /// FR-008 phase-05: Phase-0 access-list gate. Optional — `None` = every
+    /// request continues unconditionally (no whitelist/blacklist enforcement).
+    pub access_lists: Option<Arc<AccessPhaseGate>>,
 }
 
 impl WafProxy {
@@ -78,6 +83,7 @@ impl WafProxy {
             response_chain: Arc::new(build_response_chain()),
             body_mask_cache: Arc::new(DashMap::new()),
             tier_registry: None,
+            access_lists: None,
         }
     }
 
@@ -86,6 +92,13 @@ impl WafProxy {
     /// the boot-time `CatchAll` fallback.
     pub fn with_tier_registry(&mut self, registry: Arc<TierPolicyRegistry>) {
         self.tier_registry = Some(registry);
+    }
+
+    /// Inject the FR-008 Phase-0 access-list gate. The proxy stores a hot
+    /// snapshot reference; phase-06 watcher will swap the `ArcSwap` content on
+    /// file change without restart. When unset, no access-list enforcement runs.
+    pub fn with_access_lists(&mut self, lists: Arc<ArcSwap<AccessLists>>) {
+        self.access_lists = Some(Arc::new(AccessPhaseGate::new(lists)));
     }
 
     /// Resolve (and lazily compile) the mask config for a given host.
@@ -271,6 +284,38 @@ impl ProxyHttp for WafProxy {
             return Ok(true);
         }
 
+        // FR-008 phase-05 — Phase-0 access-list gate runs *before* the WAF
+        // engine. peer_ip is the immediate TCP peer (XFF/real-ip rewrites are
+        // upstream-bound and run later in upstream_request_filter).
+        if let Some(gate) = &self.access_lists {
+            let peer_ip = session
+                .client_addr()
+                .and_then(|a| a.as_inet())
+                .map_or(request_ctx.client_ip, std::net::SocketAddr::ip);
+            match gate.evaluate(&request_ctx.host, peer_ip, request_ctx.tier) {
+                AccessGateOutcome::Continue => {}
+                AccessGateOutcome::Bypass => {
+                    ctx.access_bypass = true;
+                }
+                AccessGateOutcome::Block(status) => {
+                    self.blocked_counter.fetch_add(1, Ordering::Relaxed);
+                    let accept = session
+                        .get_header("accept")
+                        .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+                        .map(str::to_string);
+                    let (headers, body) = ErrorPageFactory::render(status, accept.as_deref())?;
+                    session.write_response_header(Box::new(headers), false).await?;
+                    session.write_response_body(Some(body), true).await?;
+                    return Ok(true);
+                }
+            }
+        }
+
+        // Whitelist full-bypass skips the WAF engine entirely (D6 fast path).
+        if ctx.access_bypass {
+            return Ok(false);
+        }
+
         let decision = self.engine.inspect(&mut request_ctx).await;
         write_waf_decision(session, &decision, &request_ctx, &self.blocked_counter).await
     }
@@ -282,7 +327,7 @@ impl ProxyHttp for WafProxy {
         end_of_stream: bool,
         ctx: &mut GatewayCtx,
     ) -> pingora_core::Result<()> {
-        if ctx.body_inspected {
+        if ctx.body_inspected || ctx.access_bypass {
             return Ok(());
         }
         if let Some(chunk) = body {

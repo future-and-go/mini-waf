@@ -145,14 +145,15 @@ Downstream filters that respect bypass (rule engine, risk scorer) early-return w
    - Integration (`crates/gateway/tests/access_e2e_block.rs`): full Pingora session, blacklisted IP → 403 + audit log line.
 
 ## Todo List
-- [ ] Add `access_bypass: AtomicBool` to `RequestCtx` (defaults `false`)
-- [ ] Create `pipeline/access_phase.rs` (`AccessPhaseFilter`)
-- [ ] Add `Proxy::with_access_lists` + storage field
-- [ ] Register filter at chain index 0 when injected
-- [ ] Confirm `Err(HTTPStatus(403))` flows through to `proxy_waf_response` 403 page
-- [ ] Unit test each match arm (≥4 tests)
+- [x] ~~Add `access_bypass: AtomicBool` to `RequestCtx`~~ **Deviated:** put `access_bypass: bool` on `GatewayCtx` instead. `RequestCtx` has 25+ struct-literal construction sites in `waf-engine` tests/benches; the bypass flag only needs to flow inside the gateway crate (decides whether to call `engine.inspect`). Smaller, surgical diff. No `AtomicBool` needed because `GatewayCtx` is `&mut` in every Pingora callback.
+- [x] Create `pipeline/access_phase.rs` (`AccessPhaseGate` + `AccessGateOutcome`) — 10 unit tests pass
+- [x] Add `WafProxy::with_access_lists` + `access_lists: Option<Arc<AccessPhaseGate>>` field
+- [x] ~~Register filter at chain index 0 when injected~~ **Deviated:** `RequestFilterChain` runs in `upstream_request_filter` (post-WAF). Phase 0 must run *before* `engine.inspect`, so the gate is invoked inline at the top of `WafProxy::request_filter` instead. Same architectural intent ("before any other filter pays cost"), correct lifecycle hook.
+- [x] Confirm 403 path: gate calls `ErrorPageFactory::render(status, accept)` directly (mirrors the existing fail-closed 503 path at proxy.rs ~line 263) — neutral page, no Pingora fingerprint, no double-emission
+- [x] Unit tests: 10 tests covering all match arms + hot-swap (`pipeline::access_phase::tests`)
 - [ ] Stub e2e — full integration in phase-07
-- [ ] `cargo check --workspace` clean
+- [x] `cargo check --workspace` clean
+- [x] `cargo clippy -p gateway --all-targets -- -D warnings` clean
 
 ## Success Criteria
 - `cargo test -p gateway pipeline::access_phase` ≥ 4 tests pass.
