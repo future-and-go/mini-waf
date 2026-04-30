@@ -34,6 +34,7 @@ use crate::middleware::require_auth;
 use crate::notifications::{
     create_notification, delete_notification, list_notifications, notification_log, test_notification,
 };
+use crate::panel_api::{get_panel_config, put_panel_config};
 use crate::plugins::{delete_plugin, disable_plugin, enable_plugin, list_plugins, upload_plugin};
 use crate::rules_api::{get_rule_registry, import_rules, reload_rule_registry, toggle_rule};
 use crate::security::{admin_ip_check_middleware, list_audit_log, rate_limit_middleware, security_headers_middleware};
@@ -103,6 +104,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/security-events", get(list_security_events))
         // System status
         .route("/api/status", get(get_status))
+        // Panel runtime TOML (admin ↔ disk)
+        .route("/api/panel-config", get(get_panel_config).put(put_panel_config))
         // Rule reload
         .route("/api/reload", post(reload_rules))
         // SQLi scan config hot-reload

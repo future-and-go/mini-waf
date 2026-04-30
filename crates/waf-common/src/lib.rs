@@ -1,5 +1,6 @@
 pub mod config;
 pub mod crypto;
+pub mod panel_config;
 pub mod tier;
 pub mod tier_match;
 pub mod types;
