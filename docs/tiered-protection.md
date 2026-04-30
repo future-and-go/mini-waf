@@ -211,3 +211,9 @@ Note: `cache_policy` is not a `Copy` type — clone or match by reference.
 6. Announce the new field in `../../CHANGELOG.md`.
 
 **Do not** add FR-specific fields to `TierPolicy` directly — keep it a shared policy struct. For FR-private state, carry it in the FR's own config and look up by `ctx.tier`.
+
+---
+
+## 10. Per-Tier Whitelist Mode (FR-008)
+
+The Phase-0 access-list gate (FR-008) consumes `ctx.tier` to dispatch on a per-tier `whitelist_mode` flag (`full_bypass` vs `blacklist_only`) when an IP whitelist hit occurs. Configuration lives in `rules/access-lists.yaml`, separate from the tier TOML — see [`access-lists.md`](./access-lists.md#4-per-tier-whitelist-mode-strategy).
