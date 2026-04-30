@@ -32,7 +32,7 @@ default_rps = 100
 burst = 200
 session_expiry_secs = 3600
 global_rps = 0
-request_timeout_secs = 35
+request_timeout_secs = 30
 fail_open = false
 
 [auto_block]

@@ -126,6 +126,9 @@ export const SettingsPage: React.FC = () => {
   const { message } = App.useApp();
   const [form] = Form.useForm<WafPanelConfig>();
   const dirtyRef = useRef(false);
+  // Suppress onValuesChange while we apply server data programmatically
+  // (some AntD versions still fire onValuesChange on setFieldsValue).
+  const suppressDirtyRef = useRef(false);
   const lastRevRef = useRef<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -173,27 +176,50 @@ export const SettingsPage: React.FC = () => {
     }
   }, [panelQuery.query.error, t]);
 
+  const envelope = panelQuery.result?.data as PanelConfigEnvelope | undefined;
+
+  const markDirty = () => {
+    if (suppressDirtyRef.current) return;
+    dirtyRef.current = true;
+    setIsDirty(true);
+  };
+  const markClean = () => {
+    dirtyRef.current = false;
+    setIsDirty(false);
+  };
+
+  // Apply server values to the form while suppressing onValuesChange so the
+  // programmatic update doesn't flip the dirty flag.
+  const applyToForm = (cfg: WafPanelConfig) => {
+    suppressDirtyRef.current = true;
+    form.setFieldsValue(cfg);
+    // schedule reset after AntD's internal change dispatch
+    queueMicrotask(() => { suppressDirtyRef.current = false; });
+  };
+
   useEffect(() => {
-    const envelope = panelQuery.result?.data as PanelConfigEnvelope | undefined;
     if (!envelope?.config) return;
     if (lastRevRef.current === null) {
-      form.setFieldsValue(envelope.config);
+      applyToForm(envelope.config);
       lastRevRef.current = envelope.revision;
       return;
     }
     if (envelope.revision !== lastRevRef.current && !dirtyRef.current) {
-      form.setFieldsValue(envelope.config);
+      applyToForm(envelope.config);
       lastRevRef.current = envelope.revision;
       message.info(t("settings.panel.syncedFromDisk"));
     }
-  }, [panelQuery.result?.data, form, message, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [envelope, form, message, t]);
 
-  const markDirty = () => { dirtyRef.current = true; setIsDirty(true); };
-  const markClean = () => { dirtyRef.current = false; setIsDirty(false); };
-
-  const onDiscard = () => {
-    const envelope = panelQuery.result?.data as PanelConfigEnvelope | undefined;
-    if (envelope?.config) form.setFieldsValue(envelope.config);
+  const onDiscard = async () => {
+    // Refetch first so we discard against the most recent disk state, not stale cache.
+    const r = await panelQuery.query.refetch();
+    const fresh = r.data?.data as PanelConfigEnvelope | undefined;
+    if (fresh?.config) {
+      applyToForm(fresh.config);
+      lastRevRef.current = fresh.revision;
+    }
     markClean();
   };
 
@@ -223,10 +249,20 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const envelope = panelQuery.result?.data as PanelConfigEnvelope | undefined;
   const riskAllow = Form.useWatch("risk_allow", form) ?? envelope?.config?.risk_allow ?? 51;
   const riskChallenge = Form.useWatch("risk_challenge", form) ?? envelope?.config?.risk_challenge ?? 74;
   const riskBlock = Form.useWatch("risk_block", form) ?? envelope?.config?.risk_block ?? 75;
+
+  // Cross-field revalidate when sliders change so the InputNumber/risk_block
+  // shows its error immediately (without waiting for submit).
+  useEffect(() => {
+    if (form.isFieldTouched("risk_block")) {
+      form.validateFields(["risk_block"]).catch(() => {});
+    }
+    if (form.isFieldTouched("risk_challenge")) {
+      form.validateFields(["risk_challenge"]).catch(() => {});
+    }
+  }, [riskAllow, riskChallenge, form]);
 
   const ipsCount = (status?.rules?.allow_ips ?? 0) + (status?.rules?.block_ips ?? 0);
   const urlsCount = (status?.rules?.allow_urls ?? 0) + (status?.rules?.block_urls ?? 0);
