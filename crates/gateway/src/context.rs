@@ -3,6 +3,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use waf_common::{HostConfig, RequestCtx};
 
+use crate::filters::BodyRedactState;
 use crate::protocol::Protocol;
 
 /// Maximum request body bytes buffered for WAF inspection (64 KiB).
@@ -25,6 +26,11 @@ pub struct GatewayCtx {
     pub body_inspected: bool,
     /// AC-17: streaming state for the response body internal-ref masker.
     pub body_mask: BodyMaskState,
+    /// FR-034: streaming state for the JSON field redactor. Composes with
+    /// `body_mask` — when both are enabled, `body_redact` runs first and the
+    /// AC-17 mask runs over the redacted output (see
+    /// `proxy::WafProxy::response_body_filter`).
+    pub body_redact: BodyRedactState,
     /// Phase-05: wire protocol detected at session start. Tagged once in
     /// `request_filter` and consumed for per-protocol observability.
     pub protocol: Protocol,

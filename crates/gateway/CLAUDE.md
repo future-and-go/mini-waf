@@ -30,6 +30,27 @@ Scope limits (FR-001):
 - Patterns that fail to compile are dropped (fail-open). A bad regex must
   never 502 a host.
 
+## Response body sensitive-field redaction (FR-034)
+
+`response_body_filter` also runs a JSON field-name redactor (see
+`filters/response_json_field_redactor.rs`) per host. Active families and
+extras come from `HostConfig::{redact_pci, redact_banking, redact_identity,
+redact_secrets, redact_pii, redact_phi, redact_extra_fields, redact_mask_token,
+redact_max_bytes, redact_case_insensitive}`.
+
+Composes with AC-17: FR-034 runs first, buffering chunks until EOS (or
+`redact_max_bytes`, default 256 KiB), parsing, redacting, then emitting the
+full body. AC-17 then runs over the FR-034 output. While FR-034 is buffering,
+`*body` is set to `None` so AC-17 sees nothing.
+
+Skip conditions match AC-17 (non-identity `Content-Encoding`) plus a JSON
+content-type gate (only `application/json` and `application/*+json`;
+`text/event-stream` and `application/x-ndjson` rejected). Fail-open on cap
+overflow / malformed JSON / parse error.
+
+Defaults all OFF — every `redact_*` family toggle defaults to `false`. Hosts
+that don't opt in see zero behaviour change.
+
 ## Folder Structure
 ```
 src/

@@ -238,6 +238,54 @@ pub struct HostConfig {
     /// remainder is forwarded untouched with a `tracing::warn!`.
     #[serde(default = "default_body_mask_max_bytes")]
     pub body_mask_max_bytes: u64,
+    /// FR-034: PCI-DSS payment-card field family. When `true`, JSON values
+    /// whose keys are in the PCI catalog (`card_number`, `cvv`, `pin`,
+    /// `expiration_date`, the `cc_*` and `creditcard` aliases) are replaced
+    /// with `redact_mask_token` in identity-encoded JSON response bodies.
+    /// Default `false` — explicit opt-in.
+    #[serde(default)]
+    pub redact_pci: bool,
+    /// FR-034: Banking field family (`bank_account`, `account_number`,
+    /// `routing_number`, `iban`, `bic`, `swift_code`). Default `false`.
+    #[serde(default)]
+    pub redact_banking: bool,
+    /// FR-034: Identity field family (`ssn`, `tax_id`, `passport_number`,
+    /// `driver_license`, `national_id`). Default `false`.
+    #[serde(default)]
+    pub redact_identity: bool,
+    /// FR-034: Secret / credential field family (`password`, `token`,
+    /// `api_key`, `secret`, `client_secret`, `refresh_token`, `access_token`,
+    /// `private_key`). Default `false`.
+    #[serde(default)]
+    pub redact_secrets: bool,
+    /// FR-034: PII field family (`email`, `phone_number`, `dob`,
+    /// `mother_maiden_name`). Default `false` — high false-positive surface
+    /// in legitimate user-listing APIs.
+    #[serde(default)]
+    pub redact_pii: bool,
+    /// FR-034: PHI field family (`patient_id`, `medical_record_number`,
+    /// `insurance_id`, `health_record`). Default `false` — HIPAA scope only.
+    #[serde(default)]
+    pub redact_phi: bool,
+    /// FR-034: Operator-supplied additional field names. Extends every
+    /// active family. Case-folded at compile time when
+    /// `redact_case_insensitive` is `true`.
+    #[serde(default)]
+    pub redact_extra_fields: Vec<String>,
+    /// FR-034: Replacement token written in place of every matched JSON
+    /// field value. Distinct from AC-17 `mask_token` to keep the two
+    /// redaction surfaces independently observable in logs / responses.
+    #[serde(default = "default_redact_mask_token")]
+    pub redact_mask_token: String,
+    /// FR-034: Hard ceiling on bytes buffered per response. Beyond this,
+    /// the response is forwarded unredacted with a single `tracing::warn!`.
+    #[serde(default = "default_redact_max_bytes")]
+    pub redact_max_bytes: u64,
+    /// FR-034: Match field names case-insensitively. Default `true` —
+    /// HTTP/JSON convention. Switch to `false` only if your backend
+    /// deliberately distinguishes `cardNumber` from `CardNumber`.
+    #[serde(default = "default_redact_case_insensitive")]
+    pub redact_case_insensitive: bool,
 }
 
 const fn default_preserve_host() -> bool {
@@ -254,6 +302,18 @@ fn default_mask_token() -> String {
 
 const fn default_body_mask_max_bytes() -> u64 {
     1024 * 1024
+}
+
+fn default_redact_mask_token() -> String {
+    "***REDACTED***".to_string()
+}
+
+const fn default_redact_max_bytes() -> u64 {
+    256 * 1024
+}
+
+const fn default_redact_case_insensitive() -> bool {
+    true
 }
 
 impl Default for HostConfig {
@@ -283,6 +343,16 @@ impl Default for HostConfig {
             internal_patterns: Vec::new(),
             mask_token: default_mask_token(),
             body_mask_max_bytes: default_body_mask_max_bytes(),
+            redact_pci: false,
+            redact_banking: false,
+            redact_identity: false,
+            redact_secrets: false,
+            redact_pii: false,
+            redact_phi: false,
+            redact_extra_fields: Vec::new(),
+            redact_mask_token: default_redact_mask_token(),
+            redact_max_bytes: default_redact_max_bytes(),
+            redact_case_insensitive: true,
         }
     }
 }
