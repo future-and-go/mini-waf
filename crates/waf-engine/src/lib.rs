@@ -1,3 +1,4 @@
+pub mod access;
 pub mod block_page;
 pub mod checker;
 pub mod checks;
