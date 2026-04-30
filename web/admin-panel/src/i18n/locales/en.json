@@ -239,7 +239,8 @@
       "blockThresholdLabel": "Block from score",
       "honeypotPathsHelp": "Requests matching these paths are flagged as honeypot traps. Add any path you don't expect legitimate users to visit.",
       "zeroOff": "0 = disabled",
-      "failOpenHelp": "Allow requests when the rate-limiter backend is unavailable"
+      "failOpenHelp": "Allow requests when the rate-limiter backend is unavailable",
+      "discard": "Discard changes"
     }
   },
   "certificates": {

@@ -128,6 +128,7 @@ export const SettingsPage: React.FC = () => {
   const dirtyRef = useRef(false);
   const lastRevRef = useRef<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
   const [panelUnavailable, setPanelUnavailable] = useState<string | null>(null);
 
   const { result, query } = useCustom<SystemStatus>({
@@ -187,6 +188,15 @@ export const SettingsPage: React.FC = () => {
     }
   }, [panelQuery.result?.data, form, message, t]);
 
+  const markDirty = () => { dirtyRef.current = true; setIsDirty(true); };
+  const markClean = () => { dirtyRef.current = false; setIsDirty(false); };
+
+  const onDiscard = () => {
+    const envelope = panelQuery.result?.data as PanelConfigEnvelope | undefined;
+    if (envelope?.config) form.setFieldsValue(envelope.config);
+    markClean();
+  };
+
   const onSavePanel = async () => {
     try {
       const values = await form.validateFields();
@@ -196,16 +206,18 @@ export const SettingsPage: React.FC = () => {
         values,
       );
       message.success(t("settings.panel.saved"));
-      dirtyRef.current = false;
+      markClean();
       const rev = resp.data?.data?.revision;
       if (typeof rev === "number") lastRevRef.current = rev;
       await panelQuery.query.refetch();
     } catch (e: unknown) {
-      // validation errors bubble inline; only show API errors
-      const ax = e as { response?: { data?: { error?: string } }; message?: string; errorFields?: unknown };
-      if (ax.errorFields) return; // AntD validation, already shown inline
+      // AntD validation errors show inline — skip toast
+      if (e && typeof e === "object" && "errorFields" in e) return;
+      const ax = e as { response?: { data?: { error?: string } }; message?: string };
       const detail = ax.response?.data?.error ?? ax.message ?? String(e);
       message.error(detail);
+      // dirtyRef intentionally NOT reset on API error so user can retry;
+      // they can use Discard to re-sync from disk if needed.
     } finally {
       setSaving(false);
     }
@@ -226,7 +238,7 @@ export const SettingsPage: React.FC = () => {
       form={form}
       layout="vertical"
       disabled={formDisabled}
-      onValuesChange={() => { dirtyRef.current = true; }}
+      onValuesChange={markDirty}
     >
       <Space direction="vertical" size="middle" style={{ width: "100%" }}>
 
@@ -313,6 +325,11 @@ export const SettingsPage: React.FC = () => {
                     >
                       {t("common.refresh")}
                     </Button>
+                    {isDirty && (
+                      <Button size="small" onClick={onDiscard}>
+                        {t("settings.panel.discard")}
+                      </Button>
+                    )}
                     <Button
                       type="primary"
                       size="small"
@@ -549,14 +566,19 @@ export const SettingsPage: React.FC = () => {
 
             {/* ── Bottom save shortcut ─────────────────────────────────── */}
             <Row justify="end">
-              <Button
-                type="primary"
-                icon={<SaveOutlined />}
-                loading={saving}
-                onClick={() => void onSavePanel()}
-              >
-                {t("common.save")}
-              </Button>
+              <Space>
+                {isDirty && (
+                  <Button onClick={onDiscard}>{t("settings.panel.discard")}</Button>
+                )}
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  loading={saving}
+                  onClick={() => void onSavePanel()}
+                >
+                  {t("common.save")}
+                </Button>
+              </Space>
             </Row>
           </>
         )}

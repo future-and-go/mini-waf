@@ -239,7 +239,8 @@
       "blockThresholdLabel": "Chặn từ điểm",
       "honeypotPathsHelp": "Request đến các path này bị đánh dấu là honeypot trap. Thêm path nào bạn không kỳ vọng user hợp lệ truy cập.",
       "zeroOff": "0 = tắt",
-      "failOpenHelp": "Cho phép request khi backend rate-limiter không khả dụng"
+      "failOpenHelp": "Cho phép request khi backend rate-limiter không khả dụng",
+      "discard": "Huỷ thay đổi"
     }
   },
   "certificates": {
