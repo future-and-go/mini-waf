@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
@@ -52,6 +53,10 @@ pub struct AppState {
     /// Dedicated rate limiter for login endpoint — stricter than general API
     /// to mitigate brute-force credential attacks (None if disabled)
     pub login_rate_limiter: Option<Arc<crate::security::ApiRateLimiter>>,
+    /// Resolved absolute path to `waf-panel.toml` when `[panel]` is configured.
+    pub panel_config_path: Option<PathBuf>,
+    /// Path to the main WAF config file the server was started with (e.g. `configs/default.toml`).
+    pub main_config_file: Option<String>,
 }
 
 impl AppState {
@@ -91,6 +96,8 @@ impl AppState {
             security_config: waf_common::config::SecurityConfig::default(),
             rate_limiter: None,
             login_rate_limiter: None,
+            panel_config_path: None,
+            main_config_file: None,
         })
     }
 

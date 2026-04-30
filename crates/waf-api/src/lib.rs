@@ -7,6 +7,7 @@ pub mod handlers;
 pub mod health;
 pub mod middleware;
 pub mod notifications;
+pub mod panel_api;
 pub mod plugins;
 pub mod rules_api;
 pub mod security;

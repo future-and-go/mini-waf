@@ -34,6 +34,10 @@ api_rate_limit_rps = 0
 # CORS origins for admin API.  Empty = allow all.
 cors_origins = []
 
+# ── Admin panel runtime TOML (shadow mode, risk bands, honeypots, …) ─────────
+[panel]
+config_path = "waf-panel.toml"
+
 # ── Example host configuration ────────────────────────────────────────────────
 # [[hosts]]
 # host = "example.com"

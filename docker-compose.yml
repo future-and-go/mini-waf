@@ -32,7 +32,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-with-a-long-random-secret}
       DATABASE_URL: postgresql://prx_waf:prx_waf@postgres:5432/prx_waf
     volumes:
-      - ./configs:/app/configs:ro
+      - ./configs:/app/configs      # rw: waf-panel.toml is written by the admin API
       - ./rules:/app/rules:ro
       - waf_certs:/app/certs
     ports:
