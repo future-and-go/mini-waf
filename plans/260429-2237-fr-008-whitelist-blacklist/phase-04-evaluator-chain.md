@@ -4,7 +4,7 @@
 - Design: brainstorm §6 (decision pseudocode), §7 (audit fields)
 
 ## Overview
-**Priority:** P0 · **Status:** pending · **Effort:** 0.5 d
+**Priority:** P0 · **Status:** complete · **Effort:** 0.5 d
 
 Tie everything together. `evaluate(req, tier) -> AccessDecision`. Three stages run in fixed order: Host gate → Blacklist → Whitelist. **Chain of Responsibility** pattern — each stage may short-circuit; otherwise control falls through.
 
@@ -104,12 +104,12 @@ This decouples evaluator from `pingora_http::RequestHeader` for unit-testability
 6. **Audit-log fields**: surface `access_decision` and `access_match` from `AccessDecision::Display` impl + a tiny `audit_fields()` helper returning `(reason_str, matched_str)`.
 
 ## Todo List
-- [ ] Define `AccessDecision`, `BlockReason`, `AccessRequestView`
-- [ ] Implement `evaluate()` per pseudocode
-- [ ] Implement `AccessLists::evaluate` delegate
-- [ ] Wire `tier_modes` and `dry_run` into `from_yaml_str`
-- [ ] 10 unit tests
-- [ ] `cargo clippy -p waf-engine -- -D warnings` clean
+- [x] Define `AccessDecision`, `BlockReason`, `AccessRequestView`
+- [x] Implement `evaluate()` per pseudocode
+- [x] Implement `AccessLists::evaluate` delegate
+- [x] Wire `tier_modes` and `dry_run` into `from_yaml_str`
+- [x] 10 unit tests
+- [x] `cargo clippy -p waf-engine -- -D warnings` clean
 
 ## Success Criteria
 - 10 unit tests pass.

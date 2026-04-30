@@ -10,6 +10,6 @@ pub mod host_gate;
 pub mod ip_table;
 
 pub use config::{AccessConfig, AccessLists, WhitelistMode};
-pub use evaluator::AccessDecision;
+pub use evaluator::{AccessDecision, AccessRequestView, BlockReason, evaluate};
 pub use host_gate::HostGate;
 pub use ip_table::IpCidrTable;
