@@ -37,7 +37,11 @@ prx-waf/
 │   │   ├── ssl_manager.rs     # ACME (Let's Encrypt) via instant-acme
 │   │   ├── http3.rs           # HTTP/3 server (QUIC via quinn)
 │   │   ├── cache.rs           # moka LRU response cache
-│   │   └── tunnel.rs          # Reverse tunnel (encrypted WebSocket)
+│   │   ├── tunnel.rs          # Reverse tunnel (encrypted WebSocket)
+│   │   └── filters/
+│   │       ├── response_body_mask_filter.rs        # AC-17 operator regex
+│   │       ├── response_body_content_scanner.rs    # FR-033 built-in catalog
+│   │       └── response_body_decompressor.rs       # FR-033 gzip decoder
 │   │
 │   ├── waf-engine/src/
 │   │   ├── engine.rs          # Main WafEngine (16-phase checker)

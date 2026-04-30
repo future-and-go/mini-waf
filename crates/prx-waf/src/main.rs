@@ -1514,7 +1514,7 @@ async fn init_async(
     api_state.cluster_state = cluster_state;
 
     // Apply security configuration
-    api_state.cors_origins = config.security.cors_origins.clone();
+    api_state.cors_origins.clone_from(&config.security.cors_origins);
     api_state.security_config = config.security.clone();
     if config.security.api_rate_limit_rps > 0 {
         api_state.rate_limiter = Some(waf_api::security::ApiRateLimiter::new(

@@ -22,13 +22,49 @@ Scope limits (FR-001):
 
 - **Compressed bodies are NOT masked.** If `Content-Encoding` is anything other
   than `identity` (or absent), the masker is disabled for that response and a
-  `tracing::debug!` line is emitted. Body decompression is FR-033's problem.
+  `tracing::debug!` line is emitted. Body decompression for gzip handled by
+  FR-033 (`response_body_content_scanner.rs`); deflate + brotli deferred to
+  FR-033b.
 - `Content-Length` is stripped when masking is enabled (replacement length
   differs from match length); Pingora switches to chunked transfer.
 - A per-host byte ceiling (`body_mask_max_bytes`, default 1 MiB) caps work;
   bytes beyond the ceiling are forwarded unchanged with a single warn log.
 - Patterns that fail to compile are dropped (fail-open). A bad regex must
   never 502 a host.
+
+## Response body content scanner (FR-033)
+
+`response_body_filter` also runs a built-in catalog scanner
+(`filters/response_body_content_scanner.rs`) over the same upstream response
+chunks. The scanner detects four leak categories — stack traces, verbose
+errors, API keys / secrets, internal IPs — and replaces every match with the
+hardcoded module constant `MASK_TOKEN = b"[redacted]"`.
+
+Filter chain order in `response_body_filter`: FR-033 (decompress + catalog
+scan) → FR-034 (JSON field redact, when PR #18 merges) → AC-17 (operator
+regex). FR-033 owns gzip decompression, so the downstream layers always see
+plaintext.
+
+Scope limits:
+
+- gzip-only decompression in v1 (`response_body_decompressor.rs`); deflate +
+  brotli + zstd / lz4 deferred to FR-033b.
+- Defenses: 4 MiB output cap, 8 MiB input cap, 100:1 ratio guard. Fail-open
+  on decode error (forward original bytes + `tracing::warn!`).
+- Content-Type allowlist at `response_filter`: only `text/*`,
+  `application/json`, `application/xml`, `application/problem+json`,
+  `application/javascript`. Skips `application/grpc*`, `text/event-stream`,
+  `application/octet-stream`.
+- `Content-Length` and `Transfer-Encoding` are dropped unconditionally when
+  the scanner enables. `Content-Encoding` is dropped only when gzip
+  decompression succeeded.
+- Cache key is content-hash `(host_name, xxhash64(body_scan_*))` — no
+  `Arc::as_ptr`, so a config reload cannot bleed compiled patterns across
+  hosts.
+
+`HostConfig` exposes only two opt-in fields (defaults preserve passthrough):
+`body_scan_enabled`, `body_scan_max_body_bytes`. All other knobs are module
+constants.
 
 ## Folder Structure
 ```

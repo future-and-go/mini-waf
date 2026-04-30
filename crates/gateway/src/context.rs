@@ -3,6 +3,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use waf_common::{HostConfig, RequestCtx};
 
+use crate::filters::response_body_decompressor::DecoderChain;
 use crate::protocol::Protocol;
 
 /// Maximum request body bytes buffered for WAF inspection (64 KiB).
@@ -25,6 +26,8 @@ pub struct GatewayCtx {
     pub body_inspected: bool,
     /// AC-17: streaming state for the response body internal-ref masker.
     pub body_mask: BodyMaskState,
+    /// FR-033: streaming state for the response body content scanner.
+    pub body_scan: BodyScanState,
     /// Phase-05: wire protocol detected at session start. Tagged once in
     /// `request_filter` and consumed for per-protocol observability.
     pub protocol: Protocol,
@@ -45,4 +48,38 @@ pub struct BodyMaskState {
     pub processed: u64,
     /// `true` once the byte ceiling was hit; used to log a single warning.
     pub ceiling_logged: bool,
+}
+
+/// Per-response state for the FR-033 streaming content scanner.
+///
+/// Lives next to [`BodyMaskState`] in [`GatewayCtx`]; the two are independent
+/// (each layer reads its own enable flag) but share the body-filter callback.
+#[derive(Default)]
+pub struct BodyScanState {
+    /// Whether the FR-033 scanner is active for this response. Set in
+    /// `response_filter` after Content-Type allowlist + Content-Encoding probe.
+    pub enabled: bool,
+    /// gzip decoder when the upstream sent `Content-Encoding: gzip`. `None`
+    /// for identity bodies.
+    pub decoder: Option<DecoderChain>,
+    /// Total plaintext bytes scanned so far. Beyond
+    /// [`HostConfig::body_scan_max_body_bytes`] the rest of the response is
+    /// forwarded unchanged.
+    pub processed: u64,
+    /// Inter-chunk straddle buffer.
+    pub tail: BytesMut,
+    /// Set on decode error / bomb / cap; subsequent chunks short-circuit.
+    pub failed: bool,
+    /// `true` once the byte ceiling was hit; used to log a single warning.
+    pub ceiling_logged: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Pingora's `ProxyHttp::CTX` bound requires `Send`. If a future field on
+    // BodyScanState (e.g. a non-Send Mutex) breaks this, fail at compile time.
+    static_assertions::assert_impl_all!(BodyScanState: Send);
+    static_assertions::assert_impl_all!(GatewayCtx: Send);
 }

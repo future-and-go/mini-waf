@@ -238,6 +238,12 @@ pub struct HostConfig {
     /// remainder is forwarded untouched with a `tracing::warn!`.
     #[serde(default = "default_body_mask_max_bytes")]
     pub body_mask_max_bytes: u64,
+    /// FR-033: enable response body content scanner.
+    #[serde(default)]
+    pub body_scan_enabled: bool,
+    /// FR-033: max body bytes scanned per response.
+    #[serde(default = "default_body_scan_max_body_bytes")]
+    pub body_scan_max_body_bytes: u64,
 }
 
 const fn default_preserve_host() -> bool {
@@ -254,6 +260,10 @@ fn default_mask_token() -> String {
 
 const fn default_body_mask_max_bytes() -> u64 {
     1024 * 1024
+}
+
+const fn default_body_scan_max_body_bytes() -> u64 {
+    1 << 20
 }
 
 impl Default for HostConfig {
@@ -283,6 +293,8 @@ impl Default for HostConfig {
             internal_patterns: Vec::new(),
             mask_token: default_mask_token(),
             body_mask_max_bytes: default_body_mask_max_bytes(),
+            body_scan_enabled: false,
+            body_scan_max_body_bytes: default_body_scan_max_body_bytes(),
         }
     }
 }
