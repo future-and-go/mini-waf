@@ -16,7 +16,9 @@ PRX-WAF is a production-ready reverse proxy WAF built on [Pingora](https://githu
 **Core Protection**
 
 - HTTP/1.1, HTTP/2, HTTP/3 (QUIC) via quinn; weighted round-robin load balancing
-- 10+ attack detection phases: SQLi, XSS, RCE, path traversal, RFI/LFI, SSRF, scanner detection
+- **Phase-0 access gate (FR-008)**: per-tier IP/Host whitelist + blacklist (Patricia trie, dual-stack v4/v6)
+- **Tiered request classification (FR-002)**: 4 tiers (Critical/High/Medium/CatchAll) with per-tier policies (fail-mode, DDoS threshold, cache policy)
+- 16-phase attack detection: SQLi, XSS, RCE, path traversal, RFI/LFI, SSRF, scanner detection, custom rules, CrowdSec
 - libinjection-based SQLi/XSS detection via libinjectionrs (low false-positive)
 - SSRF protection with DNS rebinding guard and RFC-1918 blocking
 - Iterative URL decoding (up to 3 rounds) to prevent encoding bypasses
@@ -25,6 +27,7 @@ PRX-WAF is a production-ready reverse proxy WAF built on [Pingora](https://githu
 **Rules & Automation**
 
 - OWASP Core Rule Set (CRS) support; 51 built-in rules (7 CVE patches, 24 OWASP, 6 advanced)
+- **File-based custom rules (FR-003)**: `rules/custom/*.yaml` auto-loaded with `kind: custom_rule_v1`
 - Hot-reload: file watcher (notify) + SIGHUP handler; atomic reload without downtime
 - Rhai scripting engine for custom detection rules (sandboxed)
 - ModSecurity rule parser (basic subset: ARGS, REQUEST_HEADERS, REQUEST_URI, REQUEST_BODY)
@@ -167,10 +170,12 @@ seeds       = []
 
 ## Architecture
 
-**Request Flow (16-Phase Pipeline)**
+**Request Flow (Phase-0 + 16-Phase Pipeline)**
 
 ```
-Client → TCP/TLS/QUIC → IP allow/block (phases 1-4)
+Client → TCP/TLS/QUIC → [Tier Classification]
+  → Phase-0: Host gate + IP blacklist + IP whitelist (access lists)
+  → IP allow/block (phases 1-4)
   → CC rate limit (phase 5) → Scanner detect (phase 6)
   → Bot detect (phase 7) → SQL injection (phase 8)
   → XSS (phase 9) → RCE (phase 10) → Dir traversal (phase 11)
@@ -241,12 +246,16 @@ See [API docs](./docs/system-architecture.md) for all 70+ endpoints.
 
 ## Documentation
 
-- [System Architecture](./docs/system-architecture.md) — 16-phase pipeline, cluster topology
+- [System Architecture](./docs/system-architecture.md) — Topology, components, storage, cluster, panel-config API
+- [Request Pipeline](./docs/request-pipeline.md) — Tier classification, Phase-0 access gate, 16-phase rule pipeline
 - [Code Standards](./docs/code-standards.md) — Rust 2024, safety rules, error handling
-- [Deployment Guide](./docs/deployment-guide.md) — Docker, systemd, cluster setup
+- [Deployment Guide](./docs/deployment-guide.md) — Docker, systemd, cluster setup, config reference
 - [Project Overview & PDR](./docs/project-overview-pdr.md) — Vision, requirements, success metrics
 - [Design Guidelines](./docs/design-guidelines.md) — Admin UI patterns, WebSocket usage
 - [Project Roadmap](./docs/project-roadmap.md) — v0.2.0 release, upcoming milestones
+- [Tiered Protection](./docs/tiered-protection.md) — Request tier classification and per-tier policies (FR-002)
+- [Access Lists](./docs/access-lists.md) — IP/Host whitelist + blacklist operator guide (FR-008)
+- [Custom Rules Syntax](./docs/custom-rules-syntax.md) — File-based and DB-driven rule schemas
 - [Cluster Design](./docs/cluster-design.md) — Deep technical design (QUIC/mTLS, election, sync)
 - [Cluster Guide](./docs/cluster-guide.md) — Cluster quick-start and operations
 

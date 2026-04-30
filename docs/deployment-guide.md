@@ -396,6 +396,15 @@ max_request_body_bytes  = 10485760     # 10 MB
 api_rate_limit_rps      = 100          # Per IP
 cors_origins            = []
 
+[tiered_protection]
+# See docs/tiered-protection.md for per-tier policies and classifier rules
+default_tier = "catch_all"
+
+[[tiered_protection.classifier_rules]]
+priority = 100
+tier = "critical"
+path = { kind = "exact", value = "/login" }
+
 [rules]
 dir            = "rules/"
 hot_reload     = true
@@ -404,16 +413,26 @@ enable_builtin_owasp = true
 enable_builtin_bot = true
 enable_builtin_scanner = true
 
+# See docs/access-lists.md for Phase-0 access gate (IP/Host whitelist/blacklist)
+# File: rules/access-lists.yaml (hot-reloaded, 250ms debounce)
+
 [[rules.sources]]
 name   = "custom"
 path   = "rules/custom/"
 format = "yaml"
+
+# File-based custom rules: rules/custom/*.yaml auto-loaded (FR-003)
+# See docs/custom-rules-syntax.md for schema
 
 [[rules.sources]]
 name            = "owasp-crs"
 url             = "https://rules.openprx.dev/owasp-crs.yaml"
 format          = "yaml"
 update_interval = 86400  # 24h
+
+# Panel Config: GET/PUT /api/panel-config (operational policy)
+# File: waf-panel.toml (atomic read/write via API)
+# See system-architecture.md → Admin Control Plane
 
 [cluster]
 enabled     = false
