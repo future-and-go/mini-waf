@@ -5,7 +5,7 @@
 - Reference impl: `crates/gateway/src/tiered/tier_config_watcher.rs`
 
 ## Overview
-**Priority:** P0 · **Status:** pending · **Effort:** 0.5 d
+**Priority:** P0 · **Status:** complete · **Effort:** 0.5 d
 
 `notify::RecommendedWatcher` + SIGHUP signal both trigger an atomic `ArcSwap` of `Arc<AccessLists>`. On parse failure, the previous snapshot is retained and a structured WARN is emitted — the gateway never crashes from a bad config.
 
@@ -113,13 +113,13 @@ SIGHUP    ──signal─┘                          │
    - `t_reload_bad_yaml_keeps_prior`: write malformed; sleep; assert ArcSwap.load() unchanged + WARN log captured.
 
 ## Todo List
-- [ ] Read existing tier_config_watcher.rs to mirror its conventions
-- [ ] Implement `AccessReloader::spawn`
-- [ ] Add `clone_arc` / Arc-returning `from_yaml_path` (whichever phase-01 chose)
-- [ ] SIGHUP listener (`#[cfg(unix)]`)
-- [ ] Wire reload spawn into `Proxy`
-- [ ] 2 integration tests
-- [ ] `cargo check --workspace` clean
+- [x] Read existing tier_config_watcher.rs to mirror its conventions
+- [x] Implement `AccessReloader::spawn`
+- [x] `from_yaml_path` already returns `Arc<Self>` (phase-01) — reload is one-line `store.store(new)`
+- [x] SIGHUP listener (`#[cfg(unix)]`) — `spawn_sighup_listener`
+- [~] Wire reload spawn into `Proxy` — deferred: tier watcher itself is not yet wired in `main.rs`; public API exposed via `AccessReloader::spawn` for symmetric wiring later
+- [x] 2 integration tests (`tests/access_hot_reload.rs`)
+- [x] `cargo check --workspace` clean + `cargo clippy -p waf-engine -- -D warnings`
 
 ## Success Criteria
 - AC-07 passes: malformed YAML → previous snapshot retained + WARN emitted (no panic).
