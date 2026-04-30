@@ -365,7 +365,15 @@ See [Tiered Protection Consumer Guide](./tiered-protection.md) for request class
 
 ### Access Lists (FR-008)
 
-Phase-0 gate ahead of the 16-phase rule pipeline: per-tier IP whitelist (Patricia trie via `ip_network_table`), IP blacklist, per-tier Host (FQDN) whitelist. Hot-reloaded from `rules/access-lists.yaml` via `ArcSwap`. See [Access Lists Operator Guide](./access-lists.md). Module: `crates/waf-engine/src/access/`.
+Phase-0 gate ahead of the 16-phase rule pipeline: per-tier IP whitelist (Patricia trie via `ip_network_table`), IP blacklist, per-tier Host (FQDN) whitelist. Hot-reloaded from `rules/access-lists.yaml` via `ArcSwap`. Decisions: host gate → IP blacklist → IP whitelist; per-tier dispatch on `full_bypass` vs `blacklist_only` (Strategy). Soft-warn ≥50k entries, hard-reject ≥500k. See [Access Lists Operator Guide](./access-lists.md). Module: `crates/waf-engine/src/access/`.
+
+### Custom Rule File Loader (FR-003)
+
+File-based custom rule hot-reload: scans `rules/custom/*.yaml`, auto-loads YAML docs with `kind: custom_rule_v1` discriminator. Per-file error isolation; stale rules cleared on reload. `notify`-driven watcher (500ms debounce). Formats: `custom_rule_yaml.rs` multi-doc YAML, forward-compat rejects unknown `custom_rule_v*` versions. See [Custom Rules Syntax](./custom-rules-syntax.md). Module: `crates/waf-engine/src/rules/{custom_file_loader,formats/custom_rule_yaml}.rs`.
+
+### Panel Config API (Control Plane)
+
+Atomic read/write of `waf-panel.toml` (WAF policy settings) via `GET/PUT /api/panel-config`. Config struct `WafPanelConfig` (TOML) with nested sections: `ResponseFilteringPanel`, `TrustedBypassPanel`, `RateLimitsPanel`, `AutoBlockPanel`. Validates risk thresholds (allow < challenge < block), CIDR syntax, honeypot paths start with '/'. Atomic write semantics (write-through to file). Frontend: `web/admin-panel/src/pages/settings/index.tsx` binds to live config state. Module: `crates/waf-common/src/panel_config.rs`, `crates/waf-api/src/panel_api.rs`.
 
 ### Error Handling
 
