@@ -1,3 +1,4 @@
+pub mod access;
 pub mod block_page;
 pub mod checker;
 pub mod checks;
@@ -8,7 +9,6 @@ pub mod geoip;
 pub mod geoip_updater;
 pub mod plugins;
 pub mod rules;
-
 pub use checker::RuleStore;
 pub use checks::{AntiHotlinkCheck, GeoCheck, GeoRule, GeoRuleMode, OWASPCheck, SensitiveCheck};
 pub use community::{
