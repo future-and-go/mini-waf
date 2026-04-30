@@ -157,7 +157,10 @@ mod tests {
     fn gate_evaluate_blacklist_blocks() {
         let lists = AccessLists::from_yaml_str("version: 1\nip_blacklist:\n  - 203.0.113.0/24\n").expect("yaml");
         let gate = AccessPhaseGate::new(Arc::new(ArcSwap::from(lists)));
-        assert_eq!(gate.evaluate("h", ip("203.0.113.5"), Tier::Medium), AccessGateOutcome::Block(403));
+        assert_eq!(
+            gate.evaluate("h", ip("203.0.113.5"), Tier::Medium),
+            AccessGateOutcome::Block(403)
+        );
     }
 
     #[test]
@@ -165,7 +168,10 @@ mod tests {
         let yaml = "version: 1\nip_whitelist:\n  - 10.0.0.0/8\ntier_whitelist_mode:\n  medium: full_bypass\n";
         let lists = AccessLists::from_yaml_str(yaml).expect("yaml");
         let gate = AccessPhaseGate::new(Arc::new(ArcSwap::from(lists)));
-        assert_eq!(gate.evaluate("h", ip("10.1.2.3"), Tier::Medium), AccessGateOutcome::Bypass);
+        assert_eq!(
+            gate.evaluate("h", ip("10.1.2.3"), Tier::Medium),
+            AccessGateOutcome::Bypass
+        );
     }
 
     #[test]

@@ -70,11 +70,7 @@ impl AccessReloader {
     ///
     /// Watches the parent (not the file) so editors that rename-then-write —
     /// which replace the inode — are still observed.
-    pub fn spawn(
-        path: PathBuf,
-        store: Arc<ArcSwap<AccessLists>>,
-        debounce_ms: u64,
-    ) -> Result<Self, WatcherError> {
+    pub fn spawn(path: PathBuf, store: Arc<ArcSwap<AccessLists>>, debounce_ms: u64) -> Result<Self, WatcherError> {
         let parent = path
             .parent()
             .ok_or_else(|| WatcherError::NoParent(path.clone()))?
@@ -98,15 +94,10 @@ impl AccessReloader {
             loop {
                 match rx.recv_timeout(debounce) {
                     Ok(Ok(event)) => {
-                        let touches_us = event
-                            .paths
-                            .iter()
-                            .any(|p| p.file_name() == Some(file_name.as_os_str()));
+                        let touches_us = event.paths.iter().any(|p| p.file_name() == Some(file_name.as_os_str()));
                         let relevant = matches!(
                             event.kind,
-                            notify::EventKind::Create(_)
-                                | notify::EventKind::Modify(_)
-                                | notify::EventKind::Remove(_)
+                            notify::EventKind::Create(_) | notify::EventKind::Modify(_) | notify::EventKind::Remove(_)
                         );
                         if touches_us && relevant {
                             last_event = Instant::now();
@@ -170,4 +161,72 @@ pub fn spawn_sighup_listener(
             reload(&path, &store);
         }
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error as _;
+
+    #[test]
+    fn t_watcher_error_display_no_parent() {
+        let e = WatcherError::NoParent(PathBuf::from("/no-parent"));
+        assert!(e.to_string().contains("no parent directory"));
+        assert!(e.source().is_none());
+    }
+
+    #[test]
+    fn t_watcher_error_display_no_file_name() {
+        let e = WatcherError::NoFileName(PathBuf::from("/"));
+        assert!(e.to_string().contains("no file name"));
+        assert!(e.source().is_none());
+    }
+
+    #[test]
+    fn t_watcher_error_from_notify_carries_source() {
+        let notify_err = notify::Error::generic("synthetic");
+        let e: WatcherError = notify_err.into();
+        assert!(matches!(e, WatcherError::Notify(_)));
+        assert!(e.source().is_some());
+        // Display must not panic.
+        let _ = e.to_string();
+    }
+
+    #[test]
+    fn t_spawn_rejects_root_path() {
+        // `/` has no parent → NoParent (Path::parent returns None for the root).
+        let store = Arc::new(ArcSwap::from(AccessLists::empty()));
+        match AccessReloader::spawn(PathBuf::from("/"), store, DEFAULT_DEBOUNCE_MS) {
+            Err(WatcherError::NoParent(_)) => {}
+            Ok(_) => panic!("root path should not succeed"),
+            Err(other) => panic!("expected NoParent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t_reload_swaps_on_success() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let path = tmp.path().join("a.yaml");
+        std::fs::write(&path, "version: 1\nip_blacklist:\n  - 203.0.113.0/24\n").expect("write");
+        let store = Arc::new(ArcSwap::from(AccessLists::empty()));
+        assert_eq!(store.load().config().ip_blacklist.len(), 0);
+        reload(&path, &store);
+        assert_eq!(store.load().config().ip_blacklist.len(), 1);
+    }
+
+    #[test]
+    fn t_reload_keeps_prior_on_bad_yaml() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let path = tmp.path().join("a.yaml");
+        std::fs::write(&path, "version: 1\nip_blacklist:\n  - 203.0.113.0/24\n").expect("write");
+        let initial = AccessLists::from_yaml_path(&path).expect("v1");
+        let store = Arc::new(ArcSwap::from(initial));
+        let prior_ptr = Arc::as_ptr(&store.load_full());
+
+        std::fs::write(&path, "version: 1\nip_blacklist:\n  - garbage\n").expect("write bad");
+        reload(&path, &store);
+
+        let now_ptr = Arc::as_ptr(&store.load_full());
+        assert_eq!(prior_ptr, now_ptr, "snapshot must be retained on bad reload");
+    }
 }

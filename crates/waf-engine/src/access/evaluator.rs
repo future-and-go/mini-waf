@@ -177,7 +177,10 @@ mod tests {
         let v = view("2001:db8::1", "x", Tier::Medium);
         assert!(matches!(
             lists.evaluate(&v),
-            AccessDecision::Block { reason: BlockReason::IpBlacklist, .. }
+            AccessDecision::Block {
+                reason: BlockReason::IpBlacklist,
+                ..
+            }
         ));
     }
 
@@ -207,7 +210,10 @@ mod tests {
         let v = view("10.1.2.3", "x", Tier::Medium);
         assert!(matches!(
             lists.evaluate(&v),
-            AccessDecision::Block { reason: BlockReason::IpBlacklist, .. }
+            AccessDecision::Block {
+                reason: BlockReason::IpBlacklist,
+                ..
+            }
         ));
     }
 
@@ -259,7 +265,10 @@ mod tests {
         let v = view("203.0.113.5", "evil.com", Tier::Critical);
         assert!(matches!(
             lists.evaluate(&v),
-            AccessDecision::Block { reason: BlockReason::HostGate, .. }
+            AccessDecision::Block {
+                reason: BlockReason::HostGate,
+                ..
+            }
         ));
     }
 

@@ -51,5 +51,9 @@ harness = false
 name = "rule_eval"
 harness = false
 
+[[bench]]
+name = "access_lookup"
+harness = false
+
 [lints]
 workspace = true
