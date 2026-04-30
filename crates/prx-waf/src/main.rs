@@ -1,4 +1,4 @@
-#![allow(clippy::print_stdout, clippy::print_stderr)]
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::doc_markdown)]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,9 +7,13 @@ use clap::{Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
+use arc_swap::ArcSwap;
 use gateway::{HostRouter, TunnelConfig, WafProxy};
 use waf_api::{AppState, start_api_server};
 use waf_common::config::{AppConfig, load_config};
+#[cfg(unix)]
+use waf_engine::access::reload::spawn_sighup_listener;
+use waf_engine::access::{AccessLists, AccessReloader, DEFAULT_DEBOUNCE_MS};
 use waf_engine::{
     CrowdSecClient, CrowdSecConfig, ExportFormat, GeoIpService, RuleManager, WafEngine, WafEngineConfig, XdbUpdater,
     cache_policy_from_str, init_community, init_crowdsec, spawn_auto_updater,
@@ -1333,6 +1337,54 @@ fn run_server(config: &AppConfig, config_file_path: &str) -> anyhow::Result<()> 
              Consider adding trusted proxy CIDRs for production use."
         );
     }
+
+    // FR-008 — Load access-lists snapshot, spawn watcher, inject into proxy.
+    // Fail-soft: missing file or parse error → empty snapshot, log WARN.
+    let access_path = PathBuf::from("rules/access-lists.yaml");
+    let access_lists: Arc<AccessLists> = match AccessLists::from_yaml_path(&access_path) {
+        Ok(lists) => {
+            tracing::info!(path = %access_path.display(), "FR-008 access-lists loaded");
+            lists
+        }
+        Err(e) => {
+            tracing::warn!(
+                path = %access_path.display(),
+                error = %e,
+                "FR-008 access-lists missing or invalid; using empty snapshot"
+            );
+            AccessLists::empty()
+        }
+    };
+    let access_store: Arc<ArcSwap<AccessLists>> = Arc::new(ArcSwap::from(access_lists));
+
+    // Spawn the file watcher; keep the handle alive for the process lifetime.
+    match AccessReloader::spawn(access_path.clone(), Arc::clone(&access_store), DEFAULT_DEBOUNCE_MS) {
+        Ok(reloader) => {
+            // Watcher must outlive the runtime — drop = stop watching.
+            std::mem::forget(reloader);
+            tracing::info!("FR-008 access-lists watcher started");
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "FR-008 access-lists watcher failed to start; running without hot-reload");
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        // spawn_sighup_listener calls tokio::spawn; use the existing rt.
+        match rt.block_on(async { spawn_sighup_listener(access_path.clone(), Arc::clone(&access_store)) }) {
+            Ok(handle) => {
+                std::mem::forget(handle);
+                tracing::info!("FR-008 access-lists SIGHUP listener active");
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "FR-008 access-lists SIGHUP listener failed");
+            }
+        }
+    }
+
+    // Inject into proxy. Must run BEFORE proxy.start().
+    proxy.with_access_lists(Arc::clone(&access_store));
 
     let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
     proxy_service.add_tcp(&config.proxy.listen_addr);

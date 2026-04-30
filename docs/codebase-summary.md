@@ -75,6 +75,8 @@ prx-waf/
 │   │   │   ├── geoip.rs       # GeoIP lookup (ip2region)
 │   │   │   └── url_validator.rs # SSRF protection, DNS rebinding guard
 │   │   │
+│   │   ├── access/            # FR-008 — file-based YAML allowlist/blocklist (IP, CIDR, host)
+│   │   │
 │   │   └── lib.rs
 │   │
 │   ├── waf-storage/src/
@@ -435,6 +437,16 @@ See [Tiered Protection Consumer Guide](./tiered-protection.md) for request class
 - Criterion benchmarks: p99 <500µs clean traffic, <1ms malicious payloads
 
 **Testing**: 63+ acceptance tests covering all pattern types, encoding bypasses, false positives
+
+---
+
+## Threat-Intel Module (FR-008 v1.5)
+
+File-based IP/FQDN allow+block lists, Tor exit blocking, and ASN-based blocking inserted as Phase 1.5 in the detection pipeline (between DB IP-allow and DB IP-block). Hot-reloaded via inotify, 4h periodic re-scan, and SIGHUP.
+
+**v1.5 hardening** — Phase 01: feed-freshness tracking (`list_max_age_hours`, `freshness_minutes` audit field, `bypass_attempt` warn throttled 1/60s). Phase 02: optional Ed25519 sidecar signing (`public_key_pins`, per-list `signing_required`, `signed_by` audit field).
+
+See [`docs/threat-intel-operator-runbook.md`](./threat-intel-operator-runbook.md) for full setup, key rotation procedure, and signed-mirror cron examples.
 
 ---
 
