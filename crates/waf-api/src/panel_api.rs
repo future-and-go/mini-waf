@@ -55,7 +55,12 @@ pub async fn get_panel_config(State(state): State<Arc<AppState>>) -> ApiResult<J
     // the operator sees the actual TOML mistake.
     let cfg = WafPanelConfig::from_toml_str(&raw).map_err(|e| ApiError::BadRequest(format!("{e}")))?;
 
-    Ok(Json(panel_json_response(&cfg, revision, path, state.main_config_file.as_deref())))
+    Ok(Json(panel_json_response(
+        &cfg,
+        revision,
+        path,
+        state.main_config_file.as_deref(),
+    )))
 }
 
 pub async fn put_panel_config(
@@ -83,5 +88,10 @@ pub async fn put_panel_config(
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("write panel config: {e}")))?;
 
     let revision = panel_revision_secs(path).await?;
-    Ok(Json(panel_json_response(&cfg, revision, path, state.main_config_file.as_deref())))
+    Ok(Json(panel_json_response(
+        &cfg,
+        revision,
+        path,
+        state.main_config_file.as_deref(),
+    )))
 }

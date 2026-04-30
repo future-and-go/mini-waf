@@ -1187,8 +1187,12 @@ fn run_server(config: &AppConfig, config_file_path: &str) -> anyhow::Result<()> 
     // `_shutdown_guards` holds the watch senders that signal background workers
     // to stop.  They are dropped automatically when `run_server` returns (after
     // `server.run_forever()` exits), which sends the shutdown signal.
-    let (engine, router, api_state, _shutdown_guards) =
-        rt.block_on(init_async(config, config_file_path, cluster_state_for_api, panel_config_path))?;
+    let (engine, router, api_state, _shutdown_guards) = rt.block_on(init_async(
+        config,
+        config_file_path,
+        cluster_state_for_api,
+        panel_config_path,
+    ))?;
 
     // Start the management API in a background thread
     let api_listen = config.api.listen_addr.clone();
