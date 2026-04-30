@@ -28,6 +28,10 @@ pub struct GatewayCtx {
     /// Phase-05: wire protocol detected at session start. Tagged once in
     /// `request_filter` and consumed for per-protocol observability.
     pub protocol: Protocol,
+    /// FR-008: set by Phase-0 access gate when an IP whitelist hit resolves
+    /// to `full_bypass` for the request's tier. When true, `engine.inspect()`
+    /// is skipped (whitelist trust → fast path).
+    pub access_bypass: bool,
 }
 
 /// Per-response state for the streaming body masker (AC-17).

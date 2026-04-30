@@ -108,6 +108,18 @@ Phase 1: IP Allowlist (CIDR)
 ├─ If match → allow this phase, continue to Phase 2
 └─ If no match → continue (allowlist is permissive)
 
+Phase 1.5: Threat-Intel (FR-008 v1.5) — file-based, inserted between Phase 1 and Phase 2
+├─ IP allowlist files (CIDR) → short-circuit allow if matched
+├─ IP blocklist files (CIDR) + ASN blocklist + Tor exits → BLOCK if matched
+├─ FQDN allowlist (IDNA-normalized) → short-circuit allow
+├─ CDN ASN short-circuit (Cloudflare/AWS/Akamai/Fastly/Google)
+├─ Feed freshness: mtime checked at load; stale file → tracing::warn! (never fail-closed)
+│   freshness_minutes added to WafDecision.detail for SIEM alerting (Phase 01)
+├─ Ed25519 sidecar signing: public_key_pins in TOML; per-list signing_required;
+│   signed_by audit field on verified hits (Phase 02)
+├─ bypass_attempt warn (throttled 1/60s) when IP matches both allowlist + blocklist
+└─ If no match → continue to Phase 2
+
 Phase 2: IP Blocklist (CIDR)
 ├─ Check if client IP in block_ips table
 ├─ If match → BLOCK (decision made)

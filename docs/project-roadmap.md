@@ -100,6 +100,12 @@ Implements a four-tier request classification and per-tier policy bus that all d
 
 ---
 
+### FR-008 — File-Based Access Lists (allow/block) — complete
+
+YAML-driven IP/CIDR/host allow+block layer (access module). Hot-reload via inotify + SIGHUP. Replaces earlier threat_intel module.
+
+---
+
 ## v0.3.0 (Proposed — Q3 2026)
 
 **Theme**: Observability & Developer Experience
