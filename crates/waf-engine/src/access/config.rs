@@ -15,6 +15,8 @@ use ipnet::IpNet;
 use serde::Deserialize;
 use waf_common::tier::Tier;
 
+use crate::access::ip_table::IpCidrTable;
+
 /// Hard cap — parser rejects YAML beyond this entry count to bound memory.
 const HARD_REJECT_ENTRIES: usize = 500_000;
 /// Soft cap — emit `tracing::warn!` past this point.
@@ -128,6 +130,8 @@ fn validate_host(host: &str) -> anyhow::Result<()> {
 #[derive(Debug)]
 pub struct AccessLists {
     config: AccessConfig,
+    ip_whitelist: IpCidrTable,
+    ip_blacklist: IpCidrTable,
 }
 
 impl AccessLists {
@@ -143,6 +147,8 @@ impl AccessLists {
                 version: SUPPORTED_VERSION,
                 ..AccessConfig::default()
             },
+            ip_whitelist: IpCidrTable::new(),
+            ip_blacklist: IpCidrTable::new(),
         })
     }
 
@@ -151,7 +157,25 @@ impl AccessLists {
     pub fn from_yaml_str(s: &str) -> anyhow::Result<Arc<Self>> {
         let config: AccessConfig = serde_yaml::from_str(s).context("parsing access-lists YAML")?;
         config.validate().context("validating access-lists")?;
-        Ok(Arc::new(Self { config }))
+
+        let mut ip_whitelist = IpCidrTable::new();
+        for entry in &config.ip_whitelist {
+            ip_whitelist
+                .insert_str(entry)
+                .with_context(|| format!("ip_whitelist entry {entry:?}"))?;
+        }
+        let mut ip_blacklist = IpCidrTable::new();
+        for entry in &config.ip_blacklist {
+            ip_blacklist
+                .insert_str(entry)
+                .with_context(|| format!("ip_blacklist entry {entry:?}"))?;
+        }
+
+        Ok(Arc::new(Self {
+            config,
+            ip_whitelist,
+            ip_blacklist,
+        }))
     }
 
     /// Read + parse + validate a YAML file from disk.
@@ -178,6 +202,18 @@ impl AccessLists {
     #[must_use]
     pub const fn dry_run(&self) -> bool {
         self.config.dry_run
+    }
+
+    /// Pre-built IP whitelist trie. Hot-path lookup in phase-04.
+    #[must_use]
+    pub const fn ip_whitelist(&self) -> &IpCidrTable {
+        &self.ip_whitelist
+    }
+
+    /// Pre-built IP blacklist trie. Hot-path lookup in phase-04.
+    #[must_use]
+    pub const fn ip_blacklist(&self) -> &IpCidrTable {
+        &self.ip_blacklist
     }
 }
 

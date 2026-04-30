@@ -11,3 +11,4 @@ pub mod ip_table;
 
 pub use config::{AccessConfig, AccessLists, WhitelistMode};
 pub use evaluator::AccessDecision;
+pub use ip_table::IpCidrTable;
