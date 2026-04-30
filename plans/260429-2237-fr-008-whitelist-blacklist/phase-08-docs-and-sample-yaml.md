@@ -5,7 +5,7 @@
 - Existing docs index: `docs/`
 
 ## Overview
-**Priority:** P1 · **Status:** pending · **Effort:** 0.25 d
+**Priority:** P1 · **Status:** done · **Effort:** 0.25 d
 
 Ship operator docs + a checked-in sample YAML so the feature is usable on day one of code-freeze week. Cross-link from `docs/tiered-protection.md` so the FR-002 reader sees the new `tier_whitelist_mode` field.
 
@@ -100,13 +100,13 @@ docs/access-lists.md
 5. **Roadmap & changelog**: add FR-008 milestone row + changelog entry on PR merge (`docs-manager` agent does this — call out in PR description).
 
 ## Todo List
-- [ ] Write `docs/access-lists.md`
-- [ ] Add `rules/access-lists.yaml` empty-but-valid sample
-- [ ] Cross-link section in `docs/tiered-protection.md`
-- [ ] Append entry in `docs/codebase-summary.md`
-- [ ] Update `docs/development-roadmap.md` FR-008 row
-- [ ] Add `docs/project-changelog.md` entry on merge
-- [ ] Verify all internal links resolve (`grep -nR "access-lists.md" docs/`)
+- [x] Write `docs/access-lists.md`
+- [x] Add `rules/access-lists.yaml` empty-but-valid sample
+- [x] Cross-link section in `docs/tiered-protection.md` (§10)
+- [x] Append entry in `docs/codebase-summary.md` (Access Lists section + module map)
+- [x] Update `docs/project-roadmap.md` FR-008 row (note: project uses `project-roadmap.md`, not `development-roadmap.md`)
+- [x] Add `CHANGELOG.md` entry under [Unreleased] (root-level — no `docs/project-changelog.md` exists)
+- [x] Verify all internal links resolve (`grep -nR "access-lists.md" docs/`)
 
 ## Success Criteria
 - Operator can read `docs/access-lists.md` and configure the feature without reading code.

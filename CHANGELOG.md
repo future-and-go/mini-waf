@@ -7,6 +7,25 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **FR-008 access lists** — Phase-0 gate ahead of the 16-phase rule pipeline:
+  per-tier IP whitelist (Patricia trie via `ip_network_table`), IP blacklist,
+  and per-tier Host (FQDN) whitelist. Runs Host gate → IP blacklist →
+  IP whitelist with deny-wins-over-allow semantics; per-tier `whitelist_mode`
+  dispatches between `full_bypass` (skip all later phases) and `blacklist_only`
+  (defense-in-depth, default). Configuration in `rules/access-lists.yaml`,
+  hot-reloaded via `notify` + `ArcSwap` with ~250 ms debounce; bad YAML keeps
+  the previous snapshot live with a `tracing::warn!`. Audit fields
+  `access_decision` / `access_reason` / `access_match` stamp every request.
+  Operator guide: [`docs/access-lists.md`](docs/access-lists.md).
+  Tor exit list, bad-ASN classification, and validated XFF `ctx.client_ip`
+  are deferred to FR-042 and FR-007.
+
+---
+
 ## [0.2.0] — 2026-03-27
 
 ### Security

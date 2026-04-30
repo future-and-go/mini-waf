@@ -96,7 +96,7 @@ New dep: `ip_network_table = "0.2"` in `crates/waf-engine/Cargo.toml`.
 | 05 | [phase-05-pipeline-wiring.md](phase-05-pipeline-wiring.md) | `gateway/pipeline/access_phase.rs`, `proxy.rs`, `context.rs` | done (e2e deferred to phase-07) | AC-01, 05, 06 (e2e) |
 | 06 | [phase-06-hot-reload-watcher.md](phase-06-hot-reload-watcher.md) | `access/reload.rs`, `proxy.rs` | done (proxy wire-up deferred — symmetric with tier watcher) | AC-07, 08 |
 | 07 | [phase-07-tests-bench-coverage.md](phase-07-tests-bench-coverage.md) | `crates/waf-engine/tests/access_*`, `benches/access_lookup.rs`, `crates/gateway/tests/access_e2e_*` | pending | All (verification) |
-| 08 | [phase-08-docs-and-sample-yaml.md](phase-08-docs-and-sample-yaml.md) | `docs/access-lists.md`, `rules/access-lists.yaml` | pending | docs |
+| 08 | [phase-08-docs-and-sample-yaml.md](phase-08-docs-and-sample-yaml.md) | `docs/access-lists.md`, `rules/access-lists.yaml` | done | docs |
 
 ## Key Dependencies
 

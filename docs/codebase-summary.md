@@ -41,6 +41,7 @@ prx-waf/
 │   │
 │   ├── waf-engine/src/
 │   │   ├── engine.rs          # Main WafEngine (16-phase checker)
+│   │   ├── access/            # FR-008 Phase-0 gate: IP/host whitelist + blacklist (Patricia trie + ArcSwap hot-reload)
 │   │   ├── checks/            # Individual detection modules
 │   │   │   ├── ip_allow.rs    # IP whitelist (CIDR)
 │   │   │   ├── ip_block.rs    # IP blocklist
@@ -361,6 +362,10 @@ prx-waf/
 ### Tiered Protection (FR-002)
 
 See [Tiered Protection Consumer Guide](./tiered-protection.md) for request classification, policy bus, and per-tier semantics.
+
+### Access Lists (FR-008)
+
+Phase-0 gate ahead of the 16-phase rule pipeline: per-tier IP whitelist (Patricia trie via `ip_network_table`), IP blacklist, per-tier Host (FQDN) whitelist. Hot-reloaded from `rules/access-lists.yaml` via `ArcSwap`. See [Access Lists Operator Guide](./access-lists.md). Module: `crates/waf-engine/src/access/`.
 
 ### Error Handling
 

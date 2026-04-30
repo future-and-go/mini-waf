@@ -98,6 +98,18 @@ Implements a four-tier request classification and per-tier policy bus that all d
 - [x] Consumer doc (`docs/tiered-protection.md`) — API reference for FR-005/006/009/027 implementers
 - [x] Architecture diagram — Mermaid tier flow added to `docs/system-architecture.md`
 
+### FR-008 — Whitelist + Blacklist (In Progress)
+
+Phase-0 access-control gate that runs before the 16-phase rule pipeline: per-tier IP whitelist (Patricia trie via `ip_network_table`), IP blacklist, per-tier Host (FQDN) whitelist, with `full_bypass` / `blacklist_only` per-tier dispatch (Strategy). Snapshot lives behind `Arc<ArcSwap<AccessLists>>`; the `notify`-driven reloader watches `rules/access-lists.yaml`, debounces editor save bursts (~250 ms), and atomically swaps validated snapshots — bad YAML keeps the previous snapshot live with a `tracing::warn!` (D8). Decision chain runs Host gate → IP blacklist → IP whitelist (deny wins over allow); audit fields `access_decision` / `access_reason` / `access_match` stamp every request.
+
+- [x] `crates/waf-engine/src/access/{config,ip_table,host_gate,evaluator,reload}.rs` — schema, trie adapter, host gate, chain evaluator, watcher
+- [x] `crates/gateway/src/pipeline/access_phase.rs` — Phase-0 wiring
+- [ ] `crates/waf-engine/{tests,benches}/access_*` — AC-01..AC-08, p99 ≤ 2 µs at 10 k entries, ≥ 90 % coverage on `src/access/**`
+- [x] Operator doc (`docs/access-lists.md`) + sample YAML (`rules/access-lists.yaml`)
+- [x] Cross-links: `tiered-protection.md` §10, `codebase-summary.md`
+
+Deferred follow-ups: Tor exit list (FR-042), bad ASN classification (FR-007), validated XFF `ctx.client_ip` (FR-007).
+
 ---
 
 ## v0.3.0 (Proposed — Q3 2026)
