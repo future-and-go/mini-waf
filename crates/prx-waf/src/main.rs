@@ -323,7 +323,7 @@ fn main() -> anyhow::Result<()> {
                 .block_on(run_seed_admin(&config))?;
         }
         Commands::Run => {
-            run_server(&config)?;
+            run_server(&config, &cli.config)?;
         }
         Commands::Crowdsec(sub) => {
             tokio::runtime::Builder::new_current_thread()
@@ -1157,7 +1157,7 @@ fn app_config_to_crowdsec(config: &AppConfig) -> CrowdSecConfig {
 }
 
 /// Start the full server: async init → API server thread → Pingora proxy
-fn run_server(config: &AppConfig) -> anyhow::Result<()> {
+fn run_server(config: &AppConfig, config_file_path: &str) -> anyhow::Result<()> {
     use pingora_core::server::Server;
 
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
@@ -1182,10 +1182,17 @@ fn run_server(config: &AppConfig) -> anyhow::Result<()> {
     };
     let cluster_state_for_api = cluster_node.as_ref().map(waf_cluster::ClusterNode::state);
 
+    let panel_config_path = resolve_panel_config_path(config_file_path, config.panel.config_path.as_deref());
+
     // `_shutdown_guards` holds the watch senders that signal background workers
     // to stop.  They are dropped automatically when `run_server` returns (after
     // `server.run_forever()` exits), which sends the shutdown signal.
-    let (engine, router, api_state, _shutdown_guards) = rt.block_on(init_async(config, cluster_state_for_api))?;
+    let (engine, router, api_state, _shutdown_guards) = rt.block_on(init_async(
+        config,
+        config_file_path,
+        cluster_state_for_api,
+        panel_config_path,
+    ))?;
 
     // Start the management API in a background thread
     let api_listen = config.api.listen_addr.clone();
@@ -1360,16 +1367,49 @@ struct ShutdownGuards {
     _community: Option<tokio::sync::watch::Sender<bool>>,
 }
 
+fn resolve_panel_config_path(main_config_file: &str, configured: Option<&str>) -> Option<std::path::PathBuf> {
+    let s = configured?.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let p = std::path::Path::new(s);
+    Some(if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::path::Path::new(main_config_file)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join(p)
+    })
+}
+
 /// Async initialization: database, engine, rules, Phases 5 & 6
 async fn init_async(
     config: &AppConfig,
+    config_file_path: &str,
     cluster_state: Option<Arc<waf_cluster::NodeState>>,
+    panel_config_path: Option<std::path::PathBuf>,
 ) -> anyhow::Result<(Arc<WafEngine>, Arc<HostRouter>, Arc<AppState>, ShutdownGuards)> {
     info!("Connecting to database...");
     let db = Arc::new(Database::connect(&config.storage.database_url, config.storage.max_connections).await?);
 
     info!("Running database migrations...");
     db.migrate().await?;
+
+    if let Some(ref path) = panel_config_path
+        && !path.exists()
+    {
+        use waf_common::panel_config::WafPanelConfig;
+        let default = WafPanelConfig::default();
+        let s = default
+            .to_toml_string()
+            .map_err(|e| anyhow::anyhow!("panel config serialize: {e}"))?;
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::write(path, s.as_bytes()).await?;
+        info!("Created default panel config at {}", path.display());
+    }
 
     // WAF engine
     let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
@@ -1485,6 +1525,8 @@ async fn init_async(
     // Login rate limiter: always enabled with a strict 10 req/s burst
     // to mitigate brute-force credential attacks on /api/auth/login
     api_state.login_rate_limiter = Some(waf_api::security::ApiRateLimiter::new(10));
+    api_state.panel_config_path = panel_config_path;
+    api_state.main_config_file = Some(config_file_path.to_string());
 
     // Phase 4: create default admin user if none exist
     {

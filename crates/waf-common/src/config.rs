@@ -32,6 +32,9 @@ pub struct AppConfig {
     /// `SQLi` scanner configuration (header scanning, size limits)
     #[serde(default)]
     pub sqli_scan: SqliScanConfig,
+    /// Admin panel runtime TOML path (`waf-panel.toml`)
+    #[serde(default)]
+    pub panel: crate::panel_config::PanelFileRef,
 }
 
 /// Rule source entry from configuration
