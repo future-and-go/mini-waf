@@ -60,11 +60,13 @@ server)                         Log: security_events +
 
 ## Request Lifecycle
 
-Per-request flow runs in three stages:
+Per-request flow runs in five stages:
 
-1. **Pre-Phase — Tier Classification (FR-002)** — `TierPolicyRegistry::classify` resolves `(Tier, Arc<TierPolicy>)` from request parts; result attached to `RequestCtx` before any phase.
-2. **Phase-0 — Access Gate (FR-008)** — Host gate → IP blacklist → IP whitelist (per-tier `full_bypass`/`blacklist_only` dispatch). Short-circuits before the rule pipeline.
-3. **Phases 1–16 — Rule Pipeline** — IP/URL filtering → rate limiting & behavior → payload attacks (SQLi/XSS/RCE/traversal) → custom rules → OWASP CRS → sensitive data → anti-hotlink → CrowdSec. Final decision: Allow / Block / Challenge.
+1. **Pre-Phase — Relay Detection (FR-007)** — `RelayDetector::evaluate` validates XFF / X-Real-IP headers, detects trusted-proxy chains, classifies ASN (residential/datacenter/Tor), and emits signals. Output `ClientIdentity { real_ip, asn_class, asn, signals }` attached to `RequestCtx` for downstream rule predicates.
+2. **Pre-Phase — Tier Classification (FR-002)** — `TierPolicyRegistry::classify` resolves `(Tier, Arc<TierPolicy>)` from request parts; result attached to `RequestCtx` before any phase.
+3. **Phase-0 — Access Gate (FR-008)** — Host gate → IP blacklist → IP whitelist (per-tier `full_bypass`/`blacklist_only` dispatch). *Future*: IP evaluation to use `ClientIdentity.real_ip` instead of peer IP. Short-circuits before the rule pipeline.
+4. **Phases 1–16 — Rule Pipeline** — IP/URL filtering → rate limiting & behavior → payload attacks (SQLi/XSS/RCE/traversal) → custom rules → OWASP CRS → sensitive data → anti-hotlink → CrowdSec. Final decision: Allow / Block / Challenge.
+5. **Risk Scoring (FR-025/026)** — Per-signal `risk_score_delta` from YAML; aggregated risk score influences final decision (future integration).
 
 Full per-phase walkthrough, mermaid diagrams, and post-decision handling: see **[request-pipeline.md](./request-pipeline.md)**.
 
@@ -106,6 +108,38 @@ impl ProxyHttp for WafProxy {
     }
 }
 ```
+
+### Gateway → RelayDetector (FR-007)
+
+```rust
+// In gateway::proxy.rs, early in request_filter()
+let detector = &self.relay_detector;  // RelayDetector instance
+let client_identity = detector.evaluate(
+    peer_ip,                            // TCP remote address
+    &req.headers,                       // HTTP headers (XFF, X-Real-IP, etc.)
+    &self.relay_config,                 // RelayConfig (trusted-proxy CIDRs, ASN db)
+)?;
+
+// Output: ClientIdentity {
+//   real_ip: IpAddr,               // Derived from XFF or fallback to peer_ip
+//   asn_class: AsnClass,           // Datacenter / Residential / Tor
+//   asn: Option<u32>,              // BGP ASN if found
+//   signals: Vec<Signal>,          // XffSpoofPrivate, XffMalformed, ExcessiveHopDepth, TorExit, etc.
+// }
+
+// Attach to RequestCtx for rule predicates (FR-025/026)
+let mut builder = RequestCtxBuilder::new(session, ...);
+builder = builder.with_client_identity(client_identity);
+// ... rest of ctx building
+```
+
+**Multi-provider architecture:**
+- `XffValidator` — parses XFF chain, detects spoofing (private IPs in trusted section)
+- `ProxyChainAnalyzer` — counts hop depth, emits `ExcessiveHopDepth` signal if >32
+- `AsnClassifier` — mmdb lookup (IPinfo Lite primary, fallback iptoasn TSV)
+- `TorExitMatcher` — checks IP against Tor exit node set (refreshed hourly via HTTP+ETag)
+
+**Hot-reload:** File watcher on `rules/relay.yaml` monitors config changes (trusted-proxy CIDRs, ASN db path, Tor feed URL, refresh intervals). Changes propagate via `ArcSwap` (lock-free atomic swap) with ≤1s latency.
 
 ### WafEngine → PostgreSQL Storage
 

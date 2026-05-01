@@ -119,7 +119,23 @@ Phase-0 access-control gate that runs before the 16-phase rule pipeline: per-tie
 - [x] Operator doc (`docs/access-lists.md`) + sample YAML (`rules/access-lists.yaml`)
 - [x] Cross-links: `tiered-protection.md` §10, `codebase-summary.md`, `system-architecture.md`
 
-Deferred follow-ups: Tor exit list (FR-042), bad ASN classification (FR-007), validated XFF `ctx.client_ip` (FR-007).
+Deferred follow-ups: Tor exit list (FR-042), ASN-aware rule predicates (FR-025/026 risk-scorer integration).
+
+### FR-007 — Relay & Proxy Detection (Complete ✓)
+
+Detects relay/proxy traffic via XFF validation, proxy-chain hop-depth analysis, and ASN classification (residential/datacenter/Tor exit). Multi-provider architecture with hot-reload support.
+
+- [x] `crates/waf-engine/src/relay/` — XFF validator, proxy-chain analyzer, ASN classifier, Tor exit matcher
+- [x] `crates/waf-engine/src/relay/intel/` — IP intel refresh (Tor feed, IPinfo Lite mmdb, iptoasn fallback)
+- [x] `crates/gateway/src/proxy.rs` — relay detector integration, `ClientIdentity` attachment to request context
+- [x] YAML hot-reload — `ArcSwap<RelayConfig>`, `ArcSwap<TorSet>`, `ArcSwap<AsnDb>` with `notify` watcher
+- [x] Test suite (9 integration tests + 1 gateway test) — XFF edge cases, proptest fuzz (256 cases), ASN override precedence, Tor exit matching, intel feed scenarios (200/304/500/below-floor), hot-reload propagation ≤1s
+- [x] Criterion bench (`relay_eval`) — 4-hop XFF + all 4 providers, p99 <50µs target
+- [x] Adversarial test matrix (12 rows) — spoofed XFF, IPv6 zone-id, oversize headers/chains, unicode rejects, compromised feed scenarios
+- [x] Wiremock intel feed tests — covers TorFeed, IpinfoLite, Iptoasn refresh with 200/304/500/below-floor outcomes
+- [x] Dev-deps added: `proptest`, `wiremock`, `reqwest` (explicit for tests)
+
+**Deferred to CI pipeline:** ≥90% coverage llvm-cov gate, `.unwrap()` grep gate, 1M-entry Tor oversize test, IptoasnFeed gz variant test, full Pingora e2e (substituted with wiring contract test).
 
 ### Panel-Config API (Complete ✓)
 

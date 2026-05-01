@@ -137,9 +137,11 @@ Use this when introducing a host-gate to an existing service: enable dry-run for
 
 ### 7.1 Client-IP source (XFF / `client_ip`)
 
-Until FR-007 lands a validated `ctx.client_ip` (XFF-aware with trusted-proxy CIDRs), the access lists evaluate against **the TCP peer IP**. Behind a reverse proxy that does not preserve the source IP, every request appears to come from the proxy.
+Access lists evaluate against **the TCP peer IP** by default. FR-007 (Relay & Proxy Detection) ships XFF validation and `ClientIdentity { real_ip, asn_class, signals }` — however, wiring `ctx.client_ip` to consume `ClientIdentity.real_ip` is a follow-up task (one-line change in `gateway/ctx_builder.rs`).
 
-**Workaround:** terminate the reverse proxy at a layer that exposes peer IP (PROXY protocol or HTTP/3 source IP) until FR-007 ships.
+**Interim:** Behind a reverse proxy that does not preserve the source IP, requests appear to come from the proxy. Use PROXY protocol or HTTP/3 source IP to expose the actual client IP at the socket layer.
+
+**Post-FR-007 wiring:** Once `ctx.client_ip` consumes `ClientIdentity.real_ip`, access lists will correctly evaluate XFF-derived client IPs with trusted-proxy CIDR validation.
 
 ### 7.2 Host header normalization
 
@@ -206,6 +208,7 @@ Filter the log stream on `access_decision != continue` to see every block / bypa
 ## 11. Related
 
 - FR-002 tiered protection: [`tiered-protection.md`](./tiered-protection.md) — the `Tier` enum keys used in `host_whitelist` and `tier_whitelist_mode`.
+- FR-007 relay detection: planned integration of `ClientIdentity.real_ip` into access-list IP evaluation.
 - Brainstorm (locked decisions D1–D11): `plans/reports/brainstorm-260429-2222-fr-008-whitelist-blacklist.md`.
 - Implementation plan: `plans/260429-2237-fr-008-whitelist-blacklist/plan.md`.
-- Follow-ups: **FR-042** (Tor exit list), **FR-007** (XFF-aware `client_ip`).
+- Follow-ups: **FR-042** (Tor exit list), **ctx.client_ip wiring** (consume FR-007 `ClientIdentity.real_ip`).

@@ -22,6 +22,7 @@ use pingora_proxy::{FailToProxy, ProxyHttp, Session};
 use waf_common::HostConfig;
 use waf_engine::WafEngine;
 use waf_engine::access::AccessLists;
+use waf_engine::relay::RelayDetector;
 
 use crate::tiered::TierPolicyRegistry;
 
@@ -66,6 +67,9 @@ pub struct WafProxy {
     /// FR-008 phase-05: Phase-0 access-list gate. Optional — `None` = every
     /// request continues unconditionally (no whitelist/blacklist enforcement).
     pub access_lists: Option<Arc<AccessPhaseGate>>,
+    /// FR-007 phase-06: relay/proxy detector. Optional — `None` = pipeline
+    /// behaves exactly as pre-FR-007 (back-compat fast path).
+    pub relay_detector: Option<Arc<RelayDetector>>,
 }
 
 impl WafProxy {
@@ -84,7 +88,16 @@ impl WafProxy {
             body_mask_cache: Arc::new(DashMap::new()),
             tier_registry: None,
             access_lists: None,
+            relay_detector: None,
         }
+    }
+
+    /// Inject the FR-007 relay/proxy detector. When set, every request runs
+    /// detection in `request_filter` and the resolved `ClientIdentity` is
+    /// stashed on the gateway context. When unset, the detector is skipped
+    /// entirely (no overhead, identical to pre-FR-007 behaviour).
+    pub fn with_relay_detector(&mut self, detector: Arc<RelayDetector>) {
+        self.relay_detector = Some(detector);
     }
 
     /// Inject the tier policy registry (FR-002 phase-05). When set, every
@@ -240,6 +253,21 @@ impl ProxyHttp for WafProxy {
         ctx.protocol = detect_from_session(session);
         self.proto_counters.record(ctx.protocol);
 
+        // FR-007 phase-06: run relay/proxy detection BEFORE building the
+        // request ctx so the resolved `real_ip` can override the raw peer/XFF
+        // value used by FR-008 + downstream WAF checks. When the detector is
+        // unset, this block is skipped and the pipeline behaves exactly as
+        // pre-FR-007 (no-op fast path).
+        if let Some(detector) = &self.relay_detector
+            && ctx.client_identity.is_none()
+        {
+            let peer_ip = session.client_addr().and_then(|a| a.as_inet()).map_or_else(
+                || std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                std::net::SocketAddr::ip,
+            );
+            ctx.client_identity = Some(detector.evaluate(peer_ip, &session.req_header().headers));
+        }
+
         // Build request context early so WAF runs before upstream_peer.
         if ctx.request_ctx.is_none() {
             let host_header = session
@@ -254,7 +282,15 @@ impl ProxyHttp for WafProxy {
                 if let Some(reg) = &self.tier_registry {
                     builder = builder.with_tier_registry(reg);
                 }
-                ctx.request_ctx = Some(builder.build());
+                let mut built = builder.build();
+                // FR-007 → FR-008 handover: when the detector resolved a
+                // validated `real_ip`, prefer it over the builder's XFF-based
+                // extraction. Detector validates trusted-proxy chain + spoof
+                // signals; raw XFF parsing in the builder does not.
+                if let Some(id) = &ctx.client_identity {
+                    built.client_ip = id.real_ip;
+                }
+                ctx.request_ctx = Some(built);
             }
         }
 
@@ -288,11 +324,19 @@ impl ProxyHttp for WafProxy {
         // engine. peer_ip is the immediate TCP peer (XFF/real-ip rewrites are
         // upstream-bound and run later in upstream_request_filter).
         if let Some(gate) = &self.access_lists {
-            let peer_ip = session
-                .client_addr()
-                .and_then(|a| a.as_inet())
-                .map_or(request_ctx.client_ip, std::net::SocketAddr::ip);
-            match gate.evaluate(&request_ctx.host, peer_ip, request_ctx.tier) {
+            // FR-007 → FR-008 handover: prefer detector-validated `real_ip`
+            // over raw TCP peer. Falls back to peer when the detector is
+            // unset, preserving pre-FR-007 semantics.
+            let access_ip = ctx.client_identity.as_ref().map_or_else(
+                || {
+                    session
+                        .client_addr()
+                        .and_then(|a| a.as_inet())
+                        .map_or(request_ctx.client_ip, std::net::SocketAddr::ip)
+                },
+                |id| id.real_ip,
+            );
+            match gate.evaluate(&request_ctx.host, access_ip, request_ctx.tier) {
                 AccessGateOutcome::Continue => {}
                 AccessGateOutcome::Bypass => {
                     ctx.access_bypass = true;
