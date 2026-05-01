@@ -35,3 +35,43 @@ impl Check for CommunityChecker {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::community::client::CommunityClient;
+    use bytes::Bytes;
+    use std::collections::HashMap;
+    use waf_common::HostConfig;
+
+    fn ctx_with_ip(ip: &str) -> RequestCtx {
+        RequestCtx {
+            req_id: "t".to_string(),
+            client_ip: ip.parse().expect("ip"),
+            client_port: 0,
+            method: "GET".to_string(),
+            host: "example.com".to_string(),
+            port: 80,
+            path: "/".to_string(),
+            query: String::new(),
+            headers: HashMap::new(),
+            body_preview: Bytes::new(),
+            content_length: 0,
+            is_tls: false,
+            host_config: Arc::new(HostConfig::default()),
+            geo: None,
+            tier: waf_common::tier::Tier::CatchAll,
+            tier_policy: RequestCtx::default_tier_policy(),
+            cookies: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn empty_blocklist_yields_no_detection() {
+        let client = Arc::new(CommunityClient::new("http://localhost").expect("client"));
+        let bl = Arc::new(CommunityBlocklistSync::new(client, "k".to_string(), 60, None));
+        let checker = CommunityChecker::new(bl);
+        let ctx = ctx_with_ip("1.2.3.4");
+        assert!(checker.check(&ctx).is_none());
+    }
+}

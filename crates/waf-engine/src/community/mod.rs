@@ -180,3 +180,18 @@ pub async fn init_community(
         flush_handle,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn disabled_returns_none() {
+        let cfg = CommunityConfig {
+            enabled: false,
+            ..CommunityConfig::default()
+        };
+        let (_tx, rx) = watch::channel(false);
+        assert!(init_community(cfg, rx).await.is_none());
+    }
+}

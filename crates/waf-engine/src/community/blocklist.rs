@@ -1048,4 +1048,22 @@ mod tests {
         let oversized = "x".repeat(MAX_FIELD_LEN + 1);
         assert!(oversized.len() > MAX_FIELD_LEN);
     }
+
+    #[test]
+    fn fresh_sync_is_empty_and_check_ip_misses() {
+        use crate::community::client::CommunityClient;
+        let client = Arc::new(CommunityClient::new("http://localhost").expect("client"));
+        let sync = CommunityBlocklistSync::new(client, "k".to_string(), 60, None);
+        assert!(sync.is_empty());
+        assert_eq!(sync.len(), 0);
+        let ip: IpAddr = "1.2.3.4".parse().expect("ip");
+        assert!(sync.check_ip(&ip).is_none());
+    }
+
+    #[test]
+    fn parse_public_key_rejects_non_hex_chars() {
+        // 64 chars but contains non-hex 'g'
+        let bad = format!("g{}", "0".repeat(63));
+        assert!(parse_public_key(&bad).is_none());
+    }
 }

@@ -288,9 +288,7 @@ mod tests {
     fn cached_decision_is_expired_reflects_instant() {
         let past = CachedDecision {
             decision: decision("Ip", "1.2.3.4", "test"),
-            expires_at: Instant::now()
-                .checked_sub(Duration::from_mins(1))
-                .expect("clock"),
+            expires_at: Instant::now().checked_sub(Duration::from_mins(1)).expect("clock"),
         };
         let future = CachedDecision {
             decision: decision("Ip", "1.2.3.4", "test"),

@@ -107,3 +107,55 @@ const fn default_update_frequency() -> u64 {
 const fn default_appsec_timeout() -> u64 {
     500
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_are_safe() {
+        let cfg = CrowdSecConfig::default();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.mode, CrowdSecMode::Bouncer);
+        assert_eq!(cfg.lapi_url, "http://127.0.0.1:8080");
+        assert!(cfg.api_key.is_empty());
+        assert_eq!(cfg.update_frequency_secs, default_update_frequency());
+        assert_eq!(cfg.cache_ttl_secs, 0);
+        assert_eq!(cfg.fallback_action, FallbackAction::Allow);
+        assert!(cfg.scenarios_containing.is_empty());
+        assert!(cfg.scenarios_not_containing.is_empty());
+        assert!(cfg.appsec.is_none());
+        assert!(cfg.pusher.is_none());
+    }
+
+    #[test]
+    fn deserializes_minimal_json() {
+        let raw = r#"{
+            "enabled": true,
+            "lapi_url": "http://example:8080",
+            "api_key": "abc"
+        }"#;
+        let cfg: CrowdSecConfig = serde_json::from_str(raw).expect("parse");
+        assert!(cfg.enabled);
+        assert_eq!(cfg.lapi_url, "http://example:8080");
+        assert_eq!(cfg.api_key, "abc");
+        assert_eq!(cfg.mode, CrowdSecMode::Bouncer);
+        assert_eq!(cfg.update_frequency_secs, default_update_frequency());
+    }
+
+    #[test]
+    fn mode_and_fallback_round_trip() {
+        let modes = [CrowdSecMode::Bouncer, CrowdSecMode::Appsec, CrowdSecMode::Both];
+        for m in modes {
+            let s = serde_json::to_string(&m).expect("ser");
+            let back: CrowdSecMode = serde_json::from_str(&s).expect("de");
+            assert_eq!(m, back);
+        }
+        let actions = [FallbackAction::Allow, FallbackAction::Block, FallbackAction::Log];
+        for a in actions {
+            let s = serde_json::to_string(&a).expect("ser");
+            let back: FallbackAction = serde_json::from_str(&s).expect("de");
+            assert_eq!(a, back);
+        }
+    }
+}
