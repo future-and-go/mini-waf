@@ -252,3 +252,60 @@ impl CommunityReporter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn detection(phase: Phase) -> DetectionResult {
+        DetectionResult {
+            rule_id: Some("R1".to_string()),
+            rule_name: "Test".to_string(),
+            phase,
+            detail: "test detail".to_string(),
+        }
+    }
+
+    #[test]
+    fn confidence_buckets_match_phase_categories() {
+        assert!((compute_confidence(Phase::SqlInjection) - 0.95).abs() < 1e-9);
+        assert!((compute_confidence(Phase::Xss) - 0.90).abs() < 1e-9);
+        assert!((compute_confidence(Phase::DirTraversal) - 0.85).abs() < 1e-9);
+        assert!((compute_confidence(Phase::IpBlacklist) - 0.80).abs() < 1e-9);
+        assert!((compute_confidence(Phase::Bot) - 0.70).abs() < 1e-9);
+        assert!((compute_confidence(Phase::CrowdSec) - 0.60).abs() < 1e-9);
+        assert!((compute_confidence(Phase::Community) - 0.50).abs() < 1e-9);
+        assert!((compute_confidence(Phase::GeoIp) - 0.40).abs() < 1e-9);
+        assert!((compute_confidence(Phase::IpWhitelist) - 0.30).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn try_push_detection_queues_signal_without_dropping() {
+        let client = Arc::new(CommunityClient::new("http://localhost").expect("client"));
+        let reporter = CommunityReporter::new(client, "k".to_string(), 50, 30);
+        let det = detection(Phase::SqlInjection);
+        let req = RequestInfo {
+            http_method: "GET".to_string(),
+            request_path: "/x".to_string(),
+            request_host: "h".to_string(),
+            geo_country: Some("US".to_string()),
+        };
+        reporter.try_push_detection("1.2.3.4".parse().expect("ip"), &det, Some(&req));
+        // No drop expected — bounded channel still has room.
+        assert_eq!(reporter.dropped.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn try_push_detection_drops_when_channel_full() {
+        let client = Arc::new(CommunityClient::new("http://localhost").expect("client"));
+        // batch_size=1 → cap = max(16, 1024) = 1024. Fill it past capacity.
+        let reporter = CommunityReporter::new(client, "k".to_string(), 1, 30);
+        let det = detection(Phase::Bot);
+        let ip = "9.9.9.9".parse().expect("ip");
+        // Push past cap (1024) so back-pressure kicks in.
+        for _ in 0..2000 {
+            reporter.try_push_detection(ip, &det, None);
+        }
+        assert!(reporter.dropped.load(Ordering::Relaxed) > 0);
+    }
+}
