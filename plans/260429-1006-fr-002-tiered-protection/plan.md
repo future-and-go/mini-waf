@@ -35,7 +35,7 @@ Implement FR-002 acceptance criteria:
 | 3 | Policy registry + ArcSwap | complete | 0.5d | [phase-03-registry.md](phase-03-registry.md) |
 | 4 | Config watcher (hot-reload) | complete | 0.5d | [phase-04-watcher.md](phase-04-watcher.md) |
 | 5 | Wire into ctx_builder | complete | 0.25d | [phase-05-wire-in.md](phase-05-wire-in.md) |
-| 6 | Tests + bench + docs | complete | 0.5d | [phase-06-tests-docs.md](phase-06-tests-docs.md) |
+| 6 | Tests + bench + docs | pending | 0.5d | [phase-06-tests-docs.md](phase-06-tests-docs.md) |
 
 ## Key Dependencies
 - **FR-001** (reverse proxy) ✅ merged — `RequestCtx` & `ctx_builder` finalized.
@@ -44,9 +44,9 @@ Implement FR-002 acceptance criteria:
 - **regex** crate ✅ in workspace.
 
 ## Cross-Plan Status
-- **Phases 1-6 COMPLETE** (4.25d delivered, on schedule).
-- **FR-002 SHIPPED** — ready for FR-005/006/009/027 to start.
-- **Unblocks:** FR-005/006/009/027 (tier policy consumer APIs).
+- **Phases 1-5 COMPLETE** (3.75d delivered, 25min ahead of plan).
+- **Phase 6 (tests/bench/docs) PENDING** — final gate before FR-005/006/009/027 can start.
+- **Blocks:** FR-005/006/009/027 (when Phase 6 ships).
 
 ## Success Criteria
 - All 4 tiers classifiable from TOML config.

@@ -1,0 +1,31 @@
+# FR-008 — Access lists (IP allow/deny + per-tier Host allowlist).
+#
+# All-empty default → every gate is OFF until populated. Safe to deploy as-is.
+# Schema mirrored verbatim in docs/access-lists.md — keep both in sync.
+#
+# Hot-reloaded on file save (notify watcher, ~250 ms debounce). Parse errors
+# keep the previous snapshot live; check WAF logs for `access-list reload`.
+
+version: 1
+dry_run: false
+
+# IP/CIDR lists. Bare IPs accepted (treated as /32 or /128). v4 + v6 mix freely.
+ip_whitelist: []
+ip_blacklist: []
+
+# Per-tier Host (FQDN) whitelist. Lowercase, no port suffix.
+# Empty list per tier = gate disabled for that tier (deny-by-default OFF).
+host_whitelist:
+  critical:  []
+  high:      []
+  medium:    []
+  catch_all: []
+
+# How a whitelist hit short-circuits the pipeline, per tier.
+#   full_bypass    → skip ALL downstream WAF phases (fast path).
+#   blacklist_only → run rules even if whitelisted (defense-in-depth, default).
+tier_whitelist_mode:
+  critical:  blacklist_only
+  high:      blacklist_only
+  medium:    full_bypass
+  catch_all: full_bypass

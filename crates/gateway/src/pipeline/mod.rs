@@ -9,9 +9,11 @@ use std::sync::Arc;
 
 use waf_common::{HostConfig, RequestCtx};
 
+pub mod access_phase;
 pub mod request_filter_chain;
 pub mod response_filter_chain;
 
+pub use access_phase::{AccessGateOutcome, AccessPhaseGate};
 pub use request_filter_chain::RequestFilterChain;
 pub use response_filter_chain::ResponseFilterChain;
 
