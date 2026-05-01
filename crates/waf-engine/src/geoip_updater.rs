@@ -349,4 +349,61 @@ mod tests {
         // Unrecognised unit falls back to 7 days.
         assert_eq!(parse_duration("3x"), Duration::from_hours(168));
     }
+
+    #[test]
+    fn parse_duration_no_unit_treated_as_seconds() {
+        // No unit suffix: parser treats the whole string as seconds.
+        assert_eq!(parse_duration("45"), Duration::from_secs(45));
+    }
+
+    #[test]
+    fn parse_duration_unparseable_number_falls_back_to_seven_days() {
+        // No leading digits → unit becomes "zh" (unrecognised) → 7-day default.
+        assert_eq!(parse_duration("zh"), Duration::from_hours(168));
+    }
+
+    #[test]
+    fn xdb_file_info_reports_missing_file() {
+        let path = std::path::Path::new("/nonexistent/doesnotexist.xdb");
+        let info = xdb_file_info(path);
+        assert!(info.contains("not found"));
+    }
+
+    #[test]
+    fn xdb_file_info_reports_size_for_existing_file() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let path = tmp.path().join("dummy.xdb");
+        std::fs::write(&path, b"abc").expect("write");
+        let info = xdb_file_info(&path);
+        assert!(info.contains("bytes"));
+        assert!(info.contains("modified"));
+    }
+
+    #[test]
+    fn updater_constructors_set_url_and_dir() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let custom = XdbUpdater::new(tmp.path().to_path_buf(), "https://example.com".to_string());
+        assert_eq!(custom.github_base_url, "https://example.com");
+        assert_eq!(custom.data_dir, tmp.path());
+
+        let default = XdbUpdater::with_default_url(tmp.path().to_path_buf());
+        assert_eq!(default.github_base_url, DEFAULT_GITHUB_BASE_URL);
+    }
+
+    #[test]
+    fn build_client_succeeds_with_reasonable_timeout() {
+        let res = build_client(30);
+        assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn check_update_returns_true_when_files_missing() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        // Use a non-routable URL so HEAD requests never hit the network for
+        // the size-comparison branch — but since both files are missing, the
+        // function returns Ok(true) before issuing a request.
+        let updater = XdbUpdater::new(tmp.path().to_path_buf(), "http://127.0.0.1:1".to_string());
+        let res = updater.check_update().await.expect("missing files → Ok(true)");
+        assert!(res);
+    }
 }

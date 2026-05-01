@@ -123,3 +123,47 @@ pub fn register_sighup_handler(manager: Arc<Mutex<RuleManager>>) {
 /// No-op on non-Unix platforms.
 #[cfg(not(unix))]
 pub fn register_sighup_handler(_manager: Arc<Mutex<RuleManager>>) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use waf_common::RulesConfig;
+
+    fn empty_manager() -> Arc<Mutex<RuleManager>> {
+        let cfg = RulesConfig {
+            enable_builtin_owasp: false,
+            enable_builtin_bot: false,
+            enable_builtin_scanner: false,
+            ..RulesConfig::default()
+        };
+        Arc::new(Mutex::new(RuleManager::new(&cfg)))
+    }
+
+    #[test]
+    fn start_creates_missing_rules_directory() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let rules_dir = tmp.path().join("does-not-exist");
+        assert!(!rules_dir.exists());
+
+        let mgr = empty_manager();
+        // Hold the watcher to keep the OS handle alive briefly.
+        let _hr = HotReloader::start(mgr, rules_dir.clone(), 50).expect("start");
+        assert!(rules_dir.exists());
+    }
+
+    #[test]
+    fn trigger_reload_handles_empty_manager() {
+        let mgr = empty_manager();
+        // Just exercises the success path: no sources → empty report.
+        trigger_reload(&mgr);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn register_sighup_handler_does_not_panic() {
+        let mgr = empty_manager();
+        register_sighup_handler(mgr);
+        // Yield so the spawned task can install the signal handler.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
