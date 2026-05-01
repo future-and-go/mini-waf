@@ -47,3 +47,28 @@ impl CommunityClient {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_strips_trailing_slashes() {
+        let c = CommunityClient::new("https://example.com///").expect("client");
+        assert_eq!(c.base_url, "https://example.com");
+    }
+
+    #[test]
+    fn new_keeps_clean_url_unchanged() {
+        let c = CommunityClient::new("https://example.com").expect("client");
+        assert_eq!(c.base_url, "https://example.com");
+    }
+
+    #[tokio::test]
+    async fn test_connection_unreachable_host_returns_error() {
+        // Use a TCP port that should reject immediately (loopback, no listener).
+        let c = CommunityClient::new("http://127.0.0.1:1").expect("client");
+        let res = c.test_connection(Some("k")).await;
+        assert!(res.is_err());
+    }
+}

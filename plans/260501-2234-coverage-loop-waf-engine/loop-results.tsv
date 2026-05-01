@@ -1,0 +1,8 @@
+iter	timestamp	metric	delta	kept	description
+0	2026-05-01T15:43:22Z	60.54	+0.00	baseline	initial measurement
+1	2026-05-01T15:45:57Z	64.90	+4.36	yes	add builtin rules loader unit tests
+2	2026-05-01T15:48:31Z	65.86	+0.96	yes	cover rules::formats helpers and validators
+3	2026-05-01T15:50:22Z	66.51	+0.65	yes	cover rules::sources accessors and reports
+4	2026-05-01T15:54:34Z	69.31	+2.80	yes	cover RuleManager construction and lifecycle
+5	2026-05-01T15:56:24Z	69.91	+0.60	yes	cover RuleRegistry CRUD, filtering and search
+6	2026-05-01T16:04:46	72.37	+2.46	yes	crowdsec/cache.rs + checker integration tests

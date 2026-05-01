@@ -62,3 +62,34 @@ const fn default_flush_interval() -> u64 {
 const fn default_sync_interval() -> u64 {
     300
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_values_match_constants() {
+        let cfg = CommunityConfig::default();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.server_url, default_server_url());
+        assert!(cfg.api_key.is_none());
+        assert!(cfg.machine_id.is_none());
+        assert!(cfg.public_key.is_none());
+        assert_eq!(cfg.batch_size, default_batch_size());
+        assert_eq!(cfg.flush_interval_secs, default_flush_interval());
+        assert_eq!(cfg.sync_interval_secs, default_sync_interval());
+    }
+
+    #[test]
+    fn round_trips_through_json() {
+        let cfg = CommunityConfig {
+            enabled: true,
+            api_key: Some("k".to_string()),
+            ..CommunityConfig::default()
+        };
+        let s = serde_json::to_string(&cfg).expect("serialize");
+        let back: CommunityConfig = serde_json::from_str(&s).expect("deserialize");
+        assert!(back.enabled);
+        assert_eq!(back.api_key.as_deref(), Some("k"));
+    }
+}
