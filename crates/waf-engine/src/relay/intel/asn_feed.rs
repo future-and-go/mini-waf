@@ -47,7 +47,7 @@ impl AsnDb for IpinfoLiteMmdb {
         // mmdb returns Err on lookup miss in some versions; treat any error
         // as "no record" (matches the `AsnUnknown` semantics in the
         // classifier).
-        let rec: IpinfoLiteRecord<'_> = self.reader.lookup(ip).ok()?;
+        let rec: IpinfoLiteRecord<'_> = self.reader.lookup(ip).ok()?.decode().ok().flatten()?;
         let asn_str = rec.asn?;
         let asn: u32 = asn_str.strip_prefix("AS").unwrap_or(asn_str).parse().ok()?;
         let org = rec.as_name.unwrap_or_default().to_string();

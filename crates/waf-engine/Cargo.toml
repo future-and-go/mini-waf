@@ -39,7 +39,7 @@ ahash = "0.8"
 globset = "0.4"
 ip_network_table = "0.2"
 ip_network = "0.4"
-maxminddb = "0.24"
+maxminddb = "0.27"
 http = { workspace = true }
 
 [dev-dependencies]
