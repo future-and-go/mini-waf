@@ -1,0 +1,44 @@
+# FR-007 phase-03 — minimal hyperscaler/cloud ASN seed.
+# Loaded as a `datacenter_lists:` entry in `rules/relay-detection.yaml`.
+# Operator overrides (via separate `allow:`/`deny:` YAML) ALWAYS WIN.
+#
+# Format: top-level `asns:` (numeric ASN list) + optional `cidrs:` (string list).
+# Detection: `DatacenterSet::merge_yaml` treats files containing `asns:`/`cidrs:`
+# as datacenter sources; `allow:`/`deny:` files are operator overrides.
+asns:
+  # AWS
+  - 16509
+  - 14618
+  # Google Cloud
+  - 15169
+  - 396982
+  # Microsoft Azure
+  - 8075
+  - 8068
+  # Oracle Cloud
+  - 31898
+  # DigitalOcean
+  - 14061
+  # OVH
+  - 16276
+  # Hetzner
+  - 24940
+  # Linode / Akamai
+  - 63949
+  - 20940
+  - 16625
+  # Vultr / Choopa
+  - 20473
+  # Cloudflare
+  - 13335
+  # Fastly
+  - 54113
+  # IBM Cloud / SoftLayer
+  - 36351
+  # Tencent Cloud
+  - 132203
+  - 45090
+  # Alibaba Cloud
+  - 37963
+  - 45102
+cidrs: []
