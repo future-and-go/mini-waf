@@ -35,6 +35,8 @@ hex = { workspace = true }
 url = { workspace = true }
 ahash = "0.8"
 globset = "0.4"
+ip_network_table = "0.2"
+ip_network = "0.4"
 
 [dev-dependencies]
 rand = { workspace = true }
@@ -47,6 +49,10 @@ harness = false
 
 [[bench]]
 name = "rule_eval"
+harness = false
+
+[[bench]]
+name = "access_lookup"
 harness = false
 
 [lints]

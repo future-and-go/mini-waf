@@ -84,7 +84,7 @@
 
 ## Unreleased (In Progress — 2026-04-29)
 
-### FR-002 — Tiered Protection
+### FR-002 — Tiered Protection (Complete ✓)
 
 Implements a four-tier request classification and per-tier policy bus that all downstream feature-requests (FR-005, FR-006, FR-009, FR-027) consume. Every request is mapped to `Critical / High / Medium / CatchAll` by a priority-sorted classifier (path-exact, path-prefix, path-regex, host-suffix, method, header matchers); the matched tier's `TierPolicy` — carrying `fail_mode`, `ddos_threshold_rps`, `cache_policy`, and `risk_thresholds` — is attached to `RequestCtx` before Phase 1 runs. The policy registry is backed by `ArcSwap` for lock-free atomic hot-swaps: the `TierConfigWatcher` thread monitors `configs/default.toml`, debounces editor-burst events (200 ms window), and publishes validated snapshots without restarting the gateway. On parse or validation failure the previous config is retained and a `tracing::warn!` is emitted; the gateway never panics on bad config.
 
@@ -97,6 +97,38 @@ Implements a four-tier request classification and per-tier policy bus that all d
 - [x] Criterion bench (`crates/gateway/benches/tier_classifier_bench.rs`) — 50-rule classify over 1000 paths
 - [x] Consumer doc (`docs/tiered-protection.md`) — API reference for FR-005/006/009/027 implementers
 - [x] Architecture diagram — Mermaid tier flow added to `docs/system-architecture.md`
+
+### FR-003 — File-Based Custom Rule Loader (Complete ✓)
+
+Scans `rules/custom/*.yaml` and auto-loads YAML documents marked with `kind: custom_rule_v1`. Per-file error isolation: bad files skip gracefully, previous versions retained, errors logged. Hot-reload via `notify` watcher (500ms debounce). Forward-compat: unknown `custom_rule_v*` versions rejected on parse.
+
+- [x] `crates/waf-engine/src/rules/custom_file_loader.rs` — watcher loop, scan + load
+- [x] `crates/waf-engine/src/rules/formats/custom_rule_yaml.rs` — multi-doc YAML parser, `kind` discriminator
+- [x] Rule registry integration: clear stale, `add_file_rule` per result
+- [x] Tests: `custom_rule_file_load.rs`, `custom_rule_hot_reload.rs`
+- [x] Updated `docs/custom-rules-syntax.md` (already current)
+
+### FR-008 — Whitelist + Blacklist (Complete ✓)
+
+Phase-0 access-control gate that runs before the 16-phase rule pipeline: per-tier IP whitelist (Patricia trie via `ip_network_table`), IP blacklist, per-tier Host (FQDN) whitelist, with `full_bypass` / `blacklist_only` per-tier dispatch (Strategy). Snapshot lives behind `Arc<ArcSwap<AccessLists>>`; the `notify`-driven reloader watches `rules/access-lists.yaml`, debounces editor save bursts (~250 ms), and atomically swaps validated snapshots — bad YAML keeps the previous snapshot live with a `tracing::warn!` (D8). Decision chain runs Host gate → IP blacklist → IP whitelist (deny wins over allow); audit fields `access_decision` / `access_reason` / `access_match` stamp every request. Soft-warn ≥50k entries, hard-reject ≥500k.
+
+- [x] `crates/waf-engine/src/access/{config,ip_table,host_gate,evaluator,reload}.rs` — schema, trie adapter, host gate, chain evaluator, watcher
+- [x] `crates/gateway/src/pipeline/access_phase.rs` — Phase-0 wiring
+- [x] `crates/waf-engine/tests/access_hot_reload.rs`, `access_reload_under_load.rs` — hot-reload integration
+- [x] `crates/waf-engine/benches/access_lookup.rs` — bench: v4 p99 ≤2µs @ 10k, v6 ≤4µs
+- [x] Operator doc (`docs/access-lists.md`) + sample YAML (`rules/access-lists.yaml`)
+- [x] Cross-links: `tiered-protection.md` §10, `codebase-summary.md`, `system-architecture.md`
+
+Deferred follow-ups: Tor exit list (FR-042), bad ASN classification (FR-007), validated XFF `ctx.client_ip` (FR-007).
+
+### Panel-Config API (Complete ✓)
+
+Atomic read/write of `waf-panel.toml` (operational policy settings) via `GET/PUT /api/panel-config`. Config struct `WafPanelConfig` with nested sections: `ResponseFilteringPanel`, `TrustedBypassPanel`, `RateLimitsPanel`, `AutoBlockPanel`. Validates risk thresholds (allow < challenge < block), CIDR syntax, honeypot paths. Atomic write-through semantics.
+
+- [x] `crates/waf-common/src/panel_config.rs` — TOML schema + validation
+- [x] `crates/waf-api/src/panel_api.rs` — `GET/PUT /api/panel-config` handlers
+- [x] Frontend: `web/admin-panel/src/pages/settings/index.tsx` — settings UI with i18n
+- [x] i18n locales updated (all 11 locales)
 
 ---
 
