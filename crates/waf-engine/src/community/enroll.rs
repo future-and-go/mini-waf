@@ -61,3 +61,21 @@ fn hostname_safe() -> String {
         .or_else(|_| std::env::var("COMPUTERNAME"))
         .unwrap_or_else(|_| "unknown".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hostname_safe_is_non_empty() {
+        let h = hostname_safe();
+        assert!(!h.is_empty());
+    }
+
+    #[tokio::test]
+    async fn enroll_machine_propagates_error_on_unreachable_server() {
+        let client = CommunityClient::new("http://127.0.0.1:1").expect("client");
+        let res = enroll_machine(&client).await;
+        assert!(res.is_err());
+    }
+}
