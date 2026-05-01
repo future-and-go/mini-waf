@@ -134,3 +134,113 @@ pub fn export_rules(rules: &[Rule], format: ExportFormat) -> Result<String> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn sample_rule(id: &str, name: &str) -> Rule {
+        Rule {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: None,
+            category: "sqli".to_string(),
+            source: "test".to_string(),
+            enabled: true,
+            action: "block".to_string(),
+            severity: Some("low".to_string()),
+            pattern: None,
+            tags: vec![],
+            metadata: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn rule_format_from_path_known_extensions() {
+        assert_eq!(RuleFormat::from_path(&PathBuf::from("a.yaml")), Some(RuleFormat::Yaml));
+        assert_eq!(RuleFormat::from_path(&PathBuf::from("a.yml")), Some(RuleFormat::Yaml));
+        assert_eq!(
+            RuleFormat::from_path(&PathBuf::from("a.conf")),
+            Some(RuleFormat::ModSec)
+        );
+        assert_eq!(
+            RuleFormat::from_path(&PathBuf::from("a.modsec")),
+            Some(RuleFormat::ModSec)
+        );
+        assert_eq!(RuleFormat::from_path(&PathBuf::from("a.json")), Some(RuleFormat::Json));
+        assert_eq!(RuleFormat::from_path(&PathBuf::from("a.txt")), None);
+        assert_eq!(RuleFormat::from_path(&PathBuf::from("noext")), None);
+    }
+
+    #[test]
+    fn rule_format_as_str_and_display() {
+        assert_eq!(RuleFormat::Yaml.as_str(), "yaml");
+        assert_eq!(RuleFormat::Json.as_str(), "json");
+        assert_eq!(RuleFormat::ModSec.as_str(), "modsec");
+        assert_eq!(format!("{}", RuleFormat::Yaml), "yaml");
+        assert_eq!(RuleFormat::default(), RuleFormat::Yaml);
+    }
+
+    #[test]
+    fn export_format_parse_str() {
+        assert_eq!(ExportFormat::parse_str("json"), ExportFormat::Json);
+        assert_eq!(ExportFormat::parse_str("JSON"), ExportFormat::Json);
+        assert_eq!(ExportFormat::parse_str("yaml"), ExportFormat::Yaml);
+        // Unknown values fall through to Yaml.
+        assert_eq!(ExportFormat::parse_str("toml"), ExportFormat::Yaml);
+    }
+
+    #[test]
+    fn export_rules_round_trips_for_both_formats() {
+        let rules = vec![sample_rule("r1", "first"), sample_rule("r2", "second")];
+
+        let yaml = export_rules(&rules, ExportFormat::Yaml).expect("yaml export");
+        assert!(yaml.contains("r1"));
+        assert!(yaml.contains("second"));
+
+        let json = export_rules(&rules, ExportFormat::Json).expect("json export");
+        assert!(json.contains("\"r1\""));
+        assert!(json.contains("\"second\""));
+    }
+
+    #[test]
+    fn validate_rules_flags_empty_id_and_name() {
+        // Use JSON so we can craft known-bad rules without depending on yaml grammar.
+        let json_payload = r#"[
+            {"id":"","name":"missing-id","category":"c","source":"s","enabled":true,"action":"block"},
+            {"id":"x","name":"","category":"c","source":"s","enabled":true,"action":"block"}
+        ]"#;
+        let errors = validate_rules(json_payload, RuleFormat::Json);
+        assert_eq!(errors.len(), 2);
+        let messages: Vec<_> = errors.iter().map(|e| e.message.clone()).collect();
+        assert!(messages.iter().any(|m| m.contains("id")));
+        assert!(messages.iter().any(|m| m.contains("name")));
+    }
+
+    #[test]
+    fn validate_rules_returns_parse_error_on_garbage_input() {
+        let errors = validate_rules("{not valid json", RuleFormat::Json);
+        assert_eq!(errors.len(), 1);
+        let first = errors.first().expect("at least one error");
+        assert!(first.message.starts_with("Parse error"));
+    }
+
+    #[test]
+    fn validation_error_display_includes_line_when_present() {
+        let with_line = ValidationError {
+            line: Some(7),
+            field: None,
+            message: "boom".to_string(),
+        };
+        assert_eq!(format!("{with_line}"), "line 7: boom");
+
+        let without_line = ValidationError {
+            line: None,
+            field: None,
+            message: "boom".to_string(),
+        };
+        assert_eq!(format!("{without_line}"), "boom");
+    }
+}
