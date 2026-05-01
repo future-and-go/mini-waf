@@ -159,3 +159,24 @@ impl CrowdSecClient {
         Ok(auth.token)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unreachable_client() -> CrowdSecClient {
+        // Loopback port 1 — kernel will refuse the connection immediately.
+        CrowdSecClient::new("http://127.0.0.1:1".to_string(), "k".to_string()).expect("client")
+    }
+
+    #[tokio::test]
+    async fn unreachable_lapi_propagates_errors() {
+        let c = unreachable_client();
+        assert!(c.get_decisions_stream(true).await.is_err());
+        assert!(c.check_ip("1.2.3.4").await.is_err());
+        assert!(c.delete_decision(42).await.is_err());
+        assert!(c.test_connection().await.is_err());
+        assert!(c.push_alerts("tok", serde_json::json!([])).await.is_err());
+        assert!(c.machine_auth("m", "p").await.is_err());
+    }
+}

@@ -73,3 +73,29 @@ pub async fn run_decision_sync(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn sync_task_exits_on_shutdown_signal() {
+        let client = Arc::new(CrowdSecClient::new("http://127.0.0.1:1".to_string(), "k".to_string()).expect("client"));
+        let cache = Arc::new(DecisionCache::new(60));
+        let config = CrowdSecConfig {
+            update_frequency_secs: 5,
+            ..CrowdSecConfig::default()
+        };
+        let (tx, rx) = watch::channel(false);
+
+        // Spawn the sync task and immediately request shutdown.
+        let task = tokio::spawn(run_decision_sync(client, cache, config, rx));
+        tx.send(true).expect("send shutdown");
+
+        // Should return promptly. Bound the wait so a regression doesn't hang CI.
+        tokio::time::timeout(std::time::Duration::from_secs(10), task)
+            .await
+            .expect("sync task did not exit on shutdown")
+            .expect("task panicked");
+    }
+}

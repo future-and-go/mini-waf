@@ -106,3 +106,70 @@ pub fn appsec_to_detection(message: String) -> DetectionResult {
         detail: message,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crowdsec::config::FallbackAction;
+    use bytes::Bytes;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use waf_common::HostConfig;
+
+    fn cfg() -> AppSecConfig {
+        AppSecConfig {
+            endpoint: "http://127.0.0.1:1/appsec".to_string(),
+            api_key: "k".to_string(),
+            timeout_ms: 200,
+            failure_action: FallbackAction::Allow,
+        }
+    }
+
+    fn ctx() -> RequestCtx {
+        RequestCtx {
+            req_id: "t".to_string(),
+            client_ip: "1.2.3.4".parse().expect("ip"),
+            client_port: 0,
+            method: "GET".to_string(),
+            host: "example.com".to_string(),
+            port: 80,
+            path: "/".to_string(),
+            query: String::new(),
+            headers: HashMap::new(),
+            body_preview: Bytes::new(),
+            content_length: 0,
+            is_tls: false,
+            host_config: Arc::new(HostConfig::default()),
+            geo: None,
+            tier: waf_common::tier::Tier::CatchAll,
+            tier_policy: RequestCtx::default_tier_policy(),
+            cookies: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn appsec_to_detection_carries_message() {
+        let det = appsec_to_detection("blocked-by-appsec".to_string());
+        assert_eq!(det.rule_id.as_deref(), Some("crowdsec:appsec"));
+        assert_eq!(det.detail, "blocked-by-appsec");
+        assert_eq!(det.phase, Phase::CrowdSec);
+    }
+
+    #[tokio::test]
+    async fn check_request_returns_unavailable_when_endpoint_down() {
+        let client = AppSecClient::new(cfg()).expect("client");
+        let result = client.check_request(&ctx()).await;
+        assert!(matches!(result, AppSecResult::Unavailable));
+    }
+
+    #[tokio::test]
+    async fn check_request_forwards_body_when_present() {
+        let client = AppSecClient::new(cfg()).expect("client");
+        let mut c = ctx();
+        c.body_preview = Bytes::from_static(b"some body");
+        c.headers.insert("user-agent".to_string(), "test-agent".to_string());
+        // Endpoint is unreachable — we just exercise the body branch.
+        let result = client.check_request(&c).await;
+        assert!(matches!(result, AppSecResult::Unavailable));
+    }
+}
