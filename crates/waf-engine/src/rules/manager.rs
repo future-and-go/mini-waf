@@ -480,3 +480,192 @@ async fn fetch_remote_content(url: &str) -> Result<String> {
 
     Ok(body)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::tempdir;
+    use waf_common::config::RuleSourceEntry;
+
+    fn minimal_config() -> RulesConfig {
+        RulesConfig {
+            dir: "/nonexistent-rules-dir".to_string(),
+            hot_reload: false,
+            reload_debounce_ms: 0,
+            enable_builtin_owasp: true,
+            enable_builtin_bot: true,
+            enable_builtin_scanner: true,
+            sources: vec![],
+        }
+    }
+
+    fn write_yaml_rule(dir: &Path, filename: &str, id: &str) -> PathBuf {
+        let path = dir.join(filename);
+        let mut f = std::fs::File::create(&path).expect("create rule file");
+        writeln!(f, "- id: \"{id}\"\n  name: \"test rule\"").expect("write rule");
+        path
+    }
+
+    #[test]
+    fn new_with_empty_sources_only_adds_enabled_builtins() {
+        let mut cfg = minimal_config();
+        cfg.enable_builtin_bot = false;
+        let mgr = RuleManager::new(&cfg);
+        // owasp + scanner = 2 builtin sources, bot disabled.
+        assert_eq!(mgr.sources.len(), 2);
+        for s in &mgr.sources {
+            assert_eq!(s.source_type(), "builtin");
+        }
+    }
+
+    #[test]
+    fn new_translates_source_entries_to_rule_sources() {
+        let tmp = tempdir().expect("tempdir");
+        let file_path = write_yaml_rule(tmp.path(), "f.yaml", "F-1");
+        let dir_path = tmp.path().to_path_buf();
+
+        let cfg = RulesConfig {
+            dir: tmp.path().display().to_string(),
+            hot_reload: false,
+            reload_debounce_ms: 0,
+            enable_builtin_owasp: false,
+            enable_builtin_bot: false,
+            enable_builtin_scanner: false,
+            sources: vec![
+                RuleSourceEntry {
+                    name: "file-src".to_string(),
+                    path: Some(file_path.display().to_string()),
+                    url: None,
+                    format: "yaml".to_string(),
+                    update_interval: 0,
+                },
+                RuleSourceEntry {
+                    name: "dir-src".to_string(),
+                    path: Some(dir_path.display().to_string()),
+                    url: None,
+                    format: "yaml".to_string(),
+                    update_interval: 0,
+                },
+                RuleSourceEntry {
+                    name: "url-src".to_string(),
+                    path: None,
+                    url: Some("https://example.com/rules.json".to_string()),
+                    format: "json".to_string(),
+                    update_interval: 30,
+                },
+            ],
+        };
+
+        let mgr = RuleManager::new(&cfg);
+        assert_eq!(mgr.sources.len(), 3);
+        let kinds: Vec<_> = mgr.sources.iter().map(RuleSource::source_type).collect();
+        assert!(kinds.contains(&"local_file"));
+        assert!(kinds.contains(&"local_dir"));
+        assert!(kinds.contains(&"remote_url"));
+    }
+
+    #[test]
+    fn load_all_populates_builtin_rules() {
+        let mut mgr = RuleManager::new(&minimal_config());
+        let report = mgr.load_all().expect("load_all");
+        assert!(report.rules_loaded > 0);
+        // Built-in rule sources count as one logical "source" in load_all.
+        assert!(report.sources_loaded >= 1);
+        let stats = mgr.stats();
+        assert_eq!(stats.total, report.rules_loaded);
+    }
+
+    #[test]
+    fn export_returns_serialized_rules_after_load() {
+        let mut mgr = RuleManager::new(&minimal_config());
+        mgr.load_all().expect("load_all");
+        let yaml = mgr.export(ExportFormat::Yaml).expect("export yaml");
+        let json = mgr.export(ExportFormat::Json).expect("export json");
+        assert!(yaml.contains("id"));
+        assert!(json.starts_with('['));
+    }
+
+    #[test]
+    fn search_finds_loaded_rules() {
+        let mut mgr = RuleManager::new(&minimal_config());
+        mgr.load_all().expect("load_all");
+        // Built-in OWASP rules are tagged with "OWASP-" id prefix.
+        let hits = mgr.search("OWASP");
+        assert!(!hits.is_empty(), "expected at least one OWASP rule hit");
+    }
+
+    #[test]
+    fn enable_disable_rule_toggles_state() {
+        let mut mgr = RuleManager::new(&minimal_config());
+        mgr.load_all().expect("load_all");
+        let id: String = mgr
+            .registry
+            .read()
+            .list()
+            .into_iter()
+            .next()
+            .expect("at least one rule")
+            .id
+            .clone();
+
+        mgr.disable_rule(&id).expect("disable");
+        assert!(!mgr.registry.read().get(&id).expect("rule").enabled);
+        mgr.enable_rule(&id).expect("enable");
+        assert!(mgr.registry.read().get(&id).expect("rule").enabled);
+
+        assert!(mgr.enable_rule("does-not-exist").is_err());
+        assert!(mgr.disable_rule("does-not-exist").is_err());
+    }
+
+    #[test]
+    fn registry_handle_shares_state_with_manager() {
+        let mut mgr = RuleManager::new(&minimal_config());
+        mgr.load_all().expect("load_all");
+        let handle = mgr.registry_handle();
+        let count_via_handle = handle.read().list().len();
+        let count_via_stats = mgr.stats().total;
+        assert_eq!(count_via_handle, count_via_stats);
+    }
+
+    #[test]
+    fn validate_file_accepts_valid_yaml_and_rejects_unknown_extension() {
+        let tmp = tempdir().expect("tempdir");
+        let valid = write_yaml_rule(tmp.path(), "ok.yaml", "OK-1");
+        let mgr = RuleManager::new(&minimal_config());
+        let errors = mgr.validate_file(&valid).expect("validate");
+        assert!(errors.is_empty());
+
+        let bad_ext = tmp.path().join("rules.txt");
+        std::fs::write(&bad_ext, "irrelevant").unwrap();
+        assert!(mgr.validate_file(&bad_ext).is_err());
+    }
+
+    #[test]
+    fn import_from_file_inserts_rules_into_registry() {
+        let tmp = tempdir().expect("tempdir");
+        let path = write_yaml_rule(tmp.path(), "imp.yaml", "IMP-42");
+        let mut mgr = RuleManager::new(&minimal_config());
+        let count = mgr.import_from_file(&path).expect("import");
+        assert_eq!(count, 1);
+        assert!(mgr.registry.read().get("IMP-42").is_some());
+    }
+
+    #[test]
+    fn reload_returns_zero_diff_when_called_twice() {
+        let mut mgr = RuleManager::new(&minimal_config());
+        mgr.load_all().expect("first load");
+        let report = mgr.reload().expect("reload");
+        // After identical reload, every rule should be unchanged.
+        assert_eq!(report.added, 0);
+        assert_eq!(report.removed, 0);
+        assert!(report.unchanged > 0);
+    }
+
+    #[tokio::test]
+    async fn load_remote_sources_returns_empty_when_no_remote_sources_configured() {
+        let mut mgr = RuleManager::new(&minimal_config());
+        let results = mgr.load_remote_sources().await;
+        assert!(results.is_empty());
+    }
+}
