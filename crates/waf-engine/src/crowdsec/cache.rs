@@ -254,3 +254,249 @@ fn parse_cs_duration(s: &str) -> Option<u64> {
     }
     Some(total)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crowdsec::config::CrowdSecConfig;
+    use crate::crowdsec::models::{Decision, DecisionStream};
+
+    fn decision(scope: &str, value: &str, scenario: &str) -> Decision {
+        Decision {
+            id: 1,
+            origin: "crowdsec".to_string(),
+            scope: scope.to_string(),
+            value: value.to_string(),
+            type_: "ban".to_string(),
+            scenario: scenario.to_string(),
+            duration: Some("1h".to_string()),
+            created_at: None,
+        }
+    }
+
+    #[test]
+    fn parse_cs_duration_handles_compound_units() {
+        assert_eq!(parse_cs_duration("1h"), Some(3600));
+        assert_eq!(parse_cs_duration("2m"), Some(120));
+        assert_eq!(parse_cs_duration("30s"), Some(30));
+        assert_eq!(parse_cs_duration("1h30m15s"), Some(3600 + 30 * 60 + 15));
+        // Empty string yields zero, garbage segments are ignored.
+        assert_eq!(parse_cs_duration(""), Some(0));
+    }
+
+    #[test]
+    fn cached_decision_is_expired_reflects_instant() {
+        let past = CachedDecision {
+            decision: decision("Ip", "1.2.3.4", "test"),
+            expires_at: Instant::now()
+                .checked_sub(Duration::from_mins(1))
+                .expect("clock"),
+        };
+        let future = CachedDecision {
+            decision: decision("Ip", "1.2.3.4", "test"),
+            expires_at: Instant::now() + Duration::from_mins(1),
+        };
+        assert!(past.is_expired());
+        assert!(!future.is_expired());
+    }
+
+    #[test]
+    fn apply_stream_inserts_ip_range_and_other_then_check_ip_finds_them() {
+        let cache = DecisionCache::new(60);
+        let stream = DecisionStream {
+            new: Some(vec![
+                decision("Ip", "10.0.0.1", "scenario-a"),
+                decision("Range", "10.1.0.0/16", "scenario-b"),
+                decision("Country", "RU", "scenario-c"),
+            ]),
+            deleted: None,
+        };
+        cache.apply_stream(stream, &CrowdSecConfig::default());
+
+        let stats = cache.stats();
+        assert_eq!(stats.total_cached, 3);
+
+        // Exact-IP hit
+        let ip_match = cache.check_ip(&"10.0.0.1".parse().expect("ip"));
+        assert!(ip_match.is_some());
+
+        // CIDR-range hit (different IP within the range)
+        let range_match = cache.check_ip(&"10.1.5.5".parse().expect("ip"));
+        assert!(range_match.is_some());
+
+        // Miss
+        assert!(cache.check_ip(&"8.8.8.8".parse().expect("ip")).is_none());
+
+        let stats = cache.stats();
+        assert!(stats.hits >= 2);
+        assert!(stats.misses >= 1);
+        assert!(stats.hit_rate_pct > 0.0);
+    }
+
+    #[test]
+    fn apply_stream_deletion_removes_entries() {
+        let cache = DecisionCache::new(60);
+        cache.apply_stream(
+            DecisionStream {
+                new: Some(vec![
+                    decision("Ip", "1.2.3.4", "s"),
+                    decision("Range", "10.0.0.0/24", "s"),
+                    decision("Country", "RU", "s"),
+                ]),
+                deleted: None,
+            },
+            &CrowdSecConfig::default(),
+        );
+        assert_eq!(cache.stats().total_cached, 3);
+
+        cache.apply_stream(
+            DecisionStream {
+                new: None,
+                deleted: Some(vec![
+                    decision("Ip", "1.2.3.4", "s"),
+                    decision("Range", "10.0.0.0/24", "s"),
+                    decision("Country", "RU", "s"),
+                ]),
+            },
+            &CrowdSecConfig::default(),
+        );
+        assert_eq!(cache.stats().total_cached, 0);
+    }
+
+    #[test]
+    fn should_cache_respects_scenarios_filters() {
+        let cache = DecisionCache::new(60);
+        let config = CrowdSecConfig {
+            scenarios_containing: vec!["bruteforce".to_string()],
+            scenarios_not_containing: vec!["whitelist".to_string()],
+            ..CrowdSecConfig::default()
+        };
+
+        cache.apply_stream(
+            DecisionStream {
+                new: Some(vec![
+                    decision("Ip", "1.0.0.1", "ssh-bruteforce"),       // included
+                    decision("Ip", "1.0.0.2", "scan"),                 // excluded — no "bruteforce"
+                    decision("Ip", "1.0.0.3", "bruteforce-whitelist"), // excluded — "whitelist"
+                ]),
+                deleted: None,
+            },
+            &config,
+        );
+        assert_eq!(cache.stats().total_cached, 1);
+        assert!(cache.check_ip(&"1.0.0.1".parse().expect("ip")).is_some());
+        assert!(cache.check_ip(&"1.0.0.2".parse().expect("ip")).is_none());
+    }
+
+    #[test]
+    fn cleanup_expired_drops_stale_entries_in_all_scopes() {
+        let cache = DecisionCache::new(0); // use decision duration
+        // Insert decisions with an immediately-expired duration.
+        let mut stale = decision("Ip", "1.2.3.4", "s");
+        stale.duration = Some("0s".to_string());
+        let mut stale_range = decision("Range", "10.0.0.0/24", "s");
+        stale_range.duration = Some("0s".to_string());
+        let mut stale_other = decision("Country", "ZZ", "s");
+        stale_other.duration = Some("0s".to_string());
+
+        cache.apply_stream(
+            DecisionStream {
+                new: Some(vec![stale, stale_range, stale_other]),
+                deleted: None,
+            },
+            &CrowdSecConfig::default(),
+        );
+        // Sleep a hair to ensure expires_at is in the past.
+        std::thread::sleep(Duration::from_millis(10));
+        cache.cleanup_expired();
+        assert_eq!(cache.stats().total_cached, 0);
+    }
+
+    #[test]
+    fn list_decisions_returns_all_active() {
+        let cache = DecisionCache::new(60);
+        cache.apply_stream(
+            DecisionStream {
+                new: Some(vec![
+                    decision("Ip", "1.1.1.1", "s"),
+                    decision("Range", "10.0.0.0/8", "s"),
+                    decision("Country", "AA", "s"),
+                ]),
+                deleted: None,
+            },
+            &CrowdSecConfig::default(),
+        );
+        assert_eq!(cache.list_decisions().len(), 3);
+    }
+
+    #[test]
+    fn invalid_ip_or_cidr_values_are_silently_skipped() {
+        let cache = DecisionCache::new(60);
+        cache.apply_stream(
+            DecisionStream {
+                new: Some(vec![
+                    decision("Ip", "not-an-ip", "s"),
+                    decision("Range", "definitely-not-a-cidr", "s"),
+                ]),
+                deleted: None,
+            },
+            &CrowdSecConfig::default(),
+        );
+        assert_eq!(cache.stats().total_cached, 0);
+    }
+
+    #[test]
+    fn checker_returns_detection_on_cache_hit_and_skips_in_appsec_mode() {
+        use crate::checks::Check;
+        use crate::crowdsec::checker::CrowdSecChecker;
+        use crate::crowdsec::config::CrowdSecMode;
+        use bytes::Bytes;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use waf_common::{HostConfig, RequestCtx};
+
+        let cache = Arc::new(DecisionCache::new(60));
+        cache.apply_stream(
+            DecisionStream {
+                new: Some(vec![decision("Ip", "9.9.9.9", "ssh-bf")]),
+                deleted: None,
+            },
+            &CrowdSecConfig::default(),
+        );
+
+        let ctx = RequestCtx {
+            req_id: "test".to_string(),
+            client_ip: "9.9.9.9".parse().expect("ip"),
+            client_port: 0,
+            method: "GET".to_string(),
+            host: "example.com".to_string(),
+            port: 80,
+            path: "/".to_string(),
+            query: String::new(),
+            headers: HashMap::new(),
+            body_preview: Bytes::new(),
+            content_length: 0,
+            is_tls: false,
+            host_config: Arc::new(HostConfig::default()),
+            geo: None,
+            tier: waf_common::tier::Tier::CatchAll,
+            tier_policy: RequestCtx::default_tier_policy(),
+            cookies: HashMap::new(),
+        };
+
+        // Bouncer mode → cache hit
+        let bouncer = CrowdSecChecker::new(Arc::clone(&cache), CrowdSecConfig::default());
+        let det = bouncer.check(&ctx).expect("detection");
+        assert!(det.rule_id.as_deref().unwrap_or("").contains("ssh-bf"));
+
+        // AppSec-only mode → checker bails out
+        let appsec_only = CrowdSecChecker::new(
+            Arc::clone(&cache),
+            CrowdSecConfig {
+                mode: CrowdSecMode::Appsec,
+                ..CrowdSecConfig::default()
+            },
+        );
+        assert!(appsec_only.check(&ctx).is_none());
+    }
+}
