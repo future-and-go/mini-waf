@@ -320,3 +320,69 @@ impl Default for PluginManager {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_action_try_from_maps_known_codes() {
+        assert_eq!(PluginAction::try_from(0), Ok(PluginAction::Allow));
+        assert_eq!(PluginAction::try_from(1), Ok(PluginAction::Block));
+        assert_eq!(PluginAction::try_from(2), Ok(PluginAction::Log));
+        assert!(PluginAction::try_from(3).is_err());
+        assert!(PluginAction::try_from(-1).is_err());
+    }
+
+    #[test]
+    fn plugin_action_serializes_snake_case() {
+        let s = serde_json::to_string(&PluginAction::Allow).expect("ser");
+        assert_eq!(s, "\"allow\"");
+        let s = serde_json::to_string(&PluginAction::Block).expect("ser");
+        assert_eq!(s, "\"block\"");
+        let s = serde_json::to_string(&PluginAction::Log).expect("ser");
+        assert_eq!(s, "\"log\"");
+    }
+
+    #[test]
+    fn wasm_plugin_new_rejects_invalid_bytes() {
+        let res = WasmPlugin::new(
+            Uuid::new_v4(),
+            "bad".to_string(),
+            "0".to_string(),
+            String::new(),
+            String::new(),
+            true,
+            b"not-wasm",
+        );
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn empty_manager_returns_allow_and_misses() {
+        let mgr = PluginManager::new();
+        assert_eq!(mgr.run_request("GET", "/", "1.2.3.4").await, PluginAction::Allow);
+        assert!(mgr.list().await.is_empty());
+        let id = Uuid::new_v4();
+        assert!(mgr.get(id).await.is_none());
+        assert!(!mgr.unload(id).await);
+        assert!(!mgr.set_enabled(id, false).await);
+    }
+
+    #[tokio::test]
+    async fn load_invalid_wasm_propagates_error() {
+        let mgr = PluginManager::new();
+        let res = mgr
+            .load(LoadPluginParams {
+                id: Uuid::new_v4(),
+                name: "p".to_string(),
+                version: "1".to_string(),
+                description: String::new(),
+                author: String::new(),
+                enabled: true,
+                wasm_bytes: b"\0\0\0\0",
+            })
+            .await;
+        assert!(res.is_err());
+    }
+}
