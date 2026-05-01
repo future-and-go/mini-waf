@@ -117,3 +117,117 @@ impl std::fmt::Display for RuleReloadReport {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn yaml_format() -> RuleFormat {
+        RuleFormat::Yaml
+    }
+
+    #[test]
+    fn rule_source_name_returns_inner_name_for_each_variant() {
+        let local_file = RuleSource::LocalFile {
+            name: "lf".to_string(),
+            path: PathBuf::from("/tmp/rules.yaml"),
+            format: yaml_format(),
+        };
+        let local_dir = RuleSource::LocalDir {
+            name: "ld".to_string(),
+            path: PathBuf::from("/tmp/rules"),
+            glob: "*.yaml".to_string(),
+        };
+        let remote = RuleSource::RemoteUrl {
+            name: "ru".to_string(),
+            url: "https://example.com/rules.yaml".to_string(),
+            format: yaml_format(),
+            update_interval_secs: 60,
+        };
+        let builtin = RuleSource::Builtin { name: "bi".to_string() };
+
+        assert_eq!(local_file.name(), "lf");
+        assert_eq!(local_dir.name(), "ld");
+        assert_eq!(remote.name(), "ru");
+        assert_eq!(builtin.name(), "bi");
+
+        assert_eq!(local_file.source_type(), "local_file");
+        assert_eq!(local_dir.source_type(), "local_dir");
+        assert_eq!(remote.source_type(), "remote_url");
+        assert_eq!(builtin.source_type(), "builtin");
+    }
+
+    #[test]
+    fn rule_source_update_interval_only_set_for_remote_url() {
+        let remote = RuleSource::RemoteUrl {
+            name: "ru".to_string(),
+            url: "https://example.com".to_string(),
+            format: yaml_format(),
+            update_interval_secs: 30,
+        };
+        assert_eq!(remote.update_interval(), Some(Duration::from_secs(30)));
+
+        let builtin = RuleSource::Builtin { name: "bi".to_string() };
+        assert_eq!(builtin.update_interval(), None);
+
+        let local_file = RuleSource::LocalFile {
+            name: "lf".to_string(),
+            path: PathBuf::from("/tmp/x"),
+            format: yaml_format(),
+        };
+        assert_eq!(local_file.update_interval(), None);
+
+        let local_dir = RuleSource::LocalDir {
+            name: "ld".to_string(),
+            path: PathBuf::from("/tmp"),
+            glob: "*".to_string(),
+        };
+        assert_eq!(local_dir.update_interval(), None);
+    }
+
+    #[test]
+    fn rule_load_report_merge_accumulates_fields() {
+        let mut a = RuleLoadReport {
+            sources_loaded: 1,
+            rules_loaded: 10,
+            rules_skipped: 2,
+            errors: vec!["e1".to_string()],
+        };
+        let b = RuleLoadReport {
+            sources_loaded: 2,
+            rules_loaded: 5,
+            rules_skipped: 0,
+            errors: vec!["e2".to_string(), "e3".to_string()],
+        };
+        a.merge(b);
+        assert_eq!(a.sources_loaded, 3);
+        assert_eq!(a.rules_loaded, 15);
+        assert_eq!(a.rules_skipped, 2);
+        assert_eq!(a.errors, vec!["e1", "e2", "e3"]);
+    }
+
+    #[test]
+    fn rule_load_report_display_format() {
+        let report = RuleLoadReport {
+            sources_loaded: 4,
+            rules_loaded: 100,
+            rules_skipped: 3,
+            errors: vec!["x".to_string()],
+        };
+        assert_eq!(
+            format!("{report}"),
+            "Loaded 100 rules from 4 sources (3 skipped, 1 errors)"
+        );
+    }
+
+    #[test]
+    fn rule_reload_report_display_format() {
+        let report = RuleReloadReport {
+            added: 5,
+            removed: 2,
+            unchanged: 7,
+            errors: vec![],
+        };
+        assert_eq!(format!("{report}"), "Reload complete: +5 -2 =7 (0 errors)");
+    }
+}
