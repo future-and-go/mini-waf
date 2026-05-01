@@ -169,3 +169,133 @@ pub struct RuleStats {
     pub by_source: HashMap<String, usize>,
     pub version: u64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rule(id: &str, category: &str, source: &str) -> Rule {
+        Rule {
+            id: id.to_string(),
+            name: format!("name-{id}"),
+            description: Some(format!("desc-{id}")),
+            category: category.to_string(),
+            source: source.to_string(),
+            enabled: true,
+            action: "block".to_string(),
+            severity: None,
+            pattern: None,
+            tags: vec![],
+            metadata: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn insert_and_get_round_trip_bumps_version() {
+        let mut reg = RuleRegistry::new();
+        assert_eq!(reg.version, 0);
+        reg.insert(rule("R1", "sqli", "owasp"));
+        assert_eq!(reg.version, 1);
+        let got = reg.get("R1").expect("present");
+        assert_eq!(got.id, "R1");
+        assert!(reg.get("missing").is_none());
+    }
+
+    #[test]
+    fn insert_replacing_existing_rule_does_not_duplicate_index() {
+        let mut reg = RuleRegistry::new();
+        reg.insert(rule("R1", "sqli", "owasp"));
+        // Replace with same id but new category/source.
+        reg.insert(rule("R1", "xss", "custom"));
+        assert_eq!(reg.rules.len(), 1);
+        assert_eq!(reg.filter_by_category("sqli").len(), 0);
+        assert_eq!(reg.filter_by_category("xss").len(), 1);
+        assert_eq!(reg.filter_by_source("owasp").len(), 0);
+        assert_eq!(reg.filter_by_source("custom").len(), 1);
+    }
+
+    #[test]
+    fn remove_returns_rule_when_present_and_none_otherwise() {
+        let mut reg = RuleRegistry::new();
+        reg.insert(rule("R1", "sqli", "owasp"));
+        let removed = reg.remove("R1").expect("removed");
+        assert_eq!(removed.id, "R1");
+        assert!(reg.get("R1").is_none());
+        assert!(reg.remove("nope").is_none());
+    }
+
+    #[test]
+    fn list_returns_rules_sorted_by_id() {
+        let mut reg = RuleRegistry::new();
+        reg.insert(rule("B", "c", "s"));
+        reg.insert(rule("A", "c", "s"));
+        reg.insert(rule("C", "c", "s"));
+        let ids: Vec<_> = reg.list().into_iter().map(|r| r.id.clone()).collect();
+        assert_eq!(ids, vec!["A", "B", "C"]);
+    }
+
+    #[test]
+    fn filter_by_unknown_key_returns_empty() {
+        let reg = RuleRegistry::new();
+        assert!(reg.filter_by_category("nope").is_empty());
+        assert!(reg.filter_by_source("nope").is_empty());
+    }
+
+    #[test]
+    fn search_is_case_insensitive_across_fields() {
+        let mut reg = RuleRegistry::new();
+        reg.insert(rule("CRS-001", "sqli", "owasp"));
+        reg.insert(rule("BOT-9", "bot", "builtin-bot"));
+
+        assert_eq!(reg.search("crs").len(), 1);
+        assert_eq!(reg.search("NAME-BOT-9").len(), 1);
+        assert_eq!(reg.search("desc-bot").len(), 1);
+        assert_eq!(reg.search("SQLI").len(), 1);
+        assert!(reg.search("absent").is_empty());
+    }
+
+    #[test]
+    fn stats_counts_enabled_disabled_and_groups() {
+        let mut reg = RuleRegistry::new();
+        let mut a = rule("A", "sqli", "owasp");
+        a.enabled = false;
+        reg.insert(a);
+        reg.insert(rule("B", "sqli", "owasp"));
+        reg.insert(rule("C", "xss", "custom"));
+
+        let s = reg.stats();
+        assert_eq!(s.total, 3);
+        assert_eq!(s.enabled, 2);
+        assert_eq!(s.disabled, 1);
+        assert_eq!(s.by_category.get("sqli").copied(), Some(2));
+        assert_eq!(s.by_category.get("xss").copied(), Some(1));
+        assert_eq!(s.by_source.get("owasp").copied(), Some(2));
+        assert_eq!(s.by_source.get("custom").copied(), Some(1));
+        assert_eq!(s.version, reg.version);
+    }
+
+    #[test]
+    fn clear_resets_state() {
+        let mut reg = RuleRegistry::new();
+        reg.insert(rule("R1", "sqli", "owasp"));
+        reg.mark_loaded();
+        assert!(reg.loaded_at.is_some());
+        reg.clear();
+        assert_eq!(reg.rules.len(), 0);
+        assert_eq!(reg.version, 0);
+        assert!(reg.loaded_at.is_none());
+        assert!(reg.by_category.is_empty());
+        assert!(reg.by_source.is_empty());
+    }
+
+    #[test]
+    fn get_mut_allows_in_place_modification() {
+        let mut reg = RuleRegistry::new();
+        reg.insert(rule("R1", "sqli", "owasp"));
+        if let Some(r) = reg.get_mut("R1") {
+            r.enabled = false;
+        }
+        assert!(!reg.get("R1").expect("present").enabled);
+        assert!(reg.get_mut("missing").is_none());
+    }
+}
