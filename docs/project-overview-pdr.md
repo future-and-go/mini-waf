@@ -79,6 +79,17 @@ Organizations deploying web applications face evolving threats:
 - Hot-reload from `rules/access-lists.yaml`; soft-warn ≥50k, hard-reject ≥500k entries
 - Audit fields: `access_decision`, `access_reason`, `access_match` stamped on every request
 
+**F1.3: Relay & Proxy Detection (FR-007)** ✓
+- XFF / X-Real-IP parser + validator (IPv6 zone-id, brackets, ports, spoofing detection)
+- Trusted-proxy CIDR strip with effective hop-depth signal (`ExcessiveHopDepth` signal)
+- ASN classifier: IPinfo Lite mmdb (primary), iptoasn TSV (fallback) + datacenter override set
+- Tor exit matcher with HTTP intel refresh (ETag, atomic swap, retry logic)
+- Multi-provider architecture: `SignalProvider` trait + `ProviderRegistry` extensible dispatch
+- Hot-reload via `ArcSwap<RelayConfig>`, `ArcSwap<TorSet>`, `ArcSwap<AsnDb>` — file watch propagation ≤1s
+- Pipeline integration: `RelayDetector::evaluate()` called early in request flow, output `ClientIdentity { real_ip, asn_class, asn, signals }` attached to request ctx
+- Comprehensive test suite: 9 integration tests, proptest fuzz (256 cases), adversarial matrix (12 rows), Wiremock intel feed tests
+- Criterion bench: 4-hop XFF + all 4 providers, p99 <50µs target
+
 **F3: Rule Management**
 - YAML, ModSecurity, JSON rule formats
 - **File-based custom rules (FR-003)**: `rules/custom/*.yaml` auto-loaded with `kind: custom_rule_v1`, per-file error isolation, 500ms debounce
@@ -206,13 +217,16 @@ Organizations deploying web applications face evolving threats:
 6. **Regression Testing**: 243 regression tests (116 added in v0.2.0); all passing
 7. **Dependency Audit**: 0 unaddressed CVEs; wasmtime upgraded (23→43, 5 CVEs fixed)
 
-### v0.3.0 (Proposed — Metrics)
+### v0.3.0 (Proposed — Q3 2026, Relay + Observability)
 
-1. **Observability**: OpenTelemetry integration, distributed tracing across cluster
-2. **Metrics**: Prometheus endpoint (/metrics), histogram latency, rule hit counts
-3. **Documentation**: Complete API reference (70+ endpoints), operator runbooks
-4. **Performance**: <3ms added latency (99th percentile), >15,000 RPS/node
-5. **Vue UI Tests**: >80% code coverage for admin-ui components
+Phases 1–7 of FR-007 shipped. Phase-08 (docs sync) pending. Risk-scorer integration (FR-025/026) queued post-FR-007 test pass.
+
+1. **Relay & Proxy Detection (FR-007)**: XFF validation, ASN classification, Tor exit detection, hot-reload
+2. **Observability**: OpenTelemetry integration, distributed tracing across cluster
+3. **Metrics**: Prometheus endpoint (/metrics), histogram latency, rule hit counts
+4. **Documentation**: Complete API reference (70+ endpoints), operator runbooks
+5. **Performance**: <3ms added latency (99th percentile), >15,000 RPS/node
+6. **Vue UI Tests**: >80% code coverage for admin-ui components
 
 ### Long-term (Post v1)
 

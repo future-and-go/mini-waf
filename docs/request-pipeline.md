@@ -44,6 +44,45 @@ See [tiered-protection.md](./tiered-protection.md) for the consumer guide.
 
 ---
 
+## Pre-Phase: Relay & Proxy Detection (FR-007)
+
+Detects relay/proxy traffic by validating HTTP headers (`XFF`, `X-Real-IP`) and classifying the true client IP. Runs **before** Phase-0 to populate `ClientIdentity` for downstream decisions.
+
+```
+Relay Detection:
+├─ XffValidator: parse chain, detect spoofing (private IPs in trusted section)
+├─ ProxyChainAnalyzer: count hop depth, emit ExcessiveHopDepth if >32
+├─ AsnClassifier: lookup BGP ASN (mmdb: IPinfo Lite / iptoasn fallback)
+├─ TorExitMatcher: check IP against Tor exit node set
+├─ Emits signals: XffSpoofPrivate, XffMalformed, XffTooLong, TorExit, ...
+└─ Output: ClientIdentity { real_ip, asn_class, asn, signals }
+   └─ real_ip: IpAddr (either from XFF chain with trusted-proxy CIDR strip, or fallback to peer IP)
+   └─ asn_class: AsnClass (Datacenter / Residential / Tor / Unknown)
+   └─ signals: Vec<Signal> (for rule predicates and risk scoring)
+```
+
+**Configuration**: `rules/relay.yaml` (YAML schema). Specifies:
+- `trusted_proxy_cidrs` — CIDR list for XFF chain trust boundary
+- `asn_db_path` — mmdb file path (IPinfo Lite, MaxMind GeoLite2-ASN)
+- `asn_fallback_feed_url` — HTTP endpoint for iptoasn TSV (if mmdb missing)
+- `tor_feed_url` — HTTP refresh source for Tor exit node list (ETag-aware)
+- `datacenter_overrides` — operator-defined ASN ranges to classify as datacenter
+
+**Hot-reload**: File watcher on `rules/relay.yaml` → parsed config → `ArcSwap<RelayConfig>` (lock-free atomic swap). Intel feeds (Tor, ASN mmdb) refresh via background HTTP tasks with retry and ETag caching. Propagation ≤1s.
+
+**Signals emitted** (consumed by rule predicates and risk-scorer):
+- `XffSpoofPrivate` — RFC1918 IP in trusted section of XFF chain
+- `XffMalformed` — unparseable XFF (non-IP, truncated, unicode)
+- `XffTooLong` — chain >32 entries or header >8KB
+- `ExcessiveHopDepth(n)` — n hops detected (after trusted-proxy strip)
+- `TorExit` — IP matched Tor exit node list
+- `AsnDatacenter` — IP classified as datacenter (EC2, GCP, Fastly, etc.)
+- `AsnResidential` — IP classified as residential ISP
+
+See **[planned signal-predicate docs (FR-025/026)]** for risk-scorer integration examples.
+
+---
+
 ## Phase-0: Access Gate (FR-008)
 
 Phase-0 gate runs **before** the 16-phase rule pipeline: three stages in order: **(1)** Host gate (per-tier FQDN whitelist, deny-by-default if non-empty) → **(2)** IP blacklist (Patricia trie, longest-prefix v4/v6) → **(3)** IP whitelist (Patricia trie, per-tier `full_bypass` vs `blacklist_only` dispatch).
