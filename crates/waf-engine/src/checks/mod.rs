@@ -1,6 +1,5 @@
 pub mod anti_hotlink;
 pub mod bot;
-pub mod cc;
 pub mod dir_traversal;
 pub mod geo;
 pub mod owasp;
@@ -15,7 +14,6 @@ pub mod xss;
 
 pub use anti_hotlink::AntiHotlinkCheck;
 pub use bot::BotCheck;
-pub use cc::CcCheck;
 pub use dir_traversal::DirTraversalCheck;
 pub use geo::{GeoCheck, GeoRule, GeoRuleMode};
 pub use owasp::OWASPCheck;

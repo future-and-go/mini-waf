@@ -19,8 +19,8 @@ use crate::checks::rate_limit::reload::{DEFAULT_DEBOUNCE_MS as RL_DEBOUNCE_MS, R
 use crate::checks::rate_limit::store::MemoryStore;
 use crate::checks::rate_limit::{RateLimitFileConfig, store::RateLimitStore};
 use crate::checks::{
-    AntiHotlinkCheck, BotCheck, CcCheck, Check, DirTraversalCheck, GeoCheck, OWASPCheck, RateLimitCheck,
-    RateLimitConfig, RceCheck, ScannerCheck, SensitiveCheck, SqlInjectionCheck, XssCheck,
+    AntiHotlinkCheck, BotCheck, Check, DirTraversalCheck, GeoCheck, OWASPCheck, RateLimitCheck, RateLimitConfig,
+    RceCheck, ScannerCheck, SensitiveCheck, SqlInjectionCheck, XssCheck,
 };
 use crate::community::{CommunityChecker, CommunityReporter, RequestInfo};
 use crate::crowdsec::{AppSecClient, AppSecResult, CrowdSecChecker, appsec_to_detection};
@@ -104,14 +104,11 @@ impl WafEngine {
         let sqli_check = Arc::new(SqlInjectionCheck::with_config(sqli_cfg));
 
         // Build the Phase 5-11 checker pipeline (SQLi handled separately for hot-reload).
-        // CC runs first to shed flood traffic before expensive pattern checks.
-        // FR-004 RateLimitCheck runs alongside the legacy CcCheck (phase 04).
-        // Default RateLimitConfig has no tier entries, so the new check is
-        // inert until phase 07 wires real config. Both run; old not removed.
+        // FR-004 RateLimitCheck runs first to shed flood traffic before expensive
+        // pattern checks. Inert until `start_rate_limit_watcher` loads tier config.
         let rl_store: Arc<dyn RateLimitStore> = Arc::new(MemoryStore::new());
         let rate_limit_cfg = Arc::new(ArcSwap::from(Arc::new(RateLimitConfig::default())));
         let checkers: Vec<Box<dyn Check>> = vec![
-            Box::new(CcCheck::new()),
             Box::new(RateLimitCheck::new(rl_store, Arc::clone(&rate_limit_cfg))),
             Box::new(ScannerCheck::new()),
             Box::new(BotCheck::new()),

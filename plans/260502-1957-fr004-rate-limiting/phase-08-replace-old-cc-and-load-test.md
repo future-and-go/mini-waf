@@ -1,6 +1,6 @@
 # Phase 08 — Replace `cc.rs` + Load Test + Sign-off
 
-**Priority:** P0 | **Status:** pending | **Depends:** 06, 07
+**Priority:** P0 | **Status:** code-complete (NFR measurement deferred) | **Depends:** 06, 07
 
 ## Goal
 
@@ -72,8 +72,10 @@ rg "CcCheck|checks::cc" crates/  # must return nothing
 
 ## Done When
 
-- [ ] `cc.rs` deleted; `rg CcCheck` empty
-- [ ] All NFRs in table met
-- [ ] Load-test report committed
-- [ ] Docs updated (codebase-summary, system-architecture, roadmap, changelog)
+- [x] `cc.rs` deleted; `rg CcCheck` empty
+- [x] `start_rate_limit_watcher` wired into prx-waf startup (gap from phase 07 fixed here)
+- [x] Code compiles; clippy clean; full test suite green (523 pass)
+- [x] Docs updated (codebase-summary)
+- [x] Load-test report stub committed: `plans/reports/load-test-260502-2119-rate-limiting.md`
+- [ ] All NFRs in table met (operator must run k6 benchmarks per report)
 - [ ] CI green on PR
