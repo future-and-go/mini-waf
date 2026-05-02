@@ -49,9 +49,16 @@ impl CacheGate for RouteRuleGate {
             // `allow_authenticated` is recorded but inert in v1: AuthGate
             // already ran before us and bypassed any authenticated request.
             // Documented in the plan — see open Q1.
+            // FR-009 Phase 4: prepend rule.id as a tag so every entry cached
+            // by this rule is purgeable via `purge_by_route_id`. Operators
+            // get free per-rule invalidation without authoring a dedicated
+            // tag.
+            let mut tags = Vec::with_capacity(rule.tags.len() + 1);
+            tags.push(Arc::clone(&rule.id));
+            tags.extend(rule.tags.iter().cloned());
             return Verdict::Cache {
                 ttl: cap(rule.ttl, ctx.max_ttl_secs),
-                tags: rule.tags.clone(),
+                tags,
             };
         }
         Verdict::Continue

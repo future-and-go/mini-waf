@@ -24,6 +24,10 @@ pub struct CacheStats {
     /// FR-009 Phase 3: count of bypasses caused by `RouteRuleGate` matching
     /// a rule with `ttl_seconds: 0` (operator opt-out).
     pub bypassed_explicit_deny: AtomicU64,
+    /// FR-009 Phase 4: cumulative entries removed via `purge_by_tag`.
+    pub purges_tag: AtomicU64,
+    /// FR-009 Phase 4: cumulative entries removed via `purge_by_route_id`.
+    pub purges_route: AtomicU64,
 }
 
 impl CacheStats {
@@ -36,6 +40,8 @@ impl CacheStats {
             bypassed_critical: self.bypassed_critical.load(Ordering::Relaxed),
             bypassed_authenticated: self.bypassed_authenticated.load(Ordering::Relaxed),
             bypassed_explicit_deny: self.bypassed_explicit_deny.load(Ordering::Relaxed),
+            purges_tag: self.purges_tag.load(Ordering::Relaxed),
+            purges_route: self.purges_route.load(Ordering::Relaxed),
         }
     }
 
@@ -71,4 +77,6 @@ pub struct CacheStatsSnapshot {
     pub bypassed_critical: u64,
     pub bypassed_authenticated: u64,
     pub bypassed_explicit_deny: u64,
+    pub purges_tag: u64,
+    pub purges_route: u64,
 }

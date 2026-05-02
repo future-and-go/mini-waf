@@ -4,6 +4,7 @@ description: "Tier-aware response cache with hot-reloadable rules/cache.yaml, au
 status: in-progress
 priority: P0
 effort: 10d
+progress: 80%
 branch: main
 tags: [waf, gateway, fr-009, caching, hot-reload, security]
 created: 2026-05-02
@@ -53,8 +54,10 @@ Out of scope (deferred): single-flight, conditional GET/ETag, Vary headers, disk
 | 1 | [phase-01-tier-gate-wiring.md](./phase-01-tier-gate-wiring.md) | 1d | completed |
 | 2 | [phase-02-module-refactor-pipeline.md](./phase-02-module-refactor-pipeline.md) | 2d | completed |
 | 3 | [phase-03-yaml-config-hot-reload.md](./phase-03-yaml-config-hot-reload.md) | 3d | completed |
-| 4 | [phase-04-tag-index-purge-api.md](./phase-04-tag-index-purge-api.md) | 2d | pending |
+| 4 | [phase-04-tag-index-purge-api.md](./phase-04-tag-index-purge-api.md) | 2d | completed |
 | 5 | [phase-05-tests-benches-coverage.md](./phase-05-tests-benches-coverage.md) | 2d | pending |
+
+**Progress:** 8d of 10d complete (80%). Phase 4 done; Phase 5 in queue.
 
 **Phase 1 ships the security invariant first** — even if 2-5 slip, CRITICAL traffic stops being cacheable.
 

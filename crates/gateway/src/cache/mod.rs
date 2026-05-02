@@ -21,6 +21,7 @@ pub mod rule;
 pub mod rule_set;
 mod stats;
 mod store;
+mod tag_index;
 pub mod watcher;
 
 pub use rule_set::{CompiledRuleSet, RuleSetError, RuleSetHolder};

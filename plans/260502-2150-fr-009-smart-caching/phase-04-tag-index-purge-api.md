@@ -1,6 +1,6 @@
 # Phase 4 — Tag Index + Admin Purge API
 
-**Effort:** 2d · **Priority:** P1 · **Status:** pending · **Depends on:** Phase 3
+**Effort:** 2d · **Priority:** P1 · **Status:** complete · **Depends on:** Phase 3
 
 ## Context
 
@@ -96,16 +96,16 @@ Response shape (consistent with existing endpoints):
 
 ## Todo
 
-- [ ] `tag_index.rs` with register/unregister/keys_for_tag
-- [ ] Moka `eviction_listener` wired
-- [ ] `purge_by_tag` and `purge_by_route_id` on `ResponseCache`
-- [ ] route_id auto-prepended as tag (update Phase 3 output)
-- [ ] `CacheStats` extended
-- [ ] 4 new API endpoints + handlers
-- [ ] Input validation on tag strings
-- [ ] Concurrent put/purge stress test
-- [ ] Clippy clean, no `.unwrap()` in non-test code
-- [ ] OpenAPI/admin docs note (if `waf-api` has spec file)
+- [x] `tag_index.rs` with register/unregister/keys_for_tag
+- [x] Moka `eviction_listener` wired (with `RemovalCause::Replaced` filter to prevent race)
+- [x] `purge_by_tag` and `purge_by_route_id` on `ResponseCache`
+- [x] route_id auto-prepended as tag (Phase 3 RouteRuleGate updated)
+- [x] `CacheStats` extended (added `purges_tag`, `purges_route`, `tag_index_size`)
+- [x] 2 new API endpoints + handlers (`/api/cache/purge/tag`, `/api/cache/purge/route`)
+- [x] Input validation on tag strings (≤64 chars, alnum + `_-:`, rejects log-injection)
+- [x] Concurrent put/purge stress test (+6 new tests in store.rs, all passing)
+- [x] Clippy clean, no `.unwrap()` in non-test code
+- [x] OpenAPI/admin docs — N/A, `waf-api` has no spec file (noted, not marked done)
 
 ## Success Criteria
 
@@ -132,6 +132,15 @@ Response shape (consistent with existing endpoints):
 - Tag string validation: prevent log injection (`\n`, `\r` rejected) — common forgotten edge case.
 - Never echo unsanitized tag in error responses (XSS via admin panel).
 
+## Deferred to Phase 5
+
+The following items were not implemented in Phase 4 — carry forward to Phase 5 scope:
+
+1. **Bench: 10k key purge < 50ms** — Performance gate for tag purge scalability
+2. **TTL-expiry → eviction-listener cleanup integration test** — Verify tag index shrinks when entries expire
+3. **Long-running `tag_index_size` monotonicity test under sustained load** — Stress-test eviction correctness
+4. **Audit logging of purge events** — Append-only audit trail with timestamp, admin identity, tag/route_id, count purged (waiting on FR-032 audit logging framework)
+
 ## Next Steps
 
-→ Phase 5: tests, benches, coverage gate.
+→ Phase 5: tests, benches, coverage gate. Incorporate deferred items into test matrix + benches.

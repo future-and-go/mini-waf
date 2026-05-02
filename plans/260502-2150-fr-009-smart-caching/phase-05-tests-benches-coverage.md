@@ -6,6 +6,7 @@
 
 - Brainstorm: [`../reports/brainstorm-260502-2140-fr-009-smart-caching.md`](../reports/brainstorm-260502-2140-fr-009-smart-caching.md) §11
 - Coverage precedent: `crates/gateway/CLAUDE.md` §"Testing & coverage" — 95% line coverage gate via cargo-llvm-cov
+- Phase 4 deferred items: [`phase-04-tag-index-purge-api.md#Deferred to Phase 5`](./phase-04-tag-index-purge-api.md)
 
 ## Goal
 
@@ -67,9 +68,10 @@ Lock in correctness + performance. Ship coverage gate that future PRs cannot reg
 ### Tag index / purge
 - [ ] register N keys with tag T → keys_for_tag(T).len() == N
 - [ ] purge_by_tag → all gone, other tags intact
-- [ ] TTL eviction → tag index shrinks
+- [ ] TTL eviction → tag index shrinks (deferred from Phase 4: integration test)
 - [ ] Concurrent put + purge — no deadlock, no panic
 - [ ] purge_by_route_id wraps purge_by_tag(rule.id)
+- [ ] Long-running `tag_index_size` monotonicity under sustained load (deferred from Phase 4: stress test)
 
 ### Admin API
 - [ ] Unauthenticated purge → 401
@@ -91,11 +93,13 @@ cache_resolver_bench:
   - resolve_no_match_fallback:   target p99 < 30µs
 
 cache_purge_bench:
-  - purge_by_tag_10k_keys:       target < 50ms
+  - purge_by_tag_10k_keys:       target < 50ms (deferred from Phase 4)
   - put_with_5_tags:             target p99 < 5µs
 ```
 
 Use `criterion` (already a workspace dep — verify in `Cargo.toml`).
+
+**Note:** Phase 4 deferred the 10k key purge bench; add it here to validate tag purge scalability.
 
 ## Coverage Gate
 
@@ -158,6 +162,10 @@ Add a new CI job (or extend existing gateway-coverage job) targeting `cache/**` 
 
 - Tests are the audit trail. Any test asserting a security invariant (CRITICAL bypass, AuthGate, Set-Cookie bypass) must include a comment referencing the FR-009 AC it covers.
 - Reviewers should be able to grep `// FR-009 AC-1` and find the regression guard immediately.
+
+## Deferred to FR-032 or Later
+
+- **Audit logging of purge events** — Append-only audit trail with timestamp, admin identity, tag/route_id, count purged (depends on FR-032 audit logging framework; mentioned in Phase 4 security considerations but blocked on external dependency)
 
 ## Next Steps
 

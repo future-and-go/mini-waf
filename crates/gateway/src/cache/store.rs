@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use moka::future::Cache;
+use moka::notification::RemovalCause;
 use tracing::{debug, trace};
 use waf_common::tier::{CachePolicy, Tier};
 
@@ -21,6 +22,7 @@ use super::gates::{AuthGate, MethodGate, RouteRuleGate, TierDefaultGate, TierGat
 use super::policy::{CacheCtx, CachePolicyResolver, Verdict};
 use super::rule_set::{CompiledRuleSet, RuleSetHolder};
 use super::stats::{CacheStats, CacheStatsSnapshot};
+use super::tag_index::TagIndex;
 
 /// A cached HTTP response
 #[derive(Debug, Clone)]
@@ -40,6 +42,8 @@ pub struct ResponseCache {
     default_ttl: Duration,
     max_ttl: Duration,
     resolver: CachePolicyResolver,
+    /// FR-009 Phase 4: reverse index for tag-based purge.
+    tag_index: Arc<TagIndex>,
 }
 
 impl ResponseCache {
@@ -68,10 +72,31 @@ impl ResponseCache {
     ) -> Arc<Self> {
         let capacity = (max_size_mb * 16).max(64);
         let stats = Arc::new(CacheStats::default());
+        let tag_index = Arc::new(TagIndex::new());
 
+        // FR-009 Phase 4: keep tag index in sync with moka. Without this hook
+        // a TTL-expired or LRU-evicted entry leaks its key in the index until
+        // the next purge sweep. The closure is sync (moka invokes it from a
+        // maintenance task); only an in-memory DashMap update happens here so
+        // there is no need for `async_eviction_listener`.
+        //
+        // `Replaced` is filtered out: when `put` overwrites an existing key,
+        // moka schedules eviction-listener for the *old* value, but that task
+        // can run AFTER `put` has already re-registered the new tags. Acting
+        // on `Replaced` would then wipe the fresh index entry and orphan the
+        // new value (`purge_by_tag` would miss it until TTL). The `put` path
+        // always re-registers, so `Replaced` cleanup is both redundant and
+        // racy.
+        let tag_index_for_evict = Arc::clone(&tag_index);
         let inner = Cache::builder()
             .max_capacity(capacity)
             .time_to_live(Duration::from_secs(max_ttl_secs))
+            .eviction_listener(move |k: Arc<String>, _v: Arc<CachedResponse>, cause: RemovalCause| {
+                if matches!(cause, RemovalCause::Replaced) {
+                    return;
+                }
+                tag_index_for_evict.unregister(&Arc::<str>::from(k.as_str()));
+            })
             .build();
 
         let resolver = CachePolicyResolver::new(vec![
@@ -89,6 +114,7 @@ impl ResponseCache {
             default_ttl: Duration::from_secs(default_ttl_secs),
             max_ttl: Duration::from_secs(max_ttl_secs),
             resolver,
+            tag_index,
         })
     }
 
@@ -166,14 +192,22 @@ impl ResponseCache {
                 debug!(key = %key, ?reason, "cache bypass");
                 false
             }
-            Verdict::Cache { ttl, tags: _ } => {
+            Verdict::Cache { ttl, tags } => {
                 let entry = Arc::new(CachedResponse {
                     status,
                     headers,
                     body,
                     max_age: ttl.as_secs(),
                 });
+                let key_for_index: Option<Arc<str>> = if tags.is_empty() {
+                    None
+                } else {
+                    Some(Arc::<str>::from(key.as_str()))
+                };
                 self.inner.insert(key, entry).await;
+                if let Some(k) = key_for_index {
+                    self.tag_index.register(&k, &tags);
+                }
                 self.stats.stores.fetch_add(1, Ordering::Relaxed);
                 true
             }
@@ -207,6 +241,48 @@ impl ResponseCache {
     pub async fn flush(&self) {
         self.inner.invalidate_all();
         self.inner.run_pending_tasks().await;
+        // Eviction listener will fire for each entry, but `invalidate_all`
+        // is async-batched — clear the index synchronously too so callers
+        // observe a zero gauge immediately after `flush().await` returns.
+        self.tag_index.clear();
+    }
+
+    /// FR-009 Phase 4: purge every entry tagged with `tag`. Returns the count.
+    /// Snapshot-then-remove avoids holding `DashMap` shard locks across `await`.
+    pub async fn purge_by_tag(&self, tag: &str) -> usize {
+        let keys = self.tag_index.keys_for_tag(tag);
+        let n = self.purge_keys(keys).await;
+        self.stats.purges_tag.fetch_add(n as u64, Ordering::Relaxed);
+        n
+    }
+
+    /// FR-009 Phase 4: purge every entry cached by the rule with this `id`.
+    /// Implemented as a tag lookup because `RouteRuleGate` auto-prepends the
+    /// rule id to every entry's tag list.
+    pub async fn purge_by_route_id(&self, route_id: &str) -> usize {
+        let keys = self.tag_index.keys_for_tag(route_id);
+        let n = self.purge_keys(keys).await;
+        self.stats.purges_route.fetch_add(n as u64, Ordering::Relaxed);
+        n
+    }
+
+    /// Internal: remove the given keys from moka and the tag index.
+    async fn purge_keys(&self, keys: Vec<Arc<str>>) -> usize {
+        let count = keys.len();
+        for k in keys {
+            self.inner.remove(k.as_ref()).await;
+            // Eviction listener will also call `unregister`; calling it here
+            // is idempotent and ensures the index is consistent the moment
+            // this method returns (eviction listener runs out-of-band).
+            self.tag_index.unregister(&k);
+        }
+        count
+    }
+
+    /// FR-009 Phase 4: number of distinct keys currently tracked by the tag
+    /// index (gauge, not a counter).
+    pub fn tag_index_size(&self) -> usize {
+        self.tag_index.key_count()
     }
 
     /// Return current statistics.
@@ -403,6 +479,148 @@ mod tests {
             .await;
         assert!(!stored);
         assert_eq!(c.stats().bypassed_authenticated, 1);
+    }
+
+    // FR-009 Phase 4 tests --------------------------------------------------
+
+    /// Build a single-rule cache and return both the cache and the rule's
+    /// declared tag for symmetry with the assertions.
+    fn cache_with_rule(rule_id: &str, prefix: &str, ttl_secs: u32, tags: Vec<String>) -> Arc<ResponseCache> {
+        use crate::cache::config::{CacheConfigDoc, Defaults, MatchDoc, PathSpec, RuleDoc};
+        let doc = CacheConfigDoc {
+            version: 1,
+            defaults: Defaults::default(),
+            rules: vec![RuleDoc {
+                id: rule_id.into(),
+                match_: MatchDoc {
+                    host: None,
+                    path: PathSpec::Prefix { prefix: prefix.into() },
+                    methods: None,
+                },
+                ttl_seconds: ttl_secs,
+                tags,
+                allow_authenticated: false,
+            }],
+        };
+        let set = CompiledRuleSet::try_from_doc(doc).unwrap();
+        ResponseCache::with_rules(8, 60, 3600, RuleSetHolder::new(set))
+    }
+
+    async fn put_under_rule(c: &ResponseCache, key: &str, host: &str, path: &str) -> bool {
+        c.put(
+            key.to_string(),
+            host,
+            path,
+            200,
+            vec![],
+            Bytes::from("ok"),
+            None,
+            Tier::Medium,
+            &CachePolicy::Aggressive { ttl_seconds: 300 },
+            false,
+            false,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn purge_by_tag_removes_only_matching_entries() {
+        let c = cache_with_rule("static", "/p", 600, vec!["catalog".into()]);
+        assert!(put_under_rule(&c, "GET:h:/p/a", "h", "/p/a").await);
+        assert!(put_under_rule(&c, "GET:h:/p/b", "h", "/p/b").await);
+        assert_eq!(c.tag_index_size(), 2);
+
+        let purged = c.purge_by_tag("catalog").await;
+        assert_eq!(purged, 2);
+        assert_eq!(c.tag_index_size(), 0);
+        assert!(c.get("GET:h:/p/a", Tier::Medium).await.is_none());
+        assert!(c.get("GET:h:/p/b", Tier::Medium).await.is_none());
+        assert_eq!(c.stats().purges_tag, 2);
+    }
+
+    #[tokio::test]
+    async fn purge_by_unknown_tag_returns_zero() {
+        let c = cache_with_rule("static", "/p", 600, vec!["catalog".into()]);
+        assert!(put_under_rule(&c, "GET:h:/p/a", "h", "/p/a").await);
+        let purged = c.purge_by_tag("nonexistent").await;
+        assert_eq!(purged, 0);
+        // Untouched entry must still be present.
+        assert!(c.get("GET:h:/p/a", Tier::Medium).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn purge_by_route_id_uses_auto_prepended_tag() {
+        // Operator only declared `catalog`, but route_id `static` was
+        // auto-prepended by RouteRuleGate so this must still work.
+        let c = cache_with_rule("static", "/p", 600, vec!["catalog".into()]);
+        assert!(put_under_rule(&c, "GET:h:/p/a", "h", "/p/a").await);
+        let purged = c.purge_by_route_id("static").await;
+        assert_eq!(purged, 1);
+        assert_eq!(c.stats().purges_route, 1);
+        assert_eq!(
+            c.stats().purges_tag,
+            0,
+            "route purge must not double-count as tag purge"
+        );
+    }
+
+    #[tokio::test]
+    async fn flush_clears_tag_index() {
+        let c = cache_with_rule("static", "/p", 600, vec!["catalog".into()]);
+        assert!(put_under_rule(&c, "GET:h:/p/a", "h", "/p/a").await);
+        assert!(c.tag_index_size() >= 1);
+        c.flush().await;
+        assert_eq!(c.tag_index_size(), 0);
+    }
+
+    #[tokio::test]
+    async fn untagged_entries_do_not_grow_tag_index() {
+        // Plain cache (no rules) → UpstreamCcGate / TierDefaultGate produce
+        // empty tag lists; the index must stay empty.
+        let c = cache();
+        assert!(
+            put_basic(
+                &c,
+                vec![],
+                Some("max-age=600"),
+                Tier::Medium,
+                &CachePolicy::Aggressive { ttl_seconds: 300 },
+            )
+            .await
+        );
+        assert_eq!(c.tag_index_size(), 0);
+    }
+
+    #[tokio::test]
+    async fn concurrent_put_and_purge_no_deadlock() {
+        let c = cache_with_rule("static", "/p", 600, vec!["catalog".into()]);
+        // Pre-seed so `purge_by_tag` has something to chew on while puts race.
+        for i in 0..32 {
+            assert!(
+                put_under_rule(&c, &format!("GET:h:/p/{i}"), "h", &format!("/p/{i}")).await,
+                "seed put {i}"
+            );
+        }
+
+        let c1 = Arc::clone(&c);
+        let c2 = Arc::clone(&c);
+        let writer = tokio::spawn(async move {
+            for i in 32..96 {
+                let _ = put_under_rule(&c1, &format!("GET:h:/p/{i}"), "h", &format!("/p/{i}")).await;
+            }
+        });
+        let purger = tokio::spawn(async move {
+            for _ in 0..4 {
+                let _ = c2.purge_by_tag("catalog").await;
+                tokio::task::yield_now().await;
+            }
+        });
+        let (w, p) = tokio::join!(writer, purger);
+        w.expect("writer task");
+        p.expect("purger task");
+        // Final purge — index must be reachable and consistent.
+        let _ = c.purge_by_tag("catalog").await;
+        assert_eq!(c.tag_index_size(), 0, "index must drain after final purge");
     }
 
     #[tokio::test]

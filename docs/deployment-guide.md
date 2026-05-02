@@ -405,12 +405,40 @@ rules:
 **Stats tracked:**
 - `bypassed_authenticated` — Requests bypassed by auth header/cookies
 - `bypassed_explicit_deny` — Requests hitting `ttl_seconds: 0` rules
+- `purges_tag` — Total entries purged via tag-based purge API (FR-009 Phase 4)
+- `purges_route` — Total entries purged via route-id purge API (FR-009 Phase 4)
+- `tag_index_size` — Current tag→key mappings (FR-009 Phase 4)
 - Standard cache hit/miss/eviction counters
 
 **Validation:**
 ```bash
 prx-waf rules validate rules/cache.yaml
 ```
+
+### Cache Admin API Endpoints (FR-009 Phase 4)
+
+**Tag-based purge** — Invalidate logical groups of cached entries without flushing the entire cache.
+
+All endpoints require admin JWT token + IP allowlist. Request body validated: tag/route_id ≤64 chars, ASCII alnum + `_-:` only.
+
+| Method | Path | Body | Response | Purpose |
+|--------|------|------|----------|---------|
+| POST | `/api/cache/purge/tag` | `{"tag":"catalog"}` | `{"ok":true,"purged":142,"duration_ms":7}` | Purge all entries with this tag |
+| POST | `/api/cache/purge/route` | `{"route_id":"static-assets"}` | `{"ok":true,"purged":89,"duration_ms":3}` | Purge all entries cached by this rule |
+| GET | `/api/cache/stats` | — | `{...,"purges_tag":500,"purges_route":120,"tag_index_size":312}` | Cache metrics (includes Phase 4 counters) |
+
+**Example:**
+```bash
+curl -X POST http://localhost:16827/api/cache/purge/tag \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tag":"api"}'
+  
+# Response:
+# {"ok":true,"purged":142,"duration_ms":7}
+```
+
+**Automatic tagging:** Every cached entry is automatically tagged with its source rule ID (RouteRuleGate prepends this), so `purge_by_route` is equivalent to `purge_by_tag(rule_id)`.
 
 ---
 

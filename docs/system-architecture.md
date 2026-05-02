@@ -527,7 +527,7 @@ CREATE INDEX idx_request_stats_timestamp ON request_stats(timestamp DESC);
 
 ## Caching Strategy
 
-### Response Cache (moka LRU) + Per-Route TTL (FR-009 Phase 3)
+### Response Cache (moka LRU) + Per-Route TTL (FR-009 Phase 3) + Tag-Based Purge (FR-009 Phase 4)
 
 **What's cached?**
 - Static content (CSS, JS, images)
@@ -589,11 +589,19 @@ rules:
     tags: ["admin", "sensitive"]
 ```
 
-**Stats (new):**
+**Tag index + purge (Phase 4 — new):**
+- Every cached entry is tagged with its source rule ID (auto-prepended by RouteRuleGate) plus explicit tags from YAML.
+- Tag index (`DashMap<tag, Set<cache_keys>>`) maintained in-memory; automatically cleaned when entries expire via moka eviction listener.
+- Operators purge by tag or route_id without flushing entire cache: `POST /api/cache/purge/tag` or `POST /api/cache/purge/route`.
+- Admin-only endpoints (JWT + IP allowlist); input validated (≤64 chars, ASCII alnum + `_-:` only).
+- Stats tracked: `purges_tag`, `purges_route`, `tag_index_size`.
+
+**Stats:**
 - `bypassed_authenticated` — Requests blocked by AuthGate
 - `bypassed_explicit_deny` — Requests blocked by ExplicitDeny (ttl=0)
-
-**Operator guide:** See [`docs/cache-operator-guide.md`](./cache-operator-guide.md) (future) for tag-based purge API and per-route tuning.
+- `purges_tag` — Total entries purged via tag-based purge API
+- `purges_route` — Total entries purged via route-id purge API
+- `tag_index_size` — Current number of tag→key mappings (for monitoring tag index growth)
 
 **Key:** `host + path + query_string + (cookies if allowed)`
 
