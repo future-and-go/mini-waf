@@ -58,6 +58,11 @@ ignore = [
     # requires hostile script code which would be a separate access-control
     # failure first.
     { id = "RUSTSEC-2026-0099", reason = "thin-vec via rhai: requires hostile script in admin-controlled context" },
+    # rustls-pemfile 2.x unmaintained, superseded by rustls-pki-types parsers.
+    # Transitive via redis 0.27 -> rustls-native-certs 0.7. We do not parse
+    # PEM ourselves; redis only uses it for TLS root certs. Drops when redis
+    # upgrades rustls-native-certs to 0.8+.
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile via redis 0.27: transitive, no PEM parsing in our code" },
 ]
 
 [licenses]

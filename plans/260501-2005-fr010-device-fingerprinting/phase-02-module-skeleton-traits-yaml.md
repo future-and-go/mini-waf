@@ -1,6 +1,6 @@
 # Phase 02 — Module Skeleton, Traits, YAML Schema, Hot Reload
 
-**Status:** pending | **Priority:** P0 | **Effort:** M | **Blocked by:** phase-01
+**Status:** completed | **Priority:** P0 | **Effort:** M | **Blocked by:** phase-01
 
 ## Context
 
@@ -131,15 +131,15 @@ device_fp:
 
 ## Todos
 
-- [ ] Create module directory tree + stubs
-- [ ] Define core types (Signal, FpKey, RawCapture, etc.)
-- [ ] Implement DeviceFpConfig serde + validation
-- [ ] Implement ArcSwap + notify hot reload
-- [ ] Implement ProviderRegistry
-- [ ] Wire DeviceFpDetector into WafEngine
-- [ ] Default `configs/device-fp.yaml`
-- [ ] Unit tests: config load, invalid YAML, hot reload swap
-- [ ] `cargo clippy --workspace -- -D warnings` clean
+- [x] Create module directory tree + stubs
+- [x] Define core types (Signal, FpKey, RawCapture, etc.)
+- [x] Implement DeviceFpConfig serde + validation
+- [x] Implement ArcSwap + notify hot reload
+- [x] Implement ProviderRegistry
+- [ ] Wire DeviceFpDetector into WafEngine — **deferred to phase-04+** (no signals to emit yet; premature integration violates KISS)
+- [x] Default `configs/device-fp.yaml`
+- [x] Unit tests: config load, invalid YAML, hot reload swap (24 tests pass)
+- [x] `cargo clippy -p waf-engine --all-targets --all-features -- -D warnings` clean
 
 ## Success Criteria
 

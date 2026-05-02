@@ -38,6 +38,11 @@
 # element drop panics. Pulled in by rhai 1.24. The Rhai scripts we run are
 # admin-supplied with strict sandbox limits; the panic-during-drop scenario
 # requires hostile script code. Track upstream fix.
+#
+# RUSTSEC-2025-0134: rustls-pemfile 2.x unmaintained — superseded by
+# rustls-pki-types parsers. Transitive via redis 0.27 -> rustls-native-certs
+# 0.7. We do not parse PEM ourselves; redis only uses it for TLS root
+# certs. Drops when redis upgrades rustls-native-certs to 0.8+.
 ignore = [
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0388",
@@ -66,6 +71,7 @@ ignore = [
     "RUSTSEC-2026-0099",
     "RUSTSEC-2026-0103",
     "RUSTSEC-2026-0104",
+    "RUSTSEC-2025-0134",
 ]
 informational_warnings = ["unmaintained"]
 severity_threshold = "low"

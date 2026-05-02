@@ -22,6 +22,8 @@ use pingora_proxy::{FailToProxy, ProxyHttp, Session};
 use waf_common::HostConfig;
 use waf_engine::WafEngine;
 use waf_engine::access::AccessLists;
+use waf_engine::device_fp::DeviceFpDetector;
+use waf_engine::device_fp::capture::ConnCtx as DeviceFpConnCtx;
 use waf_engine::relay::RelayDetector;
 
 use crate::tiered::TierPolicyRegistry;
@@ -70,6 +72,9 @@ pub struct WafProxy {
     /// FR-007 phase-06: relay/proxy detector. Optional — `None` = pipeline
     /// behaves exactly as pre-FR-007 (back-compat fast path).
     pub relay_detector: Option<Arc<RelayDetector>>,
+    /// FR-010 phase-07: device fingerprint detector. Optional — `None` =
+    /// no fingerprinting, no signal emission, no aggregator submit.
+    pub device_fp_detector: Option<Arc<DeviceFpDetector>>,
 }
 
 impl WafProxy {
@@ -89,7 +94,15 @@ impl WafProxy {
             tier_registry: None,
             access_lists: None,
             relay_detector: None,
+            device_fp_detector: None,
         }
+    }
+
+    /// Inject the FR-010 device fingerprint detector. When set, every request
+    /// runs `process()` after relay detection so resolved signals reach the
+    /// risk aggregator. When unset, no fingerprinting work runs.
+    pub fn with_device_fp_detector(&mut self, detector: Arc<DeviceFpDetector>) {
+        self.device_fp_detector = Some(detector);
     }
 
     /// Inject the FR-007 relay/proxy detector. When set, every request runs
@@ -266,6 +279,31 @@ impl ProxyHttp for WafProxy {
                 std::net::SocketAddr::ip,
             );
             ctx.client_identity = Some(detector.evaluate(peer_ip, &session.req_header().headers));
+        }
+
+        // FR-010 phase-07: device fingerprint pipeline. Runs after relay
+        // detection so it can use the validated `real_ip`. L4 capture
+        // wiring (TLS/h2 inspectors → ConnCtx) lands in a later phase;
+        // until then `process()` operates on an empty `ConnCtx`, producing
+        // an empty FpKey but still dispatching UA-only providers.
+        if let Some(detector) = &self.device_fp_detector
+            && ctx.device_identity.is_none()
+        {
+            let peer_ip = ctx.client_identity.as_ref().map_or_else(
+                || {
+                    session.client_addr().and_then(|a| a.as_inet()).map_or(
+                        std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                        std::net::SocketAddr::ip,
+                    )
+                },
+                |id| id.real_ip,
+            );
+            let ua = session
+                .get_header("user-agent")
+                .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+                .unwrap_or("");
+            let conn = DeviceFpConnCtx::new();
+            ctx.device_identity = Some(detector.process(peer_ip, ua, &conn).await);
         }
 
         // Build request context early so WAF runs before upstream_peer.

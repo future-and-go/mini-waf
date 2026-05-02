@@ -38,6 +38,9 @@
         │  - Sensitive data detection     │
         │  - Anti-hotlink                 │
         │  - CrowdSec integration         │
+        │  - Device fingerprinting        │
+        │    (FR-010: TLS ClientHello +   │
+        │     H2 frame capture)           │
         └────────────────┬────────────────┘
                          │
         ┌────────────────▼────────────────┐
@@ -140,6 +143,79 @@ builder = builder.with_client_identity(client_identity);
 - `TorExitMatcher` — checks IP against Tor exit node set (refreshed hourly via HTTP+ETag)
 
 **Hot-reload:** File watcher on `rules/relay.yaml` monitors config changes (trusted-proxy CIDRs, ASN db path, Tor feed URL, refresh intervals). Changes propagate via `ArcSwap` (lock-free atomic swap) with ≤1s latency.
+
+### Gateway → DeviceFpDetector (FR-010)
+
+Operator guide: [`device-fingerprinting.md`](device-fingerprinting.md).
+
+```mermaid
+flowchart LR
+    CH[TLS ClientHello bytes] -->|patched pingora hook| Cap[ConnCtx]
+    H2[HTTP/2 frames] -->|H2FrameTap| Cap
+    Cap --> FP[FingerprintRegistry: ja3 / ja4 / h2 akamai]
+    FP --> Key((FpKey))
+    Key --> Store[(IdentityStore: Memory or Redis)]
+    Store --> Obs[Observation]
+    Key --> Disp[ProviderRegistry.dispatch]
+    Obs --> Disp
+    Disp --> Sigs[Vec&lt;Signal&gt;]
+    Sigs --> Agg[RiskAggregator.submit -- FR-025 plug-in]
+    Sigs --> Out[DeviceIdentity to gateway ctx]
+```
+
+```rust
+// In gateway::proxy.rs, immediately after RelayDetector
+let detector = &self.device_fp_detector;  // Arc<DeviceFpDetector>
+let device_identity = detector
+    .process(peer_ip, user_agent, &conn_ctx)  // ConnCtx holds raw L4 capture
+    .await;
+
+// Output: DeviceIdentity {
+//   key: Arc<FpKey>,            // Composite ja3 / ja4 / h2_akamai hashes
+//   signals: Vec<Signal>,       // FpConflict, IpHopping, LowEntropyUa, UaBlocklisted, H2Anomaly
+// }
+```
+
+**Pipeline (`DeviceFpDetector::process`):**
+1. `FingerprintRegistry::assemble` → `FpKey` from `RawCapture`.
+2. `IdentityStore::observe` (when configured + key non-empty) → `Observation` (sliding-window distinct IPs/UAs).
+3. `ProviderRegistry::dispatch` → `Vec<Signal>`.
+4. `RiskAggregator::submit` (fire-and-forget) → FR-025 plug-in.
+
+#### FR-025 plug-in contract
+
+`device_fp/` ships `RiskAggregator` (in `crates/waf-engine/src/device_fp/aggregator.rs`) and a `NoopAggregator` default. FR-025 lives in its own crate, implements the trait, and is wired in by the binary:
+
+```rust
+use waf_engine::device_fp::{DeviceFpDetector, RiskAggregator, FpKey, Signal};
+
+pub struct ScoringAggregator {
+    tx: tokio::sync::mpsc::Sender<Job>,
+}
+
+#[async_trait::async_trait]
+impl RiskAggregator for ScoringAggregator {
+    async fn submit(&self, key: &FpKey, signals: &[Signal]) {
+        let job = Job { key: key.clone(), signals: signals.to_vec() };
+        if self.tx.try_send(job).is_err() {
+            tracing::warn!("risk-scorer queue full, dropping submission");
+        }
+    }
+}
+
+// Wiring:
+let detector = DeviceFpDetector::new(cfg, registry)
+    .with_store(Arc::new(MemoryIdentityStore::default()))
+    .with_aggregator(Arc::new(ScoringAggregator::new()));
+```
+
+**Contract rules:**
+- `submit` is async but MUST NOT block the caller — fan out to a bounded channel internally and drop-with-warn on overflow.
+- Caller treats `submit` as fire-and-forget; no result, no error path.
+- `key` is borrowed; clone if the impl retains it past the call.
+- `device_fp/` never depends on the FR-025 crate — wiring lives at the binary entry point only.
+
+`LoggingAggregator` (same module) is a test/dev impl that records submissions into a bounded ring buffer for assertions.
 
 ### WafEngine → PostgreSQL Storage
 

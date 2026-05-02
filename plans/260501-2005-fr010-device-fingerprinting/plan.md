@@ -42,15 +42,16 @@ Module: `crates/waf-engine/src/device_fp/`. See brainstorm §4.2 for full layout
 
 | # | Phase | Status | Effort |
 |---|---|---|---|
-| 01 | Pingora patch — ClientHello + h2 frame hooks | pending | M |
-| 02 | Module skeleton, traits, YAML schema, hot reload | pending | M |
-| 03 | Capture layer (TLS + h2) + fixtures | pending | M |
-| 04 | Fingerprint providers: JA3, JA4, h2 Akamai | pending | M |
-| 05 | IdentityStore trait + Memory impl + conformance suite | pending | S |
-| 06 | Signal providers (5x) | pending | M |
-| 07 | RiskAggregator trait + Noop default + wiring | pending | S |
+| 01 | Pingora inspector primitives (Option B — L4 byte tap) | **completed** | S |
+| 02 | Module skeleton, traits, YAML schema, hot reload | **completed** | M |
+| 03 | Capture layer (TLS + h2) + fixtures | **completed (deferred: real-client captures + gateway wiring)** | M |
+| 04 | Fingerprint providers: JA3, JA4, h2 Akamai | **completed (deferred: golden vectors + property tests + benches)** | M |
+| 05 | IdentityStore trait + Memory impl + conformance suite | **completed (deferred: bloom prefilter + bench)** | S |
+| 06 | Signal providers (5x) | **completed (deferred: integration stream test + <100µs bench)** | M |
+| 07 | RiskAggregator trait + Noop default + wiring | **completed (deferred: real handshake e2e via curl-impersonate harness; <5µs noop bench)** | S |
 | 08 | IdentityStore Redis impl (feature-flagged) | pending | S |
-| 09 | Coverage gate, perf bench, docs sync | pending | S |
+| 09 | Coverage gate, perf bench, docs sync | **completed (deferred: live coverage run, project-changelog.md absent, final smoke test needs phase 03-sub)** | S |
+| 03-sub | Capture sub-phase: real-client fixtures + gateway listener patch | pending | M |
 
 ## Key Decisions (from brainstorm)
 

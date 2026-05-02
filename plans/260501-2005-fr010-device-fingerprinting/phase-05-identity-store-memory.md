@@ -1,6 +1,6 @@
 # Phase 05 — IdentityStore Trait + Memory Impl + Conformance Suite
 
-**Status:** pending | **Priority:** P0 | **Effort:** S | **Blocked by:** phase-02
+**Status:** completed (deferred: bloom prefilter + dedicated bench) | **Priority:** P0 | **Effort:** S | **Blocked by:** phase-02
 
 ## Context
 
@@ -53,14 +53,14 @@
 
 ## Todos
 
-- [ ] Finalize trait + types in `trait.rs`
-- [ ] `MemoryIdentityStore` impl
-- [ ] TTL janitor task
-- [ ] Bloom prefilter (optional, feature-flagged)
-- [ ] Conformance suite (12 scenarios)
-- [ ] Run suite vs Memory impl — all green
-- [ ] Bench observe/lookup <10µs
-- [ ] Concurrency stress test (loom or 50-thread tokio)
+- [x] Finalize trait + types in `identity_trait.rs` (already done in phase-02)
+- [x] `MemoryIdentityStore` impl — DashMap + sliding window via deque + count map
+- [x] TTL janitor task — `spawn_janitor` returns `JoinHandle`
+- [ ] Bloom prefilter (deferred — YAGNI, optional in plan)
+- [x] Conformance suite (12 scenarios) — `identity::conformance::run_store_conformance`
+- [x] Run suite vs Memory impl — all green (3/3 tests pass)
+- [ ] Bench observe/lookup <10µs (deferred — phase-09 perf gate)
+- [x] Concurrency stress test — 16 tasks × 50 ops, no panic
 
 ## Success Criteria
 

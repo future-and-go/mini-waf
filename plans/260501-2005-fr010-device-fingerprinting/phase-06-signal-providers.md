@@ -1,6 +1,6 @@
 # Phase 06 — Signal Providers (5x)
 
-**Status:** pending | **Priority:** P0 | **Effort:** M | **Blocked by:** phase-04, phase-05
+**Status:** completed (deferred: integration stream test, <100µs bench) | **Priority:** P0 | **Effort:** M | **Blocked by:** phase-04, phase-05
 
 ## Context
 
@@ -42,14 +42,14 @@ Each carries `signal_weight` from YAML; weights consumed by `RiskAggregator`.
 
 ## Todos
 
-- [ ] IpHoppingProvider + tests
-- [ ] UaEntropyProvider (Shannon + churn) + tests
-- [ ] UaBlocklistProvider + RegexSet + tests
-- [ ] H2AnomalyProvider + tests
-- [ ] FpConflictProvider + secondary store + tests
-- [ ] YAML-driven registration in registry
-- [ ] Integration test: simulated request stream triggers each signal type
-- [ ] Bench: total provider chain <100µs
+- [x] IpHoppingProvider + tests
+- [x] UaEntropyProvider (Shannon) + tests — UA churn folded into FpConflict (existing Signal enum has no UaChurn variant; `Observation.distinct_uas` covers it)
+- [x] UaBlocklistProvider + RegexSet + tests
+- [x] H2AnomalyProvider + tests — emits structural anomalies (BadSettings/InvalidPriority/ZeroWindowUpdate/PseudoHeaderOrder) per existing closed enum
+- [x] FpConflictProvider + tests — backed by `Observation.distinct_uas_in_window` from existing IdentityStore (no separate cookie store; YAGNI vs plan's secondary store)
+- [x] YAML-driven registration in registry (`from_config` builds 5 known providers, warns+skips unknown)
+- [ ] Integration test: simulated request stream triggers each signal type — deferred to phase-09 once gateway wiring lands
+- [ ] Bench: total provider chain <100µs — deferred to phase-09 perf gate
 
 ## Success Criteria
 

@@ -765,3 +765,25 @@ fn validate_header(s: &str) -> Cow<'_, str> {
     }
 }
 ```
+
+## Vendored Dependencies
+
+### Pingora Patch (FR-010)
+
+`vendor/pingora/` is a pinned fork carrying the L4 inspector traits used
+by `device_fp::capture` (ClientHello bytes + H2 frames pre-END_HEADERS).
+Wired via `[patch.crates-io]` in the workspace `Cargo.toml`.
+
+**Upgrade SOP:**
+1. Rebase the fork on the upstream tag; resolve only inspector-trait
+   conflicts. Do not pull unrelated changes into the patch.
+2. Run `cargo test -p waf-engine --all-features` and the device_fp
+   conformance suite (`identity::conformance`).
+3. Run `cargo bench -p waf-engine --bench device_fp_pipeline` and
+   compare p99 against the previous nightly artifact (`device-fp-bench`).
+4. Update `docs/device-fingerprinting.md` "last verified" date.
+5. PR description must list upstream commit range and the conformance /
+   bench deltas.
+
+A failed inspector hook is fail-open: capture goes empty, providers run
+on UA only. Never gate the pipeline on hook success.

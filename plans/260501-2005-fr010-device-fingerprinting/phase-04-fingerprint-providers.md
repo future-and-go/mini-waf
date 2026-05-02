@@ -1,6 +1,6 @@
 # Phase 04 — Fingerprint Providers: JA3, JA4, H2 Akamai
 
-**Status:** pending | **Priority:** P0 | **Effort:** M | **Blocked by:** phase-03
+**Status:** completed (core impl); deferred — FoxIO golden vectors, proptests, benches | **Priority:** P0 | **Effort:** M | **Blocked by:** phase-03
 
 ## Context
 
@@ -39,14 +39,15 @@ Convert `RawCapture` into stable fingerprint strings. Three algorithms, all impl
 
 ## Todos
 
-- [ ] JA3 implementation + tests
-- [ ] JA4 implementation + tests + FoxIO golden vectors
-- [ ] H2 Akamai implementation + tests
-- [ ] Provider registration
-- [ ] Property tests (GREASE, ordering)
-- [ ] Golden vector tests (Chrome/Firefox/Safari/curl/curl-impersonate)
-- [ ] Bench `ja3_hash`, `ja4_hash`, `h2_akamai_hash`
-- [ ] Document algorithm versions
+- [x] JA3 implementation + tests
+- [x] JA4 implementation + tests
+- [ ] FoxIO JA4 golden vectors — deferred (needs fixture import in phase-09)
+- [x] H2 Akamai implementation + tests
+- [x] Provider registration (`FingerprintRegistry::assemble`)
+- [ ] Property tests (GREASE, ordering) — deferred to phase-09 coverage gate
+- [ ] Golden vector tests (Chrome/Firefox/Safari/curl/curl-impersonate) — deferred to phase-09
+- [ ] Bench `ja3_hash`, `ja4_hash`, `h2_akamai_hash` — deferred to phase-09
+- [x] Document algorithm versions (`JA3_VERSION`, `JA4_VERSION`, `H2_AKAMAI_VERSION` consts)
 
 ## Success Criteria
 

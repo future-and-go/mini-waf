@@ -4,6 +4,7 @@ pub mod checker;
 pub mod checks;
 pub mod community;
 pub mod crowdsec;
+pub mod device_fp;
 pub mod engine;
 pub mod geoip;
 pub mod geoip_updater;
