@@ -46,6 +46,8 @@ pingora-core = { workspace = true }
 # FR-010 phase-04 fingerprint hashers.
 md-5 = { workspace = true }
 sha2 = { workspace = true }
+# FR-010 phase-08 — Redis identity store backend; gated by `redis-store` feature.
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager", "tls-rustls", "tokio-rustls-comp", "script"], optional = true }
 
 [dev-dependencies]
 rand = { workspace = true }
@@ -78,7 +80,7 @@ harness = false
 [features]
 default = []
 # FR-010 device fingerprinting — Redis-backed identity store (phase-08).
-redis-store = []
+redis-store = ["dep:redis"]
 
 [lints]
 workspace = true
