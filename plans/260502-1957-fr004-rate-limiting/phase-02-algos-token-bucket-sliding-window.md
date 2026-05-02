@@ -1,6 +1,6 @@
 # Phase 02 — Algorithms: Token Bucket + Sliding Window Counter
 
-**Priority:** P0 | **Status:** pending | **Depends:** 01
+**Priority:** P0 | **Status:** done | **Depends:** 01
 
 ## Goal
 
@@ -126,6 +126,6 @@ cargo clippy -p waf-engine -- -D warnings
 
 ## Done When
 
-- [ ] Both algos compile, all unit tests pass
-- [ ] No `.unwrap()` outside `#[cfg(test)]`
+- [x] Both algos compile, all unit tests pass
+- [x] No `.unwrap()` outside `#[cfg(test)]`
 - [ ] Branch coverage ≥95% on algo files (checked via `cargo llvm-cov` if configured)
