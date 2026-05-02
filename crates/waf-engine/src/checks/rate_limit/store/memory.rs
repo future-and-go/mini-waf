@@ -257,4 +257,12 @@ mod tests {
         assert!(tokio::runtime::Handle::try_current().is_err());
         let _store = MemoryStore::new();
     }
+
+    // Phase 05: full conformance suite, parameterized over `dyn RateLimitStore`.
+    #[tokio::test]
+    async fn conformance_suite() {
+        use crate::checks::rate_limit::conformance::run_conformance;
+        let store: Arc<dyn RateLimitStore> = Arc::new(MemoryStore::new());
+        run_conformance(store).await;
+    }
 }

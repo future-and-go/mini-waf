@@ -17,6 +17,9 @@ pub mod check;
 pub mod key;
 pub mod store;
 
+#[cfg(any(test, feature = "test-conformance"))]
+pub mod conformance;
+
 pub use check::RateLimitCheck;
 pub use store::{Decision, RateLimitStore};
 

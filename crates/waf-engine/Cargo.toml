@@ -90,6 +90,9 @@ harness = false
 default = []
 # FR-010 device fingerprinting — Redis-backed identity store (phase-08).
 redis-store = ["dep:redis"]
+# FR-004 rate-limiting — exposes the shared store conformance suite to integration
+# tests / external backends. Implicitly enabled under `cfg(test)`.
+test-conformance = []
 
 [lints]
 workspace = true
