@@ -8,6 +8,9 @@ use async_trait::async_trait;
 pub mod memory;
 pub use memory::MemoryStore;
 
+#[cfg(feature = "redis-store")]
+pub mod redis;
+
 /// Outcome of a single `check_and_consume` call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {

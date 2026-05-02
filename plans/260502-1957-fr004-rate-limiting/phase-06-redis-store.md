@@ -146,7 +146,7 @@ REDIS_TEST_URL=redis://127.0.0.1:6379 cargo test -p waf-engine --features redis-
 
 ## Done When
 
-- [ ] `redis-store` feature compiles
-- [ ] Conformance suite green against live Redis
-- [ ] Breaker opens at 5 consecutive failures, recovers on success
-- [ ] No `.unwrap()` outside tests
+- [x] `redis-store` feature compiles
+- [ ] Conformance suite green against live Redis  <!-- pending: needs REDIS_TEST_URL run -->
+- [x] Breaker opens at 5 consecutive failures, recovers on success
+- [x] No `.unwrap()` outside tests
