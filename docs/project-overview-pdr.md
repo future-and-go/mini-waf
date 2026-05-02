@@ -217,13 +217,18 @@ Organizations deploying web applications face evolving threats:
 6. **Regression Testing**: 243 regression tests (116 added in v0.2.0); all passing
 7. **Dependency Audit**: 0 unaddressed CVEs; wasmtime upgraded (23→43, 5 CVEs fixed)
 
-### v0.3.0 (Proposed — Q3 2026, Relay + Observability)
+### v0.2.x Post-Release (2026-04-29) — Shipped
 
-Phases 1–7 of FR-007 shipped. Phase-08 (docs sync) pending. Risk-scorer integration (FR-025/026) queued post-FR-007 test pass.
+1. **FR-004 — Rate Limiting**: Token-bucket (burst) + sliding-window (sustained) per tier; MemoryStore (DashMap, idle-eviction 10min, 100K cap) + RedisStore (Lua script) + BreakerStore (circuit-breaker fallback); dual IP+session keys; YAML hot-reload (configs/rate-limit.yaml); rule IDs RL-IP/RL-SESSION/RL-ERR
+2. **FR-009 — Smart Caching**: Tier-aware bypass (CRITICAL never cached), 6-gate Chain-of-Responsibility pipeline; tag-based purge index with admin endpoints (/api/cache/purge/tag, /api/cache/purge/route); cache stats tracking (hit/miss/bypassed); YAML hot-reload (rules/cache.yaml)
 
-1. **Relay & Proxy Detection (FR-007)**: XFF validation, ASN classification, Tor exit detection, hot-reload
-2. **Observability**: OpenTelemetry integration, distributed tracing across cluster
-3. **Metrics**: Prometheus endpoint (/metrics), histogram latency, rule hit counts
+### v0.3.0 (Proposed — Q3 2026, Observability + Risk Scoring)
+
+FR-004 (rate limiting) and FR-009 (smart caching) shipped post-v0.2.0. Focus now on observability, risk scoring, and UI testing.
+
+1. **Observability**: Prometheus endpoint (/metrics), histogram latency, rate-limit hit counts, cache metrics
+2. **Risk Scoring (FR-025/026)**: Device fingerprinting signals → risk aggregator → policy-based decisions
+3. **Distributed Tracing**: OpenTelemetry integration (optional, off by default), trace correlation with security events
 4. **Documentation**: Complete API reference (70+ endpoints), operator runbooks
 5. **Performance**: <3ms added latency (99th percentile), >15,000 RPS/node
 6. **Vue UI Tests**: >80% code coverage for admin-ui components

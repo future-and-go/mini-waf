@@ -123,8 +123,28 @@ Phase 4: URL Blocklist (regex + literal)
 
 ## Phases 5-7: Rate Limiting & Behavior Analysis
 
+### Phase 5: Rate Limiting (FR-004)
+
 ```
-Phase 5: CC/DDoS Rate Limiting
+FR-004 Rate Limiting: Tiered token-bucket + sliding-window
+├─ Key 1: ip:<host>:<client_ip> (checked first, IP-based limit)
+│  ├─ Algorithm: token-bucket (burst) + sliding-window (sustained)
+│  ├─ Config: per-tier burst_capacity, burst_refill_per_s, window_secs, window_limit
+│  ├─ Store: MemoryStore (100K cap, 10min idle eviction) or RedisStore (Lua roundtrip)
+│  └─ BreakerStore wraps both: circuit-breaker (default 5 failures) → fallback to memory
+├─ If IP key fails → BLOCK with rule ID RL-IP (fail-mode: tier.Close=block, Open=pass)
+├─ Else check Key 2: sess:<host>:<session_id> (session/device-fp, fallback if cookie present)
+│  └─ If session key fails → BLOCK with rule ID RL-SESSION
+├─ If both Allow → continue to Phase 6
+└─ Rule ID RL-ERR on check error (fail-mode honored per tier policy)
+
+Config: configs/rate-limit.yaml (hot-reload via notify, 200ms debounce, ArcSwap)
+```
+
+**Legacy format (for backward compat, removed after v0.3.0):**
+
+```
+Phase 5: CC/DDoS Rate Limiting (simplified view)
 ├─ Per-IP sliding-window counter
 ├─ Increment on each request
 ├─ If counter > threshold → BLOCK (or challenge)
@@ -218,7 +238,9 @@ After Phase 16:
 ├─ Decision = Allow
 │  ├─ Route to backend (vhost → load balancer → upstream)
 │  ├─ Receive response from backend
-│  ├─ Store in response cache (if eligible)
+│  ├─ FR-009 Smart Cache: Check tier gate (CRITICAL never cached)
+│  │  → MethodGate, AuthGate, RouteRuleGate, UpstreamCcGate, TierDefaultGate
+│  │  → If cacheable: store in moka LRU (tag index updated for purge)
 │  └─ Return response to client
 │
 ├─ Decision = Block
@@ -227,7 +249,7 @@ After Phase 16:
 │  ├─ Send notifications (email, webhook, etc.)
 │  └─ Increment blocked_requests counter
 │
-└─ Decision = Challenge
+└─ Decision = Challenge (FR-004 rate limit)
    ├─ Return HTTP 429 Too Many Requests (or CAPTCHA page)
    ├─ Log to security_events
    └─ Wait for client to solve challenge before allowing

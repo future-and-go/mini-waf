@@ -327,7 +327,7 @@ prx-waf/
 5. Phase 2: IP Blocklist (CIDR)
 6. Phase 3: URL Allowlist (regex/string)
 7. Phase 4: URL Blocklist (regex/string)
-8. Phase 5: FR-004 Rate Limiting (token-bucket + sliding-window, tiered, memory or Redis store, hot-reload YAML)
+8. Phase 5: Rate Limiting (FR-004: token-bucket + sliding-window, dual IP+session keys, tiered)
 9. Phase 6: Scanner Detection (Nmap, Nikto, etc.)
 10. Phase 7: Bot Detection (headless browser, crawlers)
 11. Phase 8: SQL Injection (libinjectionrs + regex)
@@ -343,10 +343,10 @@ prx-waf/
 20. Decision: Allow / Block / Challenge / Log
 21. If Allow: Route to backend via load balancer
 22. If Block: Return 403 Forbidden
-23. If Challenge: CAPTCHA or rate-limit token
+23. If Challenge: CAPTCHA or rate-limit token (429)
 24. Log: Write security_events + attack_logs to PostgreSQL
-25. Notify: Send alerts (Email, Webhook, Telegram)
-26. Cache: If response eligible, store in moka LRU
+25. Cache: If response eligible and tier permits (FR-009), store in moka LRU
+26. Notify: Send alerts (Email, Webhook, Telegram)
 27. Return response to client
 ```
 
@@ -388,6 +388,10 @@ prx-waf/
 ### Tiered Protection (FR-002)
 
 See [Tiered Protection Consumer Guide](./tiered-protection.md) for request classification, policy bus, and per-tier semantics.
+
+### Rate Limiting (FR-004)
+
+Tiered rate limiting using token-bucket (burst) and sliding-window (sustained) algorithms. Two-store architecture: MemoryStore (DashMap-based, 100K entry cap, 10min idle eviction, background cleanup) for fast local checks; RedisStore (single Lua script roundtrip via `CHECK_AND_CONSUME_LUA`, 50ms op timeout) for distributed state. BreakerStore wraps both with circuit-breaker (default 5 consecutive failures) to fallback gracefully to memory. Dual-key strategy: `ip:<host>:<client_ip>` (IP-based, checked first for flood short-circuit) and `sess:<host>:<session_id>` (session/device-fingerprint, fallback if cookie present). Both keys must Allow for request to pass. Emitted rule IDs: RL-IP, RL-SESSION, RL-ERR. Hot-reload via `notify` watcher on `configs/rate-limit.yaml` (200ms debounce, ArcSwap snapshot, schema v1). Config per tier: `burst_capacity`, `burst_refill_per_s`, `window_secs`, `window_limit`. Fail-mode dispatch: tier policy Close (block) / Open (pass on failure). Module: `crates/waf-engine/src/checks/rate_limit/`, integrated as Check trait in phase 5. See scout findings and plans/260502-1957-fr004-rate-limiting/.
 
 ### Access Lists (FR-008)
 

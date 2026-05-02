@@ -84,6 +84,49 @@
 
 ## Unreleased (In Progress — 2026-04-29)
 
+### FR-004 — Rate Limiting (Complete ✓)
+
+Tiered rate limiting with token-bucket (burst) and sliding-window (sustained) algorithms. Two-tier store architecture: MemoryStore (DashMap, idle-eviction 10min, 100K cap) for fast local checks, RedisStore (single Lua script roundtrip) for distributed state. BreakerStore circuit-breaker (default 5 failures) routes to memory fallback. Dual keys: `ip:<host>:<client_ip>` (flood short-circuit) and `sess:<host>:<session_id>` (fallback to device-fp). Both must Allow for request to pass. Rule IDs: RL-IP, RL-SESSION, RL-ERR. Hot-reload via `configs/rate-limit.yaml` (notify watcher, 200ms debounce, ArcSwap snapshot). Per-tier config: `burst_capacity`, `burst_refill_per_s`, `window_secs`, `window_limit`. Fail-mode honors tier policy (Close=block, Open=pass).
+
+- [x] Token-bucket + sliding-window algorithms (pure logic, ~16B state per key)
+- [x] MemoryStore (DashMap, idle-eviction, background cleanup)
+- [x] RedisStore (Lua script, 50ms timeout)
+- [x] BreakerStore (circuit-breaker with fallback)
+- [x] Dual-key strategy (IP + session, both must Allow)
+- [x] YAML hot-reload (`configs/rate-limit.yaml`, schema v1)
+- [x] Per-tier policies via TierPolicyRegistry
+- [x] Integration as Check trait, fail-mode dispatch
+- [x] Rule IDs: RL-IP, RL-SESSION, RL-ERR
+- [x] Plan: plans/260502-1957-fr004-rate-limiting/
+
+**Deliverables**
+- Module: `crates/waf-engine/src/checks/rate_limit/`
+- Config: `configs/rate-limit.yaml` (example)
+- Rules emitted: RL-IP (IP limit), RL-SESSION (session limit), RL-ERR (check error)
+
+---
+
+### FR-009 — Smart Caching (Complete ✓)
+
+Response caching with tier-aware bypass logic and tag-based purge. CRITICAL tier never cached (non-overridable). Pipeline refactored to Chain-of-Responsibility: TierGate → MethodGate → AuthGate → RouteRuleGate → UpstreamCcGate → TierDefaultGate. YAML hot-reload of `rules/cache.yaml` (notify, 200ms debounce, ArcSwap, schema v1). Tag index (DashMap reverse-index, moka eviction listeners) with admin endpoints for purge-by-tag / purge-by-route and cache stats. Schema: defaults (max_body_bytes, cacheable_status_codes [200,203,301,410]), rules with id/match{host,path.regex,methods}/ttl_seconds/tags/allow_authenticated. Tier defaults: NoCache, ShortTtl{300}, Aggressive{600}, Default{60}.
+
+- [x] Tier-aware bypass logic (CRITICAL never cached)
+- [x] Chain-of-Responsibility pipeline (6-gate architecture)
+- [x] YAML hot-reload (`rules/cache.yaml`, schema v1)
+- [x] Tag-based purge index (DashMap + moka eviction listeners)
+- [x] Admin endpoints: POST /api/cache/purge/tag, POST /api/cache/purge/route
+- [x] Cache stats: GET /api/cache/stats (hit/miss/bypassed/tag_index_size)
+- [x] Regex/ID validation on YAML parse; error-safe hot-reload
+- [x] Per-tier TierDefault policies (NoCache, ShortTtl, Aggressive, Default)
+- [x] Plan: plans/260502-2150-fr-009-smart-caching/
+
+**Deliverables**
+- Module: `crates/gateway/src/cache/`
+- Config: `rules/cache.yaml` (example)
+- Admin endpoints: cache purge + stats
+
+---
+
 ### FR-002 — Tiered Protection (Complete ✓)
 
 Implements a four-tier request classification and per-tier policy bus that all downstream feature-requests (FR-005, FR-006, FR-009, FR-027) consume. Every request is mapped to `Critical / High / Medium / CatchAll` by a priority-sorted classifier (path-exact, path-prefix, path-regex, host-suffix, method, header matchers); the matched tier's `TierPolicy` — carrying `fail_mode`, `ddos_threshold_rps`, `cache_policy`, and `risk_thresholds` — is attached to `RequestCtx` before Phase 1 runs. The policy registry is backed by `ArcSwap` for lock-free atomic hot-swaps: the `TierConfigWatcher` thread monitors `configs/default.toml`, debounces editor-burst events (200 ms window), and publishes validated snapshots without restarting the gateway. On parse or validation failure the previous config is retained and a `tracing::warn!` is emitted; the gateway never panics on bad config.
@@ -167,6 +210,8 @@ Atomic read/write of `waf-panel.toml` (operational policy settings) via `GET/PUT
 
 **Theme**: Observability & Developer Experience
 
+**Build on FR-004/FR-009**: v0.3.0 will add Prometheus metrics for rate-limit counters (RL-IP, RL-SESSION request/deny counts) and cache hit ratio tracking. These extend the core FR-004 rate limiting and FR-009 caching functionality shipped in v0.2.x.
+
 ### Metrics & Monitoring
 - [ ] Prometheus `/metrics` endpoint (counter, gauge, histogram types)
 - [ ] Metrics exported:
@@ -175,6 +220,7 @@ Atomic read/write of `waf-panel.toml` (operational policy settings) via `GET/PUT
   - `prx_waf_request_duration_ms` (histogram, P50/P95/P99)
   - `prx_waf_rule_matches_total` (counter, per rule_id)
   - `prx_waf_backend_latency_ms` (histogram)
+  - `prx_waf_rate_limit_hits_total` (counter, RL-IP/RL-SESSION)
   - `prx_waf_cache_hit_ratio` (gauge)
   - `prx_waf_cluster_election_time_ms` (histogram)
 - [ ] Grafana dashboard templates (JSON)

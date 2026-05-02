@@ -18,6 +18,8 @@ PRX-WAF is a production-ready reverse proxy WAF built on [Pingora](https://githu
 - HTTP/1.1, HTTP/2, HTTP/3 (QUIC) via quinn; weighted round-robin load balancing
 - **Phase-0 access gate (FR-008)**: per-tier IP/Host whitelist + blacklist (Patricia trie, dual-stack v4/v6)
 - **Tiered request classification (FR-002)**: 4 tiers (Critical/High/Medium/CatchAll) with per-tier policies (fail-mode, DDoS threshold, cache policy)
+- **Rate limiting (FR-004)**: token-bucket (burst) + sliding-window (sustained) per tier; IP + session keys; memory/Redis stores with circuit-breaker fallback
+- **Smart response caching (FR-009)**: tier-aware bypass (CRITICAL never cached), tag-based purge index, per-route TTL via YAML
 - 16-phase attack detection: SQLi, XSS, RCE, path traversal, RFI/LFI, SSRF, scanner detection, custom rules, CrowdSec
 - libinjection-based SQLi/XSS detection via libinjectionrs (low false-positive)
 - SSRF protection with DNS rebinding guard and RFC-1918 blocking
