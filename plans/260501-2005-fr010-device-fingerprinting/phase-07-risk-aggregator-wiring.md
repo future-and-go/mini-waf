@@ -1,6 +1,6 @@
 # Phase 07 — RiskAggregator Trait + Noop Default + Signal Wiring
 
-**Status:** pending | **Priority:** P0 | **Effort:** S | **Blocked by:** phase-06
+**Status:** completed (2026-05-02) | **Priority:** P0 | **Effort:** S | **Blocked by:** phase-06
 
 ## Context
 
@@ -49,13 +49,15 @@ FR-025 (cumulative risk scorer) not shipped yet. Define stable `RiskAggregator` 
 
 ## Todos
 
-- [ ] `RiskAggregator` trait + rustdoc
-- [ ] `NoopAggregator`
-- [ ] `LoggingAggregator` (test util)
-- [ ] `DeviceFpDetector::process` end-to-end
-- [ ] Gateway proxy wiring (early filter)
-- [ ] Integration test: real handshake → expected signals
-- [ ] Document FR-025 plug-in contract
+- [x] `RiskAggregator` trait + rustdoc (FR-025 contract documented in module + system-architecture.md)
+- [x] `NoopAggregator` (debug log added)
+- [x] `LoggingAggregator` (bounded ring buffer)
+- [x] `DeviceFpDetector::process` end-to-end (capture → fp → store observe → providers → aggregator)
+- [x] Gateway proxy wiring (`request_filter`, after relay detector)
+- [x] Integration test: synthetic h2 anomaly + UA blocklist captured in `LoggingAggregator`
+  - Deferred: real curl-impersonate handshake harness (needs L4 capture wiring from phase-03-sub)
+- [x] Document FR-025 plug-in contract (`docs/system-architecture.md`)
+- [ ] Deferred: <5µs noop overhead bench (phase-09 perf gate)
 
 ## Success Criteria
 
