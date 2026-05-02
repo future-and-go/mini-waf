@@ -4,6 +4,7 @@ pub mod cc;
 pub mod dir_traversal;
 pub mod geo;
 pub mod owasp;
+pub mod rate_limit;
 pub mod rce;
 pub mod scanner;
 pub mod sensitive;
