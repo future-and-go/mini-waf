@@ -34,7 +34,7 @@ Ship 7 production P0 detection checks (FR-014..FR-020) for prx-waf with extensib
 | 00 | [phase-00-framework-and-coverage.md](phase-00-framework-and-coverage.md) | `feat/fr-frame-detection-framework` | — | code-complete (coverage-baseline deferred) | lotus |
 | 01 | [phase-01-fr014-xss-enhance.md](phase-01-fr014-xss-enhance.md) | `feat/fr-014-xss-json-walk` | FR-014 | pending | TBD |
 | 02 | [phase-02-fr015-path-traversal-enhance.md](phase-02-fr015-path-traversal-enhance.md) | `feat/fr-015-path-traversal-recursive` | FR-015 | pending | TBD |
-| 03 | [phase-03-fr016-ssrf-new.md](phase-03-fr016-ssrf-new.md) | `feat/fr-016-ssrf-detection` | FR-016 | pending | TBD |
+| 03 | [phase-03-fr016-ssrf-new.md](phase-03-fr016-ssrf-new.md) | `feat/fr-016-ssrf-detection` | FR-016 | code-complete (PR stacked on Phase 00) | lotus |
 | 04 | [phase-04-fr017-header-injection-new.md](phase-04-fr017-header-injection-new.md) | `feat/fr-017-header-injection` | FR-017 | pending | TBD |
 | 05 | [phase-05-fr019-scanner-enhance.md](phase-05-fr019-scanner-enhance.md) | `feat/fr-019-scanner-recon` | FR-019 | pending | TBD |
 | 06 | [phase-06-fr020-body-abuse-new.md](phase-06-fr020-body-abuse-new.md) | `feat/fr-020-body-abuse` | FR-020 | pending | TBD |
