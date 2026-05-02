@@ -146,6 +146,23 @@ builder = builder.with_client_identity(client_identity);
 
 ### Gateway → DeviceFpDetector (FR-010)
 
+Operator guide: [`device-fingerprinting.md`](device-fingerprinting.md).
+
+```mermaid
+flowchart LR
+    CH[TLS ClientHello bytes] -->|patched pingora hook| Cap[ConnCtx]
+    H2[HTTP/2 frames] -->|H2FrameTap| Cap
+    Cap --> FP[FingerprintRegistry: ja3 / ja4 / h2 akamai]
+    FP --> Key((FpKey))
+    Key --> Store[(IdentityStore: Memory or Redis)]
+    Store --> Obs[Observation]
+    Key --> Disp[ProviderRegistry.dispatch]
+    Obs --> Disp
+    Disp --> Sigs[Vec&lt;Signal&gt;]
+    Sigs --> Agg[RiskAggregator.submit -- FR-025 plug-in]
+    Sigs --> Out[DeviceIdentity to gateway ctx]
+```
+
 ```rust
 // In gateway::proxy.rs, immediately after RelayDetector
 let detector = &self.device_fp_detector;  // Arc<DeviceFpDetector>

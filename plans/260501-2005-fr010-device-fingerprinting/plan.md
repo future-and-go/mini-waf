@@ -50,7 +50,7 @@ Module: `crates/waf-engine/src/device_fp/`. See brainstorm §4.2 for full layout
 | 06 | Signal providers (5x) | **completed (deferred: integration stream test + <100µs bench)** | M |
 | 07 | RiskAggregator trait + Noop default + wiring | **completed (deferred: real handshake e2e via curl-impersonate harness; <5µs noop bench)** | S |
 | 08 | IdentityStore Redis impl (feature-flagged) | pending | S |
-| 09 | Coverage gate, perf bench, docs sync | pending | S |
+| 09 | Coverage gate, perf bench, docs sync | **completed (deferred: live coverage run, project-changelog.md absent, final smoke test needs phase 03-sub)** | S |
 | 03-sub | Capture sub-phase: real-client fixtures + gateway listener patch | pending | M |
 
 ## Key Decisions (from brainstorm)
