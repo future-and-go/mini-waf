@@ -1,6 +1,6 @@
 # Phase 03 — MemoryStore (DashMap-backed)
 
-**Priority:** P0 | **Status:** pending | **Depends:** 02
+**Priority:** P0 | **Status:** complete | **Depends:** 02
 **Pattern reference:** `crates/waf-engine/src/checks/cc.rs` (TTL/eviction logic to reuse)
 
 ## Goal
@@ -92,6 +92,6 @@ cargo clippy -p waf-engine -- -D warnings
 
 ## Done When
 
-- [ ] `MemoryStore` passes its own unit tests
-- [ ] Cleanup task spawn does not panic without runtime (test with `tokio::runtime::Handle::try_current().is_err()` path)
-- [ ] No `.unwrap()` outside tests
+- [x] `MemoryStore` passes its own unit tests
+- [x] Cleanup task spawn does not panic without runtime (test with `tokio::runtime::Handle::try_current().is_err()` path)
+- [x] No `.unwrap()` outside tests
