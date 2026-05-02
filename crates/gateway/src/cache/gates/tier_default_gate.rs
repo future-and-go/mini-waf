@@ -31,12 +31,16 @@ mod tests {
         CacheCtx {
             tier: Tier::Medium,
             method: "GET",
+            host: "h",
+            path: "/",
             status: 200,
             headers: &[],
             cache_control: None,
             policy,
             max_ttl_secs: 3600,
             default_ttl_secs: 60,
+            has_authorization: false,
+            has_cookie: false,
         }
     }
 

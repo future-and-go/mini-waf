@@ -15,6 +15,9 @@ enabled = true
 max_size_mb = 256
 default_ttl_secs = 60
 max_ttl_secs = 3600
+# FR-009 Phase 3: per-route TTL rules. Hot-reloaded on file change.
+# Missing file is non-fatal at boot (logs warn, runs with no per-route rules).
+rules_path = "rules/cache.yaml"
 
 # ── Phase 5: HTTP/3 (QUIC) ────────────────────────────────────────────────────
 [http3]

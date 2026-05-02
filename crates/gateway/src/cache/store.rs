@@ -17,8 +17,9 @@ use moka::future::Cache;
 use tracing::{debug, trace};
 use waf_common::tier::{CachePolicy, Tier};
 
-use super::gates::{MethodGate, TierDefaultGate, TierGate, UpstreamCcGate};
+use super::gates::{AuthGate, MethodGate, RouteRuleGate, TierDefaultGate, TierGate, UpstreamCcGate};
 use super::policy::{CacheCtx, CachePolicyResolver, Verdict};
+use super::rule_set::{CompiledRuleSet, RuleSetHolder};
 use super::stats::{CacheStats, CacheStatsSnapshot};
 
 /// A cached HTTP response
@@ -46,6 +47,25 @@ impl ResponseCache {
     ///
     /// `max_size_mb`: maximum total size in MiB (approximate, measured by entry count).
     pub fn new(max_size_mb: u64, default_ttl_secs: u64, max_ttl_secs: u64) -> Arc<Self> {
+        Self::with_rules(
+            max_size_mb,
+            default_ttl_secs,
+            max_ttl_secs,
+            RuleSetHolder::new(CompiledRuleSet::empty()),
+        )
+    }
+
+    /// Build a cache with a hot-swappable rule set. The caller owns the
+    /// `RuleSetHolder` (and any `CacheRuleWatcher` wired to it). FR-009 Phase 3.
+    ///
+    /// Resolver order (locked):
+    /// `TierGate → MethodGate → AuthGate → RouteRule → UpstreamCcGate → TierDefaultGate`.
+    pub fn with_rules(
+        max_size_mb: u64,
+        default_ttl_secs: u64,
+        max_ttl_secs: u64,
+        rules: Arc<RuleSetHolder>,
+    ) -> Arc<Self> {
         let capacity = (max_size_mb * 16).max(64);
         let stats = Arc::new(CacheStats::default());
 
@@ -57,6 +77,8 @@ impl ResponseCache {
         let resolver = CachePolicyResolver::new(vec![
             Box::new(TierGate),
             Box::new(MethodGate),
+            Box::new(AuthGate),
+            Box::new(RouteRuleGate::new(rules)),
             Box::new(UpstreamCcGate),
             Box::new(TierDefaultGate),
         ]);
@@ -102,27 +124,40 @@ impl ResponseCache {
 
     /// Store a response. Decision is delegated to `CachePolicyResolver`.
     /// Returns `false` if any gate bypassed.
+    ///
+    /// `host`/`path` and `has_authorization`/`has_cookie` feed the FR-009
+    /// Phase 3 gates (`RouteRuleGate`, `AuthGate`). Callers probe the request
+    /// once and pass the result; gates do not re-parse headers.
+    #[allow(clippy::too_many_arguments)]
     pub async fn put(
         &self,
         key: String,
+        host: &str,
+        path: &str,
         status: u16,
         headers: Vec<(String, String)>,
         body: Bytes,
         cache_control: Option<&str>,
         tier: Tier,
         policy: &CachePolicy,
+        has_authorization: bool,
+        has_cookie: bool,
     ) -> bool {
         // Method extracted from key prefix (`method:host:path[?query]`).
         let method = key.split(':').next().unwrap_or("");
         let ctx = CacheCtx {
             tier,
             method,
+            host,
+            path,
             status,
             headers: &headers,
             cache_control,
             policy,
             max_ttl_secs: self.max_ttl.as_secs(),
             default_ttl_secs: self.default_ttl.as_secs(),
+            has_authorization,
+            has_cookie,
         };
 
         match self.resolver.resolve(&ctx) {
@@ -197,20 +232,42 @@ mod tests {
         "GET:h:/p".to_string()
     }
 
+    /// Test helper — wraps the now-extended `put()` signature so individual
+    /// tests stay readable. Anonymous + no Set-Cookie unless overridden.
+    async fn put_basic(
+        c: &ResponseCache,
+        headers: Vec<(String, String)>,
+        cc: Option<&str>,
+        tier: Tier,
+        policy: &CachePolicy,
+    ) -> bool {
+        c.put(
+            key(),
+            "h",
+            "/p",
+            200,
+            headers,
+            Bytes::from("ok"),
+            cc,
+            tier,
+            policy,
+            false,
+            false,
+        )
+        .await
+    }
+
     #[tokio::test]
     async fn critical_tier_bypasses_put_even_with_max_age() {
         let c = cache();
-        let stored = c
-            .put(
-                key(),
-                200,
-                vec![],
-                Bytes::from("ok"),
-                Some("max-age=3600"),
-                Tier::Critical,
-                &CachePolicy::Aggressive { ttl_seconds: 300 },
-            )
-            .await;
+        let stored = put_basic(
+            &c,
+            vec![],
+            Some("max-age=3600"),
+            Tier::Critical,
+            &CachePolicy::Aggressive { ttl_seconds: 300 },
+        )
+        .await;
         assert!(!stored, "CRITICAL must never cache");
         assert_eq!(c.stats().bypassed_critical, 1);
         assert_eq!(c.stats().stores, 0);
@@ -219,17 +276,14 @@ mod tests {
     #[tokio::test]
     async fn critical_tier_bypasses_get_even_for_existing_key() {
         let c = cache();
-        let stored = c
-            .put(
-                key(),
-                200,
-                vec![],
-                Bytes::from("ok"),
-                Some("max-age=60"),
-                Tier::Medium,
-                &CachePolicy::Aggressive { ttl_seconds: 300 },
-            )
-            .await;
+        let stored = put_basic(
+            &c,
+            vec![],
+            Some("max-age=60"),
+            Tier::Medium,
+            &CachePolicy::Aggressive { ttl_seconds: 300 },
+        )
+        .await;
         assert!(stored);
         let r = c.get(&key(), Tier::Critical).await;
         assert!(r.is_none());
@@ -239,17 +293,7 @@ mod tests {
     #[tokio::test]
     async fn no_cache_policy_bypasses_regardless_of_tier() {
         let c = cache();
-        let stored = c
-            .put(
-                key(),
-                200,
-                vec![],
-                Bytes::from("ok"),
-                Some("max-age=600"),
-                Tier::Medium,
-                &CachePolicy::NoCache,
-            )
-            .await;
+        let stored = put_basic(&c, vec![], Some("max-age=600"), Tier::Medium, &CachePolicy::NoCache).await;
         assert!(!stored);
         assert_eq!(c.stats().bypassed_critical, 1);
     }
@@ -257,11 +301,9 @@ mod tests {
     #[tokio::test]
     async fn aggressive_caps_upstream_max_age_above_ceiling() {
         let c = cache();
-        c.put(
-            key(),
-            200,
+        put_basic(
+            &c,
             vec![],
-            Bytes::from("ok"),
             Some("max-age=10000"),
             Tier::Medium,
             &CachePolicy::Aggressive { ttl_seconds: 300 },
@@ -274,11 +316,9 @@ mod tests {
     #[tokio::test]
     async fn aggressive_uses_policy_default_when_upstream_silent() {
         let c = cache();
-        c.put(
-            key(),
-            200,
+        put_basic(
+            &c,
             vec![],
-            Bytes::from("ok"),
             None,
             Tier::Medium,
             &CachePolicy::Aggressive { ttl_seconds: 300 },
@@ -291,11 +331,9 @@ mod tests {
     #[tokio::test]
     async fn short_ttl_caps_upstream_below_ceiling_unchanged() {
         let c = cache();
-        c.put(
-            key(),
-            200,
+        put_basic(
+            &c,
             vec![],
-            Bytes::from("ok"),
             Some("max-age=30"),
             Tier::Medium,
             &CachePolicy::ShortTtl { ttl_seconds: 120 },
@@ -308,18 +346,104 @@ mod tests {
     #[tokio::test]
     async fn set_cookie_response_bypasses_cache() {
         let c = cache();
+        let stored = put_basic(
+            &c,
+            vec![("Set-Cookie".into(), "sid=abc".into())],
+            Some("max-age=600"),
+            Tier::Medium,
+            &CachePolicy::Aggressive { ttl_seconds: 300 },
+        )
+        .await;
+        assert!(!stored);
+        assert_eq!(c.stats().bypassed_critical, 0);
+    }
+
+    // FR-009 Phase 3 tests ---------------------------------------------------
+
+    #[tokio::test]
+    async fn auth_request_bypasses_via_authorization_header() {
+        let c = cache();
         let stored = c
             .put(
                 key(),
+                "h",
+                "/p",
                 200,
-                vec![("Set-Cookie".into(), "sid=abc".into())],
+                vec![],
                 Bytes::from("ok"),
                 Some("max-age=600"),
                 Tier::Medium,
                 &CachePolicy::Aggressive { ttl_seconds: 300 },
+                true,  // has_authorization
+                false, // has_cookie
             )
             .await;
         assert!(!stored);
+        assert_eq!(c.stats().bypassed_authenticated, 1);
         assert_eq!(c.stats().bypassed_critical, 0);
+    }
+
+    #[tokio::test]
+    async fn auth_request_bypasses_via_cookie_header() {
+        let c = cache();
+        let stored = c
+            .put(
+                key(),
+                "h",
+                "/p",
+                200,
+                vec![],
+                Bytes::from("ok"),
+                Some("max-age=600"),
+                Tier::Medium,
+                &CachePolicy::Aggressive { ttl_seconds: 300 },
+                false,
+                true,
+            )
+            .await;
+        assert!(!stored);
+        assert_eq!(c.stats().bypassed_authenticated, 1);
+    }
+
+    #[tokio::test]
+    async fn route_rule_ttl_overrides_upstream_when_anonymous() {
+        use crate::cache::config::{CacheConfigDoc, Defaults, MatchDoc, PathSpec, RuleDoc};
+        let doc = CacheConfigDoc {
+            version: 1,
+            defaults: Defaults::default(),
+            rules: vec![RuleDoc {
+                id: "static".into(),
+                match_: MatchDoc {
+                    host: None,
+                    path: PathSpec::Prefix { prefix: "/p".into() },
+                    methods: None,
+                },
+                ttl_seconds: 1800,
+                tags: vec!["static".into()],
+                allow_authenticated: false,
+            }],
+        };
+        let set = CompiledRuleSet::try_from_doc(doc).unwrap();
+        let holder = RuleSetHolder::new(set);
+        let c = ResponseCache::with_rules(8, 60, 3600, holder);
+
+        let stored = c
+            .put(
+                key(),
+                "h",
+                "/p",
+                200,
+                vec![],
+                Bytes::from("ok"),
+                None, // no upstream Cache-Control → route rule wins
+                Tier::Medium,
+                &CachePolicy::Aggressive { ttl_seconds: 300 },
+                false,
+                false,
+            )
+            .await;
+        assert!(stored);
+        let entry = c.get(&key(), Tier::Medium).await.expect("present");
+        assert_eq!(entry.max_age, 1800, "route rule TTL must apply");
     }
 }

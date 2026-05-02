@@ -1,0 +1,71 @@
+# FR-009 Phase 3 — Per-route response cache rules.
+#
+# Hot-reloaded by `gateway::cache::CacheRuleWatcher`. On a successful save the
+# new ruleset replaces the old atomically; in-flight requests see a consistent
+# snapshot. A bad save (parse / compile error) is logged and the prior ruleset
+# keeps serving — operators can fix the file without dropping traffic.
+#
+# Pipeline order (Phase 3):
+#   TierGate → MethodGate → AuthGate → RouteRule → UpstreamCcGate → TierDefaultGate
+#
+# Notes:
+#   - Authenticated requests (Authorization or Cookie header) bypass cache
+#     unconditionally in v1, regardless of `allow_authenticated`.
+#   - `ttl_seconds: 0` is an explicit operator opt-out for a path family.
+#   - First matching rule wins; declaration order matters.
+
+version: 1
+
+defaults:
+  # Hard cap on cacheable response body size (bytes). 0 = no cap.
+  max_body_bytes: 1048576
+  # When true, upstream `Cache-Control: no-store|no-cache|private` still bypasses.
+  respect_upstream_cache_control: true
+  # Status codes eligible for caching when a route matches.
+  # 404 deliberately excluded; recon detection is FR-019's concern.
+  cacheable_status_codes: [200, 203, 301, 410]
+
+rules:
+  # Long-TTL static assets — fingerprint-cached on the client side.
+  - id: static-assets
+    match:
+      host: "*"
+      path:
+        regex: '^/(static|assets|images|js|css|fonts)/'
+      methods: [GET, HEAD]
+    ttl_seconds: 86400
+    tags: [static, public]
+    allow_authenticated: false
+
+  # Public catalog / product browse — short TTL, high hit rate.
+  - id: public-catalog
+    match:
+      host: "*"
+      path:
+        prefix: "/catalog/"
+      methods: [GET, HEAD]
+    ttl_seconds: 300
+    tags: [catalog, public]
+    allow_authenticated: false
+
+  # Marketing pages — moderate TTL.
+  - id: marketing-pages
+    match:
+      host: "*"
+      path:
+        regex: '^/(about|pricing|features|blog)(/|$)'
+      methods: [GET, HEAD]
+    ttl_seconds: 600
+    tags: [marketing, public]
+    allow_authenticated: false
+
+  # Admin surface — explicit deny. Even anonymous requests must hit origin
+  # so CSRF tokens and freshly-rotated nonces never come from a stale cache.
+  - id: admin-deny
+    match:
+      host: "*"
+      path:
+        prefix: "/admin"
+    ttl_seconds: 0
+    tags: [admin, deny]
+    allow_authenticated: false

@@ -18,6 +18,12 @@ pub struct CacheStats {
     /// Count of put/get calls bypassed by tier or `NoCache` policy.
     /// Audit signal for FR-009 AC-1.
     pub bypassed_critical: AtomicU64,
+    /// FR-009 Phase 3: count of bypasses caused by `AuthGate`
+    /// (request had `Authorization` or `Cookie`).
+    pub bypassed_authenticated: AtomicU64,
+    /// FR-009 Phase 3: count of bypasses caused by `RouteRuleGate` matching
+    /// a rule with `ttl_seconds: 0` (operator opt-out).
+    pub bypassed_explicit_deny: AtomicU64,
 }
 
 impl CacheStats {
@@ -28,6 +34,8 @@ impl CacheStats {
             evictions: self.evictions.load(Ordering::Relaxed),
             stores: self.stores.load(Ordering::Relaxed),
             bypassed_critical: self.bypassed_critical.load(Ordering::Relaxed),
+            bypassed_authenticated: self.bypassed_authenticated.load(Ordering::Relaxed),
+            bypassed_explicit_deny: self.bypassed_explicit_deny.load(Ordering::Relaxed),
         }
     }
 
@@ -39,8 +47,17 @@ impl CacheStats {
     /// upstream-Cache-Control bypasses returned `false` without bumping any
     /// counter.
     pub fn record_bypass(&self, reason: BypassReason) {
-        if matches!(reason, BypassReason::CriticalTier | BypassReason::NoCachePolicy) {
-            self.bypassed_critical.fetch_add(1, Ordering::Relaxed);
+        match reason {
+            BypassReason::CriticalTier | BypassReason::NoCachePolicy => {
+                self.bypassed_critical.fetch_add(1, Ordering::Relaxed);
+            }
+            BypassReason::Authenticated => {
+                self.bypassed_authenticated.fetch_add(1, Ordering::Relaxed);
+            }
+            BypassReason::ExplicitDeny => {
+                self.bypassed_explicit_deny.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
         }
     }
 }
@@ -52,4 +69,6 @@ pub struct CacheStatsSnapshot {
     pub evictions: u64,
     pub stores: u64,
     pub bypassed_critical: u64,
+    pub bypassed_authenticated: u64,
+    pub bypassed_explicit_deny: u64,
 }

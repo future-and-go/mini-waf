@@ -32,6 +32,12 @@ pub enum BypassReason {
     UpstreamNoCache,
     /// Upstream `Cache-Control: private`.
     UpstreamPrivate,
+    /// Request bears `Authorization` or `Cookie` — never shared in v1.
+    /// `AuthGate` (FR-009 Phase 3).
+    Authenticated,
+    /// A matched route rule has `ttl_seconds: 0` — operator opt-out.
+    /// `RouteRuleGate` (FR-009 Phase 3).
+    ExplicitDeny,
     /// No gate produced a definitive verdict (defensive terminal).
     NoMatch,
 }
@@ -50,6 +56,11 @@ pub enum Verdict {
 pub struct CacheCtx<'a> {
     pub tier: Tier,
     pub method: &'a str,
+    /// Request authority host (already lowercased upstream when possible).
+    /// FR-009 Phase 3: consumed by `RouteRuleGate`.
+    pub host: &'a str,
+    /// Request path (no query). FR-009 Phase 3: consumed by `RouteRuleGate`.
+    pub path: &'a str,
     pub status: u16,
     pub headers: &'a [(String, String)],
     pub cache_control: Option<&'a str>,
@@ -59,6 +70,10 @@ pub struct CacheCtx<'a> {
     /// Fallback when policy has no TTL (defensive — `NoCache` is bypassed
     /// upstream by `TierGate`, so this is rarely reached).
     pub default_ttl_secs: u64,
+    /// Pre-probed: request had an `Authorization` header. FR-009 Phase 3.
+    pub has_authorization: bool,
+    /// Pre-probed: request had a `Cookie` header. FR-009 Phase 3.
+    pub has_cookie: bool,
 }
 
 /// Single decision step. Implementors live in `cache::gates`.

@@ -288,6 +288,11 @@ pub struct CacheConfig {
     pub default_ttl_secs: u64,
     /// Maximum TTL in seconds (caps upstream Cache-Control max-age)
     pub max_ttl_secs: u64,
+    /// FR-009 Phase 3: path to YAML file with per-route TTL rules.
+    /// `None` (default) → no rules; only tier-default TTLs apply.
+    /// Hot-reloaded at runtime; missing file is non-fatal at boot.
+    #[serde(default)]
+    pub rules_path: Option<std::path::PathBuf>,
 }
 
 impl Default for CacheConfig {
@@ -297,6 +302,7 @@ impl Default for CacheConfig {
             max_size_mb: 256,
             default_ttl_secs: 60,
             max_ttl_secs: 3600,
+            rules_path: None,
         }
     }
 }
