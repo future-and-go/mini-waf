@@ -11,6 +11,11 @@ Pingora-based reverse-proxy data plane. Terminates TLS, routes HTTP/1, HTTP/2, a
 - **Cache**: response caching backed by `moka`.
 - **Tunnel**: connection tunnel handling (e.g., for cluster / forwarded traffic).
 - **Per-request context**: shared state plumbed through the proxy phases.
+- **Filter chain**: pluggable request/response filters — XFF, real-IP, forwarded host/proto, hop-by-hop scrub, host policy, response Server/Location/Via header policies, response body internal-ref masker, response header blocklist.
+- **Header / location policies**: host header, server header, and Location-rewrite policy modules consumed by filters.
+- **Error pages**: factory for WAF-decision and proxy error responses.
+- **Tiered classification**: per-host tier classifier with hot-reloadable policy registry and compiled-rule matcher (consumes `waf-common::tier`).
+- **Access phase**: dedicated pipeline stage running access-control + relay + device-fp checks before upstream selection.
 
 ## Response body internal-ref masking (AC-17)
 
@@ -36,13 +41,37 @@ src/
 ├── lib.rs
 ├── proxy.rs               # Pingora ProxyHttp impl, orchestrates phases
 ├── proxy_waf_response.rs  # Response building utilities
-├── pipeline/              # Filter chains (request & response)
+├── protocol.rs            # Wire-protocol helpers (HTTP version, scheme, etc.)
+├── pipeline/              # Filter chains + access phase
 │   ├── mod.rs
+│   ├── access_phase.rs    # Access-control + relay + device-fp stage
 │   ├── request_filter_chain.rs
 │   └── response_filter_chain.rs
+├── filters/               # Individual request/response filters
+│   ├── request_xff_filter.rs
+│   ├── request_real_ip_filter.rs
+│   ├── request_forwarded_host_filter.rs
+│   ├── request_forwarded_proto_filter.rs
+│   ├── request_host_policy_filter.rs
+│   ├── request_hop_by_hop_filter.rs
+│   ├── response_body_mask_filter.rs
+│   ├── response_header_blocklist_filter.rs
+│   ├── response_server_policy_filter.rs
+│   ├── response_location_rewriter.rs
+│   └── response_via_strip_filter.rs
+├── policies/              # Reusable header / rewrite policy logic
+│   ├── host_header_policy.rs
+│   ├── server_header_policy.rs
+│   └── location_rewrite_policy.rs
+├── error_page/            # Block / error response factory
+│   └── error_page_factory.rs
 ├── ctx_builder/           # Request context construction
-│   ├── mod.rs
 │   └── request_ctx_builder.rs
+├── tiered/                # Per-host tier classifier
+│   ├── compiled_rule.rs
+│   ├── tier_classifier.rs
+│   ├── tier_config_watcher.rs
+│   └── tier_policy_registry.rs
 ├── router.rs              # Host/path → upstream routing
 ├── lb.rs                  # Load balancer
 ├── ssl.rs                 # ACME + TLS cert management
@@ -50,10 +79,12 @@ src/
 ├── cache.rs               # Response cache (moka)
 ├── tunnel.rs              # Tunnel forwarder
 └── context.rs             # Per-request context structs
+
+benches/tier_classifier_bench.rs
 ```
 
 ## Dependencies
-Depends on `waf-common`, `waf-engine`, `waf-storage`. Pulls `pingora-*`, `quinn`, `h3`, `rustls`, `instant-acme`, `rcgen`, `moka`, `reqwest`.
+Depends on `waf-common`, `waf-engine`, `waf-storage`. Pulls `pingora-core` / `pingora-proxy` / `pingora-http`, `quinn`, `h3` + `h3-quinn`, `rustls`, `instant-acme`, `rcgen`, `moka`, `reqwest`, `arc-swap`, `notify`, `dashmap`, `parking_lot`, `regex`.
 
 ## Testing & coverage (FR-001 phase-06)
 
