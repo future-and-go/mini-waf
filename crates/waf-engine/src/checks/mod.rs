@@ -6,6 +6,7 @@ pub mod cc;
 pub mod dir_traversal;
 pub mod geo;
 pub mod header_injection;
+pub(crate) mod header_injection_patterns;
 pub mod owasp;
 pub mod rce;
 pub mod scanner;
