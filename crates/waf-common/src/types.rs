@@ -383,6 +383,25 @@ pub struct DefenseConfig {
     #[serde(default = "default_bf_login_routes")]
     pub bf_login_routes: Vec<String>,
 
+    // ── FR-019 Scanner sliding-window state ──────────────────────────────
+    /// Sliding-window length (seconds) for endpoint-enum + OPTIONS-abuse
+    /// detection. Same value used for both — keeps the config terse.
+    #[serde(default = "default_scanner_window_secs")]
+    pub scanner_window_secs: u64,
+    /// Distinct paths from a single `client_ip` in the window above before
+    /// the scanner check fires.
+    #[serde(default = "default_scanner_endpoint_enum_threshold")]
+    pub scanner_endpoint_enum_threshold: usize,
+    /// OPTIONS requests from a single `client_ip` in the window above
+    /// before the scanner check fires (CORS preflight is the legitimate cap).
+    #[serde(default = "default_scanner_options_threshold")]
+    pub scanner_options_threshold: usize,
+    /// Hard cap on per-IP entries kept in `ScannerState`. Beyond this the
+    /// oldest 10% (by last-touched timestamp) are evicted to prevent an
+    /// IPv6-rotating attacker from OOM-ing the WAF (Red Team Finding #6).
+    #[serde(default = "default_scanner_max_ips")]
+    pub scanner_max_ips: usize,
+
     // ── FR-020 Request body abuse ────────────────────────────────────────
     #[serde(default = "bool_true")]
     pub body_abuse: bool,
@@ -436,6 +455,18 @@ const fn default_bf_spray_threshold() -> usize {
 fn default_bf_login_routes() -> Vec<String> {
     vec!["/login".to_string(), "/api/auth/token".to_string()]
 }
+const fn default_scanner_window_secs() -> u64 {
+    60
+}
+const fn default_scanner_endpoint_enum_threshold() -> usize {
+    30
+}
+const fn default_scanner_options_threshold() -> usize {
+    20
+}
+const fn default_scanner_max_ips() -> usize {
+    100_000
+}
 const fn default_max_body_size() -> usize {
     64 * 1024
 }
@@ -475,6 +506,10 @@ impl Default for DefenseConfig {
             bf_max_per_user: default_bf_max_per_user(),
             bf_spray_threshold: default_bf_spray_threshold(),
             bf_login_routes: default_bf_login_routes(),
+            scanner_window_secs: default_scanner_window_secs(),
+            scanner_endpoint_enum_threshold: default_scanner_endpoint_enum_threshold(),
+            scanner_options_threshold: default_scanner_options_threshold(),
+            scanner_max_ips: default_scanner_max_ips(),
             body_abuse: true,
             max_body_size: default_max_body_size(),
             max_json_depth: default_max_json_depth(),
