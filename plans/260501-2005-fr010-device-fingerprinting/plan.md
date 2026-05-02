@@ -46,7 +46,7 @@ Module: `crates/waf-engine/src/device_fp/`. See brainstorm §4.2 for full layout
 | 02 | Module skeleton, traits, YAML schema, hot reload | **completed** | M |
 | 03 | Capture layer (TLS + h2) + fixtures | **completed (deferred: real-client captures + gateway wiring)** | M |
 | 04 | Fingerprint providers: JA3, JA4, h2 Akamai | **completed (deferred: golden vectors + property tests + benches)** | M |
-| 05 | IdentityStore trait + Memory impl + conformance suite | pending | S |
+| 05 | IdentityStore trait + Memory impl + conformance suite | **completed (deferred: bloom prefilter + bench)** | S |
 | 06 | Signal providers (5x) | pending | M |
 | 07 | RiskAggregator trait + Noop default + wiring | pending | S |
 | 08 | IdentityStore Redis impl (feature-flagged) | pending | S |
