@@ -38,6 +38,9 @@
         │  - Sensitive data detection     │
         │  - Anti-hotlink                 │
         │  - CrowdSec integration         │
+        │  - Device fingerprinting        │
+        │    (FR-010: TLS ClientHello +   │
+        │     H2 frame capture)           │
         └────────────────┬────────────────┘
                          │
         ┌────────────────▼────────────────┐

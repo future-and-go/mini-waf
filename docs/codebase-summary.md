@@ -72,6 +72,17 @@ prx-waf/
 │   │   │   ├── wasm.rs        # WASM plugin manager (wasmtime)
 │   │   │   └── rhai.rs        # Rhai script engine sandbox
 │   │   │
+│   │   ├── device_fp/         # FR-010 device fingerprinting (JA3, JA4, Akamai H2)
+│   │   │   ├── capture/       # Phase-03: TLS ClientHello + H2 frame inspection
+│   │   │   │   ├── tls.rs        # ParsedClientHello, TlsCapture, parse_client_hello()
+│   │   │   │   ├── h2.rs         # H2FrameTap for HTTP/2 frame capture
+│   │   │   │   ├── conn_ctx.rs   # ConnCtx, ConnRegistry (per-connection state)
+│   │   │   │   └── parsed.rs     # RawCapture, H2Capture, PriorityFrame
+│   │   │   ├── fingerprint/   # Fingerprint algorithms (JA3, JA4, Akamai H2)
+│   │   │   ├── identity/      # Device identity storage + retrieval
+│   │   │   ├── types.rs       # DeviceFp, Signal enums
+│   │   │   └── mod.rs
+│   │   │
 │   │   ├── security/
 │   │   │   ├── geoip.rs       # GeoIP lookup (ip2region)
 │   │   │   └── url_validator.rs # SSRF protection, DNS rebinding guard
