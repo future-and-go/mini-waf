@@ -363,6 +363,57 @@ curl http://localhost:16827/health
 
 ## Configuration Reference
 
+### Cache Rules Operator File (rules/cache.yaml)
+
+**FR-009 Phase 3 feature:** Per-route TTL configuration with hot-reload.
+
+**Location:** `rules/cache.yaml` (relative to working directory or absolute path in `[cache] rules_path`)
+
+**How it works:**
+1. Create `rules/cache.yaml` with route patterns and TTL values
+2. Save the file → file watcher detects change (≤500ms)
+3. New ruleset compiled and hot-swapped (lock-free ArcSwap)
+4. Subsequent requests use new per-route TTLs
+5. No downtime, no deployment required
+
+**Example schema:**
+```yaml
+version: 1
+defaults:
+  ttl_seconds: 60
+rules:
+  - id: "fast-api"
+    match:
+      path_pattern: "^/api/v1/data"
+    ttl_seconds: 10
+    tags: ["api", "fast-changing"]
+  - id: "static-long"
+    match:
+      path_pattern: "\\.(css|js|woff2)$"
+    ttl_seconds: 86400
+    tags: ["static", "immutable"]
+  - id: "never-cache"
+    match:
+      path_pattern: "^/(admin|login)"
+    ttl_seconds: 0  # Explicit deny
+    tags: ["sensitive"]
+```
+
+**Verdict pipeline:**
+- Tier default TTL → Method filter (GET/HEAD/OPTIONS only) → Auth check (cookies/Authorization bypass) → Per-route rule match → Upstream Cache-Control → Fallback to tier default
+
+**Stats tracked:**
+- `bypassed_authenticated` — Requests bypassed by auth header/cookies
+- `bypassed_explicit_deny` — Requests hitting `ttl_seconds: 0` rules
+- Standard cache hit/miss/eviction counters
+
+**Validation:**
+```bash
+prx-waf rules validate rules/cache.yaml
+```
+
+---
+
 ### Main Config (default.toml)
 
 ```toml
@@ -384,6 +435,7 @@ enabled          = true
 max_size_mb      = 256
 default_ttl_secs = 60
 max_ttl_secs     = 3600
+rules_path       = "rules/cache.yaml"  # FR-009 Phase 3: per-route TTL config (hot-reloaded, 500ms debounce)
 
 [http3]
 enabled     = false                    # HTTP/3 (QUIC)
@@ -719,6 +771,25 @@ max_size_mb = 128  # Reduce from 256
 
 # Restart
 systemctl restart prx-waf
+```
+
+### Cache Rules Not Reloading
+
+```bash
+# Check if cache rules file exists
+ls -la rules/cache.yaml
+
+# Verify YAML syntax
+prx-waf rules validate rules/cache.yaml
+
+# Monitor file watcher (500ms debounce)
+RUST_LOG=debug prx-waf run
+
+# Manually reload by touching file (triggers watcher)
+touch rules/cache.yaml
+
+# Check cache statistics
+curl http://localhost:16827/api/cache/stats | jq .
 ```
 
 ### Rules Not Reloading

@@ -36,7 +36,16 @@ prx-waf/
 │   │   ├── router.rs          # Vhost-based routing
 │   │   ├── ssl_manager.rs     # ACME (Let's Encrypt) via instant-acme
 │   │   ├── http3.rs           # HTTP/3 server (QUIC via quinn)
-│   │   ├── cache.rs           # moka LRU response cache
+│   │   ├── cache/             # FR-009 Phase 3: per-route TTL via YAML hot-reload (ArcSwap, lock-free reads)
+│   │   │   ├── config.rs      # YAML schema + Defaults struct
+│   │   │   ├── gates/         # Cache verdict pipeline (TierGate, MethodGate, AuthGate, RouteRuleGate, UpstreamCcGate, TierDefaultGate)
+│   │   │   ├── rule.rs        # Individual cache rule (path pattern, ttl_seconds, tags)
+│   │   │   ├── rule_set.rs    # Compiled cache ruleset (hot-swappable via ArcSwap)
+│   │   │   ├── policy.rs      # Caching policy logic
+│   │   │   ├── store.rs       # moka LRU response cache backend
+│   │   │   ├── stats.rs       # Cache statistics (hit/miss/bypassed counters)
+│   │   │   ├── watcher.rs     # File watcher for rules/cache.yaml hot-reload (notify, 500ms debounce)
+│   │   │   └── mod.rs         # Cache resolver facade
 │   │   └── tunnel.rs          # Reverse tunnel (encrypted WebSocket)
 │   │
 │   ├── waf-engine/src/

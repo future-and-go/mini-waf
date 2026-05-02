@@ -527,21 +527,75 @@ CREATE INDEX idx_request_stats_timestamp ON request_stats(timestamp DESC);
 
 ## Caching Strategy
 
-### Response Cache (moka LRU)
+### Response Cache (moka LRU) + Per-Route TTL (FR-009 Phase 3)
 
 **What's cached?**
 - Static content (CSS, JS, images)
 - API responses (if Cache-Control header allows)
 - Size limit: 256 MB (configurable)
-- TTL: 60s default (configurable per host)
+- TTL: Determined by cache resolver gate pipeline (see below)
 
-**Cache bypass:**
-- Authenticated requests (Authorization header) — not cached
+**Cache resolver gate pipeline (Phase 3 — new):**
+
+```
+Request → TierGate (tier default TTL)
+        → MethodGate (method filter: GET/HEAD/OPTIONS only)
+        → AuthGate (cookies/Authorization header → bypass)
+        → RouteRuleGate (per-route YAML rules — ttl_seconds, tags)
+        → UpstreamCcGate (upstream Cache-Control header)
+        → TierDefaultGate (fallback: tier default TTL)
+        
+Verdict: { ttl_seconds, reason }
+Reasons: Tier, Method, Authenticated, ExplicitDeny (ttl=0), UpstreamCc, TierDefault
+```
+
+**Cache bypass conditions:**
+- Authenticated requests (AuthGate) — cookie or Authorization header present
+- Explicit deny (RouteRuleGate) — `ttl_seconds: 0` in `rules/cache.yaml`
 - Set-Cookie in response — not cached
-- Cache-Control: no-cache, no-store — respected
-- Cookies in request → different cache key
+- Cache-Control: no-cache, no-store — UpstreamCcGate respects
+- Non-cacheable methods (POST, PUT, DELETE, etc.) — MethodGate filters
+- Cookies in request → different cache key (unless explicitly allowed per RouteRuleGate)
 
-**Key:** `host + path + query_string`
+**Config:**
+```toml
+[cache]
+enabled = true
+max_size_mb = 256
+default_ttl_secs = 60
+rules_path = "rules/cache.yaml"  # Hot-reloaded (500ms debounce)
+```
+
+**YAML schema** (`rules/cache.yaml`):
+```yaml
+version: 1
+defaults:
+  ttl_seconds: 60
+rules:
+  - id: "api-endpoints"
+    match:
+      path_pattern: "^/api/.*"
+    ttl_seconds: 10
+    tags: ["api", "fast-changing"]
+  - id: "static-assets"
+    match:
+      path_pattern: "\\.(css|js|png|jpg)$"
+    ttl_seconds: 3600
+    tags: ["static"]
+  - id: "no-cache"
+    match:
+      path_pattern: "^/admin"
+    ttl_seconds: 0  # Explicit deny
+    tags: ["admin", "sensitive"]
+```
+
+**Stats (new):**
+- `bypassed_authenticated` — Requests blocked by AuthGate
+- `bypassed_explicit_deny` — Requests blocked by ExplicitDeny (ttl=0)
+
+**Operator guide:** See [`docs/cache-operator-guide.md`](./cache-operator-guide.md) (future) for tag-based purge API and per-route tuning.
+
+**Key:** `host + path + query_string + (cookies if allowed)`
 
 ### Rule Cache (In-Memory)
 

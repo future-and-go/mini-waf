@@ -1,7 +1,7 @@
 ---
 title: "FR-009 Smart Caching — Implementation"
 description: "Tier-aware response cache with hot-reloadable rules/cache.yaml, auth bypass, tag-based purge. CRITICAL bypass non-overridable. Production-grade."
-status: pending
+status: in-progress
 priority: P0
 effort: 10d
 branch: main
@@ -51,8 +51,8 @@ Out of scope (deferred): single-flight, conditional GET/ETag, Vary headers, disk
 | # | File | Effort | Status |
 |---|---|---|---|
 | 1 | [phase-01-tier-gate-wiring.md](./phase-01-tier-gate-wiring.md) | 1d | completed |
-| 2 | [phase-02-module-refactor-pipeline.md](./phase-02-module-refactor-pipeline.md) | 2d | pending |
-| 3 | [phase-03-yaml-config-hot-reload.md](./phase-03-yaml-config-hot-reload.md) | 3d | pending |
+| 2 | [phase-02-module-refactor-pipeline.md](./phase-02-module-refactor-pipeline.md) | 2d | completed |
+| 3 | [phase-03-yaml-config-hot-reload.md](./phase-03-yaml-config-hot-reload.md) | 3d | completed |
 | 4 | [phase-04-tag-index-purge-api.md](./phase-04-tag-index-purge-api.md) | 2d | pending |
 | 5 | [phase-05-tests-benches-coverage.md](./phase-05-tests-benches-coverage.md) | 2d | pending |
 
