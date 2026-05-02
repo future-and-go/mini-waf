@@ -68,6 +68,10 @@ harness = false
 name = "relay_eval"
 harness = false
 
+[[bench]]
+name = "device_fp_capture"
+harness = false
+
 [features]
 default = []
 # FR-010 device fingerprinting — Redis-backed identity store (phase-08).
