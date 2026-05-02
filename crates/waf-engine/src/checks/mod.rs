@@ -19,6 +19,7 @@ pub use cc::CcCheck;
 pub use dir_traversal::DirTraversalCheck;
 pub use geo::{GeoCheck, GeoRule, GeoRuleMode};
 pub use owasp::OWASPCheck;
+pub use rate_limit::{RateLimitCheck, RateLimitConfig};
 pub use rce::RceCheck;
 pub use scanner::ScannerCheck;
 pub use sensitive::SensitiveCheck;

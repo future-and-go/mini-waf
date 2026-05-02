@@ -83,10 +83,12 @@ impl Default for MemoryStore {
     }
 }
 
-#[async_trait]
-impl RateLimitStore for MemoryStore {
+impl MemoryStore {
+    /// Pure-sync core. Both async and blocking entry points delegate here so
+    /// they share identical semantics without round-tripping through the
+    /// runtime.
     #[allow(clippy::significant_drop_tightening)] // lock must span both algo steps for atomic RMW
-    async fn check_and_consume(&self, key: &str, cfg: &LimitCfg, now_ms: i64) -> anyhow::Result<Decision> {
+    fn check_and_consume_inner(&self, key: &str, cfg: &LimitCfg, now_ms: i64) -> Decision {
         // DashMap::entry holds the shard write-lock for the duration of this
         // closure, giving us atomic read-modify-write per key.
         let mut entry = self.map.entry(key.to_string()).or_insert_with(|| Entry {
@@ -99,12 +101,23 @@ impl RateLimitStore for MemoryStore {
         // TB checked first so a burst attacker sees `BurstExceeded` rather
         // than `SustainedExceeded` (more precise classification).
         if !entry.tb.try_consume(cfg, now_ms) {
-            return Ok(Decision::BurstExceeded);
+            return Decision::BurstExceeded;
         }
         if !entry.sw.try_consume(cfg, now_ms) {
-            return Ok(Decision::SustainedExceeded);
+            return Decision::SustainedExceeded;
         }
-        Ok(Decision::Allow)
+        Decision::Allow
+    }
+}
+
+#[async_trait]
+impl RateLimitStore for MemoryStore {
+    async fn check_and_consume(&self, key: &str, cfg: &LimitCfg, now_ms: i64) -> anyhow::Result<Decision> {
+        Ok(self.check_and_consume_inner(key, cfg, now_ms))
+    }
+
+    fn check_and_consume_blocking(&self, key: &str, cfg: &LimitCfg, now_ms: i64) -> anyhow::Result<Decision> {
+        Ok(self.check_and_consume_inner(key, cfg, now_ms))
     }
 
     async fn purge_expired(&self) -> anyhow::Result<usize> {

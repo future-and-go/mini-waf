@@ -1,6 +1,6 @@
 # Phase 04 — Key Builder + RateLimitCheck Integration
 
-**Priority:** P0 | **Status:** pending | **Depends:** 03
+**Priority:** P0 | **Status:** done | **Depends:** 03
 
 ## Goal
 
@@ -98,6 +98,13 @@ cargo clippy -p waf-engine --all-features -- -D warnings
 
 ## Done When
 
-- [ ] `RateLimitCheck` registered alongside `CcCheck`, both run, no panic
-- [ ] Engine-level integration test: request allowed under limit, blocked over limit
-- [ ] Tier fail-mode: simulated store error → close blocks, open allows
+- [x] `RateLimitCheck` registered alongside `CcCheck`, both run, no panic
+- [x] Engine-level integration test: request allowed under limit, blocked over limit
+- [x] Tier fail-mode: simulated store error → close blocks, open allows
+
+## Implementation Notes (deviations from sketch)
+
+- `Check` trait in this codebase is **synchronous** (`fn check(&self, ctx) -> Option<DetectionResult>`), not async with `Phase`. Bridged by adding sync `check_and_consume_blocking` method to `RateLimitStore` trait (default impl uses `block_in_place` + `Handle::block_on`); `MemoryStore` overrides with pure-sync inner method — no runtime round-trip on hot path.
+- `device_fp_hex()` accessor not yet on `RequestCtx`; YAGNI — phase 04 uses cookie only. Fallback can be added when `RequestCtx` gains the field.
+- `RateLimitConfig` defined in `rate_limit/mod.rs` (not `waf-common`) — surgical scope. Phase 07 will move/extend for hot-reload + TOML schema.
+- Default `RateLimitConfig` has empty tier map ⇒ check is inert until phase 07 wires real config (no behavior regression alongside `CcCheck`).

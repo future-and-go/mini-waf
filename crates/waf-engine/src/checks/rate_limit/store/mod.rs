@@ -39,6 +39,17 @@ pub trait RateLimitStore: Send + Sync {
     /// sliding window. Returns the resulting decision.
     async fn check_and_consume(&self, key: &str, cfg: &LimitCfg, now_ms: i64) -> anyhow::Result<Decision>;
 
+    /// Synchronous entry point used by the sync `Check` pipeline.
+    ///
+    /// Default impl bridges to `check_and_consume` via `block_in_place` +
+    /// `Handle::block_on`. Backends with a fully synchronous internal path
+    /// (e.g. `MemoryStore`) override this to skip the bridge.
+    fn check_and_consume_blocking(&self, key: &str, cfg: &LimitCfg, now_ms: i64) -> anyhow::Result<Decision> {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.check_and_consume(key, cfg, now_ms))
+        })
+    }
+
     /// Sweep idle entries. Returns count purged. (No-op for backends that
     /// rely on native TTL such as Redis `EXPIRE`.)
     async fn purge_expired(&self) -> anyhow::Result<usize>;

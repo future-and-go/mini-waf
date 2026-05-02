@@ -56,7 +56,7 @@ Per Lua call: refill TB → consume → update SW → return Decision
 | 1 | `phase-01-module-skeleton-and-trait.md` | done | — |
 | 2 | `phase-02-algos-token-bucket-sliding-window.md` | done | 1 |
 | 3 | `phase-03-memory-store.md` | done | 2 |
-| 4 | `phase-04-key-builder-and-check-integration.md` | pending | 3 |
+| 4 | `phase-04-key-builder-and-check-integration.md` | done | 3 |
 | 5 | `phase-05-conformance-suite.md` | pending | 3 |
 | 6 | `phase-06-redis-store.md` | pending | 5 |
 | 7 | `phase-07-config-fail-mode-hot-reload.md` | pending | 4 |

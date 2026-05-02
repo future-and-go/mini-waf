@@ -13,9 +13,10 @@ use crate::block_page::render_block_page;
 use crate::checker::{RuleStore, check_ip_blacklist, check_ip_whitelist, check_url_blacklist, check_url_whitelist};
 use waf_common::config::SqliScanConfig;
 
+use crate::checks::rate_limit::store::MemoryStore;
 use crate::checks::{
-    AntiHotlinkCheck, BotCheck, CcCheck, Check, DirTraversalCheck, GeoCheck, OWASPCheck, RceCheck, ScannerCheck,
-    SensitiveCheck, SqlInjectionCheck, XssCheck,
+    AntiHotlinkCheck, BotCheck, CcCheck, Check, DirTraversalCheck, GeoCheck, OWASPCheck, RateLimitCheck,
+    RateLimitConfig, RceCheck, ScannerCheck, SensitiveCheck, SqlInjectionCheck, XssCheck,
 };
 use crate::community::{CommunityChecker, CommunityReporter, RequestInfo};
 use crate::crowdsec::{AppSecClient, AppSecResult, CrowdSecChecker, appsec_to_detection};
@@ -93,8 +94,14 @@ impl WafEngine {
 
         // Build the Phase 5-11 checker pipeline (SQLi handled separately for hot-reload).
         // CC runs first to shed flood traffic before expensive pattern checks.
+        // FR-004 RateLimitCheck runs alongside the legacy CcCheck (phase 04).
+        // Default RateLimitConfig has no tier entries, so the new check is
+        // inert until phase 07 wires real config. Both run; old not removed.
+        let rl_store: Arc<dyn crate::checks::rate_limit::RateLimitStore> = Arc::new(MemoryStore::new());
+        let rl_cfg = Arc::new(RateLimitConfig::default());
         let checkers: Vec<Box<dyn Check>> = vec![
             Box::new(CcCheck::new()),
+            Box::new(RateLimitCheck::new(rl_store, rl_cfg)),
             Box::new(ScannerCheck::new()),
             Box::new(BotCheck::new()),
             Box::new(XssCheck::new()),
