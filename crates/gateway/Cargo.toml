@@ -56,5 +56,13 @@ toml = { workspace = true }
 name = "tier_classifier_bench"
 harness = false
 
+[[bench]]
+name = "cache_resolver_bench"
+harness = false
+
+[[bench]]
+name = "cache_purge_bench"
+harness = false
+
 [lints]
 workspace = true

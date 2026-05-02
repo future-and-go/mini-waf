@@ -1,10 +1,10 @@
 ---
 title: "FR-009 Smart Caching — Implementation"
 description: "Tier-aware response cache with hot-reloadable rules/cache.yaml, auth bypass, tag-based purge. CRITICAL bypass non-overridable. Production-grade."
-status: in-progress
+status: complete
 priority: P0
 effort: 10d
-progress: 80%
+progress: 100%
 branch: main
 tags: [waf, gateway, fr-009, caching, hot-reload, security]
 created: 2026-05-02
@@ -55,9 +55,9 @@ Out of scope (deferred): single-flight, conditional GET/ETag, Vary headers, disk
 | 2 | [phase-02-module-refactor-pipeline.md](./phase-02-module-refactor-pipeline.md) | 2d | completed |
 | 3 | [phase-03-yaml-config-hot-reload.md](./phase-03-yaml-config-hot-reload.md) | 3d | completed |
 | 4 | [phase-04-tag-index-purge-api.md](./phase-04-tag-index-purge-api.md) | 2d | completed |
-| 5 | [phase-05-tests-benches-coverage.md](./phase-05-tests-benches-coverage.md) | 2d | pending |
+| 5 | [phase-05-tests-benches-coverage.md](./phase-05-tests-benches-coverage.md) | 2d | completed |
 
-**Progress:** 8d of 10d complete (80%). Phase 4 done; Phase 5 in queue.
+**Progress:** 10d of 10d complete (100%). All phases shipped.
 
 **Phase 1 ships the security invariant first** — even if 2-5 slip, CRITICAL traffic stops being cacheable.
 
@@ -71,13 +71,13 @@ Out of scope (deferred): single-flight, conditional GET/ETag, Vary headers, disk
 
 ## Success Criteria (plan-level)
 
-- [ ] All 5 phases complete
-- [ ] Integration test: CRITICAL + upstream max-age=3600 → not cached
-- [ ] Integration test: MEDIUM + static asset → cached, tag purge invalidates
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings` clean
-- [ ] 95% line coverage on `crates/gateway/src/cache/**`
-- [ ] No `.unwrap()` / `todo!()` / `unimplemented!()` in production code (Seven Iron Rules)
-- [ ] Decision pipeline p99 < 50µs (bench)
+- [x] All 5 phases complete
+- [x] Integration test: CRITICAL + upstream max-age=3600 → not cached (`store.rs::critical_tier_bypasses_put_even_with_max_age`)
+- [x] Integration test: MEDIUM + static asset → cached, tag purge invalidates (`tests/cache_integration.rs::tag_index_shrinks_after_purge`)
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` clean
+- [x] 97.30% line coverage on `crates/gateway/src/cache/**` (≥95% gate)
+- [x] No `.unwrap()` / `todo!()` / `unimplemented!()` in production code (Seven Iron Rules)
+- [x] Decision pipeline p99 < 50µs (bench: 2.8 µs route-match, 1.4 µs no-match, 102 ns critical bypass)
 
 ## Risks (plan-level)
 

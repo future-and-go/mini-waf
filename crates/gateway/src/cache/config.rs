@@ -87,3 +87,22 @@ pub enum PathSpec {
     Prefix { prefix: String },
     Regex { regex: String },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Per-field defaults must apply when YAML provides an empty `defaults: {}`
+    /// block but omits individual fields. This exercises `default_true` and
+    /// `default_cacheable_statuses` — they're only reachable via serde's
+    /// default-fn path (Rust's `Default::default()` on the parent struct
+    /// returns `false`/`vec![]` instead).
+    #[test]
+    fn per_field_defaults_apply_when_fields_omitted() {
+        let raw = "version: 1\ndefaults: {}\nrules: []\n";
+        let doc: CacheConfigDoc = serde_yaml::from_str(raw).expect("parse");
+        assert!(doc.defaults.respect_upstream_cache_control);
+        assert_eq!(doc.defaults.cacheable_status_codes, vec![200, 203, 301, 410]);
+        assert!(doc.defaults.max_body_bytes.is_none());
+    }
+}

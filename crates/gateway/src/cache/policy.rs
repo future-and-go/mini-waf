@@ -159,4 +159,22 @@ mod tests {
     fn resolver_rejects_non_tier_first_gate() {
         let _ = CachePolicyResolver::new(vec![Box::new(MethodGate), Box::new(TierGate)]);
     }
+
+    // Defensive arms: every CachePolicy variant resolved by the helpers.
+    #[test]
+    fn policy_ceiling_handles_no_cache_and_default() {
+        assert_eq!(policy_ceiling_secs(&CachePolicy::NoCache, 3600), 0);
+        assert_eq!(
+            policy_ceiling_secs(&CachePolicy::Default { ttl_seconds: 60 }, 3600),
+            3600,
+            "Default falls back to hard_max"
+        );
+    }
+
+    #[test]
+    fn policy_default_secs_handles_no_cache_fallback() {
+        // NoCache is unreachable in practice (TierGate bypasses upstream), but
+        // the defensive arm must still return the caller-provided fallback.
+        assert_eq!(policy_default_secs(&CachePolicy::NoCache, 42), 42);
+    }
 }

@@ -267,6 +267,35 @@ mod tests {
     }
 
     #[test]
+    fn host_regex_matches_alternation_pattern() {
+        // Host containing regex metacharacters (`|`) → HostMatcher::Regex.
+        let r = CompiledRule::try_from_doc(&rule(
+            "r",
+            Some("(api|cdn)\\.example\\.com"),
+            PathSpec::Prefix { prefix: "/".into() },
+            None,
+        ))
+        .expect("compile");
+        assert!(r.matches_str("api.example.com", "/x", "GET"));
+        assert!(r.matches_str("cdn.example.com", "/x", "GET"));
+        assert!(!r.matches_str("www.example.com", "/x", "GET"));
+    }
+
+    #[test]
+    fn bad_host_regex_returns_error_with_rule_id() {
+        // Unmatched bracket in a regex-shaped host → BadHostRegex with rule id.
+        let err = CompiledRule::try_from_doc(&rule(
+            "broken-host",
+            Some("(unclosed"),
+            PathSpec::Prefix { prefix: "/".into() },
+            None,
+        ))
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("broken-host"));
+    }
+
+    #[test]
     fn bad_path_regex_returns_error_with_rule_id() {
         let err =
             CompiledRule::try_from_doc(&rule("broken", None, PathSpec::Regex { regex: "[".into() }, None)).unwrap_err();

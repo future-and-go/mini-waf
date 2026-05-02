@@ -623,6 +623,53 @@ mod tests {
         assert_eq!(c.tag_index_size(), 0, "index must drain after final purge");
     }
 
+    // Coverage for purge_host / purge_key / entry_count (FR-009 phase-05).
+    #[tokio::test]
+    async fn purge_host_removes_only_matching_host_entries() {
+        let c = cache();
+        for (host, path) in [("a", "/x"), ("a", "/y"), ("b", "/z")] {
+            c.put(
+                ResponseCache::make_key("GET", host, path, ""),
+                host,
+                path,
+                200,
+                vec![],
+                Bytes::from("ok"),
+                Some("max-age=60"),
+                Tier::Medium,
+                &CachePolicy::Aggressive { ttl_seconds: 300 },
+                false,
+                false,
+            )
+            .await;
+        }
+        c.inner.run_pending_tasks().await;
+        assert_eq!(c.entry_count(), 3);
+        c.purge_host("a").await;
+        c.inner.run_pending_tasks().await;
+        // Only host=a entries gone; host=b survives.
+        assert!(c.get("GET:a:/x", Tier::Medium).await.is_none());
+        assert!(c.get("GET:a:/y", Tier::Medium).await.is_none());
+        assert!(c.get("GET:b:/z", Tier::Medium).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn purge_key_removes_single_entry() {
+        let c = cache();
+        let stored = put_basic(
+            &c,
+            vec![],
+            Some("max-age=60"),
+            Tier::Medium,
+            &CachePolicy::Aggressive { ttl_seconds: 300 },
+        )
+        .await;
+        assert!(stored);
+        assert!(c.get(&key(), Tier::Medium).await.is_some());
+        c.purge_key(&key()).await;
+        assert!(c.get(&key(), Tier::Medium).await.is_none());
+    }
+
     #[tokio::test]
     async fn route_rule_ttl_overrides_upstream_when_anonymous() {
         use crate::cache::config::{CacheConfigDoc, Defaults, MatchDoc, PathSpec, RuleDoc};
