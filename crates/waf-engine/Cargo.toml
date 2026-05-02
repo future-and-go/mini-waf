@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+# cargo-machete false-positive: `md-5` is imported as `md5` in
+# device_fp/fingerprint/ja3.rs (crate name vs lib name mismatch).
+[package.metadata.cargo-machete]
+ignored = ["md-5"]
+
 [dependencies]
 waf-common = { path = "../waf-common" }
 waf-storage = { path = "../waf-storage" }
