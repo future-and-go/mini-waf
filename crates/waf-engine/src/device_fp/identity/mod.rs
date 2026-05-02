@@ -7,8 +7,11 @@
 pub mod identity_trait;
 pub mod memory;
 
+#[cfg(test)]
+pub mod conformance;
+
 #[cfg(feature = "redis-store")]
 pub mod redis;
 
 pub use identity_trait::IdentityStore;
-pub use memory::MemoryIdentityStore;
+pub use memory::{MemoryConfig, MemoryIdentityStore, spawn_janitor};
