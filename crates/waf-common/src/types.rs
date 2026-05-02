@@ -154,6 +154,14 @@ pub enum Phase {
     GeoIp = 17,
     /// Community threat intelligence blocklist
     Community = 18,
+    /// Server-Side Request Forgery (FR-016)
+    Ssrf = 19,
+    /// HTTP header injection / smuggling (FR-017)
+    HeaderInjection = 20,
+    /// Authentication brute-force / credential spraying (FR-018)
+    BruteForce = 21,
+    /// Oversized / deeply-nested request body abuse (FR-020)
+    RequestBodyAbuse = 22,
 }
 
 impl std::fmt::Display for Phase {
@@ -177,6 +185,10 @@ impl std::fmt::Display for Phase {
             Self::CrowdSec => write!(f, "CrowdSec"),
             Self::GeoIp => write!(f, "GeoIP"),
             Self::Community => write!(f, "Community"),
+            Self::Ssrf => write!(f, "SSRF"),
+            Self::HeaderInjection => write!(f, "Header Injection"),
+            Self::BruteForce => write!(f, "Brute Force"),
+            Self::RequestBodyAbuse => write!(f, "Request Body Abuse"),
         }
     }
 }
@@ -339,6 +351,50 @@ pub struct DefenseConfig {
     /// always on regardless of this flag.
     #[serde(default = "bool_false")]
     pub block_scripted_clients: bool,
+
+    // ── FR-016 SSRF ──────────────────────────────────────────────────────
+    #[serde(default = "bool_true")]
+    pub ssrf: bool,
+    #[serde(default = "default_ssrf_dns_timeout_ms")]
+    pub ssrf_dns_timeout_ms: u64,
+    /// Outbound host allow-list: hosts permitted despite RFC1918 / loopback
+    /// match (e.g. internal services intentionally reached via private IP).
+    #[serde(default)]
+    pub ssrf_outbound_host_allowlist: Vec<String>,
+
+    // ── FR-017 Header injection ──────────────────────────────────────────
+    #[serde(default = "bool_true")]
+    pub header_injection: bool,
+    #[serde(default = "default_xf2_max_hops")]
+    pub xf2_max_hops: usize,
+    /// Inbound `Host` header whitelist. Empty disables host validation.
+    #[serde(default)]
+    pub host_inbound_whitelist: Vec<String>,
+
+    // ── FR-018 Brute force ───────────────────────────────────────────────
+    #[serde(default = "bool_true")]
+    pub brute_force: bool,
+    #[serde(default = "default_bf_window_secs")]
+    pub bf_window_secs: u64,
+    #[serde(default = "default_bf_max_per_user")]
+    pub bf_max_per_user: usize,
+    #[serde(default = "default_bf_spray_threshold")]
+    pub bf_spray_threshold: usize,
+    #[serde(default = "default_bf_login_routes")]
+    pub bf_login_routes: Vec<String>,
+
+    // ── FR-020 Request body abuse ────────────────────────────────────────
+    #[serde(default = "bool_true")]
+    pub body_abuse: bool,
+    /// Hard ceiling on inspected body bytes. Defaults to 64 KiB to match the
+    /// gateway's `BODY_PREVIEW_LIMIT`; bumping it only matters once that cap
+    /// is also raised upstream.
+    #[serde(default = "default_max_body_size")]
+    pub max_body_size: usize,
+    #[serde(default = "default_max_json_depth")]
+    pub max_json_depth: usize,
+    #[serde(default = "default_max_json_keys")]
+    pub max_json_keys: usize,
 }
 
 const fn bool_true() -> bool {
@@ -362,6 +418,33 @@ const fn default_cc_ban_duration_secs() -> u64 {
 const fn default_owasp_paranoia() -> u8 {
     1
 }
+const fn default_ssrf_dns_timeout_ms() -> u64 {
+    50
+}
+const fn default_xf2_max_hops() -> usize {
+    5
+}
+const fn default_bf_window_secs() -> u64 {
+    900
+}
+const fn default_bf_max_per_user() -> usize {
+    5
+}
+const fn default_bf_spray_threshold() -> usize {
+    5
+}
+fn default_bf_login_routes() -> Vec<String> {
+    vec!["/login".to_string(), "/api/auth/token".to_string()]
+}
+const fn default_max_body_size() -> usize {
+    64 * 1024
+}
+const fn default_max_json_depth() -> usize {
+    100
+}
+const fn default_max_json_keys() -> usize {
+    10_000
+}
 
 impl Default for DefenseConfig {
     fn default() -> Self {
@@ -381,6 +464,21 @@ impl Default for DefenseConfig {
             cc_ban_duration_secs: default_cc_ban_duration_secs(),
             block_scripted_clients: false,
             owasp_paranoia: default_owasp_paranoia(),
+            ssrf: true,
+            ssrf_dns_timeout_ms: default_ssrf_dns_timeout_ms(),
+            ssrf_outbound_host_allowlist: Vec::new(),
+            header_injection: true,
+            xf2_max_hops: default_xf2_max_hops(),
+            host_inbound_whitelist: Vec::new(),
+            brute_force: true,
+            bf_window_secs: default_bf_window_secs(),
+            bf_max_per_user: default_bf_max_per_user(),
+            bf_spray_threshold: default_bf_spray_threshold(),
+            bf_login_routes: default_bf_login_routes(),
+            body_abuse: true,
+            max_body_size: default_max_body_size(),
+            max_json_depth: default_max_json_depth(),
+            max_json_keys: default_max_json_keys(),
         }
     }
 }
