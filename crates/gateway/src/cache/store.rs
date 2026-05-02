@@ -1,20 +1,25 @@
 //! In-memory LRU response cache backed by `moka`.
 //!
 //! Cache key = `method:host:path?query`
-//! Respects Cache-Control directives: `no-cache`, `no-store`, `private`, `max-age=N`.
 //!
-//! Tier-gated (FR-009 AC-1): CRITICAL-tier responses are NEVER cached, even if
-//! upstream sends `Cache-Control: max-age=N`. The per-tier `CachePolicy` also
-//! caps and/or defaults TTL — upstream cannot exceed the policy ceiling.
+//! `put` delegates to `CachePolicyResolver` (Chain of Responsibility); `get`
+//! keeps the inline CRITICAL-tier check (cheap, hot path, single concern).
+//!
+//! Tier-gated (FR-009 AC-1): CRITICAL-tier responses are NEVER cached. The
+//! per-tier `CachePolicy` also caps TTL — upstream cannot exceed the ceiling.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use bytes::Bytes;
 use moka::future::Cache;
 use tracing::{debug, trace};
 use waf_common::tier::{CachePolicy, Tier};
+
+use super::gates::{MethodGate, TierDefaultGate, TierGate, UpstreamCcGate};
+use super::policy::{CacheCtx, CachePolicyResolver, Verdict};
+use super::stats::{CacheStats, CacheStatsSnapshot};
 
 /// A cached HTTP response
 #[derive(Debug, Clone)]
@@ -27,45 +32,13 @@ pub struct CachedResponse {
     pub max_age: u64,
 }
 
-/// Cache statistics counters
-#[derive(Debug, Default)]
-pub struct CacheStats {
-    pub hits: AtomicU64,
-    pub misses: AtomicU64,
-    pub evictions: AtomicU64,
-    pub stores: AtomicU64,
-    /// Count of put/get calls bypassed by tier or `NoCache` policy.
-    /// Audit signal for FR-009 AC-1: must increment on every CRITICAL touch.
-    pub bypassed_critical: AtomicU64,
-}
-
-impl CacheStats {
-    pub fn snapshot(&self) -> CacheStatsSnapshot {
-        CacheStatsSnapshot {
-            hits: self.hits.load(Ordering::Relaxed),
-            misses: self.misses.load(Ordering::Relaxed),
-            evictions: self.evictions.load(Ordering::Relaxed),
-            stores: self.stores.load(Ordering::Relaxed),
-            bypassed_critical: self.bypassed_critical.load(Ordering::Relaxed),
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct CacheStatsSnapshot {
-    pub hits: u64,
-    pub misses: u64,
-    pub evictions: u64,
-    pub stores: u64,
-    pub bypassed_critical: u64,
-}
-
 /// Shared response cache
 pub struct ResponseCache {
     inner: Cache<String, Arc<CachedResponse>>,
     stats: Arc<CacheStats>,
     default_ttl: Duration,
     max_ttl: Duration,
+    resolver: CachePolicyResolver,
 }
 
 impl ResponseCache {
@@ -73,7 +46,6 @@ impl ResponseCache {
     ///
     /// `max_size_mb`: maximum total size in MiB (approximate, measured by entry count).
     pub fn new(max_size_mb: u64, default_ttl_secs: u64, max_ttl_secs: u64) -> Arc<Self> {
-        // Use entry count as capacity (each ~1 MiB avg → × 1024 entries per MB)
         let capacity = (max_size_mb * 16).max(64);
         let stats = Arc::new(CacheStats::default());
 
@@ -82,11 +54,19 @@ impl ResponseCache {
             .time_to_live(Duration::from_secs(max_ttl_secs))
             .build();
 
+        let resolver = CachePolicyResolver::new(vec![
+            Box::new(TierGate),
+            Box::new(MethodGate),
+            Box::new(UpstreamCcGate),
+            Box::new(TierDefaultGate),
+        ]);
+
         Arc::new(Self {
             inner,
             stats,
             default_ttl: Duration::from_secs(default_ttl_secs),
             max_ttl: Duration::from_secs(max_ttl_secs),
+            resolver,
         })
     }
 
@@ -120,16 +100,8 @@ impl ResponseCache {
         result
     }
 
-    /// Store a response, honouring tier policy and Cache-Control directives.
-    ///
-    /// Returns `false` if the response must not be cached. Bypass order:
-    /// 1. CRITICAL tier or `CachePolicy::NoCache` — non-overridable
-    /// 2. Any `Set-Cookie` header — per-user response, never shared
-    /// 3. Non-2xx status
-    /// 4. Upstream `Cache-Control` says no-store / no-cache / private
-    ///
-    /// Otherwise TTL = upstream `max-age` capped by the per-tier policy
-    /// ceiling, or the policy default if upstream is silent.
+    /// Store a response. Decision is delegated to `CachePolicyResolver`.
+    /// Returns `false` if any gate bypassed.
     pub async fn put(
         &self,
         key: String,
@@ -140,55 +112,47 @@ impl ResponseCache {
         tier: Tier,
         policy: &CachePolicy,
     ) -> bool {
-        // Gate 1: CRITICAL + NoCache are non-overridable (audit invariant).
-        if matches!(tier, Tier::Critical) || matches!(policy, CachePolicy::NoCache) {
-            self.stats.bypassed_critical.fetch_add(1, Ordering::Relaxed);
-            return false;
-        }
-
-        // Gate 2: Set-Cookie responses are per-user; never share across requests.
-        if headers
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
-        {
-            debug!(key = %key, "skipping cache: Set-Cookie present");
-            return false;
-        }
-
-        // Only cache 2xx responses on GET/HEAD
-        if !(200..300).contains(&status) {
-            return false;
-        }
-
-        let ttl = match parse_cache_control(cache_control) {
-            CacheDecision::NoStore | CacheDecision::NoCache | CacheDecision::Private => {
-                debug!(key = %key, "skipping cache: Cache-Control directive");
-                return false;
-            }
-            CacheDecision::MaxAge(secs) => apply_policy_cap(secs, policy, self.max_ttl.as_secs()),
-            CacheDecision::Default => apply_policy_default(policy, self.default_ttl.as_secs()),
+        // Method extracted from key prefix (`method:host:path[?query]`).
+        let method = key.split(':').next().unwrap_or("");
+        let ctx = CacheCtx {
+            tier,
+            method,
+            status,
+            headers: &headers,
+            cache_control,
+            policy,
+            max_ttl_secs: self.max_ttl.as_secs(),
+            default_ttl_secs: self.default_ttl.as_secs(),
         };
 
-        let entry = Arc::new(CachedResponse {
-            status,
-            headers,
-            body,
-            max_age: ttl.as_secs(),
-        });
-
-        self.inner.insert(key, entry).await;
-        self.stats.stores.fetch_add(1, Ordering::Relaxed);
-        true
+        match self.resolver.resolve(&ctx) {
+            Verdict::Bypass(reason) => {
+                self.stats.record_bypass(reason);
+                debug!(key = %key, ?reason, "cache bypass");
+                false
+            }
+            Verdict::Cache { ttl, tags: _ } => {
+                let entry = Arc::new(CachedResponse {
+                    status,
+                    headers,
+                    body,
+                    max_age: ttl.as_secs(),
+                });
+                self.inner.insert(key, entry).await;
+                self.stats.stores.fetch_add(1, Ordering::Relaxed);
+                true
+            }
+            // Resolver always terminates with Bypass(NoMatch); defensive arm.
+            Verdict::Continue => false,
+        }
     }
 
     /// Invalidate all entries for a given host.
     pub async fn purge_host(&self, host: &str) {
-        // moka doesn't support prefix-based invalidation; collect keys first
         let keys: Vec<String> = self
             .inner
             .iter()
             .filter(|(k, _)| {
-                // key format: method:host:path...
                 let parts: Vec<&str> = k.splitn(3, ':').collect();
                 parts.get(1).copied() == Some(host)
             })
@@ -219,67 +183,6 @@ impl ResponseCache {
     pub fn entry_count(&self) -> u64 {
         self.inner.entry_count()
     }
-}
-
-// ─── Cache-Control parser ─────────────────────────────────────────────────────
-
-enum CacheDecision {
-    Default,
-    NoStore,
-    NoCache,
-    Private,
-    MaxAge(u64),
-}
-
-/// Cap an upstream-supplied `max-age` by the tier policy ceiling, then by the
-/// global `max_ttl`. Variants without a ceiling fall back to `hard_max`.
-fn apply_policy_cap(upstream_secs: u64, policy: &CachePolicy, hard_max: u64) -> Duration {
-    let policy_ceiling = match policy {
-        CachePolicy::NoCache => 0, // already bypassed; defensive zero
-        CachePolicy::ShortTtl { ttl_seconds } | CachePolicy::Aggressive { ttl_seconds } => {
-            u64::from(*ttl_seconds)
-        }
-        CachePolicy::Default { .. } => hard_max,
-    };
-    Duration::from_secs(upstream_secs.min(policy_ceiling).min(hard_max))
-}
-
-/// Choose a TTL when upstream did not specify Cache-Control. Uses the policy's
-/// configured TTL; falls back to the cache's `default_ttl` only for variants
-/// without a TTL (i.e. `NoCache`, which is already bypassed upstream).
-fn apply_policy_default(policy: &CachePolicy, fallback_secs: u64) -> Duration {
-    let secs = match policy {
-        CachePolicy::NoCache => fallback_secs, // unreachable in practice
-        CachePolicy::ShortTtl { ttl_seconds }
-        | CachePolicy::Aggressive { ttl_seconds }
-        | CachePolicy::Default { ttl_seconds } => u64::from(*ttl_seconds),
-    };
-    Duration::from_secs(secs)
-}
-
-fn parse_cache_control(header: Option<&str>) -> CacheDecision {
-    let Some(header) = header else {
-        return CacheDecision::Default;
-    };
-    let lower = header.to_lowercase();
-    if lower.contains("no-store") {
-        return CacheDecision::NoStore;
-    }
-    if lower.contains("no-cache") {
-        return CacheDecision::NoCache;
-    }
-    if lower.contains("private") {
-        return CacheDecision::Private;
-    }
-    for part in lower.split(',') {
-        let part = part.trim();
-        if let Some(rest) = part.strip_prefix("max-age=")
-            && let Ok(secs) = rest.trim().parse::<u64>()
-        {
-            return CacheDecision::MaxAge(secs);
-        }
-    }
-    CacheDecision::Default
 }
 
 #[cfg(test)]
@@ -316,7 +219,6 @@ mod tests {
     #[tokio::test]
     async fn critical_tier_bypasses_get_even_for_existing_key() {
         let c = cache();
-        // Insert as Medium first.
         let stored = c
             .put(
                 key(),
@@ -329,7 +231,6 @@ mod tests {
             )
             .await;
         assert!(stored);
-        // Reclassified to Critical mid-stream → must not serve.
         let r = c.get(&key(), Tier::Critical).await;
         assert!(r.is_none());
         assert!(c.stats().bypassed_critical >= 1);
@@ -419,7 +320,6 @@ mod tests {
             )
             .await;
         assert!(!stored);
-        // Set-Cookie bypass is auth-flow protection, not a CRITICAL bypass.
         assert_eq!(c.stats().bypassed_critical, 0);
     }
 }
