@@ -14,8 +14,8 @@ use crate::checker::{RuleStore, check_ip_blacklist, check_ip_whitelist, check_ur
 use waf_common::config::SqliScanConfig;
 
 use crate::checks::{
-    AntiHotlinkCheck, BotCheck, CcCheck, Check, DirTraversalCheck, GeoCheck, OWASPCheck, RceCheck, ScannerCheck,
-    SensitiveCheck, SqlInjectionCheck, XssCheck,
+    AntiHotlinkCheck, BotCheck, BruteForceCheck, CcCheck, Check, DirTraversalCheck, GeoCheck, HeaderInjectionCheck,
+    OWASPCheck, RceCheck, RequestBodyAbuseCheck, ScannerCheck, SensitiveCheck, SqlInjectionCheck, SsrfCheck, XssCheck,
 };
 use crate::community::{CommunityChecker, CommunityReporter, RequestInfo};
 use crate::crowdsec::{AppSecClient, AppSecResult, CrowdSecChecker, appsec_to_detection};
@@ -93,6 +93,8 @@ impl WafEngine {
 
         // Build the Phase 5-11 checker pipeline (SQLi handled separately for hot-reload).
         // CC runs first to shed flood traffic before expensive pattern checks.
+        // Stubs for FR-016/017/018/020 are registered here by Phase 00 so each
+        // downstream FR PR only swaps its own check file (zero shared-edit conflicts).
         let checkers: Vec<Box<dyn Check>> = vec![
             Box::new(CcCheck::new()),
             Box::new(ScannerCheck::new()),
@@ -100,6 +102,10 @@ impl WafEngine {
             Box::new(XssCheck::new()),
             Box::new(RceCheck::new()),
             Box::new(DirTraversalCheck::new()),
+            Box::new(SsrfCheck::new()),
+            Box::new(HeaderInjectionCheck::new()),
+            Box::new(BruteForceCheck::new()),
+            Box::new(RequestBodyAbuseCheck::new()),
         ];
 
         Self {
