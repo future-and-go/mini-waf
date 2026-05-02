@@ -2,6 +2,8 @@ pub mod anti_hotlink;
 pub mod body_abuse;
 pub mod bot;
 pub mod brute_force;
+pub(crate) mod brute_force_extractors;
+pub(crate) mod brute_force_state;
 pub mod cc;
 pub mod dir_traversal;
 pub mod geo;
