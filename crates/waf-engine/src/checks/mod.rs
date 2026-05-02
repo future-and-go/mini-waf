@@ -1,9 +1,9 @@
 pub mod anti_hotlink;
 pub mod bot;
-pub mod cc;
 pub mod dir_traversal;
 pub mod geo;
 pub mod owasp;
+pub mod rate_limit;
 pub mod rce;
 pub mod scanner;
 pub mod sensitive;
@@ -14,10 +14,10 @@ pub mod xss;
 
 pub use anti_hotlink::AntiHotlinkCheck;
 pub use bot::BotCheck;
-pub use cc::CcCheck;
 pub use dir_traversal::DirTraversalCheck;
 pub use geo::{GeoCheck, GeoRule, GeoRuleMode};
 pub use owasp::OWASPCheck;
+pub use rate_limit::{RateLimitCheck, RateLimitConfig};
 pub use rce::RceCheck;
 pub use scanner::ScannerCheck;
 pub use sensitive::SensitiveCheck;
