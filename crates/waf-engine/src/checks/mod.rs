@@ -15,6 +15,7 @@ pub(crate) mod sql_injection_patterns;
 pub(crate) mod sql_injection_scanners;
 pub mod ssrf;
 pub mod xss;
+pub(crate) mod xss_scanners;
 
 pub use anti_hotlink::AntiHotlinkCheck;
 pub use body_abuse::RequestBodyAbuseCheck;

@@ -32,7 +32,7 @@ Ship 7 production P0 detection checks (FR-014..FR-020) for prx-waf with extensib
 | # | File | Branch | FR | Status | Owner |
 |---|---|---|---|---|---|
 | 00 | [phase-00-framework-and-coverage.md](phase-00-framework-and-coverage.md) | `feat/fr-frame-detection-framework` | — | code-complete (coverage-baseline deferred) | lotus |
-| 01 | [phase-01-fr014-xss-enhance.md](phase-01-fr014-xss-enhance.md) | `feat/fr-014-xss-json-walk` | FR-014 | pending | TBD |
+| 01 | [phase-01-fr014-xss-enhance.md](phase-01-fr014-xss-enhance.md) | `feat/fr-014-xss-json-walk` | FR-014 | code-complete (PR stacked on Phase 00) | lotus |
 | 02 | [phase-02-fr015-path-traversal-enhance.md](phase-02-fr015-path-traversal-enhance.md) | `feat/fr-015-path-traversal-recursive` | FR-015 | pending | TBD |
 | 03 | [phase-03-fr016-ssrf-new.md](phase-03-fr016-ssrf-new.md) | `feat/fr-016-ssrf-detection` | FR-016 | pending | TBD |
 | 04 | [phase-04-fr017-header-injection-new.md](phase-04-fr017-header-injection-new.md) | `feat/fr-017-header-injection` | FR-017 | pending | TBD |
