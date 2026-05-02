@@ -74,6 +74,7 @@ pub struct DeviceCtx<'a> {
     pub user_agent: &'a str,
     pub conn: &'a ConnCtx,
     pub key: &'a FpKey,
+    pub observation: Option<&'a Observation>,
     derived: OnceCell<DeviceDerived>,
 }
 
@@ -85,8 +86,15 @@ impl<'a> DeviceCtx<'a> {
             user_agent,
             conn,
             key,
+            observation: None,
             derived: OnceCell::new(),
         }
+    }
+
+    #[must_use]
+    pub const fn with_observation(mut self, obs: &'a Observation) -> Self {
+        self.observation = Some(obs);
+        self
     }
 
     /// Fill the derivation cache once. Subsequent calls are no-ops.

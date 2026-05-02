@@ -5,8 +5,11 @@
 //! `from_config()` returns an empty registry in phase-02 — concrete
 //! provider construction lands in phase-06.
 
-use crate::device_fp::config::DeviceFpConfig;
-use crate::device_fp::providers::SignalProvider;
+use crate::device_fp::config::{DeviceFpConfig, ProviderConfig};
+use crate::device_fp::providers::{
+    FpConflictProvider, H2AnomalyProvider, IpHoppingProvider, SignalProvider, UaBlocklistProvider,
+    UaEntropyProvider,
+};
 use crate::device_fp::signal::Signal;
 use crate::device_fp::types::DeviceCtx;
 
@@ -52,14 +55,33 @@ impl ProviderRegistry {
 
     /// Build a registry from a validated [`DeviceFpConfig`].
     ///
-    /// Phase-02 returns an empty registry regardless of config — concrete
-    /// providers (`fp_conflict`, `ip_hopping`, `ua_entropy`,
-    /// `ua_blocklist`, `h2_anomaly`) ship in phase-06. Unknown provider
-    /// names already error at `from_yaml_str` boundary; this method only
-    /// fails if construction itself fails.
-    pub fn from_config(_cfg: &DeviceFpConfig) -> anyhow::Result<Self> {
-        Ok(Self::new())
+    /// Construction errors (e.g. invalid blocklist regex) bubble up. Names
+    /// not recognised by this build are logged at `warn` and skipped — a
+    /// future binary may know providers this one doesn't, and we do not
+    /// want config-driven boot failures.
+    pub fn from_config(cfg: &DeviceFpConfig) -> anyhow::Result<Self> {
+        let mut reg = Self::new();
+        for p in &cfg.providers {
+            if let Some(boxed) = build_provider(p)? {
+                reg.register(boxed);
+            } else {
+                tracing::warn!(provider = %p.name, "device_fp: unknown provider, skipping");
+            }
+        }
+        Ok(reg)
     }
+}
+
+fn build_provider(p: &ProviderConfig) -> anyhow::Result<Option<Box<dyn SignalProvider>>> {
+    let boxed: Box<dyn SignalProvider> = match p.name.as_str() {
+        "ip_hopping" => Box::new(IpHoppingProvider::new(p.max_distinct_ips.unwrap_or(3))),
+        "ua_entropy" => Box::new(UaEntropyProvider::new(p.min_entropy_x100.unwrap_or(250))),
+        "ua_blocklist" => Box::new(UaBlocklistProvider::new(p.blocklist_patterns.clone())?),
+        "h2_anomaly" => Box::new(H2AnomalyProvider::new(false)),
+        "fp_conflict" => Box::new(FpConflictProvider::new(p.max_distinct_uas.unwrap_or(2))),
+        _ => return Ok(None),
+    };
+    Ok(Some(boxed))
 }
 
 #[cfg(test)]
@@ -118,9 +140,60 @@ mod tests {
     }
 
     #[test]
-    fn from_config_phase02_returns_empty() {
+    fn from_config_no_providers_returns_empty() {
         let cfg = DeviceFpConfig::from_yaml_str("device_fp:\n  enabled: true\n").unwrap();
         let reg = ProviderRegistry::from_config(&cfg).unwrap();
         assert!(reg.is_empty());
+    }
+
+    #[test]
+    fn from_config_builds_known_providers() {
+        let yaml = r"
+device_fp:
+  enabled: true
+  providers:
+    - name: ip_hopping
+      max_distinct_ips: 4
+    - name: ua_entropy
+      min_entropy_x100: 300
+    - name: ua_blocklist
+      blocklist_patterns: ['(?i)curl/']
+    - name: h2_anomaly
+    - name: fp_conflict
+      max_distinct_uas: 3
+";
+        let cfg = DeviceFpConfig::from_yaml_str(yaml).unwrap();
+        let reg = ProviderRegistry::from_config(&cfg).unwrap();
+        assert_eq!(reg.len(), 5);
+        assert_eq!(
+            reg.names(),
+            vec!["ip_hopping", "ua_entropy", "ua_blocklist", "h2_anomaly", "fp_conflict"]
+        );
+    }
+
+    #[test]
+    fn from_config_skips_unknown_provider() {
+        let yaml = r"
+device_fp:
+  providers:
+    - name: ip_hopping
+    - name: not_a_real_provider
+";
+        let cfg = DeviceFpConfig::from_yaml_str(yaml).unwrap();
+        let reg = ProviderRegistry::from_config(&cfg).unwrap();
+        assert_eq!(reg.len(), 1);
+        assert_eq!(reg.names(), vec!["ip_hopping"]);
+    }
+
+    #[test]
+    fn from_config_propagates_blocklist_error() {
+        let yaml = r"
+device_fp:
+  providers:
+    - name: ua_blocklist
+      blocklist_patterns: ['(.*)*evil']
+";
+        let cfg = DeviceFpConfig::from_yaml_str(yaml).unwrap();
+        assert!(ProviderRegistry::from_config(&cfg).is_err());
     }
 }
