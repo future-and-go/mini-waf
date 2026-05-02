@@ -46,7 +46,7 @@ prx-waf/
 │   │   │   ├── ip_allow.rs    # IP whitelist (CIDR)
 │   │   │   ├── ip_block.rs    # IP blocklist
 │   │   │   ├── url_*.rs       # URL patterns
-│   │   │   ├── cc_limiter.rs  # Rate limiting (sliding window)
+│   │   │   ├── rate_limit/    # FR-004 token-bucket + sliding-window (memory/Redis store, hot-reload YAML)
 │   │   │   ├── scanner.rs     # Scanner detection (fingerprints)
 │   │   │   ├── bot.rs         # Bot detection (UA, headless)
 │   │   │   ├── sql_injection.rs          # SQL injection coordinator (libinjectionrs + pattern checks)
@@ -317,7 +317,7 @@ prx-waf/
 5. Phase 2: IP Blocklist (CIDR)
 6. Phase 3: URL Allowlist (regex/string)
 7. Phase 4: URL Blocklist (regex/string)
-8. Phase 5: CC/DDoS Rate Limiting (sliding window)
+8. Phase 5: FR-004 Rate Limiting (token-bucket + sliding-window, tiered, memory or Redis store, hot-reload YAML)
 9. Phase 6: Scanner Detection (Nmap, Nikto, etc.)
 10. Phase 7: Bot Detection (headless browser, crawlers)
 11. Phase 8: SQL Injection (libinjectionrs + regex)

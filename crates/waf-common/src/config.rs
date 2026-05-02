@@ -35,6 +35,21 @@ pub struct AppConfig {
     /// Admin panel runtime TOML path (`waf-panel.toml`)
     #[serde(default)]
     pub panel: crate::panel_config::PanelFileRef,
+    /// FR-004 rate-limit subsystem reference. Points to a YAML config file
+    /// (e.g. `configs/rate-limit.yaml`). Omit ⇒ subsystem inert.
+    #[serde(default)]
+    pub rate_limit: RateLimitFileRef,
+}
+
+/// Path reference for `configs/rate-limit.yaml`.
+///
+/// Lives in waf-common so the gateway/main can read it without pulling in
+/// the full engine crate. The actual schema parsing happens engine-side.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RateLimitFileRef {
+    /// Path to the YAML file. None ⇒ rate-limit subsystem stays inert.
+    #[serde(default)]
+    pub config_path: Option<String>,
 }
 
 /// Rule source entry from configuration

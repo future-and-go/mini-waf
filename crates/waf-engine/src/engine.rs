@@ -1,5 +1,7 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
+
+use arc_swap::ArcSwap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -13,9 +15,12 @@ use crate::block_page::render_block_page;
 use crate::checker::{RuleStore, check_ip_blacklist, check_ip_whitelist, check_url_blacklist, check_url_whitelist};
 use waf_common::config::SqliScanConfig;
 
+use crate::checks::rate_limit::reload::{DEFAULT_DEBOUNCE_MS as RL_DEBOUNCE_MS, RateLimitReloader};
+use crate::checks::rate_limit::store::MemoryStore;
+use crate::checks::rate_limit::{RateLimitFileConfig, store::RateLimitStore};
 use crate::checks::{
-    AntiHotlinkCheck, BotCheck, CcCheck, Check, DirTraversalCheck, GeoCheck, OWASPCheck, RceCheck, ScannerCheck,
-    SensitiveCheck, SqlInjectionCheck, XssCheck,
+    AntiHotlinkCheck, BotCheck, Check, DirTraversalCheck, GeoCheck, OWASPCheck, RateLimitCheck, RateLimitConfig,
+    RceCheck, ScannerCheck, SensitiveCheck, SqlInjectionCheck, XssCheck,
 };
 use crate::community::{CommunityChecker, CommunityReporter, RequestInfo};
 use crate::crowdsec::{AppSecClient, AppSecResult, CrowdSecChecker, appsec_to_detection};
@@ -75,6 +80,13 @@ pub struct WafEngine {
     /// File watcher for `<rules_dir>/custom/*.yaml` (FR-003 hot-reload).
     /// Set lazily via `start_file_watcher`; held to keep the OS watch alive.
     file_watcher: OnceLock<CustomRuleFileWatcher>,
+    // ── FR-004 rate-limit (phase-07) ─────────────────────────────────────────
+    /// Hot-reloadable rate-limit config snapshot. Shared with the
+    /// `RateLimitCheck` registered in `checkers`.
+    rate_limit_cfg: Arc<ArcSwap<RateLimitConfig>>,
+    /// File watcher for `configs/rate-limit.yaml`. Lazy via
+    /// `start_rate_limit_watcher`; held to keep the OS watch alive.
+    rate_limit_reloader: OnceLock<RateLimitReloader>,
 }
 
 impl WafEngine {
@@ -92,9 +104,12 @@ impl WafEngine {
         let sqli_check = Arc::new(SqlInjectionCheck::with_config(sqli_cfg));
 
         // Build the Phase 5-11 checker pipeline (SQLi handled separately for hot-reload).
-        // CC runs first to shed flood traffic before expensive pattern checks.
+        // FR-004 RateLimitCheck runs first to shed flood traffic before expensive
+        // pattern checks. Inert until `start_rate_limit_watcher` loads tier config.
+        let rl_store: Arc<dyn RateLimitStore> = Arc::new(MemoryStore::new());
+        let rate_limit_cfg = Arc::new(ArcSwap::from(Arc::new(RateLimitConfig::default())));
         let checkers: Vec<Box<dyn Check>> = vec![
-            Box::new(CcCheck::new()),
+            Box::new(RateLimitCheck::new(rl_store, Arc::clone(&rate_limit_cfg))),
             Box::new(ScannerCheck::new()),
             Box::new(BotCheck::new()),
             Box::new(XssCheck::new()),
@@ -120,7 +135,46 @@ impl WafEngine {
             geoip: OnceLock::new(),
             rules_dir: OnceLock::new(),
             file_watcher: OnceLock::new(),
+            rate_limit_cfg,
+            rate_limit_reloader: OnceLock::new(),
         }
+    }
+
+    /// Load `configs/rate-limit.yaml` once and start the hot-reload watcher.
+    ///
+    /// Bad YAML or a missing file logs a warning and leaves the subsystem
+    /// inert (default empty config) — the gateway never refuses to start
+    /// because of a rate-limit config issue.
+    pub fn start_rate_limit_watcher(&self, path: &Path) {
+        if self.rate_limit_reloader.get().is_some() {
+            return;
+        }
+        match RateLimitFileConfig::from_path(path) {
+            Ok(cfg) => {
+                self.rate_limit_cfg.store(cfg);
+                info!(file = %path.display(), "rate_limit: initial config loaded");
+            }
+            Err(e) => {
+                warn!(file = %path.display(), error = %e, "rate_limit: initial load failed; using empty config");
+            }
+        }
+        match RateLimitReloader::start(path.to_path_buf(), Arc::clone(&self.rate_limit_cfg), RL_DEBOUNCE_MS) {
+            Ok(r) => {
+                let _ = self.rate_limit_reloader.set(r);
+            }
+            Err(e) => warn!(
+                file = %path.display(),
+                error = %e,
+                "rate_limit: hot-reload watcher failed to start; running without hot-reload"
+            ),
+        }
+    }
+
+    /// Test/admin hook: replace the rate-limit config snapshot directly.
+    /// Used by integration tests; production paths go through the file watcher.
+    #[cfg(test)]
+    pub fn replace_rate_limit_config(&self, cfg: Arc<RateLimitConfig>) {
+        self.rate_limit_cfg.store(cfg);
     }
 
     /// Set the root rules directory used by the file-based custom rule

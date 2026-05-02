@@ -38,6 +38,11 @@ cors_origins = []
 [panel]
 config_path = "waf-panel.toml"
 
+# ── FR-004 rate-limit subsystem (YAML, hot-reload) ───────────────────────────
+# Omit `config_path` to leave the subsystem inert.
+[rate_limit]
+config_path = "configs/rate-limit.yaml"
+
 # ── Example host configuration ────────────────────────────────────────────────
 # [[hosts]]
 # host = "example.com"

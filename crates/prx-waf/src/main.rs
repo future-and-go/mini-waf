@@ -1417,6 +1417,12 @@ async fn init_async(
     engine.reload_rules().await?;
     engine.start_file_watcher();
 
+    // FR-004 rate-limit subsystem: load YAML and start hot-reload watcher.
+    // Absent path leaves the subsystem inert (default empty config).
+    if let Some(rl_path) = config.rate_limit.config_path.as_deref() {
+        engine.start_rate_limit_watcher(std::path::Path::new(rl_path));
+    }
+
     // GeoIP service
     if config.geoip.enabled {
         let policy = cache_policy_from_str(&config.geoip.cache_policy);
