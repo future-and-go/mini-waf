@@ -15,7 +15,9 @@ use tower_http::trace::TraceLayer;
 use tracing::info;
 
 use crate::auth::{login, logout, refresh_token};
-use crate::cache_api::{cache_flush, cache_flush_host, cache_flush_key, cache_stats};
+use crate::cache_api::{
+    cache_flush, cache_flush_host, cache_flush_key, cache_purge_route, cache_purge_tag, cache_stats,
+};
 use crate::cluster::{cluster_status, generate_join_token, get_cluster_node, list_cluster_nodes, remove_cluster_node};
 use crate::crowdsec::{
     crowdsec_stats, crowdsec_status, delete_crowdsec_decision, get_crowdsec_config, list_crowdsec_decisions,
@@ -167,6 +169,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/cache", delete(cache_flush))
         .route("/api/cache/host/{host}", delete(cache_flush_host))
         .route("/api/cache/key", delete(cache_flush_key))
+        // FR-009 Phase 4: tag-based + route-based purge.
+        .route("/api/cache/purge/tag", post(cache_purge_tag))
+        .route("/api/cache/purge/route", post(cache_purge_route))
         // Phase 5: Audit log
         .route("/api/audit-log", get(list_audit_log))
         // Rule registry (YAML filesystem scanner)

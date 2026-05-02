@@ -113,3 +113,30 @@ phase-06 plan) are **deferred to phase-06b**. They require a `WafEngine` test
 seam that does not bind to a live PostgreSQL `Database`; see
 `plans/260428-1010-fr-001-reverse-proxy-impl/phase-06-test-harness-coverage.md`
 for the deferral rationale.
+
+## Cache module coverage (FR-009 phase-05)
+
+Separate 95% line-coverage gate scoped to `crates/gateway/src/cache/**`.
+Inline tests live per-file (`cache/store.rs`, `cache/policy.rs`, every
+`cache/gates/*.rs`, `cache/tag_index.rs`, `cache/rule.rs`, `cache/rule_set.rs`,
+`cache/watcher.rs`, `cache/config.rs`); end-to-end pipeline tests live in
+`tests/cache_integration.rs` and `tests/cache_hot_reload.rs`.
+
+Reproduce the gate locally:
+
+```bash
+cargo llvm-cov -p gateway --summary-only \
+  --ignore-filename-regex '(context|http3|lb|lib|protocol|proxy|proxy_waf_response|router|ssl|tunnel)\.rs$|/(ctx_builder|error_page|filters|pipeline|policies|tiered)/|crates/(waf-|prx-)|/tests/|/benches/'
+```
+
+CI enforces ≥95% via the `cache-coverage` job in `.github/workflows/ci.yml`.
+
+Benches (criterion):
+
+```bash
+cargo bench -p gateway --bench cache_resolver_bench --bench cache_purge_bench
+```
+
+Targets: `resolve_critical_bypass` < 10µs, `resolve_route_match_hit` < 50µs,
+`resolve_no_match_fallback` < 30µs, `put_with_5_tags` < 5µs,
+`purge_by_tag_10k_keys` < 50ms.
