@@ -1,5 +1,6 @@
 pub mod anti_hotlink;
 pub mod body_abuse;
+pub(crate) mod body_abuse_walker;
 pub mod bot;
 pub mod brute_force;
 pub mod cc;
