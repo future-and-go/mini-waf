@@ -11,6 +11,11 @@ pub use memory::MemoryStore;
 #[cfg(feature = "redis-store")]
 pub mod redis;
 
+#[cfg(feature = "redis-store")]
+pub mod breaker;
+#[cfg(feature = "redis-store")]
+pub use breaker::BreakerStore;
+
 /// Outcome of a single `check_and_consume` call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {

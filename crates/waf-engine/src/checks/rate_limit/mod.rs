@@ -14,13 +14,17 @@ use store::LimitCfg;
 
 pub mod algo;
 pub mod check;
+pub mod config;
 pub mod key;
+pub mod reload;
 pub mod store;
 
 #[cfg(any(test, feature = "test-conformance"))]
 pub mod conformance;
 
 pub use check::RateLimitCheck;
+pub use config::RateLimitFileConfig;
+pub use reload::RateLimitReloader;
 pub use store::{Decision, RateLimitStore};
 
 /// Per-deployment rate-limit configuration.

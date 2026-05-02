@@ -7,6 +7,7 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use arc_swap::ArcSwap;
 use waf_common::tier::FailMode;
 use waf_common::{DetectionResult, Phase, RequestCtx};
 
@@ -15,21 +16,17 @@ use super::key::KeyKind;
 use super::store::{Decision, RateLimitStore};
 use crate::checks::Check;
 
-/// Rate-limit check. Holds a shared store handle + config snapshot.
+/// Rate-limit check. Holds a shared store handle + a hot-reloadable config
+/// snapshot. The `ArcSwap` lets the reloader replace config without dropping
+/// in-flight requests.
 pub struct RateLimitCheck {
     store: Arc<dyn RateLimitStore>,
-    cfg: Arc<RateLimitConfig>,
+    cfg: Arc<ArcSwap<RateLimitConfig>>,
 }
 
 impl RateLimitCheck {
-    pub const fn new(store: Arc<dyn RateLimitStore>, cfg: Arc<RateLimitConfig>) -> Self {
+    pub const fn new(store: Arc<dyn RateLimitStore>, cfg: Arc<ArcSwap<RateLimitConfig>>) -> Self {
         Self { store, cfg }
-    }
-
-    /// Read the configured session cookie. Returns `None` if absent — phase 04
-    /// has no `device_fp` fallback (not yet present on `RequestCtx`).
-    fn session_id<'a>(&self, ctx: &'a RequestCtx) -> Option<&'a str> {
-        ctx.cookies.get(&self.cfg.session_cookie).map(String::as_str)
     }
 
     /// Translate a non-Allow decision into a `DetectionResult`.
@@ -69,8 +66,10 @@ impl RateLimitCheck {
 
 impl Check for RateLimitCheck {
     fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+        // Single Arc load per request — readers never block writers.
+        let snapshot = self.cfg.load();
         // Skip when this tier has no limit configured.
-        let cfg = self.cfg.for_tier(ctx.tier)?;
+        let cfg = snapshot.for_tier(ctx.tier)?;
 
         let now_ms = now_epoch_ms();
         let host = ctx.host_config.code.as_str();
@@ -88,7 +87,7 @@ impl Check for RateLimitCheck {
         }
 
         // Per-session, if we have a session id.
-        let sid = self.session_id(ctx)?;
+        let sid = ctx.cookies.get(&snapshot.session_cookie).map(String::as_str)?;
         let s_key = KeyKind::Session { host, session: sid }.render();
         match self.store.check_and_consume_blocking(&s_key, cfg, now_ms) {
             Ok(Decision::Allow) => None,
@@ -117,7 +116,7 @@ mod tests {
     use waf_common::HostConfig;
     use waf_common::tier::{CachePolicy, RiskThresholds, Tier, TierPolicy};
 
-    fn cfg_for_tier(tier: Tier) -> Arc<RateLimitConfig> {
+    fn cfg_for_tier(tier: Tier) -> Arc<ArcSwap<RateLimitConfig>> {
         let mut tiers = HashMap::new();
         tiers.insert(
             tier,
@@ -128,10 +127,10 @@ mod tests {
                 window_limit: 1_000,
             },
         );
-        Arc::new(RateLimitConfig {
+        Arc::new(ArcSwap::from(Arc::new(RateLimitConfig {
             session_cookie: "SID".to_string(),
             tiers,
-        })
+        })))
     }
 
     fn make_ctx(tier: Tier, fail_mode: FailMode, with_cookie: bool) -> RequestCtx {
@@ -303,10 +302,10 @@ mod tests {
                 window_limit: 1_000,
             },
         );
-        let cfg = Arc::new(RateLimitConfig {
+        let cfg = Arc::new(ArcSwap::from(Arc::new(RateLimitConfig {
             session_cookie: "SID".to_string(),
             tiers,
-        });
+        })));
         let check = RateLimitCheck::new(store, cfg);
         let ctx = make_ctx(Tier::CatchAll, FailMode::Open, false);
         // burst=2 → first 2 allowed. Each call consumes 1 IP token.

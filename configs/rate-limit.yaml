@@ -1,0 +1,42 @@
+# FR-004 rate-limiting — default configuration.
+# Schema v1. Empty / absent file ⇒ subsystem inert.
+# Hot-reload watches this file; bad edits log a warning and the previous
+# snapshot is retained (the gateway never crashes from a bad YAML edit).
+#
+# Per-tier fail-mode is governed by TierPolicy (FR-037), not this file.
+
+rate_limit:
+  schema_version: 1
+  enabled: false                 # flip to true to activate
+  session_cookie: SESSIONID
+  hot_reload: true
+
+  tiers:
+    critical:
+      burst_capacity: 5
+      burst_refill_per_s: 2.0
+      window_secs: 60
+      window_limit: 30
+    high:
+      burst_capacity: 20
+      burst_refill_per_s: 10.0
+      window_secs: 60
+      window_limit: 200
+    medium:
+      burst_capacity: 50
+      burst_refill_per_s: 20.0
+      window_secs: 60
+      window_limit: 600
+    catch_all:
+      burst_capacity: 100
+      burst_refill_per_s: 50.0
+      window_secs: 60
+      window_limit: 1500
+
+  # Omit the `redis:` block for standalone (memory-only) mode.
+  # Requires building waf-engine with `--features redis-store`.
+  # redis:
+  #   url: "redis://127.0.0.1:6379"
+  #   key_prefix: "wafrl:"
+  #   op_timeout_ms: 50
+  #   breaker_threshold: 5
