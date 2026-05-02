@@ -6,3 +6,8 @@ iter	timestamp	metric	delta	kept	description
 4	2026-05-01T15:54:34Z	69.31	+2.80	yes	cover RuleManager construction and lifecycle
 5	2026-05-01T15:56:24Z	69.91	+0.60	yes	cover RuleRegistry CRUD, filtering and search
 6	2026-05-01T16:04:46	72.37	+2.46	yes	crowdsec/cache.rs + checker integration tests
+7	2026-05-01T16:09:03	73.54	+1.17	yes	community+crowdsec config/init/client/checker tests
+8	2026-05-01T16:11:24	74.91	+1.37	yes	plugin manager + community reporter tests
+9	2026-05-01T16:13:40	76.70	+1.79	yes	crowdsec client/pusher/sync/appsec tests
+10	2026-05-01T16:16:16	77.52	+0.82	yes	hot_reload + geoip_updater helpers
+11	2026-05-01T16:21:11Z	77.78	+0.26	yes	community/enroll helper tests

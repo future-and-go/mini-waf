@@ -72,6 +72,22 @@ prx-waf/
 │   │   │   ├── wasm.rs        # WASM plugin manager (wasmtime)
 │   │   │   └── rhai.rs        # Rhai script engine sandbox
 │   │   │
+│   │   ├── device_fp/         # FR-010 device fingerprinting (operator guide: docs/device-fingerprinting.md)
+│   │   │   ├── capture/       # TLS ClientHello + H2 frame inspection (Pingora hooks)
+│   │   │   │   ├── tls.rs / h2.rs / client_hello_inspector.rs / h2_frame_inspector.rs
+│   │   │   │   ├── conn_ctx.rs   # ConnCtx, ConnRegistry (per-connection state)
+│   │   │   │   └── parsed.rs     # RawCapture, H2Capture, PriorityFrame
+│   │   │   ├── fingerprint/   # JA3, JA4, Akamai H2 hashers (FingerprintRegistry)
+│   │   │   ├── identity/      # IdentityStore trait + Memory + Redis (feature `redis-store`)
+│   │   │   ├── providers/     # SignalProvider impls: ip_hopping, fp_conflict, ua_entropy, ua_blocklist, h2_anomaly
+│   │   │   ├── aggregator.rs  # RiskAggregator trait + Noop/Logging defaults (FR-025 plug-in point)
+│   │   │   ├── config.rs      # YAML schema (deny_unknown_fields), ArcSwap snapshot
+│   │   │   ├── reload.rs      # notify-based hot reload
+│   │   │   ├── registry.rs    # ProviderRegistry (Strategy + Registry pattern)
+│   │   │   ├── signal.rs      # Signal enum + H2AnomalyReason
+│   │   │   ├── types.rs       # DeviceCtx, DeviceIdentity, FpKey, Observation
+│   │   │   └── mod.rs         # DeviceFpDetector facade (process pipeline)
+│   │   │
 │   │   ├── security/
 │   │   │   ├── geoip.rs       # GeoIP lookup (ip2region)
 │   │   │   └── url_validator.rs # SSRF protection, DNS rebinding guard

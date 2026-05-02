@@ -161,6 +161,14 @@ cargo test
 cargo build --release
 ```
 
+## Pre-Push Formatting (MANDATORY)
+
+**Always run `cargo fmt --all` before `git push`.** CI enforces `cargo fmt --all -- --check` strictly — any drift fails the Lint job and blocks the PR.
+
+- Run `cargo fmt --all` to apply formatting (modifies files)
+- Verify with `cargo fmt --all -- --check` (exits non-zero on any diff)
+- Format-only commits use `style:` prefix (no behavior change → not `fix:`)
+
 ## Docker
 
 ```bash

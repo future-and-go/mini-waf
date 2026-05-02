@@ -1,92 +1,88 @@
-# Phase 01 — Pingora Patch: ClientHello + H2 Frame Hooks
+# Phase 01 — Pingora Inspector Primitives (Option B)
 
-**Status:** pending | **Priority:** P0 | **Effort:** M | **Blocks:** all subsequent phases
+**Status:** completed | **Priority:** P0 | **Effort:** S (revised from M) | **Blocks:** all subsequent phases
 
 ## Context
 
-Pingora terminates TLS and owns the h2 stack. To capture JA3/JA4 ClientHello bytes and Akamai-style h2 frames, we need extension points it doesn't provide upstream. This phase produces a pinned patch.
+Pingora terminates TLS and owns the h2 stack. To capture JA3/JA4 ClientHello bytes and Akamai-style h2 frames, we need extension points it doesn't provide upstream.
 
-## Requirements
+## Strategy Pivot — Option B (L4 byte tap)
 
-### Functional
-- Expose `set_client_hello_inspector(Arc<dyn ClientHelloInspector>)` invoked synchronously during rustls/boring handshake; receives raw ClientHello bytes + parsed extensions list
-- Expose `set_h2_frame_inspector(Arc<dyn H2FrameInspector>)` invoked per-frame for SETTINGS, WINDOW_UPDATE, PRIORITY, HEADERS until first END_HEADERS, then auto-detach
-- Hooks store raw capture into a per-connection slot (slab keyed by conn id) readable by the HTTP request filter stage
-- No behavior change when hooks unset (default = `None`)
+Original phase plan called for hooks **inside** rustls's accept callback and **inside** the h2 frame dispatch loop. Code inspection of pingora 0.8 showed:
 
-### Non-functional
-- Hooks read-only on owned frame copies; do not mutate frame stream
-- Synchronous hook callbacks (no `.await`); callers wrap heavy work in spawned tasks if needed
-- Patch isolated to a single branch; rebase SOP documented
+- `vendor/pingora/pingora-core/src/listeners/tls/rustls/mod.rs:81` uses the **high-level** `RusTlsAcceptor::accept()` API which hides ClientHello bytes.
+- `protocols/http/v2/server.rs` delegates to the `h2` crate, which exposes typed events, not raw frames.
 
-## Architecture
+Patching three crates (pingora + rustls + h2) was rejected as unsustainable. **Adopted approach:** transparent stream-tap adapter wrapping `AsyncRead + AsyncWrite + Unpin` streams; fans inbound bytes to a `ByteTap` callback. Inserted at L4 (pre-TLS) for ClientHello and at the post-TLS boundary for h2 frames in Phase 03. Parsing happens in `waf-engine` using `tls-parser` + a hand-rolled h2 frame walker.
 
-```
-Cargo.toml
-└── pingora = { git = "https://github.com/<org>/pingora", branch = "mini-waf/device-fp-hooks", rev = "<sha>" }
+Net pingora source delta: **two files** (one new module, one `pub mod` line in `protocols/mod.rs`).
 
-waf-engine/src/device_fp/capture/
-├── client_hello_inspector.rs   # impls Pingora trait
-└── h2_frame_inspector.rs       # impls Pingora trait
-```
+## Vendoring
 
-## Files
+`cloudflare/pingora` cloned to `vendor/pingora/` (rev `1476e7a`, 0.8.0+53). Wired via `[patch.crates-io]` + `exclude = ["vendor/pingora"]` in workspace `Cargo.toml`. `vendor/` ignored by git.
 
-**Patched (Pingora fork):**
-- `pingora-core/src/listeners/tls.rs` — add inspector field + invocation
-- `pingora-core/src/protocols/http/v2/server.rs` — add frame inspector hook
-- New trait file: `pingora-core/src/protocols/inspector.rs`
+## Deliverables (this phase)
 
-**Created (this repo):**
-- `crates/waf-engine/src/device_fp/capture/client_hello_inspector.rs`
-- `crates/waf-engine/src/device_fp/capture/h2_frame_inspector.rs`
-- `crates/waf-engine/src/device_fp/capture/conn_ctx.rs` (per-conn raw capture slot)
+**Pingora fork (added):**
+- `vendor/pingora/pingora-core/src/protocols/inspector.rs` — new module:
+  - `trait ClientHelloInspector { fn on_client_hello(&self, raw: &[u8]); }`
+  - `trait H2FrameInspector { fn on_frame(&self, frame: &H2FrameSnapshot<'_>); }`
+  - `enum H2FrameSnapshot<'a>` — Settings/WindowUpdate/Priority/Headers variants
+  - `trait ByteTap { fn on_bytes(&self, chunk: &[u8]) -> bool; }`
+  - `struct InspectStream<S>` — `AsyncRead + AsyncWrite` passthrough; fans inbound bytes to `ByteTap`; auto-detaches on `false` return
+- `vendor/pingora/pingora-core/src/protocols/mod.rs` — add `pub mod inspector;`
 
-**Modified:**
-- `Cargo.toml` (workspace root) — add `[patch.crates-io]` or git dep for pingora
-- `docs/system-architecture.md` — patch upgrade SOP
+**waf-engine (added):**
+- `crates/waf-engine/src/device_fp/mod.rs`
+- `crates/waf-engine/src/device_fp/capture/mod.rs`
+- `crates/waf-engine/src/device_fp/capture/client_hello_inspector.rs` — `NoopClientHelloInspector`
+- `crates/waf-engine/src/device_fp/capture/h2_frame_inspector.rs` — `NoopH2FrameInspector`
+- `crates/waf-engine/src/device_fp/capture/conn_ctx.rs` — `ConnCtx` + `RawCapture` (parking_lot::Mutex slot)
+- `crates/waf-engine/Cargo.toml` — `pingora-core = { workspace = true }`
+- `crates/waf-engine/src/lib.rs` — `pub mod device_fp;`
 
-## Steps
+**Cargo / repo:**
+- Root `Cargo.toml` — `[patch.crates-io]` redirect + `workspace.exclude`
+- `.gitignore` — `/vendor`
 
-1. Fork `cloudflare/pingora` to org repo; create branch `mini-waf/device-fp-hooks`
-2. Add `ClientHelloInspector` trait + `H2FrameInspector` trait in new `pingora-core/src/protocols/inspector.rs`
-3. Add `inspector: Option<Arc<dyn ClientHelloInspector>>` to TLS listener config; invoke in rustls `accept` callback before handshake completes
-4. Add `inspector: Option<Arc<dyn H2FrameInspector>>` to h2 server; tap frames in dispatch loop, detach after END_HEADERS on stream 1
-5. Build pingora locally; run pingora's own tests — must pass unchanged
-6. Pin in our `Cargo.toml` via git dep w/ explicit `rev = "<sha>"`
-7. Implement no-op inspector wrappers in `device_fp/capture/` to validate wiring
-8. Add CI job: build pingora fork from rev + run pingora conformance suite
+## Deferred to Phase 03
+
+Phase 01 ships **primitives only**. Wiring `InspectStream` into pingora's listener loop (pre-TLS for ClientHello, post-TLS for h2 frames), real `tls-parser` integration, h2 frame walker, and the per-conn registry are Phase 03's "Capture layer (TLS + h2) + fixtures" work.
+
+## Verification
+
+- `cargo check --workspace --all-targets` ✅
+- `cargo fmt --all -- --check` ✅
+- `cargo clippy -p waf-engine --all-targets -- -D warnings` ✅
+- `cargo test -p waf-engine device_fp` ✅ — 6 unit tests pass
 
 ## Todos
 
-- [ ] Fork pingora repo to org
-- [ ] Create branch + add inspector traits
-- [ ] Wire ClientHello inspector in TLS listener
-- [ ] Wire H2 frame inspector in h2 server
-- [ ] Run pingora upstream tests (unchanged behavior)
-- [ ] Pin via git rev in Cargo.toml
-- [ ] Add no-op inspector wrappers in waf-engine
-- [ ] CI job for pingora fork build + conformance
-- [ ] Document rebase/upgrade SOP in `docs/system-architecture.md`
+- [x] Vendor pingora to `vendor/pingora`
+- [x] `[patch.crates-io]` + `workspace.exclude` for pingora-*
+- [x] `.gitignore /vendor`
+- [x] Add inspector traits + `H2FrameSnapshot` enum
+- [x] Add `InspectStream` adapter + `ByteTap`
+- [x] No-op inspector wrappers in waf-engine
+- [x] `ConnCtx` skeleton
+- [x] `cargo check / fmt / clippy / test` green
+- [ ] (Phase 03) Wire `InspectStream` into pingora L4 listener
+- [ ] (Phase 03) `tls-parser` ClientHello extraction
+- [ ] (Phase 03) h2 frame walker
+- [ ] (Phase 03) Integration smoke test: real handshake invokes callback
 
-## Success Criteria
+## Risks (resolved this phase)
 
-- `cargo build --release` succeeds with pinned pingora fork
-- Pingora upstream conformance tests pass against the fork
-- No-op inspectors compile and link; default behavior unchanged
-- Setting an inspector and making a TLS handshake invokes the callback (proven by integration smoke test)
+- Three-crate fork burden → **avoided** by Option B; pingora delta is 2 files
+- ClientHello access in rustls high-level API → **avoided** by tapping bytes pre-TLS
+- h2 crate raw frame access → **avoided** by tapping bytes post-TLS, parsing ourselves
 
-## Risks
+## Risks (remaining for Phase 03)
 
-- Pingora upstream changes break rebase → mitigate w/ pinned rev + conformance CI
-- License: pingora is Apache-2.0 — fork must preserve LICENSE/NOTICE
-- Async safety: hook must not block executor — callbacks store bytes in `Arc<Mutex<...>>` slot, real work happens elsewhere
+- L4 listener integration may require a small additional pingora patch to expose a `wrap_accepted_stream` hook before TLS — to be assessed in Phase 03
+- License: pingora is Apache-2.0 — vendored copy preserves LICENSE/NOTICE; no upstream contribution required for fork
 
-## Security
+## Open Questions
 
-- Inspector reads raw bytes — must clone and never mutate frame stream
-- Per-connection slot freed on connection drop (use `Drop` impl)
-
-## Next
-
-Phase 02 — module skeleton can begin once inspector traits compile, even before hook integration is fully tested.
+- Do we want to push the 2-file pingora patch upstream (Cloudflare PR) or maintain it as a private fork? Local for now; reassess after Phase 03 proves the design.
+- Whether `H2FrameSnapshot` should evolve to include CONTINUATION/PRIORITY_UPDATE before Phase 03 finalizes the parser.

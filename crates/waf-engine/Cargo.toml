@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+# cargo-machete false-positive: `md-5` is imported as `md5` in
+# device_fp/fingerprint/ja3.rs (crate name vs lib name mismatch).
+[package.metadata.cargo-machete]
+ignored = ["md-5"]
+
 [dependencies]
 waf-common = { path = "../waf-common" }
 waf-storage = { path = "../waf-storage" }
@@ -41,10 +46,17 @@ ip_network_table = "0.2"
 ip_network = "0.4"
 maxminddb = "0.27"
 http = { workspace = true }
+# FR-010 device fingerprinting — depends on inspector traits from vendored pingora fork.
+pingora-core = { workspace = true }
+# FR-010 phase-04 fingerprint hashers.
+md-5 = { workspace = true }
+sha2 = { workspace = true }
+# FR-010 phase-08 — Redis identity store backend; gated by `redis-store` feature.
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager", "tls-rustls", "tokio-rustls-comp", "script"], optional = true }
 
 [dev-dependencies]
 rand = { workspace = true }
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 tempfile = "3"
 wiremock = "0.6"
 proptest = "1"
@@ -65,6 +77,19 @@ harness = false
 [[bench]]
 name = "relay_eval"
 harness = false
+
+[[bench]]
+name = "device_fp_capture"
+harness = false
+
+[[bench]]
+name = "device_fp_pipeline"
+harness = false
+
+[features]
+default = []
+# FR-010 device fingerprinting — Redis-backed identity store (phase-08).
+redis-store = ["dep:redis"]
 
 [lints]
 workspace = true

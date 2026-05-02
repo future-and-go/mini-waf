@@ -137,6 +137,21 @@ Detects relay/proxy traffic via XFF validation, proxy-chain hop-depth analysis, 
 
 **Deferred to CI pipeline:** ≥90% coverage llvm-cov gate, `.unwrap()` grep gate, 1M-entry Tor oversize test, IptoasnFeed gz variant test, full Pingora e2e (substituted with wiring contract test).
 
+### FR-010 — Device Fingerprinting (Complete ✓)
+
+JA3 / JA4 TLS fingerprint, full Akamai HTTP/2 fingerprint, UA entropy / churn, and "same device switching IPs" detection. Trait-driven extension with YAML hot-reload; signal-only output via `RiskAggregator` (FR-025 plug-in point).
+
+- [x] `crates/waf-engine/src/device_fp/` — capture, fingerprint, identity, providers, aggregator, registry, reload
+- [x] `vendor/pingora/` — patched fork exposing L4 `ClientHelloInspector` + `H2FrameInspector`
+- [x] `IdentityStore` trait + 2 impls — Memory (default) + Redis (feature `redis-store`); shared conformance suite
+- [x] 5 signal providers — `ip_hopping`, `fp_conflict`, `ua_entropy`, `ua_blocklist`, `h2_anomaly`
+- [x] YAML schema (`deny_unknown_fields`) + `ArcSwap<DeviceFpConfig>` hot reload
+- [x] CI coverage gate ≥90% scoped to `device_fp/` (`device-fp-coverage` job)
+- [x] Criterion benches (`device_fp_capture`, `device_fp_pipeline`); nightly bench job; p99 <300µs target
+- [x] Operator guide: [`docs/device-fingerprinting.md`](device-fingerprinting.md)
+
+**Deferred:** real-client capture fixtures (curl-impersonate harness), gateway listener wiring patch, JA4+ extended hashes (JA4S/JA4H/JA4X) — tracked in `plans/260501-2005-fr010-device-fingerprinting/plan.md`.
+
 ### Panel-Config API (Complete ✓)
 
 Atomic read/write of `waf-panel.toml` (operational policy settings) via `GET/PUT /api/panel-config`. Config struct `WafPanelConfig` with nested sections: `ResponseFilteringPanel`, `TrustedBypassPanel`, `RateLimitsPanel`, `AutoBlockPanel`. Validates risk thresholds (allow < challenge < block), CIDR syntax, honeypot paths. Atomic write-through semantics.

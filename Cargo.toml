@@ -8,6 +8,10 @@ members = [
     "crates/waf-common",
     "crates/waf-cluster",
 ]
+# vendor/pingora is a separate workspace (vendored fork). Excluded so its own
+# workspace inheritance (`*.workspace = true`) resolves against pingora's root,
+# not ours.
+exclude = ["vendor/pingora"]
 resolver = "2"
 
 [workspace.package]
@@ -22,7 +26,10 @@ repository = "https://github.com/openprx/prx-waf"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# HTTP proxy
+# HTTP proxy — vendored fork at vendor/pingora (Apache-2.0).
+# Crates.io versions kept; [patch.crates-io] at workspace root redirects to
+# vendor/pingora so its own workspace inheritance still resolves. The fork is
+# patched with ClientHello/H2 frame inspector hooks for FR-010 device fingerprinting.
 pingora = { version = "0.8", features = ["lb"] }
 pingora-core = { version = "0.8" }
 pingora-proxy = { version = "0.8" }
@@ -74,6 +81,7 @@ lettre = { version = "0.11", default-features = false, features = ["tokio1", "sm
 rust-embed = "8"
 mime_guess = "2"
 sha2 = "0.10"
+md-5 = "0.10"
 hex = "0.4"
 rand = "0.8"
 totp-lite = "2"
@@ -147,3 +155,11 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+# Redirect crates.io pingora* lookups to the vendored fork (FR-010 hook patches).
+[patch.crates-io]
+pingora = { path = "vendor/pingora/pingora" }
+pingora-core = { path = "vendor/pingora/pingora-core" }
+pingora-proxy = { path = "vendor/pingora/pingora-proxy" }
+pingora-http = { path = "vendor/pingora/pingora-http" }
+pingora-timeout = { path = "vendor/pingora/pingora-timeout" }

@@ -1,6 +1,6 @@
 # Phase 03 — Capture Layer (TLS ClientHello + H2 Frames) + Fixtures
 
-**Status:** pending | **Priority:** P0 | **Effort:** M | **Blocked by:** phase-01, phase-02
+**Status:** completed (parse+inspector+bench); deferred (gateway wiring, real client fixtures) | **Priority:** P0 | **Effort:** M | **Blocked by:** phase-01, phase-02
 
 ## Context
 
@@ -42,15 +42,20 @@ Implement actual capture wiring: ClientHello bytes → `RawCapture::tls`, H2 fra
 
 ## Todos
 
-- [ ] `TlsCapture` rustls ClientHello field extraction
-- [ ] `H2FrameTap` frame capture w/ END_HEADERS detach
-- [ ] `ConnCtx` slab + Drop cleanup
-- [ ] Gateway startup registration
-- [ ] Capture 7 client ClientHello fixtures
-- [ ] Capture 7 client h2 frame fixtures
-- [ ] Unit tests parsing each fixture
-- [ ] Criterion bench `tls_capture_parse`, `h2_frame_append`
-- [ ] Confirm <50µs / <30µs targets
+- [x] `TlsCapture` ClientHello field extraction (hand-rolled parser, no rustls dep — keeps capture path zero-alloc)
+- [x] `H2FrameTap` frame capture (END_HEADERS detach handled by pingora hook layer)
+- [x] `ConnCtx` slab (`DashMap<ConnId, ConnCtx>`) + Drop cleanup verified by test
+- [ ] Gateway startup registration — **deferred** (vendored pingora exposes the inspector traits but does not yet wire them at the listener; requires sub-phase to patch pingora-core listener)
+- [ ] Capture 7 client ClientHello fixtures from real clients — **deferred** (synthetic shape-fixtures used; real captures need rustls test server + client binaries)
+- [ ] Capture 7 client h2 frame fixtures from real clients — **deferred** (synthetic shape-fixtures used; same harness gap)
+- [x] Unit tests parsing each shape fixture (7 clients, all distinct hashes)
+- [x] Criterion bench `tls_capture_parse`, `h2_frame_append_settings`, `h2_frame_append_headers`
+- [x] Confirm <50µs / <30µs targets — actual: parse ~200ns, settings append ~25ns, headers append ~80ns
+
+## Deferred to sub-phase
+
+1. **Real-client fixture capture** — stand up a rustls test server + driver scripts to dump ClientHello bytes from Chrome 121, Firefox 124, Safari 17, curl 8, curl-impersonate-chrome, Go net/http, Python requests; same for h2 SETTINGS via h2 server tap. Replaces synthetic shape fixtures.
+2. **Gateway wiring** — extend vendored pingora-core listener to invoke registered `ClientHelloInspector` / `H2FrameInspector` per accepted connection, then register `TlsCapture` + `H2FrameTap` in `gateway/proxy.rs::startup` and attach `RawCapture` to request ctx in early filter.
 
 ## Success Criteria
 

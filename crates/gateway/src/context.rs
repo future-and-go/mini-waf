@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use bytes::BytesMut;
 use waf_common::{HostConfig, RequestCtx};
+use waf_engine::device_fp::DeviceIdentity;
 use waf_engine::relay::ClientIdentity;
 
 use crate::protocol::Protocol;
@@ -38,6 +39,9 @@ pub struct GatewayCtx {
     /// `request_filter` phase has run. Downstream phases prefer
     /// `client_identity.real_ip` over the raw TCP peer when present.
     pub client_identity: Option<ClientIdentity>,
+    /// FR-010 phase-07: resolved device fingerprint identity. `None` when the
+    /// detector is not configured or before `request_filter` has run.
+    pub device_identity: Option<DeviceIdentity>,
 }
 
 /// Per-response state for the streaming body masker (AC-17).
