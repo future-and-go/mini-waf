@@ -5,9 +5,11 @@
 //! phase-09: p99 added latency < 300µs at 5k req/s. Criterion reports
 //! p50/p95/p99 in HTML output; CI nightly job snapshots numbers.
 //!
-//! Two scenarios: `cold` (fresh ConnCtx every iter, store sees new key)
-//! and `warm` (one ConnCtx + one store, repeated observations). Warm is
+//! Two scenarios: `cold` (fresh `ConnCtx` every iter, store sees new key)
+//! and `warm` (one `ConnCtx` + one store, repeated observations). Warm is
 //! the steady-state production case; cold stresses the assemble path.
+
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
