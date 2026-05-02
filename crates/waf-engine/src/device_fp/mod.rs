@@ -31,7 +31,9 @@ pub use config::{
     CaptureConfig, DeviceFpConfig, DeviceFpDocument, H2CaptureConfig, ProviderConfig,
     RedisStoreConfig, StoreBackend, StoreConfig, TlsCaptureConfig,
 };
-pub use fingerprint::FingerprintProvider;
+pub use fingerprint::{
+    FingerprintProvider, FingerprintRegistry, H2AkamaiFingerprint, Ja3Fingerprint, Ja4Fingerprint,
+};
 pub use identity::{IdentityStore, MemoryIdentityStore};
 pub use providers::SignalProvider;
 pub use registry::ProviderRegistry;

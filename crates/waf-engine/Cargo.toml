@@ -43,6 +43,9 @@ maxminddb = "0.27"
 http = { workspace = true }
 # FR-010 device fingerprinting — depends on inspector traits from vendored pingora fork.
 pingora-core = { workspace = true }
+# FR-010 phase-04 fingerprint hashers.
+md-5 = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
