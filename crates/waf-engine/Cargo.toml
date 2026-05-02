@@ -41,6 +41,8 @@ ip_network_table = "0.2"
 ip_network = "0.4"
 maxminddb = "0.27"
 http = { workspace = true }
+# FR-010 device fingerprinting — depends on inspector traits from vendored pingora fork.
+pingora-core = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
@@ -65,6 +67,11 @@ harness = false
 [[bench]]
 name = "relay_eval"
 harness = false
+
+[features]
+default = []
+# FR-010 device fingerprinting — Redis-backed identity store (phase-08).
+redis-store = []
 
 [lints]
 workspace = true

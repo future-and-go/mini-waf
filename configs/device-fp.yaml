@@ -1,0 +1,36 @@
+# FR-010 device fingerprinting — default configuration.
+# Schema v1. Empty / absent file = subsystem disabled.
+# Hot-reload watches this file; bad edits log a warning and the previous
+# snapshot is retained.
+
+device_fp:
+  schema_version: 1
+  enabled: false
+  capture:
+    tls:
+      enabled: false
+      algorithms: [ja3, ja4]
+    h2:
+      enabled: false
+      hash: akamai
+  store:
+    backend: memory      # memory | redis (redis requires `redis-store` feature)
+    ttl_secs: 3600
+  providers:
+    - name: ip_hopping
+      window_secs: 600
+      max_distinct_ips: 3
+      signal_weight: 25
+    - name: fp_conflict
+      window_secs: 600
+      max_distinct_uas: 3
+      signal_weight: 25
+    - name: ua_entropy
+      min_entropy_x100: 250
+      signal_weight: 15
+    - name: ua_blocklist
+      blocklist_patterns: []
+      signal_weight: 30
+    - name: h2_anomaly
+      signal_weight: 20
+  hot_reload: true
