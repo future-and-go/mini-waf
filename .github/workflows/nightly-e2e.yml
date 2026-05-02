@@ -31,6 +31,31 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+#  # FR-010 phase-09: device_fp criterion bench. Nightly only — too slow
+#  # for per-PR. Reports p50/p95/p99 for the full pipeline; target p99 < 300µs.
+#  device-fp-bench:
+#    name: device_fp criterion bench
+#    runs-on: ubuntu-latest
+#    timeout-minutes: 30
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: dtolnay/rust-toolchain@stable
+#      - uses: Swatinem/rust-cache@v2
+#        with:
+#          shared-key: device-fp-bench
+#      - name: Run benches
+#        run: |
+#          cargo bench -p waf-engine --bench device_fp_pipeline -- --output-format bencher \
+#            | tee bench-device-fp.txt
+#      - name: Upload bench results
+#        if: always()
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: device-fp-bench
+#          path: |
+#            bench-device-fp.txt
+#            target/criterion/**
+
   # ── 1) Build the prx-waf release binary once and share via artifact ────────
   # Pinned to ubuntu-22.04 (glibc 2.35) so the produced binary runs inside
   # the Dockerfile.prebuilt base image (debian:bookworm-slim, glibc 2.36).

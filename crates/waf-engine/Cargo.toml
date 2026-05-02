@@ -51,7 +51,7 @@ redis = { version = "0.27", default-features = false, features = ["tokio-comp", 
 
 [dev-dependencies]
 rand = { workspace = true }
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 tempfile = "3"
 wiremock = "0.6"
 proptest = "1"
@@ -75,6 +75,10 @@ harness = false
 
 [[bench]]
 name = "device_fp_capture"
+harness = false
+
+[[bench]]
+name = "device_fp_pipeline"
 harness = false
 
 [features]
