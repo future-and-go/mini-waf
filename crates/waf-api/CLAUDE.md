@@ -29,6 +29,7 @@ src/
 ├── crowdsec.rs               # CrowdSec config endpoints
 ├── stats.rs                  # Stats endpoints
 ├── notifications.rs          # Notification config + dispatch
+├── panel_api.rs              # Admin panel config endpoints
 ├── security.rs               # Security-related endpoints
 ├── health.rs                 # Health checks
 ├── websocket.rs              # WS upgrade + streaming
