@@ -113,11 +113,7 @@ fn alpn_pair(alpn: Option<&str>) -> String {
 
 const fn sanitize_alpn_byte(b: u8) -> char {
     // Spec: non-alphanumeric bytes are replaced with '9'.
-    if b.is_ascii_alphanumeric() {
-        b as char
-    } else {
-        '9'
-    }
+    if b.is_ascii_alphanumeric() { b as char } else { '9' }
 }
 
 fn hex_csv(values: &[u16]) -> String {

@@ -18,15 +18,12 @@ use tokio::runtime::Runtime;
 use waf_engine::device_fp::capture::ConnCtx;
 use waf_engine::device_fp::config::DeviceFpConfig;
 use waf_engine::device_fp::providers::{H2AnomalyProvider, UaBlocklistProvider};
-use waf_engine::device_fp::{
-    DeviceFpDetector, IdentityStore, MemoryIdentityStore, NoopAggregator, ProviderRegistry,
-};
+use waf_engine::device_fp::{DeviceFpDetector, IdentityStore, MemoryIdentityStore, NoopAggregator, ProviderRegistry};
 
 fn build_detector() -> DeviceFpDetector {
     let mut registry = ProviderRegistry::new();
     registry.register(Box::new(
-        UaBlocklistProvider::new(vec!["(?i)curl-impersonate".to_string()])
-            .expect("compile blocklist"),
+        UaBlocklistProvider::new(vec!["(?i)curl-impersonate".to_string()]).expect("compile blocklist"),
     ));
     registry.register(Box::new(H2AnomalyProvider::new(false)));
     let store: Arc<dyn IdentityStore> = Arc::new(MemoryIdentityStore::default());
@@ -50,9 +47,7 @@ fn bench_pipeline_warm(c: &mut Criterion) {
 
     c.bench_function("device_fp_full_pipeline_warm", |b| {
         b.to_async(&rt).iter(|| async {
-            let id = detector
-                .process(black_box(peer), black_box(ua), black_box(&conn))
-                .await;
+            let id = detector.process(black_box(peer), black_box(ua), black_box(&conn)).await;
             black_box(id);
         });
     });

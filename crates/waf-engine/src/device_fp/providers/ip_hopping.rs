@@ -55,22 +55,26 @@ mod tests {
     #[test]
     fn no_signal_below_threshold() {
         let p = IpHoppingProvider::new(3);
-        let obs = Observation { distinct_ips_in_window: 3, ..Observation::default() };
+        let obs = Observation {
+            distinct_ips_in_window: 3,
+            ..Observation::default()
+        };
         let conn = ConnCtx::new();
         let key = FpKey::default();
-        let ctx = DeviceCtx::new(IpAddr::V4(Ipv4Addr::LOCALHOST), "ua", &conn, &key)
-            .with_observation(&obs);
+        let ctx = DeviceCtx::new(IpAddr::V4(Ipv4Addr::LOCALHOST), "ua", &conn, &key).with_observation(&obs);
         assert!(p.evaluate(&ctx).is_empty());
     }
 
     #[test]
     fn signal_above_threshold() {
         let p = IpHoppingProvider::new(3);
-        let obs = Observation { distinct_ips_in_window: 5, ..Observation::default() };
+        let obs = Observation {
+            distinct_ips_in_window: 5,
+            ..Observation::default()
+        };
         let conn = ConnCtx::new();
         let key = FpKey::default();
-        let ctx = DeviceCtx::new(IpAddr::V4(Ipv4Addr::LOCALHOST), "ua", &conn, &key)
-            .with_observation(&obs);
+        let ctx = DeviceCtx::new(IpAddr::V4(Ipv4Addr::LOCALHOST), "ua", &conn, &key).with_observation(&obs);
         let s = p.evaluate(&ctx);
         assert_eq!(s.len(), 1);
         assert!(matches!(s[0], Signal::IpHopping { distinct_ips: 5 }));

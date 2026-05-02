@@ -30,11 +30,7 @@ pub struct DeviceFpReloader {
 
 impl DeviceFpReloader {
     /// Spawn a watcher that swaps `swap` whenever `path` changes.
-    pub fn start(
-        path: PathBuf,
-        swap: Arc<ArcSwap<DeviceFpConfig>>,
-        debounce_ms: u64,
-    ) -> Result<Self> {
+    pub fn start(path: PathBuf, swap: Arc<ArcSwap<DeviceFpConfig>>, debounce_ms: u64) -> Result<Self> {
         let watcher = spawn_watch(path, debounce_ms, move |p| reload(p, &swap))?;
         Ok(Self { _watcher: watcher })
     }
@@ -78,15 +74,10 @@ where
         loop {
             match rx.recv_timeout(debounce) {
                 Ok(Ok(event)) => {
-                    let touches = event
-                        .paths
-                        .iter()
-                        .any(|p| p.file_name() == Some(file_name.as_os_str()));
+                    let touches = event.paths.iter().any(|p| p.file_name() == Some(file_name.as_os_str()));
                     let relevant = matches!(
                         event.kind,
-                        notify::EventKind::Create(_)
-                            | notify::EventKind::Modify(_)
-                            | notify::EventKind::Remove(_)
+                        notify::EventKind::Create(_) | notify::EventKind::Modify(_) | notify::EventKind::Remove(_)
                     );
                     if touches && relevant {
                         last_event = Instant::now();
@@ -126,8 +117,7 @@ mod tests {
         let swap = Arc::new(ArcSwap::from(cfg));
         assert!(!swap.load().enabled);
 
-        let _r =
-            DeviceFpReloader::start(path.clone(), Arc::clone(&swap), 50).expect("start watcher");
+        let _r = DeviceFpReloader::start(path.clone(), Arc::clone(&swap), 50).expect("start watcher");
 
         // Write, then poll for swap. Notify needs ~ms; debounce is 50ms.
         let mut f = std::fs::File::create(&path).unwrap();

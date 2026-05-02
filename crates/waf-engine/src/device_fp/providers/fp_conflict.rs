@@ -56,22 +56,27 @@ mod tests {
     fn eval(p: &FpConflictProvider, obs: &Observation) -> Vec<Signal> {
         let conn = ConnCtx::new();
         let key = FpKey::default();
-        let ctx = DeviceCtx::new(IpAddr::V4(Ipv4Addr::LOCALHOST), "ua", &conn, &key)
-            .with_observation(obs);
+        let ctx = DeviceCtx::new(IpAddr::V4(Ipv4Addr::LOCALHOST), "ua", &conn, &key).with_observation(obs);
         p.evaluate(&ctx)
     }
 
     #[test]
     fn no_signal_below_threshold() {
         let p = FpConflictProvider::new(2);
-        let obs = Observation { distinct_uas_in_window: 2, ..Observation::default() };
+        let obs = Observation {
+            distinct_uas_in_window: 2,
+            ..Observation::default()
+        };
         assert!(eval(&p, &obs).is_empty());
     }
 
     #[test]
     fn signal_above_threshold() {
         let p = FpConflictProvider::new(2);
-        let obs = Observation { distinct_uas_in_window: 5, ..Observation::default() };
+        let obs = Observation {
+            distinct_uas_in_window: 5,
+            ..Observation::default()
+        };
         let s = eval(&p, &obs);
         assert_eq!(s.len(), 1);
         assert!(matches!(s[0], Signal::FpConflict { distinct_uas: 5 }));

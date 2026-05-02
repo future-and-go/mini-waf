@@ -20,8 +20,7 @@ async fn process_emits_h2_anomaly_and_ua_blocklist_into_aggregator() {
     // Build a registry with the two providers exercised by this test.
     let mut registry = ProviderRegistry::new();
     registry.register(Box::new(
-        UaBlocklistProvider::new(vec!["(?i)curl-impersonate".to_string()])
-            .expect("compile blocklist"),
+        UaBlocklistProvider::new(vec!["(?i)curl-impersonate".to_string()]).expect("compile blocklist"),
     ));
     registry.register(Box::new(H2AnomalyProvider::new(false)));
 
@@ -38,11 +37,7 @@ async fn process_emits_h2_anomaly_and_ua_blocklist_into_aggregator() {
         .with_aggregator(aggregator.clone());
 
     let id = detector
-        .process(
-            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)),
-            "curl-impersonate/1.0",
-            &conn,
-        )
+        .process(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)), "curl-impersonate/1.0", &conn)
         .await;
 
     assert!(
@@ -72,7 +67,5 @@ async fn process_with_default_aggregator_does_not_panic() {
     // Smoke-check the no-aggregator default path used at boot.
     let detector = DeviceFpDetector::empty();
     let conn = ConnCtx::new();
-    let _ = detector
-        .process(IpAddr::V4(Ipv4Addr::LOCALHOST), "ua", &conn)
-        .await;
+    let _ = detector.process(IpAddr::V4(Ipv4Addr::LOCALHOST), "ua", &conn).await;
 }

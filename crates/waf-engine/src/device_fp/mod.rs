@@ -30,20 +30,16 @@ use arc_swap::ArcSwap;
 
 pub use aggregator::{AggregatorSubmission, LoggingAggregator, NoopAggregator, RiskAggregator};
 pub use config::{
-    CaptureConfig, DeviceFpConfig, DeviceFpDocument, H2CaptureConfig, ProviderConfig,
-    RedisStoreConfig, StoreBackend, StoreConfig, TlsCaptureConfig,
+    CaptureConfig, DeviceFpConfig, DeviceFpDocument, H2CaptureConfig, ProviderConfig, RedisStoreConfig, StoreBackend,
+    StoreConfig, TlsCaptureConfig,
 };
-pub use fingerprint::{
-    FingerprintProvider, FingerprintRegistry, H2AkamaiFingerprint, Ja3Fingerprint, Ja4Fingerprint,
-};
+pub use fingerprint::{FingerprintProvider, FingerprintRegistry, H2AkamaiFingerprint, Ja3Fingerprint, Ja4Fingerprint};
 pub use identity::{IdentityStore, MemoryIdentityStore};
 pub use providers::SignalProvider;
 pub use registry::ProviderRegistry;
 pub use reload::{DEFAULT_DEBOUNCE_MS, DeviceFpReloader};
 pub use signal::{H2AnomalyReason, Signal};
-pub use types::{
-    DeviceCtx, DeviceDerived, DeviceIdentity, FingerprintValue, FpKey, IdentityRecord, Observation,
-};
+pub use types::{DeviceCtx, DeviceDerived, DeviceIdentity, FingerprintValue, FpKey, IdentityRecord, Observation};
 
 use crate::device_fp::capture::ConnCtx;
 
@@ -216,9 +212,7 @@ mod tests {
         let agg = Arc::new(LoggingAggregator::new(4));
         let det = DeviceFpDetector::empty().with_aggregator(agg.clone());
         let conn = ConnCtx::new();
-        let id = det
-            .process(IpAddr::V4(Ipv4Addr::LOCALHOST), "ua", &conn)
-            .await;
+        let id = det.process(IpAddr::V4(Ipv4Addr::LOCALHOST), "ua", &conn).await;
         assert!(id.signals.is_empty());
         assert_eq!(agg.len(), 1);
     }

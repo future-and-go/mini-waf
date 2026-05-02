@@ -52,7 +52,11 @@ impl SignalProvider for UaEntropyProvider {
 
 /// Shannon entropy over the byte histogram, scaled by 100 and clamped to u16.
 /// Returns 0 for empty input.
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn shannon_entropy_x100(bytes: &[u8]) -> u16 {
     if bytes.is_empty() {
         return 0;

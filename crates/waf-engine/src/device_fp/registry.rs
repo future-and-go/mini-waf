@@ -7,8 +7,7 @@
 
 use crate::device_fp::config::{DeviceFpConfig, ProviderConfig};
 use crate::device_fp::providers::{
-    FpConflictProvider, H2AnomalyProvider, IpHoppingProvider, SignalProvider, UaBlocklistProvider,
-    UaEntropyProvider,
+    FpConflictProvider, H2AnomalyProvider, IpHoppingProvider, SignalProvider, UaBlocklistProvider, UaEntropyProvider,
 };
 use crate::device_fp::signal::Signal;
 use crate::device_fp::types::DeviceCtx;
@@ -118,14 +117,8 @@ mod tests {
     #[test]
     fn dispatch_concatenates_in_order() {
         let mut reg = ProviderRegistry::new();
-        reg.register(Box::new(Fixed(
-            "a",
-            vec![Signal::IpHopping { distinct_ips: 4 }],
-        )));
-        reg.register(Box::new(Fixed(
-            "b",
-            vec![Signal::LowEntropyUa { entropy_x100: 100 }],
-        )));
+        reg.register(Box::new(Fixed("a", vec![Signal::IpHopping { distinct_ips: 4 }])));
+        reg.register(Box::new(Fixed("b", vec![Signal::LowEntropyUa { entropy_x100: 100 }])));
         let conn = ConnCtx::new();
         let key = FpKey {
             ja3: None,

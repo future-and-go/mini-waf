@@ -135,8 +135,7 @@ impl MemoryIdentityStore {
 
     #[must_use]
     pub fn with_config(cfg: MemoryConfig) -> Self {
-        let cpus = std::thread::available_parallelism()
-            .map_or(8, std::num::NonZeroUsize::get);
+        let cpus = std::thread::available_parallelism().map_or(8, std::num::NonZeroUsize::get);
         let shards = (cpus * 2).next_power_of_two();
         Self {
             map: DashMap::with_capacity_and_hasher_and_shard_amount(0, RandomState::new(), shards),
@@ -186,13 +185,7 @@ impl MemoryIdentityStore {
 
 #[async_trait]
 impl IdentityStore for MemoryIdentityStore {
-    async fn observe(
-        &self,
-        key: &FpKey,
-        ip: IpAddr,
-        ua: &str,
-        ts: i64,
-    ) -> anyhow::Result<Observation> {
+    async fn observe(&self, key: &FpKey, ip: IpAddr, ua: &str, ts: i64) -> anyhow::Result<Observation> {
         let ua_hash = self.hash_ua(ua);
         let cutoff = ts.saturating_sub(i64::from(self.cfg.window_secs));
 

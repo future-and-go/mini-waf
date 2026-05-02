@@ -118,15 +118,29 @@ impl RedisIdentityStore {
     /// enough for sharding (the source `FpKey` is the source of truth).
     fn key_hash(&self, key: &FpKey) -> String {
         let mut s = String::new();
-        if let Some(v) = &key.ja3 { s.push_str(v.as_str()); s.push('|'); }
-        if let Some(v) = &key.ja4 { s.push_str(v.as_str()); s.push('|'); }
-        if let Some(v) = &key.h2_akamai { s.push_str(v.as_str()); }
+        if let Some(v) = &key.ja3 {
+            s.push_str(v.as_str());
+            s.push('|');
+        }
+        if let Some(v) = &key.ja4 {
+            s.push_str(v.as_str());
+            s.push('|');
+        }
+        if let Some(v) = &key.h2_akamai {
+            s.push_str(v.as_str());
+        }
         format!("{:016x}", self.hasher.hash_one(&s))
     }
 
-    fn k_meta(&self, h: &str) -> String { format!("{}fp:{h}", self.cfg.key_prefix) }
-    fn k_ips(&self, h: &str) -> String { format!("{}ips:{h}", self.cfg.key_prefix) }
-    fn k_uas(&self, h: &str) -> String { format!("{}uas:{h}", self.cfg.key_prefix) }
+    fn k_meta(&self, h: &str) -> String {
+        format!("{}fp:{h}", self.cfg.key_prefix)
+    }
+    fn k_ips(&self, h: &str) -> String {
+        format!("{}ips:{h}", self.cfg.key_prefix)
+    }
+    fn k_uas(&self, h: &str) -> String {
+        format!("{}uas:{h}", self.cfg.key_prefix)
+    }
 
     fn record_ok(&self) {
         self.consecutive_fails.store(0, Ordering::Relaxed);
@@ -153,13 +167,7 @@ fn clamp_u16(n: i64) -> u16 {
 
 #[async_trait]
 impl IdentityStore for RedisIdentityStore {
-    async fn observe(
-        &self,
-        key: &FpKey,
-        ip: IpAddr,
-        ua: &str,
-        ts: i64,
-    ) -> anyhow::Result<Observation> {
+    async fn observe(&self, key: &FpKey, ip: IpAddr, ua: &str, ts: i64) -> anyhow::Result<Observation> {
         let h = self.key_hash(key);
         let cutoff = ts.saturating_sub(i64::from(self.cfg.window_secs));
         let ua_hash = format!("{:016x}", self.hasher.hash_one(ua));
@@ -177,7 +185,11 @@ impl IdentityStore for RedisIdentityStore {
             .arg(ua_hash)
             .arg(i64::from(self.cfg.ttl_secs));
 
-        let res = timeout(self.cfg.op_timeout, invocation.invoke_async::<(i64, i64, i64, i64)>(&mut conn)).await;
+        let res = timeout(
+            self.cfg.op_timeout,
+            invocation.invoke_async::<(i64, i64, i64, i64)>(&mut conn),
+        )
+        .await;
         match res {
             Ok(Ok((ip_n, ua_n, first_seen, last_seen))) => {
                 self.record_ok();
@@ -188,8 +200,14 @@ impl IdentityStore for RedisIdentityStore {
                     last_seen_unix: last_seen,
                 })
             }
-            Ok(Err(e)) => { self.record_fail(); Err(anyhow!(e).context("device_fp redis: observe")) }
-            Err(_) => { self.record_fail(); Err(anyhow!("device_fp redis: observe timeout {:?}", self.cfg.op_timeout)) }
+            Ok(Err(e)) => {
+                self.record_fail();
+                Err(anyhow!(e).context("device_fp redis: observe"))
+            }
+            Err(_) => {
+                self.record_fail();
+                Err(anyhow!("device_fp redis: observe timeout {:?}", self.cfg.op_timeout))
+            }
         }
     }
 
@@ -221,9 +239,18 @@ impl IdentityStore for RedisIdentityStore {
                     distinct_uas: clamp_u16(ua_n),
                 }))
             }
-            Ok(Ok(_)) => { self.record_ok(); Ok(None) }
-            Ok(Err(e)) => { self.record_fail(); Err(anyhow!(e).context("device_fp redis: lookup")) }
-            Err(_) => { self.record_fail(); Err(anyhow!("device_fp redis: lookup timeout {:?}", self.cfg.op_timeout)) }
+            Ok(Ok(_)) => {
+                self.record_ok();
+                Ok(None)
+            }
+            Ok(Err(e)) => {
+                self.record_fail();
+                Err(anyhow!(e).context("device_fp redis: lookup"))
+            }
+            Err(_) => {
+                self.record_fail();
+                Err(anyhow!("device_fp redis: lookup timeout {:?}", self.cfg.op_timeout))
+            }
         }
     }
 
@@ -249,9 +276,18 @@ impl IdentityStore for RedisIdentityStore {
             Ok::<_, redis::RedisError>(keys)
         };
         let keys = match timeout(self.cfg.op_timeout * 4, scan_fut).await {
-            Ok(Ok(k)) => { self.record_ok(); k }
-            Ok(Err(e)) => { self.record_fail(); return Err(anyhow!(e).context("device_fp redis: purge scan")); }
-            Err(_) => { self.record_fail(); return Err(anyhow!("device_fp redis: purge scan timeout")); }
+            Ok(Ok(k)) => {
+                self.record_ok();
+                k
+            }
+            Ok(Err(e)) => {
+                self.record_fail();
+                return Err(anyhow!(e).context("device_fp redis: purge scan"));
+            }
+            Err(_) => {
+                self.record_fail();
+                return Err(anyhow!("device_fp redis: purge scan timeout"));
+            }
         };
 
         let mut conn = self.conn.clone();
@@ -266,7 +302,9 @@ impl IdentityStore for RedisIdentityStore {
                 Ok(Err(_)) | Err(_) => continue,
             };
             let Some(ls) = last_seen else { continue };
-            if ls >= cutoff { continue; }
+            if ls >= cutoff {
+                continue;
+            }
             // Strip the `<prefix>fp:` head to reconstruct sibling keys.
             let suffix = &fp_key[prefix_len..];
             let ips = format!("{}ips:{suffix}", self.cfg.key_prefix);

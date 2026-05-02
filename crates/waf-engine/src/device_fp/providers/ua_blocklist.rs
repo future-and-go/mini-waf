@@ -76,9 +76,9 @@ impl SignalProvider for UaBlocklistProvider {
             .matches(ctx.user_agent)
             .into_iter()
             .filter_map(|i| {
-                self.patterns.get(i).map(|p| Signal::UaBlocklisted {
-                    pattern: p.clone(),
-                })
+                self.patterns
+                    .get(i)
+                    .map(|p| Signal::UaBlocklisted { pattern: p.clone() })
             })
             .collect()
     }

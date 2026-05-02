@@ -135,8 +135,7 @@ pub fn parse_client_hello(raw: &[u8]) -> Result<ParsedClientHello, ParseError> {
 
     let ext_total = r.u16()? as usize;
     let ext_slice = r.take(ext_total)?;
-    let (extensions, supported_groups, signature_algorithms, alpn, sni) =
-        parse_extensions(ext_slice)?;
+    let (extensions, supported_groups, signature_algorithms, alpn, sni) = parse_extensions(ext_slice)?;
 
     Ok(ParsedClientHello {
         legacy_version,
@@ -337,7 +336,7 @@ mod tests {
             &[0x1301, 0x1302, 0x1303],
             &[
                 ext_sni("example.com"),
-                ext_u16_list(10, &[29, 23, 24]),    // supported_groups
+                ext_u16_list(10, &[29, 23, 24]),     // supported_groups
                 ext_u16_list(13, &[0x0403, 0x0804]), // signature_algorithms
                 ext_alpn(&["h2", "http/1.1"]),
             ],

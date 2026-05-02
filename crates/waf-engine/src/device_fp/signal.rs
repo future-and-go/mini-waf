@@ -61,13 +61,7 @@ mod tests {
         assert_eq!(Signal::FpConflict { distinct_uas: 2 }.name(), "fp_conflict");
         assert_eq!(Signal::IpHopping { distinct_ips: 5 }.name(), "ip_hopping");
         assert_eq!(Signal::LowEntropyUa { entropy_x100: 100 }.name(), "low_entropy_ua");
-        assert_eq!(
-            Signal::UaBlocklisted {
-                pattern: "bot".into()
-            }
-            .name(),
-            "ua_blocklisted"
-        );
+        assert_eq!(Signal::UaBlocklisted { pattern: "bot".into() }.name(), "ua_blocklisted");
         assert_eq!(
             Signal::H2Anomaly {
                 reason: H2AnomalyReason::BadSettings

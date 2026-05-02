@@ -14,13 +14,7 @@ use crate::device_fp::types::{FpKey, IdentityRecord, Observation};
 pub trait IdentityStore: Send + Sync {
     /// Record a new observation of `key` from `ip` + `ua` at `ts` (unix
     /// seconds). Returns the post-insert aggregate state.
-    async fn observe(
-        &self,
-        key: &FpKey,
-        ip: IpAddr,
-        ua: &str,
-        ts: i64,
-    ) -> anyhow::Result<Observation>;
+    async fn observe(&self, key: &FpKey, ip: IpAddr, ua: &str, ts: i64) -> anyhow::Result<Observation>;
 
     /// Look up the persisted record for `key`. `Ok(None)` when the key
     /// was never seen or has expired out.

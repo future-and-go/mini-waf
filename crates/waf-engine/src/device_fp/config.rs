@@ -196,8 +196,7 @@ impl DeviceFpConfig {
     /// responsibility (the loader watches the parent dir, so a symlink
     /// pointing outside is observable). Reject if path doesn't exist.
     pub fn from_path(path: &Path) -> anyhow::Result<Arc<Self>> {
-        let raw = std::fs::read_to_string(path)
-            .with_context(|| format!("device_fp: read {}", path.display()))?;
+        let raw = std::fs::read_to_string(path).with_context(|| format!("device_fp: read {}", path.display()))?;
         Self::from_yaml_str(&raw)
     }
 
