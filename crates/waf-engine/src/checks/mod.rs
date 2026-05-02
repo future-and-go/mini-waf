@@ -9,6 +9,7 @@ pub mod header_injection;
 pub mod owasp;
 pub mod rce;
 pub mod scanner;
+pub(crate) mod scanner_state;
 pub mod sensitive;
 pub mod sql_injection;
 pub(crate) mod sql_injection_patterns;
