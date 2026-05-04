@@ -10,6 +10,7 @@ pub mod sensitive;
 pub mod sql_injection;
 pub(crate) mod sql_injection_patterns;
 pub(crate) mod sql_injection_scanners;
+pub mod tx_velocity;
 pub mod xss;
 
 pub use anti_hotlink::AntiHotlinkCheck;
