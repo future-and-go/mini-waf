@@ -16,9 +16,25 @@ use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use tokio::task::JoinHandle;
 
+use super::classifier::Classifier;
 use super::config::TxVelocityConfig;
-use super::session_key::SessionKey;
+use super::session_key::{SessionIdent, SessionKey};
 use super::{EndpointRole, Event};
+use crate::device_fp::aggregator::{NoopAggregator, RiskAggregator};
+use crate::device_fp::signal::Signal;
+use crate::device_fp::types::FpKey;
+
+/// `SessionKey` → `FpKey` for risk-aggregator submissions.
+///
+/// Cookie-based identities have no fingerprint payload, so they collapse to
+/// the default (empty) `FpKey`. Aggregators that care about per-session
+/// dedupe should look at signal payloads, not the key, in that case.
+fn fp_key_for_submission(key: &SessionKey) -> FpKey {
+    match &key.ident {
+        SessionIdent::Fingerprint(fp) => fp.clone(),
+        SessionIdent::Cookie(_) => FpKey::default(),
+    }
+}
 
 /// Sample ring depth. Matches the figure in the plan; classifiers in
 /// Phase 2 will read whole snapshots, never the live struct.
@@ -89,23 +105,45 @@ pub struct ActorTxSnapshot {
     pub last_signal_ms: u64,
 }
 
-/// Per-actor transaction store. Holds an `ArcSwap<TxVelocityConfig>` so
-/// the janitor reads the current TTL on every tick (hot-reload friendly).
+/// Per-actor transaction store.
+///
+/// Holds an `ArcSwap<TxVelocityConfig>` so the janitor reads the current TTL
+/// on every tick (hot-reload friendly). `classifiers` and `aggregator` are
+/// immutable for the store's lifetime — hot-reloads change thresholds via
+/// `cfg`, never the strategy list.
 pub struct TxStore {
     actors: DashMap<SessionKey, ActorTx>,
     anchor: Instant,
     cfg: Arc<ArcSwap<TxVelocityConfig>>,
+    classifiers: Vec<Arc<dyn Classifier>>,
+    aggregator: Arc<dyn RiskAggregator>,
 }
 
 impl TxStore {
+    /// Build a store with no classifiers and a no-op aggregator. Existing
+    /// Phase 1 callers (and unit tests) keep working unchanged; production
+    /// wire-up uses [`Self::with_pipeline`] at startup.
     #[must_use]
     pub fn new(cfg: Arc<ArcSwap<TxVelocityConfig>>) -> Self {
+        Self::with_pipeline(cfg, Vec::new(), Arc::new(NoopAggregator))
+    }
+
+    /// Full constructor — classifier list + aggregator are fixed for the
+    /// store's lifetime.
+    #[must_use]
+    pub fn with_pipeline(
+        cfg: Arc<ArcSwap<TxVelocityConfig>>,
+        classifiers: Vec<Arc<dyn Classifier>>,
+        aggregator: Arc<dyn RiskAggregator>,
+    ) -> Self {
         let cpus = std::thread::available_parallelism().map_or(8, std::num::NonZeroUsize::get);
         let shards = (cpus * 2).next_power_of_two();
         Self {
             actors: DashMap::with_capacity_and_shard_amount(0, shards),
             anchor: Instant::now(),
             cfg,
+            classifiers,
+            aggregator,
         }
     }
 
@@ -116,18 +154,65 @@ impl TxStore {
         u64::try_from(self.anchor.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
-    /// Append an event for `key`. Skips when `role == None` (path didn't
-    /// match any rule) — caller is free to call unconditionally.
-    pub fn record(&self, key: SessionKey, role: EndpointRole, ok: bool) {
+    /// Append an event for `key` and run the classifier pipeline. Skips
+    /// when `role == None` (path didn't match any rule) — caller is free to
+    /// call unconditionally.
+    ///
+    /// Classifier evaluation is gated by per-actor cooldown
+    /// (`cfg.signal_cooldown_ms`); within the cooldown window the
+    /// recorder still appends the event but skips evaluation entirely.
+    /// Submission to the aggregator is fire-and-forget (`tokio::spawn`).
+    pub fn record(&self, key: &SessionKey, role: EndpointRole, ok: bool) {
         if matches!(role, EndpointRole::None) {
             return;
         }
+        let now_ms = self.now_ms();
         let event = Event {
             role,
-            ts_ms: self.now_ms(),
+            ts_ms: now_ms,
             ok,
         };
-        self.actors.entry(key).or_default().record(event);
+
+        // Append + capture cooldown marker without holding the shard guard
+        // across classifier evaluation (deadlock-safe).
+        let last_signal_ms = {
+            let mut entry = self.actors.entry(key.clone()).or_default();
+            entry.record(event);
+            entry.last_signal_ms
+        };
+
+        if self.classifiers.is_empty() {
+            return;
+        }
+        let cfg = self.cfg.load_full();
+        if !cfg.enabled {
+            return;
+        }
+        if now_ms.saturating_sub(last_signal_ms) < cfg.signal_cooldown_ms && last_signal_ms != 0 {
+            return;
+        }
+
+        let Some(snap) = self.snapshot(key) else {
+            return; // Race with purge: drop and move on.
+        };
+        let signals: Vec<Signal> = self
+            .classifiers
+            .iter()
+            .filter_map(|c| c.evaluate(&snap, now_ms, &cfg))
+            .collect();
+        if signals.is_empty() {
+            return;
+        }
+
+        // `0` is the sentinel for "never fired" — bump to 1 if record-time
+        // happened to hit the anchor instant exactly.
+        self.mark_signal(key, now_ms.max(1));
+
+        let fp_key = fp_key_for_submission(key);
+        let aggregator = Arc::clone(&self.aggregator);
+        tokio::spawn(async move {
+            aggregator.submit(&fp_key, &signals).await;
+        });
     }
 
     /// Clone the bounded actor state. Returns `None` if unseen.
@@ -214,7 +299,7 @@ mod tests {
     #[test]
     fn record_skips_role_none() {
         let s = TxStore::new(cfg(600));
-        s.record(key("a"), EndpointRole::None, true);
+        s.record(&key("a"), EndpointRole::None, true);
         assert!(s.snapshot(&key("a")).is_none());
         assert!(s.is_empty());
     }
@@ -223,7 +308,7 @@ mod tests {
     fn record_appends_for_known_role() {
         let s = TxStore::new(cfg(600));
         let k = key("a");
-        s.record(k.clone(), EndpointRole::Login, true);
+        s.record(&k, EndpointRole::Login, true);
         let snap = s.snapshot(&k).expect("snapshot present");
         assert_eq!(snap.events.len(), 1);
         assert_eq!(snap.events.first().map(|e| e.role), Some(EndpointRole::Login));
@@ -234,7 +319,7 @@ mod tests {
         let s = TxStore::new(cfg(600));
         let k = key("b");
         for _ in 0..(WINDOW + 4) {
-            s.record(k.clone(), EndpointRole::Deposit, true);
+            s.record(&k, EndpointRole::Deposit, true);
         }
         let snap = s.snapshot(&k).expect("snapshot");
         assert_eq!(snap.events.len(), WINDOW);
@@ -244,7 +329,7 @@ mod tests {
     fn mark_signal_updates_cooldown_marker() {
         let s = TxStore::new(cfg(600));
         let k = key("c");
-        s.record(k.clone(), EndpointRole::Otp, true);
+        s.record(&k, EndpointRole::Otp, true);
         s.mark_signal(&k, 12_345);
         let snap = s.snapshot(&k).expect("snapshot");
         assert_eq!(snap.last_signal_ms, 12_345);
@@ -255,7 +340,7 @@ mod tests {
         // ttl=0 ⇒ next tick treats every actor as expired.
         let s = TxStore::new(cfg(0));
         let k = key("d");
-        s.record(k.clone(), EndpointRole::Login, true);
+        s.record(&k, EndpointRole::Login, true);
         std::thread::sleep(Duration::from_millis(2));
         let purged = s.purge_expired();
         assert_eq!(purged, 1);
@@ -266,7 +351,7 @@ mod tests {
     fn purge_keeps_fresh_actors() {
         let s = TxStore::new(cfg(3_600));
         let k = key("e");
-        s.record(k.clone(), EndpointRole::Login, true);
+        s.record(&k, EndpointRole::Login, true);
         let purged = s.purge_expired();
         assert_eq!(purged, 0);
         assert!(s.snapshot(&k).is_some());
@@ -281,7 +366,7 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 for i in 0..50u32 {
                     let k = key(&format!("t{task_id}-k{}", i % 5));
-                    s.record(k, EndpointRole::Withdrawal, true);
+                    s.record(&k, EndpointRole::Withdrawal, true);
                 }
             }));
         }
@@ -297,5 +382,140 @@ mod tests {
         let h = Arc::clone(&s).spawn_janitor(Duration::from_millis(10));
         tokio::time::sleep(Duration::from_millis(50)).await;
         h.abort();
+    }
+
+    // ─── Phase 2 pipeline tests ─────────────────────────────────────────────
+
+    use crate::checks::tx_velocity::classifiers::default_classifiers;
+    use crate::checks::tx_velocity::config::{ClassifierConfigs, SequenceCfg, VelocityCfg};
+    use crate::device_fp::aggregator::LoggingAggregator;
+    use crate::device_fp::types::{FingerprintValue, FpKey};
+
+    fn cfg_pipeline(cooldown_ms: u64) -> Arc<ArcSwap<TxVelocityConfig>> {
+        Arc::new(ArcSwap::from_pointee(TxVelocityConfig {
+            enabled: true,
+            signal_cooldown_ms: cooldown_ms,
+            classifiers: ClassifierConfigs {
+                sequence: Some(SequenceCfg { min_human_ms: 1_500 }),
+                withdrawal_velocity: Some(VelocityCfg {
+                    max_count: 2,
+                    window_ms: 60_000,
+                }),
+                limit_change_velocity: None,
+            },
+            ..TxVelocityConfig::default()
+        }))
+    }
+
+    /// Spin briefly so the fire-and-forget `tokio::spawn` task lands.
+    async fn flush() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    #[tokio::test]
+    async fn pipeline_emits_signal_on_velocity_breach() {
+        let cfg = cfg_pipeline(0);
+        let agg = LoggingAggregator::new(8);
+        let store = TxStore::with_pipeline(
+            cfg,
+            default_classifiers(&TxVelocityConfig::default()),
+            Arc::new(agg.clone()),
+        );
+
+        let k = key("velocity");
+        for _ in 0..3 {
+            store.record(&k, EndpointRole::Withdrawal, true);
+        }
+        flush().await;
+
+        let snap = agg.snapshot();
+        assert!(
+            snap.iter().any(|s| matches!(
+                s.signals.first(),
+                Some(Signal::WithdrawalVelocity { count, .. }) if *count >= 3
+            )),
+            "expected WithdrawalVelocity in {snap:?}",
+        );
+    }
+
+    #[tokio::test]
+    async fn pipeline_cooldown_suppresses_duplicate_signals() {
+        // Long cooldown — two breaching record() bursts should produce one
+        // submission, not two.
+        let cfg = cfg_pipeline(60_000);
+        let agg = LoggingAggregator::new(8);
+        let store = TxStore::with_pipeline(
+            cfg,
+            default_classifiers(&TxVelocityConfig::default()),
+            Arc::new(agg.clone()),
+        );
+
+        let k = key("cooldown");
+        for _ in 0..3 {
+            store.record(&k, EndpointRole::Withdrawal, true);
+        }
+        flush().await;
+        // Trigger again: still over threshold, but cooldown should mute it.
+        for _ in 0..3 {
+            store.record(&k, EndpointRole::Withdrawal, true);
+        }
+        flush().await;
+
+        assert_eq!(agg.snapshot().len(), 1, "cooldown failed: {:?}", agg.snapshot());
+    }
+
+    #[tokio::test]
+    async fn pipeline_disabled_skips_classifier_submission() {
+        let cfg = Arc::new(ArcSwap::from_pointee(TxVelocityConfig {
+            enabled: false,
+            classifiers: ClassifierConfigs {
+                withdrawal_velocity: Some(VelocityCfg {
+                    max_count: 0,
+                    window_ms: 60_000,
+                }),
+                ..ClassifierConfigs::default()
+            },
+            ..TxVelocityConfig::default()
+        }));
+        let agg = LoggingAggregator::new(8);
+        let store = TxStore::with_pipeline(
+            cfg,
+            default_classifiers(&TxVelocityConfig::default()),
+            Arc::new(agg.clone()),
+        );
+
+        store.record(&key("disabled"), EndpointRole::Withdrawal, true);
+        flush().await;
+        assert!(agg.snapshot().is_empty());
+    }
+
+    #[tokio::test]
+    async fn pipeline_uses_fingerprint_when_session_is_fp() {
+        let cfg = cfg_pipeline(0);
+        let agg = LoggingAggregator::new(8);
+        let store = TxStore::with_pipeline(
+            cfg,
+            default_classifiers(&TxVelocityConfig::default()),
+            Arc::new(agg.clone()),
+        );
+
+        let fp = FpKey {
+            ja3: Some(FingerprintValue::new("ja3-fp")),
+            ..FpKey::default()
+        };
+        let k = SessionKey {
+            host: "h".to_string(),
+            ident: SessionIdent::Fingerprint(fp.clone()),
+        };
+        for _ in 0..3 {
+            store.record(&k, EndpointRole::Withdrawal, true);
+        }
+        flush().await;
+
+        let snap = agg.snapshot();
+        assert!(
+            snap.iter().any(|s| s.key == fp),
+            "submission should carry fp key: {snap:?}"
+        );
     }
 }
