@@ -22,6 +22,20 @@ pub enum Signal {
     UaBlocklisted { pattern: String },
     /// HTTP/2 frame sequence deviates from known-good fingerprints.
     H2Anomaly { reason: H2AnomalyReason },
+    /// FR-RS-048 — N consecutive inter-request intervals below the burst
+    /// threshold (e.g. ≥5 intervals < 50 ms).
+    /// `count` is the actual run length observed at fire time.
+    BurstInterval { count: u16 },
+    /// FR-011 — coefficient of variation across the trailing inter-request
+    /// intervals fell below the configured cap, indicating bot-like cadence.
+    /// `cv_x1000` is the observed CV scaled ×1000.
+    Regularity { cv_x1000: u16 },
+    /// FR-RS-049 — actor hammered a single Critical-tier path with no
+    /// Referer chain. `samples` is the live sample count at fire time.
+    ZeroDepth { samples: u16 },
+    /// FR-011 — first request from an unidentified actor on a navigable
+    /// path arrived without a Referer header.
+    MissingReferer,
 }
 
 /// Reason an HTTP/2 anomaly was flagged. Closed enum so risk scorer can
@@ -48,6 +62,10 @@ impl Signal {
             Self::LowEntropyUa { .. } => "low_entropy_ua",
             Self::UaBlocklisted { .. } => "ua_blocklisted",
             Self::H2Anomaly { .. } => "h2_anomaly",
+            Self::BurstInterval { .. } => "burst_interval",
+            Self::Regularity { .. } => "regularity",
+            Self::ZeroDepth { .. } => "zero_depth",
+            Self::MissingReferer => "missing_referer",
         }
     }
 }
@@ -69,5 +87,9 @@ mod tests {
             .name(),
             "h2_anomaly"
         );
+        assert_eq!(Signal::BurstInterval { count: 5 }.name(), "burst_interval");
+        assert_eq!(Signal::Regularity { cv_x1000: 100 }.name(), "regularity");
+        assert_eq!(Signal::ZeroDepth { samples: 4 }.name(), "zero_depth");
+        assert_eq!(Signal::MissingReferer.name(), "missing_referer");
     }
 }

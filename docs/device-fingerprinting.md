@@ -160,7 +160,37 @@ follows the same per-key footprint plus protocol overhead.
   next access; Redis backend uses native `EXPIRE`.
 - No fingerprint, IP, or UA is forwarded to upstream services.
 
-## 9. Cross-References
+## 9. Behavioral Anomaly Providers (FR-011)
+
+FR-011 extends device fingerprinting with per-actor behavioral analysis. Signal providers in `crates/waf-engine/src/device_fp/behavior/providers/` detect:
+
+| Provider | Signal | Threshold | Weight | Notes |
+|---|---|---|---|---|
+| `burst_interval` | BurstInterval | ≥5 sub-50ms intervals | +15 | Rapid-fire requests |
+| `regularity` | Regularity | CV ≤ 0.15 + ≥6 samples | +10 | Predictable cadence |
+| `zero_depth` | ZeroDepth | ≥4 same-path Critical-tier no-Referer | +10 | Auto-requests, headless detection |
+| `missing_referer` | MissingReferer | First-seen actor, non-exempt nav | +5 | Direct access patterns |
+
+**Config** (in `configs/device-fp.yaml`):
+```yaml
+device_fp:
+  behavior:
+    enabled: true
+    ttl_secs: 600
+    providers:
+      - name: burst_interval
+        signal_weight: 15
+      - name: regularity
+        signal_weight: 10
+      - name: zero_depth
+        signal_weight: 10
+      - name: missing_referer
+        signal_weight: 5
+```
+
+Total risk-delta cap: ≤ 40 across all four. Hot-reload via `ArcSwap<BehaviorConfig>`. See `codebase-summary.md` §Behavioral Anomaly Detection for implementation details.
+
+## 10. Cross-References
 
 - Architecture: [`system-architecture.md`](system-architecture.md) §Device fingerprinting
 - Codebase map: [`codebase-summary.md`](codebase-summary.md) — `device_fp/` module

@@ -11,6 +11,7 @@
 //! - Phase 07 ◄ End-to-end `process()` + risk-aggregator wiring (THIS).
 
 pub mod aggregator;
+pub mod behavior;
 pub mod capture;
 pub mod config;
 pub mod fingerprint;

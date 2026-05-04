@@ -96,6 +96,12 @@ prx-waf/
 │   │   │   ├── registry.rs    # ProviderRegistry (Strategy + Registry pattern)
 │   │   │   ├── signal.rs      # Signal enum + H2AnomalyReason
 │   │   │   ├── types.rs       # DeviceCtx, DeviceIdentity, FpKey, Observation
+│   │   │   ├── behavior/      # FR-011 behavioral anomaly detection (per-actor sliding window)
+│   │   │   │   ├── state.rs       # ActorBehavior (16-slot ring, alloc-free, ≤1KB)
+│   │   │   │   ├── recorder.rs    # DashMap<FpKey, ActorBehavior>, monotonic ms, TTL janitor
+│   │   │   │   ├── config.rs      # BehaviorConfig (validated, hot-reload via ArcSwap)
+│   │   │   │   ├── path_classifier.rs  # entry/low-signal exempt-path matchers
+│   │   │   │   └── providers/     # burst_interval, regularity, zero_depth, missing_referer
 │   │   │   └── mod.rs         # DeviceFpDetector facade (process pipeline)
 │   │   │
 │   │   ├── security/
@@ -392,6 +398,10 @@ See [Tiered Protection Consumer Guide](./tiered-protection.md) for request class
 ### Rate Limiting (FR-004)
 
 Tiered rate limiting using token-bucket (burst) and sliding-window (sustained) algorithms. Two-store architecture: MemoryStore (DashMap-based, 100K entry cap, 10min idle eviction, background cleanup) for fast local checks; RedisStore (single Lua script roundtrip via `CHECK_AND_CONSUME_LUA`, 50ms op timeout) for distributed state. BreakerStore wraps both with circuit-breaker (default 5 consecutive failures) to fallback gracefully to memory. Dual-key strategy: `ip:<host>:<client_ip>` (IP-based, checked first for flood short-circuit) and `sess:<host>:<session_id>` (session/device-fingerprint, fallback if cookie present). Both keys must Allow for request to pass. Emitted rule IDs: RL-IP, RL-SESSION, RL-ERR. Hot-reload via `notify` watcher on `configs/rate-limit.yaml` (200ms debounce, ArcSwap snapshot, schema v1). Config per tier: `burst_capacity`, `burst_refill_per_s`, `window_secs`, `window_limit`. Fail-mode dispatch: tier policy Close (block) / Open (pass on failure). Module: `crates/waf-engine/src/checks/rate_limit/`, integrated as Check trait in phase 5. See scout findings and plans/260502-1957-fr004-rate-limiting/.
+
+### Behavioral Anomaly Detection (FR-011)
+
+Per-actor sliding-window cadence/path classifiers layered on top of FR-010 device fingerprinting. `Recorder` keys a `DashMap<FpKey, ActorBehavior>` (lock-free shards via `ahash::RandomState`); `ActorBehavior` is a 16-slot fixed-array ring (~600 B, alloc-free after first observation) plus an 8-slot distinct-paths set. Time is monotonic ms since the recorder's anchor `Instant` — wall-clock jumps cannot produce negative intervals. Four `SignalProvider` impls read snapshot clones (no shard-guard hold across eval): `burst_interval` (≥5 sub-50ms intervals → `Signal::BurstInterval`, +15), `regularity` (CV cadence ≤ 0.15, ≥6 samples → `Signal::Regularity`, +10), `zero_depth` (≥4 same-path hits with no Referer on Critical tier → `Signal::ZeroDepth`, +10), `missing_referer` (first-seen actor on non-exempt nav → `Signal::MissingReferer`, +5). Risk-delta cap aggregates to ≤ 40 across all four. Hot-reload via `ArcSwap<DeviceFpConfig>` (validated `BehaviorConfig` block in `configs/device-fp.yaml`, `deny_unknown_fields`). TTL janitor purges idle actors (default 600s). **v1 limitation: behavioral state is per-node**; a cluster-mode rotator dilutes the window — Redis-backed sharing is captured as follow-up (research §10 Q#2). Hot-path budget: < 5 µs (record + 4 evals); benched at ~840 ns p50 in release. Module: `crates/waf-engine/src/device_fp/behavior/`. Tests: `behavior_acceptance.rs` (4 ACs), `behavior_property.rs` (proptest invariants), `benches/behavior_eval.rs`.
 
 ### Access Lists (FR-008)
 
