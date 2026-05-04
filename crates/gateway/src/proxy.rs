@@ -23,6 +23,7 @@ use waf_common::HostConfig;
 use waf_engine::WafEngine;
 use waf_engine::access::AccessLists;
 use waf_engine::device_fp::DeviceFpDetector;
+use waf_engine::device_fp::behavior::Recorder as BehaviorRecorder;
 use waf_engine::device_fp::capture::ConnCtx as DeviceFpConnCtx;
 use waf_engine::relay::RelayDetector;
 
@@ -75,6 +76,9 @@ pub struct WafProxy {
     /// FR-010 phase-07: device fingerprint detector. Optional — `None` =
     /// no fingerprinting, no signal emission, no aggregator submit.
     pub device_fp_detector: Option<Arc<DeviceFpDetector>>,
+    /// FR-011 phase-02: behavioral anomaly recorder. Optional — `None` =
+    /// no per-actor sliding-window state, classifiers downstream see no data.
+    pub behavior_recorder: Option<Arc<BehaviorRecorder>>,
 }
 
 impl WafProxy {
@@ -95,7 +99,15 @@ impl WafProxy {
             access_lists: None,
             relay_detector: None,
             device_fp_detector: None,
+            behavior_recorder: None,
         }
+    }
+
+    /// Inject the FR-011 behavioral recorder. When set, every request with a
+    /// non-empty `FpKey` records one `Sample` after device-fp resolution.
+    /// When unset, the recording call is a no-op.
+    pub fn with_behavior_recorder(&mut self, recorder: Arc<BehaviorRecorder>) {
+        self.behavior_recorder = Some(recorder);
     }
 
     /// Inject the FR-010 device fingerprint detector. When set, every request
@@ -356,6 +368,19 @@ impl ProxyHttp for WafProxy {
         if request_ctx.path == "/health" && request_ctx.method == "GET" {
             let _ = session.respond_error(200).await;
             return Ok(true);
+        }
+
+        // FR-011 phase-02 — record one behavioral sample per request. Skipped
+        // when no fingerprint resolved (empty FpKey) or no recorder injected.
+        if let Some(device) = ctx.device_identity.as_ref() {
+            let had_referer = session.get_header("referer").is_some();
+            crate::behavior_record::record_sample(
+                self.behavior_recorder.as_ref(),
+                &device.key,
+                &request_ctx.path,
+                had_referer,
+                request_ctx.tier,
+            );
         }
 
         // FR-008 phase-05 — Phase-0 access-list gate runs *before* the WAF
