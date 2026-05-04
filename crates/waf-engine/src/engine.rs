@@ -18,7 +18,9 @@ use waf_common::config::SqliScanConfig;
 use crate::checks::rate_limit::reload::{DEFAULT_DEBOUNCE_MS as RL_DEBOUNCE_MS, RateLimitReloader};
 use crate::checks::rate_limit::store::MemoryStore as RlMemoryStore;
 use crate::checks::rate_limit::{RateLimitFileConfig, store::RateLimitStore};
-use crate::checks::tx_velocity::{TxStore, TxVelocityCheck, TxVelocityConfig, TxVelocityFileConfig, TxVelocityReloader};
+use crate::checks::tx_velocity::{
+    TxStore, TxVelocityCheck, TxVelocityConfig, TxVelocityFileConfig, TxVelocityReloader,
+};
 use crate::checks::{
     AntiHotlinkCheck, BotCheck, Check, DirTraversalCheck, GeoCheck, OWASPCheck, RateLimitCheck, RateLimitConfig,
     RceCheck, ScannerCheck, SensitiveCheck, SqlInjectionCheck, XssCheck,
@@ -129,7 +131,10 @@ impl WafEngine {
 
         let checkers: Vec<Box<dyn Check>> = vec![
             Box::new(RateLimitCheck::new(rl_store, Arc::clone(&rate_limit_cfg))),
-            Box::new(TxVelocityCheck::new(Arc::clone(&tx_velocity_cfg), Arc::clone(&tx_velocity_store))),
+            Box::new(TxVelocityCheck::new(
+                Arc::clone(&tx_velocity_cfg),
+                Arc::clone(&tx_velocity_store),
+            )),
             Box::new(ScannerCheck::new()),
             Box::new(BotCheck::new()),
             Box::new(XssCheck::new()),

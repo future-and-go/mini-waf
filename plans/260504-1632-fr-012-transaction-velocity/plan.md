@@ -10,7 +10,7 @@ blocks: []
 created: "2026-05-04T09:35:51.135Z"
 createdBy: "ck:plan"
 source: skill
-progress: "3/5 phases complete (60%)"
+progress: "4/5 phases complete (80%)"
 ---
 
 # FR-012 Transaction Velocity & Sequence
@@ -36,10 +36,10 @@ Mirrors `crates/waf-engine/src/device_fp/behavior/recorder.rs` (FR-011). DRY by 
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Config + Role Tagger + Recorder](./phase-01-config-role-tagger-recorder.md) | Pending |
+| 1 | [Config + Role Tagger + Recorder](./phase-01-config-role-tagger-recorder.md) | Complete |
 | 2 | [Classifiers + Signal Emission](./phase-02-classifiers-signal-emission.md) | Complete |
 | 3 | [Engine Integration](./phase-03-engine-integration.md) | Complete |
-| 4 | [Tests Unit + E2E](./phase-04-tests-unit-e2e.md) | Pending |
+| 4 | [Tests Unit + E2E](./phase-04-tests-unit-e2e.md) | Complete |
 | 5 | [Docs Update](./phase-05-docs-update.md) | Pending
 
 ## Key Decisions (locked)
