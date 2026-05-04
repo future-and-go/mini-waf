@@ -7,5 +7,11 @@
 //! the existing `ProviderRegistry::dispatch` fan-out covers them.
 
 pub mod burst_interval;
+pub mod missing_referer;
+pub mod regularity;
+pub mod zero_depth;
 
 pub use burst_interval::BurstIntervalProvider;
+pub use missing_referer::MissingRefererProvider;
+pub use regularity::RegularityProvider;
+pub use zero_depth::ZeroDepthProvider;

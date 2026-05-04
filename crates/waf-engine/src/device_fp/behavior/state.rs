@@ -17,11 +17,24 @@ pub const MAX_DISTINCT_PATHS: usize = 8;
 /// Single observed request. `ts_ms` is monotonic ms since the owning
 /// `Recorder`'s anchor `Instant` — NOT wall clock — so wall-clock jumps
 /// can't produce negative intervals.
+///
+/// `is_entry_path` / `is_low_signal_path` are pre-computed at record time
+/// so classifiers reading the snapshot don't need the original path string
+/// (which we deliberately drop after hashing). Both default false; when
+/// a path matches the configured exempt list the recorder sets them.
+// Four bools is the minimum to express the four orthogonal per-request
+// facts the classifiers ask about (referer, prefetch hint, entry path,
+// low-signal path). Folding them into a state machine would cost clarity
+// without saving bytes — alignment already pads the struct to 24 B.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Sample {
     pub ts_ms: u64,
     pub path_hash: u64,
     pub had_referer: bool,
+    pub had_prefetch_hint: bool,
+    pub is_entry_path: bool,
+    pub is_low_signal_path: bool,
     pub tier: Tier,
 }
 
@@ -112,6 +125,9 @@ mod tests {
             ts_ms: ts,
             path_hash: path,
             had_referer: false,
+            had_prefetch_hint: false,
+            is_entry_path: false,
+            is_low_signal_path: false,
             tier: Tier::CatchAll,
         }
     }

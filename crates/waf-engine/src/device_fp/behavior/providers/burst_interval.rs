@@ -111,7 +111,7 @@ mod tests {
     /// plan calls out (off-by-one, strict-less-than).
     fn record_n_with_interval(rec: &Arc<Recorder>, k: &FpKey, n: usize, interval_ms: u64) {
         for i in 0..n {
-            rec.record(k, "/p", false, Tier::CatchAll);
+            rec.record(k, "/p", false, false, Tier::CatchAll);
             // Skip the trailing sleep — it would only delay the test.
             if i + 1 < n {
                 std::thread::sleep(Duration::from_millis(interval_ms));
@@ -165,18 +165,18 @@ mod tests {
         let k = key("c");
 
         // First three samples 30 ms apart.
-        rec.record(&k, "/p", false, Tier::CatchAll);
+        rec.record(&k, "/p", false, false, Tier::CatchAll);
         std::thread::sleep(Duration::from_millis(30));
-        rec.record(&k, "/p", false, Tier::CatchAll);
+        rec.record(&k, "/p", false, false, Tier::CatchAll);
         std::thread::sleep(Duration::from_millis(30));
-        rec.record(&k, "/p", false, Tier::CatchAll);
+        rec.record(&k, "/p", false, false, Tier::CatchAll);
         // The break.
         std::thread::sleep(Duration::from_millis(200));
-        rec.record(&k, "/p", false, Tier::CatchAll);
+        rec.record(&k, "/p", false, false, Tier::CatchAll);
         std::thread::sleep(Duration::from_millis(30));
-        rec.record(&k, "/p", false, Tier::CatchAll);
+        rec.record(&k, "/p", false, false, Tier::CatchAll);
         std::thread::sleep(Duration::from_millis(30));
-        rec.record(&k, "/p", false, Tier::CatchAll);
+        rec.record(&k, "/p", false, false, Tier::CatchAll);
 
         let p = BurstIntervalProvider::new(Arc::clone(&rec), cfg);
         // Tail run = 3 (< min=5) → silent.
@@ -198,7 +198,7 @@ mod tests {
         let cfg = cfg_default();
         let rec = Arc::new(Recorder::new(Arc::clone(&cfg)));
         let k = key("e");
-        rec.record(&k, "/p", false, Tier::CatchAll);
+        rec.record(&k, "/p", false, false, Tier::CatchAll);
         let p = BurstIntervalProvider::new(Arc::clone(&rec), cfg);
         assert!(eval(&p, &k).is_empty());
     }

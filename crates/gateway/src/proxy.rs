@@ -372,13 +372,20 @@ impl ProxyHttp for WafProxy {
 
         // FR-011 phase-02 — record one behavioral sample per request. Skipped
         // when no fingerprint resolved (empty FpKey) or no recorder injected.
+        // Phase 4 also forwards `Sec-Purpose: prefetch` so the
+        // missing_referer classifier can exempt browser-prefetched navs.
         if let Some(device) = ctx.device_identity.as_ref() {
             let had_referer = session.get_header("referer").is_some();
+            let had_prefetch_hint = session
+                .get_header("sec-purpose")
+                .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+                .is_some_and(|v| v.split(',').any(|t| t.trim().eq_ignore_ascii_case("prefetch")));
             crate::behavior_record::record_sample(
                 self.behavior_recorder.as_ref(),
                 &device.key,
                 &request_ctx.path,
                 had_referer,
+                had_prefetch_hint,
                 request_ctx.tier,
             );
         }

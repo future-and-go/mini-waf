@@ -20,6 +20,7 @@ use tokio::task::JoinHandle;
 use waf_common::tier::Tier;
 
 use crate::device_fp::behavior::config::BehaviorConfig;
+use crate::device_fp::behavior::path_classifier;
 use crate::device_fp::behavior::state::{ActorBehavior, Sample};
 use crate::device_fp::types::FpKey;
 
@@ -61,11 +62,23 @@ impl Recorder {
 
     /// Insert a new behavioral sample for `key`. Hot path: <1 µs target,
     /// zero allocations after the actor's first observation.
-    pub fn record(&self, key: &FpKey, path: &str, had_referer: bool, tier: Tier) {
+    ///
+    /// Path-exemption flags are computed here (not at the call site) so
+    /// providers reading the snapshot don't need the original path string —
+    /// only the small flag bits travel into the ring.
+    pub fn record(&self, key: &FpKey, path: &str, had_referer: bool, had_prefetch_hint: bool, tier: Tier) {
+        let cfg = self.cfg.load();
         let sample = Sample {
             ts_ms: self.now_ms(),
             path_hash: self.path_hasher.hash_one(path),
             had_referer,
+            had_prefetch_hint,
+            is_entry_path: path_classifier::is_entry_path(path, &cfg.zero_depth.exempt_entry_paths),
+            is_low_signal_path: path_classifier::is_low_signal_path(
+                path,
+                &cfg.missing_referer.exempt_paths,
+                &cfg.missing_referer.exempt_prefixes,
+            ),
             tier,
         };
         self.actors
@@ -153,7 +166,7 @@ mod tests {
         let r = Recorder::new(cfg(600));
         let k = key("a");
         assert!(r.snapshot(&k).is_none());
-        r.record(&k, "/x", false, Tier::CatchAll);
+        r.record(&k, "/x", false, false, Tier::CatchAll);
         let snap = r.snapshot(&k).expect("snapshot present after record");
         assert_eq!(snap.samples.len(), 1);
         assert_eq!(snap.distinct_paths_len, 1);
@@ -164,7 +177,7 @@ mod tests {
         let r = Recorder::new(cfg(600));
         let k = key("b");
         for i in 0..20 {
-            r.record(&k, &format!("/p/{i}"), false, Tier::CatchAll);
+            r.record(&k, &format!("/p/{i}"), false, false, Tier::CatchAll);
         }
         let snap = r.snapshot(&k).expect("snapshot present");
         // Ring caps at 16 — oldest 4 dropped.
@@ -182,7 +195,7 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 for i in 0..100u32 {
                     let k = key(&format!("t{task_id}-k{}", i % 10));
-                    r.record(&k, "/x", false, Tier::CatchAll);
+                    r.record(&k, "/x", false, false, Tier::CatchAll);
                 }
             }));
         }
@@ -201,7 +214,7 @@ mod tests {
         // the recorded sample's ts_ms.
         let r = Recorder::new(cfg(0));
         let k = key("c");
-        r.record(&k, "/x", false, Tier::CatchAll);
+        r.record(&k, "/x", false, false, Tier::CatchAll);
         std::thread::sleep(Duration::from_millis(2));
         let purged = r.purge_expired();
         assert_eq!(purged, 1);
@@ -212,7 +225,7 @@ mod tests {
     fn purge_keeps_fresh_actors() {
         let r = Recorder::new(cfg(3600));
         let k = key("d");
-        r.record(&k, "/x", false, Tier::CatchAll);
+        r.record(&k, "/x", false, false, Tier::CatchAll);
         let purged = r.purge_expired();
         assert_eq!(purged, 0);
         assert!(r.snapshot(&k).is_some());
