@@ -7,6 +7,7 @@
 //! Mirrors `device_fp::behavior` (FR-011) and `checks::rate_limit`
 //! (FR-004) — DRY by design.
 
+pub mod check;
 pub mod classifier;
 pub mod classifiers;
 pub mod config;
@@ -14,6 +15,7 @@ pub mod recorder;
 pub mod role_tagger;
 pub mod session_key;
 
+pub use check::TxVelocityCheck;
 pub use classifier::Classifier;
 pub use classifiers::{
     LimitChangeBurstClassifier, SequenceTimingClassifier, WithdrawalVelocityClassifier, default_classifiers,
