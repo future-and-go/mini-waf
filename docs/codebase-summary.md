@@ -70,6 +70,14 @@ prx-waf/
 │   │   │   ├── sensitive.rs   # Sensitive data (Aho-Corasick)
 │   │   │   ├── hotlink.rs     # Anti-hotlink (Referer)
 │   │   │   ├── crowdsec.rs    # CrowdSec bouncer + AppSec
+│   │   │   ├── tx_velocity/   # FR-012 transaction velocity anomaly detection (role-tagging, sequence timing, withdrawal burst)
+│   │   │   │   ├── check.rs       # TxVelocityCheck (Check trait impl, signal-only)
+│   │   │   │   ├── recorder.rs    # DashMap<SessionKey, ActorTx>, event recording, cooldown logic
+│   │   │   │   ├── config.rs      # YAML schema + ArcSwap hot-reload
+│   │   │   │   ├── session_key.rs # Extract session identity (cookie preferred, then FpKey)
+│   │   │   │   ├── role_tagger.rs # Classify endpoint role from path (Login/OTP/Withdrawal/etc)
+│   │   │   │   ├── classifier.rs  # Classifier trait + registry
+│   │   │   │   └── classifiers/   # Individual risk detectors (sequence_timing, withdrawal_velocity, limit_change_burst)
 │   │   │   └── mod.rs         # Check trait + registry
 │   │   │
 │   │   ├── rules/
@@ -402,6 +410,10 @@ Tiered rate limiting using token-bucket (burst) and sliding-window (sustained) a
 ### Behavioral Anomaly Detection (FR-011)
 
 Per-actor sliding-window cadence/path classifiers layered on top of FR-010 device fingerprinting. `Recorder` keys a `DashMap<FpKey, ActorBehavior>` (lock-free shards via `ahash::RandomState`); `ActorBehavior` is a 16-slot fixed-array ring (~600 B, alloc-free after first observation) plus an 8-slot distinct-paths set. Time is monotonic ms since the recorder's anchor `Instant` — wall-clock jumps cannot produce negative intervals. Four `SignalProvider` impls read snapshot clones (no shard-guard hold across eval): `burst_interval` (≥5 sub-50ms intervals → `Signal::BurstInterval`, +15), `regularity` (CV cadence ≤ 0.15, ≥6 samples → `Signal::Regularity`, +10), `zero_depth` (≥4 same-path hits with no Referer on Critical tier → `Signal::ZeroDepth`, +10), `missing_referer` (first-seen actor on non-exempt nav → `Signal::MissingReferer`, +5). Risk-delta cap aggregates to ≤ 40 across all four. Hot-reload via `ArcSwap<DeviceFpConfig>` (validated `BehaviorConfig` block in `configs/device-fp.yaml`, `deny_unknown_fields`). TTL janitor purges idle actors (default 600s). **v1 limitation: behavioral state is per-node**; a cluster-mode rotator dilutes the window — Redis-backed sharing is captured as follow-up (research §10 Q#2). Hot-path budget: < 5 µs (record + 4 evals); benched at ~840 ns p50 in release. Module: `crates/waf-engine/src/device_fp/behavior/`. Tests: `behavior_acceptance.rs` (4 ACs), `behavior_property.rs` (proptest invariants), `benches/behavior_eval.rs`.
+
+### Transaction Velocity Anomaly Detection (FR-012)
+
+Session-level transaction velocity and sequence anomalies for fintech fraud detection. `TxVelocityCheck` (signal-only, never blocks) records inbound requests keyed by session identity (cookie preferred, falls back to device fingerprint via FR-010 FpKey). Three classifiers run independently on the recorded event stream: (1) `SequenceTimingClassifier` detects suspicious gaps in multi-factor sequences (e.g., login → OTP in >1500ms, or OTP without prior login), (2) `WithdrawalVelocityClassifier` flags ≥3 withdrawal events within a 60s window, (3) `LimitChangeBurstClassifier` detects rapid limit-increase requests. Each classifier emits risk signals to the aggregator with severity deltas (+5 to +15 points). State machine: `DashMap<SessionKey, ActorTx>` (lock-free shards) where `ActorTx` is a 32-slot ring buffer (~1.5 KB, alloc-free after init) indexed by role-tagged path. TTL janitor purges idle sessions (default 3600s). Hot-path budget: ~94 ns (record + classifier eval, sub-microsecond); benched with Criterion at full scale (50k sessions, linear scaling). Hot-reload via `ArcSwap<TxVelocityConfig>` (YAML schema: `configs/tx-velocity.yaml`, thresholds configurable per classifier). Engine integration: positioned after `RateLimitCheck`, before `ScannerCheck` in the 16-phase pipeline to shed flood traffic first. Module: `crates/waf-engine/src/checks/tx_velocity/`. Tests: 9 integration + 15 unit (role_tagger, recorder, classifiers), 6 Criterion benchmarks in `crates/waf-engine/benches/tx_velocity_bench.rs`.
 
 ### Access Lists (FR-008)
 

@@ -90,6 +90,10 @@ harness = false
 name = "behavior_eval"
 harness = false
 
+[[bench]]
+name = "tx_velocity_bench"
+harness = false
+
 [features]
 default = []
 # FR-010 device fingerprinting — Redis-backed identity store (phase-08).

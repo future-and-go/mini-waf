@@ -1,0 +1,53 @@
+# FR-012 transaction velocity — default configuration.
+# Schema v1. Empty / absent file ⇒ subsystem inert (enabled: false).
+# Hot-reload watches this file; bad edits log a warning and the previous
+# snapshot is retained (the gateway never crashes from a bad YAML edit).
+#
+# This module is SIGNAL-ONLY: it never blocks requests directly. Instead,
+# it emits risk signals to the aggregator when suspicious transaction
+# patterns are detected (fast login→OTP→deposit sequences, withdrawal
+# velocity spikes, limit-change bursts).
+
+tx_velocity:
+  schema_version: 1
+  enabled: false                   # flip to true to activate
+  session_cookie: SESSIONID        # cookie name for session identity
+
+  # Cooldown between emitting duplicate risk signals for the same session.
+  signal_cooldown_ms: 5000
+
+  # How long to retain transaction history per session.
+  session_ttl_secs: 600
+
+  # Janitor cleanup interval for expired sessions.
+  janitor_period_secs: 60
+
+  # Path → endpoint role mapping. First regex match wins.
+  # Roles: login, otp, deposit, withdrawal, limit_change
+  endpoint_roles:
+    - role: login
+      path: "^/api/v[0-9]+/auth/login$"
+    - role: otp
+      path: "^/api/v[0-9]+/auth/otp"
+    - role: deposit
+      path: "^/api/v[0-9]+/wallet/deposit$"
+    - role: withdrawal
+      path: "^/api/v[0-9]+/wallet/withdraw"
+    - role: limit_change
+      path: "^/api/v[0-9]+/account/limits"
+
+  # Classifier parameters. Omit a block to disable that classifier.
+  classifiers:
+    # Login → OTP → Deposit completed faster than min_human_ms triggers signal.
+    sequence:
+      min_human_ms: 1500
+
+    # More than max_count withdrawals within window_ms triggers signal.
+    withdrawal_velocity:
+      max_count: 5
+      window_ms: 60000
+
+    # More than max_count limit-change requests within window_ms triggers signal.
+    limit_change_velocity:
+      max_count: 3
+      window_ms: 300000

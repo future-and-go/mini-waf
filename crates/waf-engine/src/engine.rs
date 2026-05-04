@@ -16,8 +16,11 @@ use crate::checker::{RuleStore, check_ip_blacklist, check_ip_whitelist, check_ur
 use waf_common::config::SqliScanConfig;
 
 use crate::checks::rate_limit::reload::{DEFAULT_DEBOUNCE_MS as RL_DEBOUNCE_MS, RateLimitReloader};
-use crate::checks::rate_limit::store::MemoryStore;
+use crate::checks::rate_limit::store::MemoryStore as RlMemoryStore;
 use crate::checks::rate_limit::{RateLimitFileConfig, store::RateLimitStore};
+use crate::checks::tx_velocity::{
+    TxStore, TxVelocityCheck, TxVelocityConfig, TxVelocityFileConfig, TxVelocityReloader,
+};
 use crate::checks::{
     AntiHotlinkCheck, BotCheck, Check, DirTraversalCheck, GeoCheck, OWASPCheck, RateLimitCheck, RateLimitConfig,
     RceCheck, ScannerCheck, SensitiveCheck, SqlInjectionCheck, XssCheck,
@@ -87,6 +90,17 @@ pub struct WafEngine {
     /// File watcher for `configs/rate-limit.yaml`. Lazy via
     /// `start_rate_limit_watcher`; held to keep the OS watch alive.
     rate_limit_reloader: OnceLock<RateLimitReloader>,
+    // ── FR-012 tx-velocity (phase-03) ────────────────────────────────────────
+    /// Hot-reloadable tx-velocity config snapshot. Shared with the
+    /// `TxVelocityCheck` and `TxStore` registered in `checkers`.
+    tx_velocity_cfg: Arc<ArcSwap<TxVelocityConfig>>,
+    /// In-memory transaction store for velocity tracking.
+    /// Kept alive for `TxVelocityCheck`; not accessed directly after construction.
+    #[allow(dead_code)]
+    tx_velocity_store: Arc<TxStore>,
+    /// File watcher for `configs/tx-velocity.yaml`. Lazy via
+    /// `start_tx_velocity_watcher`; held to keep the OS watch alive.
+    tx_velocity_reloader: OnceLock<TxVelocityReloader>,
 }
 
 impl WafEngine {
@@ -106,10 +120,21 @@ impl WafEngine {
         // Build the Phase 5-11 checker pipeline (SQLi handled separately for hot-reload).
         // FR-004 RateLimitCheck runs first to shed flood traffic before expensive
         // pattern checks. Inert until `start_rate_limit_watcher` loads tier config.
-        let rl_store: Arc<dyn RateLimitStore> = Arc::new(MemoryStore::new());
+        let rl_store: Arc<dyn RateLimitStore> = Arc::new(RlMemoryStore::new());
         let rate_limit_cfg = Arc::new(ArcSwap::from(Arc::new(RateLimitConfig::default())));
+
+        // FR-012 TxVelocityCheck: signal-only, records events and emits risk signals.
+        // Runs after rate-limit (shed flood traffic first), before pattern checks.
+        // Inert until `start_tx_velocity_watcher` loads config.
+        let tx_velocity_cfg = Arc::new(ArcSwap::from(Arc::new(TxVelocityConfig::default())));
+        let tx_velocity_store = Arc::new(TxStore::new(Arc::clone(&tx_velocity_cfg)));
+
         let checkers: Vec<Box<dyn Check>> = vec![
             Box::new(RateLimitCheck::new(rl_store, Arc::clone(&rate_limit_cfg))),
+            Box::new(TxVelocityCheck::new(
+                Arc::clone(&tx_velocity_cfg),
+                Arc::clone(&tx_velocity_store),
+            )),
             Box::new(ScannerCheck::new()),
             Box::new(BotCheck::new()),
             Box::new(XssCheck::new()),
@@ -137,6 +162,9 @@ impl WafEngine {
             file_watcher: OnceLock::new(),
             rate_limit_cfg,
             rate_limit_reloader: OnceLock::new(),
+            tx_velocity_cfg,
+            tx_velocity_store,
+            tx_velocity_reloader: OnceLock::new(),
         }
     }
 
@@ -175,6 +203,36 @@ impl WafEngine {
     #[cfg(test)]
     pub fn replace_rate_limit_config(&self, cfg: Arc<RateLimitConfig>) {
         self.rate_limit_cfg.store(cfg);
+    }
+
+    /// Load `configs/tx-velocity.yaml` once and start the hot-reload watcher.
+    ///
+    /// Bad YAML or a missing file logs a warning and leaves the subsystem
+    /// inert (default disabled config) — the gateway never refuses to start
+    /// because of a tx-velocity config issue.
+    pub fn start_tx_velocity_watcher(&self, path: &Path) {
+        if self.tx_velocity_reloader.get().is_some() {
+            return;
+        }
+        match TxVelocityFileConfig::from_path(path) {
+            Ok(cfg) => {
+                self.tx_velocity_cfg.store(cfg);
+                info!(file = %path.display(), "tx_velocity: initial config loaded");
+            }
+            Err(e) => {
+                warn!(file = %path.display(), error = %e, "tx_velocity: initial load failed; using disabled config");
+            }
+        }
+        match TxVelocityReloader::start(path.to_path_buf(), Arc::clone(&self.tx_velocity_cfg), None) {
+            Ok(r) => {
+                let _ = self.tx_velocity_reloader.set(r);
+            }
+            Err(e) => warn!(
+                file = %path.display(),
+                error = %e,
+                "tx_velocity: hot-reload watcher failed to start; running without hot-reload"
+            ),
+        }
     }
 
     /// Set the root rules directory used by the file-based custom rule

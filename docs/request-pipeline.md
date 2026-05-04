@@ -148,8 +148,41 @@ Phase 5: CC/DDoS Rate Limiting (simplified view)
 ├─ Per-IP sliding-window counter
 ├─ Increment on each request
 ├─ If counter > threshold → BLOCK (or challenge)
-└─ else → continue to Phase 6
+└─ else → continue to Phase 5.5
+```
 
+### Phase 5.5: Transaction Velocity & Sequence (FR-012)
+
+```
+FR-012 Transaction Velocity: Cross-endpoint behavioral fraud detection
+├─ Position: AFTER rate-limit (shed flood traffic first), BEFORE scanner
+├─ RoleTagger: regex match request path → EndpointRole
+│  └─ {Login, Otp, Deposit, Withdrawal, LimitChange, None}
+│  └─ None → skip tracking, continue to Phase 6
+├─ SessionKey extract: cookie value (configurable name) ?? FpKey (FR-010 fallback)
+│  └─ neither present → skip tracking, continue to Phase 6
+├─ TxStore.record(key, Event {role, ts_ms, ok}):
+│  └─ DashMap<SessionKey, ActorTx>; ArrayVec<Event, 16> ring buffer
+│  └─ Drops oldest event on overflow
+├─ Cooldown gate: if now_ms - last_signal_ms < signal_cooldown_ms → skip
+├─ Run 3 classifiers (each <20µs):
+│  ├─ SequenceTimingClassifier: Login→OTP→Deposit faster than min_human_ms
+│  │  → Signal::TxSequenceTooFast { from, to, interval_ms }
+│  ├─ WithdrawalVelocityClassifier: ≥N withdrawals / window_ms
+│  │  → Signal::WithdrawalVelocity { count, window_sec }
+│  └─ LimitChangeBurstClassifier: ≥M limit-changes / window_ms
+│     → Signal::LimitChangeBurst { count, window_sec }
+├─ Submit signals to RiskAggregator (fire-and-forget via tokio::spawn)
+├─ Janitor (tokio interval): purges idle sessions (TTL session_ttl_secs)
+└─ Returns None — SIGNAL-ONLY, never blocks. Continue to Phase 6.
+
+Config: configs/tx-velocity.yaml (hot-reload via notify, ArcSwap, schema v1)
+Operator guide: docs/transaction-velocity.md
+```
+
+### Phase 6: Scanner Detection (and beyond)
+
+```
 Phase 6: Scanner Detection
 ├─ Check User-Agent against scanner fingerprints (Nmap, Nikto, etc.)
 ├─ Check request patterns (unusual paths, SQL comments in URI, etc.)
@@ -263,3 +296,5 @@ After Phase 16:
 - [tiered-protection.md](./tiered-protection.md) — Tier classifier consumer guide.
 - [access-lists.md](./access-lists.md) — Phase-0 access gate operator guide.
 - [custom-rules-syntax.md](./custom-rules-syntax.md) — Phase-12 custom rule schema.
+- [transaction-velocity.md](./transaction-velocity.md) — FR-012 Phase-5.5 cross-endpoint fraud detection.
+- [device-fingerprinting.md](./device-fingerprinting.md) — FR-010 device identity (SessionKey fallback for FR-012).

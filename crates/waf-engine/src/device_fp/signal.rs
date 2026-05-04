@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::checks::tx_velocity::EndpointRole;
+
 /// Per-detection signal emitted by a [`crate::device_fp::SignalProvider`].
 ///
 /// Variants carry minimal contextual data — the aggregator combines them
@@ -36,6 +38,19 @@ pub enum Signal {
     /// FR-011 — first request from an unidentified actor on a navigable
     /// path arrived without a Referer header.
     MissingReferer,
+    /// FR-012 — `from → to` transition completed faster than human-plausible
+    /// (e.g. Login→Otp in <1.5 s). `interval_ms` is the observed latency.
+    TxSequenceTooFast {
+        from: EndpointRole,
+        to: EndpointRole,
+        interval_ms: u64,
+    },
+    /// FR-012 — actor exceeded the withdrawal-velocity threshold inside the
+    /// configured rolling window.
+    WithdrawalVelocity { count: u32, window_sec: u32 },
+    /// FR-012 — actor exceeded the limit-change-burst threshold inside the
+    /// configured rolling window.
+    LimitChangeBurst { count: u32, window_sec: u32 },
 }
 
 /// Reason an HTTP/2 anomaly was flagged. Closed enum so risk scorer can
@@ -66,6 +81,9 @@ impl Signal {
             Self::Regularity { .. } => "regularity",
             Self::ZeroDepth { .. } => "zero_depth",
             Self::MissingReferer => "missing_referer",
+            Self::TxSequenceTooFast { .. } => "tx_sequence_too_fast",
+            Self::WithdrawalVelocity { .. } => "withdrawal_velocity",
+            Self::LimitChangeBurst { .. } => "limit_change_burst",
         }
     }
 }
