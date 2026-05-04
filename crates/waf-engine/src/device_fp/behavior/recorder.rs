@@ -136,6 +136,7 @@ mod tests {
         Arc::new(ArcSwap::from_pointee(BehaviorConfig {
             window_size: 16,
             actor_ttl_secs: ttl_secs,
+            ..BehaviorConfig::default()
         }))
     }
 

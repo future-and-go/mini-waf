@@ -22,6 +22,10 @@ pub enum Signal {
     UaBlocklisted { pattern: String },
     /// HTTP/2 frame sequence deviates from known-good fingerprints.
     H2Anomaly { reason: H2AnomalyReason },
+    /// FR-RS-048 — N consecutive inter-request intervals below the burst
+    /// threshold (e.g. ≥5 intervals < 50 ms).
+    /// `count` is the actual run length observed at fire time.
+    BurstInterval { count: u16 },
 }
 
 /// Reason an HTTP/2 anomaly was flagged. Closed enum so risk scorer can
@@ -48,6 +52,7 @@ impl Signal {
             Self::LowEntropyUa { .. } => "low_entropy_ua",
             Self::UaBlocklisted { .. } => "ua_blocklisted",
             Self::H2Anomaly { .. } => "h2_anomaly",
+            Self::BurstInterval { .. } => "burst_interval",
         }
     }
 }
@@ -69,5 +74,6 @@ mod tests {
             .name(),
             "h2_anomaly"
         );
+        assert_eq!(Signal::BurstInterval { count: 5 }.name(), "burst_interval");
     }
 }
