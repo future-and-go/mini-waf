@@ -1,7 +1,7 @@
 ---
 title: "FR-011 Behavioral Anomaly Detection"
 description: "Per-actor sliding-window behavior recorder + four classifiers (burst-interval, regularity, zero-depth, missing-referer) feeding the FR-010 risk aggregator."
-status: pending
+status: completed
 priority: P1
 branch: "main"
 tags: [fr-011, device-fp, behavior, risk-score]
@@ -35,8 +35,8 @@ Detect bot/automation patterns via behavioral signals: burst inter-request inter
 | 2 | [Pingora Wiring](./phase-02-pingora-wiring.md) | Completed |
 | 3 | [Burst Interval Classifier](./phase-03-burst-interval-classifier.md) | Completed |
 | 4 | [Remaining Classifiers](./phase-04-remaining-classifiers.md) | Completed |
-| 5 | [Config and Hot Reload](./phase-05-config-and-hot-reload.md) | Pending |
-| 6 | [Bench Coverage and Docs](./phase-06-bench-coverage-and-docs.md) | Pending |
+| 5 | [Config and Hot Reload](./phase-05-config-and-hot-reload.md) | Completed |
+| 6 | [Bench Coverage and Docs](./phase-06-bench-coverage-and-docs.md) | Completed |
 
 ## Dependencies
 

@@ -68,7 +68,7 @@ Per-request flow runs in five stages:
 1. **Pre-Phase — Relay Detection (FR-007)** — `RelayDetector::evaluate` validates XFF / X-Real-IP headers, detects trusted-proxy chains, classifies ASN (residential/datacenter/Tor), and emits signals. Output `ClientIdentity { real_ip, asn_class, asn, signals }` attached to `RequestCtx` for downstream rule predicates.
 2. **Pre-Phase — Tier Classification (FR-002)** — `TierPolicyRegistry::classify` resolves `(Tier, Arc<TierPolicy>)` from request parts; result attached to `RequestCtx` before any phase.
 3. **Phase-0 — Access Gate (FR-008)** — Host gate → IP blacklist → IP whitelist (per-tier `full_bypass`/`blacklist_only` dispatch). *Future*: IP evaluation to use `ClientIdentity.real_ip` instead of peer IP. Short-circuits before the rule pipeline.
-4. **Phases 1–16 — Rule Pipeline** — IP/URL filtering → **FR-004 rate limiting (IP + session keys, token-bucket + sliding-window per tier)** → behavior analysis → payload attacks (SQLi/XSS/RCE/traversal) → custom rules → OWASP CRS → sensitive data → anti-hotlink → CrowdSec. Final decision: Allow / Block / Challenge.
+4. **Phases 1–16 — Rule Pipeline** — IP/URL filtering → **FR-004 rate limiting (IP + session keys, token-bucket + sliding-window per tier)** → **FR-011 behavioral anomaly detection (per-actor cadence/path classifiers, 16-slot ring, signal cap ≤40)** → payload attacks (SQLi/XSS/RCE/traversal) → custom rules → OWASP CRS → sensitive data → anti-hotlink → CrowdSec. Final decision: Allow / Block / Challenge.
 5. **Post-Decision — FR-009 Smart Caching** — If Allow: tier gate (CRITICAL never cached) → Chain-of-Responsibility gates → store response in moka LRU if eligible (tags indexed for purge).
 6. **Risk Scoring (FR-025/026)** — Per-signal `risk_score_delta` from YAML; aggregated risk score influences final decision (future integration).
 
@@ -157,8 +157,11 @@ flowchart LR
     FP --> Key((FpKey))
     Key --> Store[(IdentityStore: Memory or Redis)]
     Store --> Obs[Observation]
-    Key --> Disp[ProviderRegistry.dispatch]
+    Key --> Disp[ProviderRegistry.dispatch<br/>FR-010: ip_hopping, ua_entropy, etc.]
     Obs --> Disp
+    Key --> BRec[BehaviorRecorder<br/>FR-011: burst_interval, regularity, etc.]
+    BRec --> BProv[Behavior Providers<br/>zero_depth, missing_referer]
+    BProv --> Disp
     Disp --> Sigs[Vec&lt;Signal&gt;]
     Sigs --> Agg[RiskAggregator.submit -- FR-025 plug-in]
     Sigs --> Out[DeviceIdentity to gateway ctx]

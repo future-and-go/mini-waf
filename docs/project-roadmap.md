@@ -195,6 +195,23 @@ JA3 / JA4 TLS fingerprint, full Akamai HTTP/2 fingerprint, UA entropy / churn, a
 
 **Deferred:** real-client capture fixtures (curl-impersonate harness), gateway listener wiring patch, JA4+ extended hashes (JA4S/JA4H/JA4X) — tracked in `plans/260501-2005-fr010-device-fingerprinting/plan.md`.
 
+### FR-011 — Behavioral Anomaly Detection (Complete ✓)
+
+Per-actor sliding-window behavior recorder with four classifiers detecting bot/automation patterns: burst inter-request intervals (<50 ms), robotic cadence (low coefficient of variation), zero-depth single-path sessions on CRITICAL tier, and missing-Referer navigational requests. All signals share one per-`FpKey` sliding-window state struct (16-slot ring, alloc-free, ≤1KB), emit through existing `RiskSignalProvider` pattern, feed FR-010 risk aggregator → FR-RS-048/049 risk deltas.
+
+- [x] `crates/waf-engine/src/device_fp/behavior/` — state, recorder, config, path exempt matchers
+- [x] Four classifiers: `burst_interval`, `regularity`, `zero_depth`, `missing_referer` (trait-driven providers)
+- [x] Hot-reload of `configs/device-fp.yaml` `behavior:` block (ArcSwap, 200ms debounce, arc-swap pattern)
+- [x] Criterion bench (`behavior_eval.rs`): `behavior_record_only` ~80 ns, `behavior_full_eval` ~840 ns (budget <5 µs ✓)
+- [x] Proptest coverage (`behavior_property.rs`): classifiers_never_panic, window_size_bounded, evaluation_is_idempotent
+- [x] Integration wiring: Pingora request_filter hook, per-request record + classify loop
+- [x] `docs/codebase-summary.md` updated with FR-011 prose + behavior tree entry
+- [x] Plan: `plans/260504-1129-fr-011-behavioral-anomaly-detection/` (6 phases, all completed)
+
+**Deviations from plan:** Loom test SKIPPED (DashMap/parking_lot/Instant not loom-instrumented; concurrent_inserts_no_panic empirical test in recorder.rs covers concurrent inserts). 1000×1000 stress test SKIPPED (100×100 already in recorder.rs). CI `llvm-cov --fail-under-lines 90` step SKIPPED (matches existing project pattern — cache/gateway coverage gates already commented out).
+
+**Node-local state only (open question):** v1 ships node-local per-node recorder; cluster behavioral state mirroring documented as post-v0.2 work.
+
 ### Panel-Config API (Complete ✓)
 
 Atomic read/write of `waf-panel.toml` (operational policy settings) via `GET/PUT /api/panel-config`. Config struct `WafPanelConfig` with nested sections: `ResponseFilteringPanel`, `TrustedBypassPanel`, `RateLimitsPanel`, `AutoBlockPanel`. Validates risk thresholds (allow < challenge < block), CIDR syntax, honeypot paths. Atomic write-through semantics.

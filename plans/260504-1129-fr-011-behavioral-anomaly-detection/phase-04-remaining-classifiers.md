@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Remaining Classifiers"
-status: complete
+status: completed
 priority: P1
 effort: "1d"
 dependencies: [3]
