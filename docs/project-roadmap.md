@@ -212,6 +212,27 @@ Per-actor sliding-window behavior recorder with four classifiers detecting bot/a
 
 **Node-local state only (open question):** v1 ships node-local per-node recorder; cluster behavioral state mirroring documented as post-v0.2 work.
 
+### FR-012 — Transaction Velocity & Sequence Detection (Complete ✓)
+
+Cross-endpoint behavioral fraud detection: rapid login→OTP→deposit sequences, withdrawal velocity bursts, and limit-change storms. Signal-only — emits to the shared `RiskAggregator` (FR-025 plug-in point), never blocks directly. Per-session state via `DashMap<SessionKey, ActorTx>` (lock-free shards) with 16-slot `ArrayVec` ring buffer (~256 B per session, alloc-free after first record). Identity priority: session cookie (configurable name) → device-fp `FpKey` fallback. Three classifiers run on every record under one `Arc<dyn Classifier>` registry: `SequenceTiming` (Login→OTP→Deposit < `min_human_ms`), `WithdrawalVelocity` (≥N withdrawals / window), `LimitChangeBurst` (analogous). Per-session cooldown (`signal_cooldown_ms`, default 5s) suppresses duplicate signal flooding. TTL janitor purges idle sessions (`session_ttl_secs`, default 600s). Hot-reload via `ArcSwap<TxVelocityConfig>` driven by `notify` watcher on `configs/tx-velocity.yaml` — bad YAML retains last-good snapshot with `tracing::warn!`. Engine integration: positioned after `RateLimitCheck`, before `ScannerCheck` (Phase 5.5) — flood traffic shed first, but tx-velocity records before pattern checks pollute state.
+
+- [x] Module: `crates/waf-engine/src/checks/tx_velocity/` (config, role_tagger, recorder, classifier, classifiers/, session_key, check)
+- [x] `Signal` enum extended with 3 variants: `TxSequenceTooFast`, `WithdrawalVelocity`, `LimitChangeBurst`
+- [x] Engine wiring: `WafEngine::start_tx_velocity_watcher` + check registered in checker chain
+- [x] YAML schema v1 + hot-reload (`configs/tx-velocity.yaml`)
+- [x] Unit tests: 31 (role_tagger 4, recorder 12, classifiers 15)
+- [x] Integration tests: 9 (`crates/waf-engine/tests/tx_velocity_integration.rs`)
+- [x] Criterion benches: 6 (`crates/waf-engine/benches/tx_velocity_bench.rs`) — p99 < 100µs verified
+- [x] Operator guide: [`docs/transaction-velocity.md`](./transaction-velocity.md)
+- [x] Pipeline doc updated: Phase 5.5 in [`docs/request-pipeline.md`](./request-pipeline.md)
+- [x] Plan: [`plans/260504-1632-fr-012-transaction-velocity/`](../plans/260504-1632-fr-012-transaction-velocity/) (5 phases, all complete)
+
+**Performance:** ~94 ns hot path (record + 3 classifier evals); ~1.5 µs cold path (new session alloc); constant scaling 1k → 50k sessions. Bench results: [`bench-results.md`](../plans/260504-1632-fr-012-transaction-velocity/bench-results.md).
+
+**Node-local state (open question):** Same per-node limitation as FR-011. Cluster session affinity assumed at the LB; Redis-backed `TxStore` deferred to post-v0.2.
+
+**`ok=true` always (deferred):** Phase 3 records on request entry only. Failed-login detection requires a response-side hook — captured as follow-up work.
+
 ### Panel-Config API (Complete ✓)
 
 Atomic read/write of `waf-panel.toml` (operational policy settings) via `GET/PUT /api/panel-config`. Config struct `WafPanelConfig` with nested sections: `ResponseFilteringPanel`, `TrustedBypassPanel`, `RateLimitsPanel`, `AutoBlockPanel`. Validates risk thresholds (allow < challenge < block), CIDR syntax, honeypot paths. Atomic write-through semantics.

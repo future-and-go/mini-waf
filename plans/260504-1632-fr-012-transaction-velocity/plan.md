@@ -1,16 +1,17 @@
 ---
 title: "FR-012 Transaction Velocity & Sequence"
 description: "Cross-endpoint behavioral detection: Login→OTP→Deposit timing, withdrawal velocity, rapid limit-change. Mirrors FR-011 BehaviorRecorder pattern."
-status: in-progress
+status: complete
 priority: P1
 branch: "main"
 tags: [security, fr-012, behavioral, hackathon]
 blockedBy: []
 blocks: []
 created: "2026-05-04T09:35:51.135Z"
+completedAt: "2026-05-04"
 createdBy: "ck:plan"
 source: skill
-progress: "4/5 phases complete (80%)"
+progress: "5/5 phases complete (100%)"
 ---
 
 # FR-012 Transaction Velocity & Sequence
@@ -40,7 +41,7 @@ Mirrors `crates/waf-engine/src/device_fp/behavior/recorder.rs` (FR-011). DRY by 
 | 2 | [Classifiers + Signal Emission](./phase-02-classifiers-signal-emission.md) | Complete |
 | 3 | [Engine Integration](./phase-03-engine-integration.md) | Complete |
 | 4 | [Tests Unit + E2E](./phase-04-tests-unit-e2e.md) | Complete |
-| 5 | [Docs Update](./phase-05-docs-update.md) | Pending
+| 5 | [Docs Update](./phase-05-docs-update.md) | Complete |
 
 ## Key Decisions (locked)
 

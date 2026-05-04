@@ -11,6 +11,29 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **FR-012 transaction velocity & sequence detection** — Cross-endpoint
+  behavioral fraud detection that flags rapid `login → OTP → deposit`
+  sequences, withdrawal velocity bursts, and limit-change storms. Signal-only:
+  emits `Signal::TxSequenceTooFast` / `WithdrawalVelocity` / `LimitChangeBurst`
+  to the shared `RiskAggregator` (FR-025 plug-in point), never blocks directly.
+  Per-session state in `DashMap<SessionKey, ActorTx>` with a 16-slot `ArrayVec`
+  ring (~256 B/session, alloc-free after first record); identity priority is
+  session cookie → device-fp `FpKey` fallback. Three classifiers run under one
+  registry: `SequenceTiming` (Login→OTP / OTP→Deposit / Login→Deposit faster
+  than `min_human_ms`), `WithdrawalVelocityClassifier`, and
+  `LimitChangeBurstClassifier`. Per-session cooldown (`signal_cooldown_ms`)
+  suppresses signal flooding; TTL janitor purges idle sessions. Hot-reload via
+  `ArcSwap<TxVelocityConfig>` driven by a `notify` watcher on
+  `configs/tx-velocity.yaml` — bad YAML retains the previous snapshot with
+  `tracing::warn!`. Pipeline position: Phase 5.5, after `RateLimitCheck` and
+  before `ScannerCheck`. Bench (Apple Silicon, Criterion): ~94 ns hot path,
+  ~1.5 µs cold-path session creation, constant scaling to 50k sessions.
+  Operator guide: [`docs/transaction-velocity.md`](docs/transaction-velocity.md).
+  Module: `crates/waf-engine/src/checks/tx_velocity/`. Plan:
+  `plans/260504-1632-fr-012-transaction-velocity/`. Deferred follow-ups:
+  response-side `ok` enrichment (failed-login signal), Redis-backed `TxStore`
+  for cluster-shared state.
+
 - **FR-008 access lists** — Phase-0 gate ahead of the 16-phase rule pipeline:
   per-tier IP whitelist (Patricia trie via `ip_network_table`), IP blacklist,
   and per-tier Host (FQDN) whitelist. Runs Host gate → IP blacklist →

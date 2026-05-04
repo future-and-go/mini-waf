@@ -1,10 +1,11 @@
 ---
 phase: 5
 title: "Docs Update"
-status: pending
+status: complete
 priority: P2
 effort: "0.5d"
 dependencies: [4]
+completedAt: "2026-05-04"
 ---
 
 # Phase 5: Docs Update
@@ -50,12 +51,12 @@ Update project docs and write journal entry. Reflect FR-012 in roadmap, codebase
 
 ## Todo List
 
-- [ ] Write `transaction-velocity.md` (≤800 LOC)
-- [ ] Update request-pipeline diagram + prose
-- [ ] Add module to codebase-summary
-- [ ] Mark FR-012 complete in roadmap
-- [ ] CHANGELOG entry
-- [ ] Run `/ck:journal` for completion entry
+- [x] Write `transaction-velocity.md` (≤800 LOC)
+- [x] Update request-pipeline diagram + prose
+- [x] Add module to codebase-summary (already present from prior phase)
+- [x] Mark FR-012 complete in roadmap
+- [x] CHANGELOG entry
+- [x] Journal completion entry written
 
 ## Success Criteria
 
