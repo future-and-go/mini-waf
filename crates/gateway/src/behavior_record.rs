@@ -37,11 +37,11 @@ mod tests {
     use super::*;
     use arc_swap::ArcSwap;
     use waf_engine::device_fp::FingerprintValue;
-    use waf_engine::device_fp::behavior::BehaviorConfig;
+    use waf_engine::device_fp::config::DeviceFpConfig;
 
     fn make_recorder() -> Arc<Recorder> {
         Arc::new(Recorder::new(Arc::new(
-            ArcSwap::from_pointee(BehaviorConfig::default()),
+            ArcSwap::from_pointee(DeviceFpConfig::default()),
         )))
     }
 

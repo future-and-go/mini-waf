@@ -16,9 +16,10 @@ use arc_swap::ArcSwap;
 use waf_common::tier::Tier;
 use waf_engine::device_fp::SignalProvider;
 use waf_engine::device_fp::behavior::{
-    BehaviorConfig, BurstIntervalProvider, MissingRefererProvider, Recorder, RegularityProvider, ZeroDepthProvider,
+    BurstIntervalProvider, MissingRefererProvider, Recorder, RegularityProvider, ZeroDepthProvider,
 };
 use waf_engine::device_fp::capture::ConnCtx;
+use waf_engine::device_fp::config::DeviceFpConfig;
 use waf_engine::device_fp::signal::Signal;
 use waf_engine::device_fp::types::{DeviceCtx, FingerprintValue, FpKey};
 
@@ -35,7 +36,7 @@ fn six_records_at_thirty_ms_emit_burst_interval() {
     // Plan §Success Criteria: 6 reqs @ 30 ms apart → +15 risk delta observed.
     // We assert the *signal* (the provider's contract); the +15 risk delta is
     // the operator-configured weight that the FR-025 aggregator applies.
-    let cfg = Arc::new(ArcSwap::from_pointee(BehaviorConfig::default()));
+    let cfg = Arc::new(ArcSwap::from_pointee(DeviceFpConfig::default()));
     let rec = Arc::new(Recorder::new(Arc::clone(&cfg)));
     let provider = BurstIntervalProvider::new(Arc::clone(&rec), Arc::clone(&cfg));
     let k = key("acceptance");
@@ -73,7 +74,7 @@ fn six_records_at_thirty_ms_emit_burst_interval() {
 #[test]
 fn three_records_silent_below_threshold_count() {
     // Negative control: 3 samples → 2 intervals < min_consecutive=5 → silent.
-    let cfg = Arc::new(ArcSwap::from_pointee(BehaviorConfig::default()));
+    let cfg = Arc::new(ArcSwap::from_pointee(DeviceFpConfig::default()));
     let rec = Arc::new(Recorder::new(Arc::clone(&cfg)));
     let provider = BurstIntervalProvider::new(Arc::clone(&rec), Arc::clone(&cfg));
     let k = key("negative");
@@ -93,7 +94,7 @@ fn three_records_silent_below_threshold_count() {
 /// AC2: 8 reqs same path on `/admin/critical`, no Referer → `ZeroDepth` fires.
 #[test]
 fn ac2_eight_critical_no_referer_emits_zero_depth() {
-    let cfg = Arc::new(ArcSwap::from_pointee(BehaviorConfig::default()));
+    let cfg = Arc::new(ArcSwap::from_pointee(DeviceFpConfig::default()));
     let rec = Arc::new(Recorder::new(Arc::clone(&cfg)));
     let provider = ZeroDepthProvider::new(Arc::clone(&rec), Arc::clone(&cfg));
     let k = key("ac2");
@@ -114,7 +115,7 @@ fn ac2_eight_critical_no_referer_emits_zero_depth() {
 /// → `MissingReferer` fires.
 #[test]
 fn ac3_first_unreferenced_nav_emits_missing_referer() {
-    let cfg = Arc::new(ArcSwap::from_pointee(BehaviorConfig::default()));
+    let cfg = Arc::new(ArcSwap::from_pointee(DeviceFpConfig::default()));
     let rec = Arc::new(Recorder::new(Arc::clone(&cfg)));
     let provider = MissingRefererProvider::new(Arc::clone(&rec), Arc::clone(&cfg));
     let k = key("ac3");
@@ -133,7 +134,7 @@ fn ac3_first_unreferenced_nav_emits_missing_referer() {
 /// every Phase-3/4 classifier stays silent.
 #[test]
 fn ac4_human_trace_emits_no_signals() {
-    let cfg = Arc::new(ArcSwap::from_pointee(BehaviorConfig::default()));
+    let cfg = Arc::new(ArcSwap::from_pointee(DeviceFpConfig::default()));
     let rec = Arc::new(Recorder::new(Arc::clone(&cfg)));
     let burst = BurstIntervalProvider::new(Arc::clone(&rec), Arc::clone(&cfg));
     let regularity = RegularityProvider::new(Arc::clone(&rec), Arc::clone(&cfg));

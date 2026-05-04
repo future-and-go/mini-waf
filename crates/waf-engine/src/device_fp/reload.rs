@@ -135,6 +135,54 @@ mod tests {
         panic!("hot reload never observed enabled=true");
     }
 
+    /// Plan §Success Criteria: live behavior edits propagate within 500 ms,
+    /// and a malformed YAML write keeps the last-good snapshot.
+    #[test]
+    fn behavior_block_hot_reload_propagates_then_survives_malformed() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("device-fp.yaml");
+        std::fs::write(
+            &path,
+            "device_fp:\n  behavior:\n    burst_interval:\n      risk_delta: 15\n",
+        )
+        .unwrap();
+
+        let cfg = DeviceFpConfig::from_path(&path).unwrap();
+        let swap = Arc::new(ArcSwap::from(cfg));
+        assert_eq!(swap.load().behavior.burst_interval.risk_delta, 15);
+
+        let _r = DeviceFpReloader::start(path.clone(), Arc::clone(&swap), 50).unwrap();
+
+        // Flip 15 → 25 on disk; reload must observe within 500 ms (200 ms
+        // debounce headroom + parse + swap).
+        std::fs::write(
+            &path,
+            "device_fp:\n  behavior:\n    burst_interval:\n      risk_delta: 25\n",
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if swap.load().behavior.burst_interval.risk_delta == 25 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            swap.load().behavior.burst_interval.risk_delta,
+            25,
+            "live edit must propagate"
+        );
+
+        // Now write malformed YAML — last-good (25) must be retained.
+        std::fs::write(&path, "device_fp:\n  behavior:\n    cv_threshold: not_a_number\n").unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(
+            swap.load().behavior.burst_interval.risk_delta,
+            25,
+            "malformed YAML must not corrupt live state"
+        );
+    }
+
     #[test]
     fn reload_keeps_previous_snapshot_on_invalid_yaml() {
         let dir = tempdir().unwrap();

@@ -14,20 +14,20 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 
-use crate::device_fp::behavior::config::BehaviorConfig;
 use crate::device_fp::behavior::recorder::Recorder;
+use crate::device_fp::config::DeviceFpConfig;
 use crate::device_fp::providers::SignalProvider;
 use crate::device_fp::signal::Signal;
 use crate::device_fp::types::DeviceCtx;
 
 pub struct BurstIntervalProvider {
     recorder: Arc<Recorder>,
-    cfg: Arc<ArcSwap<BehaviorConfig>>,
+    cfg: Arc<ArcSwap<DeviceFpConfig>>,
 }
 
 impl BurstIntervalProvider {
     #[must_use]
-    pub const fn new(recorder: Arc<Recorder>, cfg: Arc<ArcSwap<BehaviorConfig>>) -> Self {
+    pub const fn new(recorder: Arc<Recorder>, cfg: Arc<ArcSwap<DeviceFpConfig>>) -> Self {
         Self { recorder, cfg }
     }
 }
@@ -41,7 +41,7 @@ impl SignalProvider for BurstIntervalProvider {
         // Per-call load — never cache the Guard. Hot-reload swaps the
         // Arc atomically; caching would pin a stale revision.
         let cfg = self.cfg.load();
-        let bi = &cfg.burst_interval;
+        let bi = &cfg.behavior.burst_interval;
         if !bi.enabled {
             return Vec::new();
         }
@@ -87,15 +87,15 @@ impl SignalProvider for BurstIntervalProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device_fp::behavior::config::BurstIntervalCfg;
+    use crate::device_fp::behavior::config::{BehaviorConfig, BurstIntervalCfg};
     use crate::device_fp::capture::ConnCtx;
     use crate::device_fp::types::{FingerprintValue, FpKey};
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::Duration;
     use waf_common::tier::Tier;
 
-    fn cfg_default() -> Arc<ArcSwap<BehaviorConfig>> {
-        Arc::new(ArcSwap::from_pointee(BehaviorConfig::default()))
+    fn cfg_default() -> Arc<ArcSwap<DeviceFpConfig>> {
+        Arc::new(ArcSwap::from_pointee(DeviceFpConfig::default()))
     }
 
     fn key(tag: &str) -> FpKey {
@@ -206,12 +206,15 @@ mod tests {
     #[test]
     fn silent_when_disabled() {
         // Even with a clear burst pattern, `enabled: false` must suppress.
-        let cfg = Arc::new(ArcSwap::from_pointee(BehaviorConfig {
-            burst_interval: BurstIntervalCfg {
-                enabled: false,
-                ..BurstIntervalCfg::default()
+        let cfg = Arc::new(ArcSwap::from_pointee(DeviceFpConfig {
+            behavior: BehaviorConfig {
+                burst_interval: BurstIntervalCfg {
+                    enabled: false,
+                    ..BurstIntervalCfg::default()
+                },
+                ..BehaviorConfig::default()
             },
-            ..BehaviorConfig::default()
+            ..DeviceFpConfig::default()
         }));
         let rec = Arc::new(Recorder::new(Arc::clone(&cfg)));
         let k = key("f");

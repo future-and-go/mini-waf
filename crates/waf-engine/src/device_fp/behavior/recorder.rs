@@ -19,9 +19,9 @@ use dashmap::DashMap;
 use tokio::task::JoinHandle;
 use waf_common::tier::Tier;
 
-use crate::device_fp::behavior::config::BehaviorConfig;
 use crate::device_fp::behavior::path_classifier;
 use crate::device_fp::behavior::state::{ActorBehavior, Sample};
+use crate::device_fp::config::DeviceFpConfig;
 use crate::device_fp::types::FpKey;
 
 /// Bounded snapshot of an actor's state — handed to classifiers so they
@@ -38,12 +38,12 @@ pub struct Recorder {
     actors: DashMap<FpKey, ActorBehavior, RandomState>,
     anchor: Instant,
     path_hasher: RandomState,
-    cfg: Arc<ArcSwap<BehaviorConfig>>,
+    cfg: Arc<ArcSwap<DeviceFpConfig>>,
 }
 
 impl Recorder {
     #[must_use]
-    pub fn new(cfg: Arc<ArcSwap<BehaviorConfig>>) -> Self {
+    pub fn new(cfg: Arc<ArcSwap<DeviceFpConfig>>) -> Self {
         let cpus = std::thread::available_parallelism().map_or(8, std::num::NonZeroUsize::get);
         let shards = (cpus * 2).next_power_of_two();
         Self {
@@ -68,16 +68,17 @@ impl Recorder {
     /// only the small flag bits travel into the ring.
     pub fn record(&self, key: &FpKey, path: &str, had_referer: bool, had_prefetch_hint: bool, tier: Tier) {
         let cfg = self.cfg.load();
+        let b = &cfg.behavior;
         let sample = Sample {
             ts_ms: self.now_ms(),
             path_hash: self.path_hasher.hash_one(path),
             had_referer,
             had_prefetch_hint,
-            is_entry_path: path_classifier::is_entry_path(path, &cfg.zero_depth.exempt_entry_paths),
+            is_entry_path: path_classifier::is_entry_path(path, &b.zero_depth.exempt_entry_paths),
             is_low_signal_path: path_classifier::is_low_signal_path(
                 path,
-                &cfg.missing_referer.exempt_paths,
-                &cfg.missing_referer.exempt_prefixes,
+                &b.missing_referer.exempt_paths,
+                &b.missing_referer.exempt_prefixes,
             ),
             tier,
         };
@@ -111,7 +112,7 @@ impl Recorder {
 
     /// Drop actors idle longer than `actor_ttl_secs`. Returns count purged.
     pub fn purge_expired(&self) -> usize {
-        let ttl_ms = u64::from(self.cfg.load().actor_ttl_secs).saturating_mul(1000);
+        let ttl_ms = u64::from(self.cfg.load().behavior.actor_ttl_secs).saturating_mul(1000);
         let cutoff = self.now_ms().saturating_sub(ttl_ms);
         let mut purged = 0_usize;
         self.actors.retain(|_, v| {
@@ -143,13 +144,17 @@ impl Recorder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::device_fp::behavior::config::BehaviorConfig;
     use crate::device_fp::types::FingerprintValue;
 
-    fn cfg(ttl_secs: u32) -> Arc<ArcSwap<BehaviorConfig>> {
-        Arc::new(ArcSwap::from_pointee(BehaviorConfig {
-            window_size: 16,
-            actor_ttl_secs: ttl_secs,
-            ..BehaviorConfig::default()
+    fn cfg(ttl_secs: u32) -> Arc<ArcSwap<DeviceFpConfig>> {
+        Arc::new(ArcSwap::from_pointee(DeviceFpConfig {
+            behavior: BehaviorConfig {
+                window_size: 16,
+                actor_ttl_secs: ttl_secs,
+                ..BehaviorConfig::default()
+            },
+            ..DeviceFpConfig::default()
         }))
     }
 

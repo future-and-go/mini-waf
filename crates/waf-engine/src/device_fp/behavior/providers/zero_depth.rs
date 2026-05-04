@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 
-use crate::device_fp::behavior::config::BehaviorConfig;
 use crate::device_fp::behavior::recorder::Recorder;
+use crate::device_fp::config::DeviceFpConfig;
 use crate::device_fp::providers::SignalProvider;
 use crate::device_fp::signal::Signal;
 use crate::device_fp::types::DeviceCtx;
@@ -21,12 +21,12 @@ use waf_common::tier::Tier;
 
 pub struct ZeroDepthProvider {
     recorder: Arc<Recorder>,
-    cfg: Arc<ArcSwap<BehaviorConfig>>,
+    cfg: Arc<ArcSwap<DeviceFpConfig>>,
 }
 
 impl ZeroDepthProvider {
     #[must_use]
-    pub const fn new(recorder: Arc<Recorder>, cfg: Arc<ArcSwap<BehaviorConfig>>) -> Self {
+    pub const fn new(recorder: Arc<Recorder>, cfg: Arc<ArcSwap<DeviceFpConfig>>) -> Self {
         Self { recorder, cfg }
     }
 }
@@ -38,7 +38,7 @@ impl SignalProvider for ZeroDepthProvider {
 
     fn evaluate(&self, ctx: &DeviceCtx<'_>) -> Vec<Signal> {
         let cfg = self.cfg.load();
-        let z = &cfg.zero_depth;
+        let z = &cfg.behavior.zero_depth;
         if !z.enabled {
             return Vec::new();
         }
@@ -65,7 +65,7 @@ impl SignalProvider for ZeroDepthProvider {
         // Critical-tier hits are what make this risky — counting samples
         // (not intervals) so the threshold reads naturally.
         let critical_hits = snap.samples.iter().filter(|s| matches!(s.tier, Tier::Critical)).count();
-        if critical_hits < usize::from(z.min_critical_samples) {
+        if critical_hits < usize::from(z.critical_hits_required) {
             return Vec::new();
         }
 
@@ -85,13 +85,13 @@ impl SignalProvider for ZeroDepthProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device_fp::behavior::config::ZeroDepthCfg;
+    use crate::device_fp::behavior::config::{BehaviorConfig, ZeroDepthCfg};
     use crate::device_fp::capture::ConnCtx;
     use crate::device_fp::types::{FingerprintValue, FpKey};
     use std::net::{IpAddr, Ipv4Addr};
 
-    fn cfg_default() -> Arc<ArcSwap<BehaviorConfig>> {
-        Arc::new(ArcSwap::from_pointee(BehaviorConfig::default()))
+    fn cfg_default() -> Arc<ArcSwap<DeviceFpConfig>> {
+        Arc::new(ArcSwap::from_pointee(DeviceFpConfig::default()))
     }
 
     fn key(tag: &str) -> FpKey {
@@ -184,12 +184,15 @@ mod tests {
 
     #[test]
     fn silent_when_disabled() {
-        let cfg = Arc::new(ArcSwap::from_pointee(BehaviorConfig {
-            zero_depth: ZeroDepthCfg {
-                enabled: false,
-                ..ZeroDepthCfg::default()
+        let cfg = Arc::new(ArcSwap::from_pointee(DeviceFpConfig {
+            behavior: BehaviorConfig {
+                zero_depth: ZeroDepthCfg {
+                    enabled: false,
+                    ..ZeroDepthCfg::default()
+                },
+                ..BehaviorConfig::default()
             },
-            ..BehaviorConfig::default()
+            ..DeviceFpConfig::default()
         }));
         let rec = Arc::new(Recorder::new(Arc::clone(&cfg)));
         let k = key("zg");

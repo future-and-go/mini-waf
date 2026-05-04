@@ -19,20 +19,20 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 
-use crate::device_fp::behavior::config::BehaviorConfig;
 use crate::device_fp::behavior::recorder::Recorder;
+use crate::device_fp::config::DeviceFpConfig;
 use crate::device_fp::providers::SignalProvider;
 use crate::device_fp::signal::Signal;
 use crate::device_fp::types::DeviceCtx;
 
 pub struct MissingRefererProvider {
     recorder: Arc<Recorder>,
-    cfg: Arc<ArcSwap<BehaviorConfig>>,
+    cfg: Arc<ArcSwap<DeviceFpConfig>>,
 }
 
 impl MissingRefererProvider {
     #[must_use]
-    pub const fn new(recorder: Arc<Recorder>, cfg: Arc<ArcSwap<BehaviorConfig>>) -> Self {
+    pub const fn new(recorder: Arc<Recorder>, cfg: Arc<ArcSwap<DeviceFpConfig>>) -> Self {
         Self { recorder, cfg }
     }
 }
@@ -44,7 +44,7 @@ impl SignalProvider for MissingRefererProvider {
 
     fn evaluate(&self, ctx: &DeviceCtx<'_>) -> Vec<Signal> {
         let cfg = self.cfg.load();
-        let m = &cfg.missing_referer;
+        let m = &cfg.behavior.missing_referer;
         if !m.enabled {
             return Vec::new();
         }
@@ -71,14 +71,14 @@ impl SignalProvider for MissingRefererProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device_fp::behavior::config::MissingRefererCfg;
+    use crate::device_fp::behavior::config::{BehaviorConfig, MissingRefererCfg};
     use crate::device_fp::capture::ConnCtx;
     use crate::device_fp::types::{FingerprintValue, FpKey};
     use std::net::{IpAddr, Ipv4Addr};
     use waf_common::tier::Tier;
 
-    fn cfg_default() -> Arc<ArcSwap<BehaviorConfig>> {
-        Arc::new(ArcSwap::from_pointee(BehaviorConfig::default()))
+    fn cfg_default() -> Arc<ArcSwap<DeviceFpConfig>> {
+        Arc::new(ArcSwap::from_pointee(DeviceFpConfig::default()))
     }
 
     fn key(tag: &str) -> FpKey {
@@ -169,12 +169,15 @@ mod tests {
 
     #[test]
     fn silent_when_disabled() {
-        let cfg = Arc::new(ArcSwap::from_pointee(BehaviorConfig {
-            missing_referer: MissingRefererCfg {
-                enabled: false,
-                ..MissingRefererCfg::default()
+        let cfg = Arc::new(ArcSwap::from_pointee(DeviceFpConfig {
+            behavior: BehaviorConfig {
+                missing_referer: MissingRefererCfg {
+                    enabled: false,
+                    ..MissingRefererCfg::default()
+                },
+                ..BehaviorConfig::default()
             },
-            ..BehaviorConfig::default()
+            ..DeviceFpConfig::default()
         }));
         let rec = Arc::new(Recorder::new(Arc::clone(&cfg)));
         let k = key("mg");

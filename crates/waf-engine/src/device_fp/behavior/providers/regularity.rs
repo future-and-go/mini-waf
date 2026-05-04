@@ -14,20 +14,20 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 
-use crate::device_fp::behavior::config::BehaviorConfig;
 use crate::device_fp::behavior::recorder::Recorder;
+use crate::device_fp::config::DeviceFpConfig;
 use crate::device_fp::providers::SignalProvider;
 use crate::device_fp::signal::Signal;
 use crate::device_fp::types::DeviceCtx;
 
 pub struct RegularityProvider {
     recorder: Arc<Recorder>,
-    cfg: Arc<ArcSwap<BehaviorConfig>>,
+    cfg: Arc<ArcSwap<DeviceFpConfig>>,
 }
 
 impl RegularityProvider {
     #[must_use]
-    pub const fn new(recorder: Arc<Recorder>, cfg: Arc<ArcSwap<BehaviorConfig>>) -> Self {
+    pub const fn new(recorder: Arc<Recorder>, cfg: Arc<ArcSwap<DeviceFpConfig>>) -> Self {
         Self { recorder, cfg }
     }
 }
@@ -44,7 +44,7 @@ impl SignalProvider for RegularityProvider {
     #[allow(clippy::cast_precision_loss)]
     fn evaluate(&self, ctx: &DeviceCtx<'_>) -> Vec<Signal> {
         let cfg = self.cfg.load();
-        let r = &cfg.regularity;
+        let r = &cfg.behavior.regularity;
         if !r.enabled {
             return Vec::new();
         }
@@ -95,23 +95,20 @@ impl SignalProvider for RegularityProvider {
             .sum::<f32>()
             / n;
         let stddev = var.sqrt();
-        // CV ×1000 to compare against the integer cap from config.
-        let cv_x1000 = (stddev / mean * 1000.0).round();
-        // NaN-safe comparison: NaN propagates to false, so we silence on
-        // any pathological input rather than spuriously firing.
-        if !cv_x1000.is_finite() || cv_x1000 < 0.0 {
+        let cv = stddev / mean;
+        // NaN-safe: any non-finite CV silences the classifier rather than
+        // spuriously firing.
+        if !cv.is_finite() || cv < 0.0 {
             return Vec::new();
         }
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let cv_int = cv_x1000 as u32;
-        if cv_int >= r.max_cv_x1000 {
+        if cv >= r.cv_threshold {
             return Vec::new();
         }
 
-        // u16-cap is safe: cv is bounded above by `max_cv_x1000` (config-capped at u32)
-        // and we know cv_int < max_cv_x1000 here. Defaults keep this < 1000.
-        #[allow(clippy::cast_possible_truncation)]
-        let cv_u16 = cv_int.min(u32::from(u16::MAX)) as u16;
+        // Wire format stays as ×1000 integer for downstream compactness.
+        // cv is < cv_threshold ≤ 1.0 here, so ×1000 fits comfortably in u16.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let cv_u16 = ((cv * 1000.0).round() as u32).min(u32::from(u16::MAX)) as u16;
         vec![Signal::Regularity { cv_x1000: cv_u16 }]
     }
 }
@@ -119,15 +116,15 @@ impl SignalProvider for RegularityProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device_fp::behavior::config::RegularityCfg;
+    use crate::device_fp::behavior::config::{BehaviorConfig, RegularityCfg};
     use crate::device_fp::capture::ConnCtx;
     use crate::device_fp::types::{FingerprintValue, FpKey};
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::Duration;
     use waf_common::tier::Tier;
 
-    fn cfg_default() -> Arc<ArcSwap<BehaviorConfig>> {
-        Arc::new(ArcSwap::from_pointee(BehaviorConfig::default()))
+    fn cfg_default() -> Arc<ArcSwap<DeviceFpConfig>> {
+        Arc::new(ArcSwap::from_pointee(DeviceFpConfig::default()))
     }
 
     fn key(tag: &str) -> FpKey {
@@ -213,12 +210,15 @@ mod tests {
 
     #[test]
     fn silent_when_disabled() {
-        let cfg = Arc::new(ArcSwap::from_pointee(BehaviorConfig {
-            regularity: RegularityCfg {
-                enabled: false,
-                ..RegularityCfg::default()
+        let cfg = Arc::new(ArcSwap::from_pointee(DeviceFpConfig {
+            behavior: BehaviorConfig {
+                regularity: RegularityCfg {
+                    enabled: false,
+                    ..RegularityCfg::default()
+                },
+                ..BehaviorConfig::default()
             },
-            ..BehaviorConfig::default()
+            ..DeviceFpConfig::default()
         }));
         let rec = Arc::new(Recorder::new(Arc::clone(&cfg)));
         let k = key("off");
