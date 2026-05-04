@@ -1,3 +1,4 @@
+pub(crate) mod behavior_record;
 pub mod cache;
 pub mod context;
 pub mod ctx_builder;

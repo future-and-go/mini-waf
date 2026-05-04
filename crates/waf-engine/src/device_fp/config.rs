@@ -10,6 +10,8 @@ use std::sync::Arc;
 use anyhow::{Context, bail};
 use serde::Deserialize;
 
+use crate::device_fp::behavior::BehaviorConfig;
+
 const SCHEMA_VERSION: u32 = 1;
 
 /// Top-level YAML wrapper: `device_fp:` is the single root key.
@@ -39,6 +41,10 @@ pub struct DeviceFpConfig {
     pub providers: Vec<ProviderConfig>,
     #[serde(default = "default_hot_reload")]
     pub hot_reload: bool,
+    /// FR-011 behavioral anomaly detection knobs. Omitting the YAML block
+    /// yields the shipped defaults (see `BehaviorConfig::default`).
+    #[serde(default)]
+    pub behavior: BehaviorConfig,
 }
 
 impl Default for DeviceFpConfig {
@@ -50,6 +56,7 @@ impl Default for DeviceFpConfig {
             store: StoreConfig::default(),
             providers: Vec::new(),
             hot_reload: default_hot_reload(),
+            behavior: BehaviorConfig::default(),
         }
     }
 }
@@ -236,6 +243,9 @@ impl DeviceFpConfig {
                 );
             }
         }
+        // FR-011 behavior block — validate before swap so a malformed edit
+        // does not poison live state.
+        self.behavior.validate().context("device_fp: behavior config invalid")?;
         Ok(())
     }
 }
@@ -320,5 +330,26 @@ device_fp:
     fn schema_version_mismatch_rejected() {
         let yaml = "device_fp:\n  schema_version: 99\n";
         assert!(DeviceFpConfig::from_yaml_str(yaml).is_err());
+    }
+
+    /// Catches plan §Risk: "Default YAML drifts from `BehaviorConfig::default()`".
+    /// Loads the shipped file and asserts that every behavior knob matches
+    /// the in-code defaults — drift here means an operator editing the YAML
+    /// would silently see different behavior than a fresh deploy.
+    #[test]
+    fn shipped_yaml_matches_behavior_defaults() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/device-fp.yaml");
+        let cfg = DeviceFpConfig::from_path(&path).expect("shipped YAML must parse + validate");
+        let d = crate::device_fp::behavior::BehaviorConfig::default();
+        let b = &cfg.behavior;
+        assert_eq!(b.window_size, d.window_size);
+        assert_eq!(b.actor_ttl_secs, d.actor_ttl_secs);
+        assert_eq!(b.burst_interval.threshold_ms, d.burst_interval.threshold_ms);
+        assert_eq!(b.burst_interval.min_consecutive, d.burst_interval.min_consecutive);
+        assert_eq!(b.regularity.min_samples, d.regularity.min_samples);
+        assert!((b.regularity.cv_threshold - d.regularity.cv_threshold).abs() < 1e-6);
+        assert_eq!(b.zero_depth.critical_hits_required, d.zero_depth.critical_hits_required);
+        assert_eq!(b.missing_referer.exempt_paths, d.missing_referer.exempt_paths);
+        assert_eq!(b.missing_referer.exempt_prefixes, d.missing_referer.exempt_prefixes);
     }
 }
