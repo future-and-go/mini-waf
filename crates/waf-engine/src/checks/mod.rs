@@ -1,5 +1,6 @@
 pub mod anti_hotlink;
 pub mod bot;
+pub mod ddos;
 pub mod dir_traversal;
 pub mod geo;
 pub mod owasp;
