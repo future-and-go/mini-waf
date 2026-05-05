@@ -1,4 +1,4 @@
-//! FR-005 DDoS soak test for memory/leak surveillance.
+//! FR-005 `DDoS` soak test for memory/leak surveillance.
 //!
 //! Runs a 30-minute sustained load at 5k rps to verify:
 //! - RSS memory drift < 5%
@@ -11,6 +11,10 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::cast_sign_loss)]
+#![allow(clippy::print_stdout)] // Test diagnostics
+#![allow(clippy::missing_const_for_fn)] // Not needed for test code
+#![allow(clippy::ignore_without_reason)] // Ignore reason in doc comment
+#![allow(clippy::duration_suboptimal_units)] // Clarity over compactness
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
