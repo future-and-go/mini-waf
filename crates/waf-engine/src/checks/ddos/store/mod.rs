@@ -8,6 +8,11 @@ use async_trait::async_trait;
 pub mod memory;
 pub use memory::MemoryCounterStore;
 
+#[cfg(feature = "redis-store")]
+pub mod redis;
+#[cfg(feature = "redis-store")]
+pub use redis::{RedisCounterConfig, RedisCounterStore};
+
 /// Atomic `DDoS` counter operations on a keyed counter.
 ///
 /// Each key represents a fingerprint (e.g., IP) or aggregate (e.g., tier).
