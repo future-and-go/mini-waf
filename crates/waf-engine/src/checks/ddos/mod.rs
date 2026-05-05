@@ -5,16 +5,21 @@
 //! - [`config`]   — YAML schema + parsing for `configs/ddos.yaml`
 //! - [`reload`]   — hot-reload watcher with `ArcSwap` snapshot
 //! - [`detector`] — `Detector` trait + per-IP detector (phase 2)
+//! - [`action`]   — action executors for bans and risk bumps (phase 5)
 
 use std::collections::HashMap;
 
 use waf_common::tier::Tier;
 
+pub mod action;
 pub mod config;
 pub mod detector;
 pub mod reload;
 pub mod store;
 
+pub use action::{
+    ActionExecutor, ActionResult, BanAction, BanSchedule, CombinedAction, DynamicBanTable, RiskBumpAction,
+};
 pub use config::DdosFileConfig;
 pub use detector::{Detector, DetectorVerdict, PerIpDetector};
 pub use reload::DdosReloader;
