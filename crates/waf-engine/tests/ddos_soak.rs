@@ -15,6 +15,7 @@
 #![allow(clippy::missing_const_for_fn)] // Not needed for test code
 #![allow(clippy::ignore_without_reason)] // Ignore reason in doc comment
 #![allow(clippy::duration_suboptimal_units)] // Clarity over compactness
+#![allow(clippy::cast_precision_loss)] // RSS memory ratios are safe within test ranges
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
@@ -55,10 +56,8 @@ fn read_rss_bytes() -> usize {
                 if line.starts_with("VmRSS:") {
                     // Format: "VmRSS:     12345 kB"
                     let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        if let Ok(kb) = parts[1].parse::<usize>() {
-                            return kb * 1024;
-                        }
+                    if let Some(Ok(kb)) = parts.get(1).map(|s| s.parse::<usize>()) {
+                        return kb * 1024;
                     }
                 }
             }
