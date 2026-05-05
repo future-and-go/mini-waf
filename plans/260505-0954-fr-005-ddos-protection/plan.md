@@ -1,7 +1,7 @@
 ---
 title: "FR-005 DDoS Protection"
 description: "Burst detection + auto-block + per-tier threshold/fail-mode. Adds per-fp + per-tier-global axes; reuses FR-004 per-IP. L7 only."
-status: in-progress
+status: complete
 priority: P0
 branch: "main"
 tags: ["security", "ddos", "fr-005", "production-ready"]
@@ -49,14 +49,14 @@ Production-ready L7 DDoS protection. Adds burst detection on two new axes (per-d
 |-------|------|--------|
 | 1 | [Config & Memory Store](./phase-01-config-memory-store.md) | Complete |
 | 2 | [Detector Trait & Per-IP](./phase-02-detector-trait-per-ip.md) | Complete |
-| 3 | [Per-Fingerprint Detector](./phase-03-per-fingerprint-detector.md) | Pending |
+| 3 | [Per-Fingerprint Detector](./phase-03-per-fingerprint-detector.md) | Complete |
 | 4 | [Per-Tier Detector & Redis Store](./phase-04-per-tier-detector-redis-store.md) | Complete |
 | 5 | [Action Ban & Risk Bump](./phase-05-action-ban-risk-bump.md) | Complete |
 | 6 | [Degrade & Circuit Breaker](./phase-06-degrade-circuit-breaker.md) | Complete |
 | 7 | [Pipeline Wiring & Observability](./phase-07-pipeline-wiring-observability.md) | Complete |
 | 8 | [Unit Property Loom Tests](./phase-08-unit-property-loom-tests.md) | Complete |
 | 9 | [Integration & Scenario E2E](./phase-09-integration-scenario-e2e.md) | Complete |
-| 10 | [Docs & Roadmap Update](./phase-10-docs-roadmap-update.md) | Pending |
+| 10 | [Docs & Roadmap Update](./phase-10-docs-roadmap-update.md) | Complete |
 
 ## Dependencies
 
