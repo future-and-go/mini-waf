@@ -70,10 +70,13 @@ prx-waf/
 │   │   │   ├── sensitive.rs   # Sensitive data (Aho-Corasick)
 │   │   │   ├── hotlink.rs     # Anti-hotlink (Referer)
 │   │   │   ├── crowdsec.rs    # CrowdSec bouncer + AppSec
-│   │   │   ├── ddos/          # FR-005 Phase 1 DDoS protection infrastructure (YAML config, in-memory counter store, hot-reload watcher)
-│   │   │   │   ├── check.rs       # DdosCheck placeholder (Phase 2+)
+│   │   │   ├── ddos/          # FR-005 DDoS protection (Phase 1: config+store; Phase 2: detector strategy pattern)
+│   │   │   │   ├── check.rs       # DdosCheck orchestrator (invokes detector pipeline, aggregates verdicts)
 │   │   │   │   ├── config.rs      # YAML schema (ddos.yaml) + Tier-per-config validation
 │   │   │   │   ├── reload.rs      # notify-based hot-reload with ArcSwap snapshot
+│   │   │   │   ├── detector/      # FR-005 Phase 2: Detector trait + implementations
+│   │   │   │   │   ├── mod.rs         # Detector trait (evaluate(ctx, cfg, now_ms) → DetectorVerdict)
+│   │   │   │   │   └── per_ip.rs      # PerIpDetector (wraps FR-004 RateLimitStore, converts Decision → Verdict)
 │   │   │   │   └── store/         # Counter backends
 │   │   │   │       ├── mod.rs         # CounterStore trait (async incr_get, purge_expired)
 │   │   │   │       └── memory.rs      # MemoryCounterStore (DashMap + GC task, max_keys LRU)

@@ -1,19 +1,22 @@
 //! FR-005 `DDoS` protection module.
 //!
 //! Composed of:
-//! - [`store`]   — async `CounterStore` trait + in-memory backend
-//! - [`config`]  — YAML schema + parsing for `configs/ddos.yaml`
-//! - [`reload`]  — hot-reload watcher with `ArcSwap` snapshot
+//! - [`store`]    — async `CounterStore` trait + in-memory backend
+//! - [`config`]   — YAML schema + parsing for `configs/ddos.yaml`
+//! - [`reload`]   — hot-reload watcher with `ArcSwap` snapshot
+//! - [`detector`] — `Detector` trait + per-IP detector (phase 2)
 
 use std::collections::HashMap;
 
 use waf_common::tier::Tier;
 
 pub mod config;
+pub mod detector;
 pub mod reload;
 pub mod store;
 
 pub use config::DdosFileConfig;
+pub use detector::{Detector, DetectorVerdict, PerIpDetector};
 pub use reload::DdosReloader;
 pub use store::{CounterStore, MemoryCounterStore};
 
