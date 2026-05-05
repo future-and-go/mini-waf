@@ -10,6 +10,9 @@
 //! - Failmode honored under store timeout
 //! - `ddos_store_errors_total` counter increments (simulated via degrade metrics)
 
+#![allow(clippy::print_stdout)] // Test diagnostics
+#![allow(clippy::uninlined_format_args)] // Clarity over compactness
+
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;

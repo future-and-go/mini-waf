@@ -11,6 +11,8 @@
 //! - Per-IP bans triggered for each attacking IP
 //! - High ban rate when attacks detected
 
+#![allow(clippy::print_stdout)] // Test diagnostics
+
 use waf_common::tier::Tier;
 
 use super::{CtxBuilder, DdosTestHarness, HarnessConfig, IpRotator};
