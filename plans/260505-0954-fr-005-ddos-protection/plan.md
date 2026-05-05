@@ -1,7 +1,7 @@
 ---
 title: "FR-005 DDoS Protection"
 description: "Burst detection + auto-block + per-tier threshold/fail-mode. Adds per-fp + per-tier-global axes; reuses FR-004 per-IP. L7 only."
-status: pending
+status: in-progress
 priority: P0
 branch: "main"
 tags: ["security", "ddos", "fr-005", "production-ready"]
@@ -51,7 +51,7 @@ Production-ready L7 DDoS protection. Adds burst detection on two new axes (per-d
 | 2 | [Detector Trait & Per-IP](./phase-02-detector-trait-per-ip.md) | Complete |
 | 3 | [Per-Fingerprint Detector](./phase-03-per-fingerprint-detector.md) | Pending |
 | 4 | [Per-Tier Detector & Redis Store](./phase-04-per-tier-detector-redis-store.md) | Complete |
-| 5 | [Action Ban & Risk Bump](./phase-05-action-ban-risk-bump.md) | Pending |
+| 5 | [Action Ban & Risk Bump](./phase-05-action-ban-risk-bump.md) | Complete |
 | 6 | [Degrade & Circuit Breaker](./phase-06-degrade-circuit-breaker.md) | Pending |
 | 7 | [Pipeline Wiring & Observability](./phase-07-pipeline-wiring-observability.md) | Pending |
 | 8 | [Unit Property Loom Tests](./phase-08-unit-property-loom-tests.md) | Pending |
