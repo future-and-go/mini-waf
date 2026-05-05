@@ -8,8 +8,16 @@ use waf_common::{RequestCtx, tier::Tier};
 
 use super::DdosTierCfg;
 
+pub mod baseline;
+pub mod clock;
+pub mod per_fp;
 pub mod per_ip;
+pub mod per_tier;
+
+pub use clock::{Clock, SystemClock};
+pub use per_fp::PerFpDetector;
 pub use per_ip::PerIpDetector;
+pub use per_tier::PerTierDetector;
 
 /// Outcome of a single detector evaluation.
 ///
