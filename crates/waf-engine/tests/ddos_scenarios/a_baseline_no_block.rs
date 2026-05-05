@@ -7,6 +7,9 @@
 //! - 0 blocks, 0 bans
 //! - p99 detector overhead < 200µs
 
+#![allow(clippy::indexing_slicing)] // Test code with controlled indices
+#![allow(clippy::print_stdout)] // Test diagnostics
+
 use std::time::Duration;
 
 use waf_common::tier::Tier;
@@ -57,7 +60,7 @@ async fn scenario_a_baseline_traffic_no_blocks() {
     let banned_count = (0..500_u32)
         .filter(|i| {
             use std::net::{IpAddr, Ipv4Addr};
-            let ip = IpAddr::V4(Ipv4Addr::from(0x0A000001 + i)); // 10.0.0.1 + i
+            let ip = IpAddr::V4(Ipv4Addr::from(0x0A00_0001 + i)); // 10.0.0.1 + i
             harness.is_banned(ip)
         })
         .count();

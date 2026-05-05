@@ -5,8 +5,11 @@
 //! - Medium tier with `fail_open` → allow with warning
 //!
 //! Pass criteria:
-//! - Verify exactly one path per tier based on fail_mode
+//! - Verify exactly one path per tier based on `fail_mode`
 //! - Per-tier detector triggers on aggregate burst
+
+#![allow(clippy::print_stdout)] // Test diagnostics
+#![allow(clippy::doc_markdown)] // Allow snake_case identifiers in docs
 
 use waf_common::tier::{FailMode, Tier};
 

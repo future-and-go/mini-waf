@@ -3,11 +3,13 @@
 //! Single attacker IP sends 1000 rps for 1 second. Tests that:
 //! - Ban is issued within threshold + 1 requests
 //! - Subsequent requests are blocked by ban table (short-circuit)
-//! - The block comes from access layer, not DDoS detector
+//! - The block comes from access layer, not `DDoS` detector
 //!
 //! Pass criteria:
 //! - Ban issued after threshold exceeded
 //! - Subsequent requests blocked
+
+#![allow(clippy::print_stdout)] // Test diagnostics
 
 use waf_common::tier::Tier;
 
@@ -46,7 +48,7 @@ async fn scenario_b_single_ip_flood_triggers_ban() {
     // Verify: first block happens after threshold (request 51 = index 50)
     let first_block = first_block_at.expect("expected at least one block");
     assert!(
-        first_block >= 50 && first_block <= 52,
+        (50..=52).contains(&first_block),
         "first block at request {first_block}, expected around 50-52"
     );
 
@@ -74,7 +76,7 @@ async fn scenario_b_single_ip_flood_triggers_ban() {
 ///
 /// Note: This test verifies the ban is issued and escalates, but doesn't
 /// test exact TTL timing since the check uses real wall-clock time while
-/// we can only control the mock clock for the is_banned() check.
+/// we can only control the mock clock for the `is_banned()` check.
 #[tokio::test]
 async fn scenario_b_ban_escalation() {
     let config = HarnessConfig {

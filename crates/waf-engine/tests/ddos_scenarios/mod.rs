@@ -1,4 +1,4 @@
-//! Shared test harness for FR-005 DDoS scenario tests.
+//! Shared test harness for FR-005 `DDoS` scenario tests.
 //!
 //! Provides utilities to:
 //! - Bootstrap `DdosCheck` with in-memory stores
@@ -10,6 +10,10 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::cast_sign_loss)]
+// Test harness provides helpers that may not all be used in every scenario
+#![allow(dead_code)]
+#![allow(clippy::missing_const_for_fn)] // Test code doesn't benefit from const
+#![allow(clippy::doc_markdown)] // Allow DDoS without backticks in docs
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};

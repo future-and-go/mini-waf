@@ -1,6 +1,6 @@
-//! FR-005 DDoS integration tests.
+//! FR-005 `DDoS` integration tests.
 //!
-//! Validates full pipeline: detector → action → ban_table → short-circuit.
+//! Validates full pipeline: detector → action → `ban_table` → short-circuit.
 //! Uses real `MemoryCounterStore`, real `IpTable`, mocked aggregator.
 //!
 //! ## Test Inventory
@@ -16,6 +16,8 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::cast_sign_loss)]
+#![allow(clippy::expect_used)] // Tests use .expect() for controlled panics
+#![allow(clippy::print_stdout)] // Test diagnostics
 
 mod ddos_scenarios;
 
@@ -156,7 +158,7 @@ async fn i1_per_ip_burst_triggers_ban() {
     // Assert: first block at request 51 (index 50)
     let first_block = first_block_at.expect("should have blocked at least one request");
     assert!(
-        first_block >= 50 && first_block <= 52,
+        (50..=52).contains(&first_block),
         "first block at {first_block}, expected 50-52"
     );
 
@@ -273,8 +275,8 @@ async fn i2_per_fp_burst_across_ips_fallback_to_per_ip() {
 /// Setup: tier=Medium, verify traffic flows through per-tier detector
 /// Assert: Traffic allowed when under adaptive threshold
 ///
-/// Note: Per-tier detector uses adaptive threshold = max(cap_floor, 3*median)
-/// With low traffic volume, median stays 0, so threshold = cap_floor (100)
+/// Note: Per-tier detector uses adaptive threshold = `max(cap_floor, 3*median)`
+/// With low traffic volume, median stays 0, so threshold = `cap_floor` (100)
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn i3_per_tier_burst_triggers_detection() {
     let clock = Arc::new(MockClock::new(0));
