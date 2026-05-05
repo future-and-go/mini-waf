@@ -1,7 +1,7 @@
 ---
 phase: 10
 title: "Docs & Roadmap Update"
-status: pending
+status: complete
 priority: P1
 effort: "4h"
 dependencies: [9]
@@ -121,14 +121,14 @@ ddos/                # FR-005 DDoS protection
 
 ## Success Criteria
 
-- [ ] `docs/ddos-protection.md` published; matches operator-guide tone of sibling docs
-- [ ] `docs/request-pipeline.md` diagram includes FR-005 box, ordered after FR-008 allowlist + before FR-004 rate_limit
-- [ ] `docs/project-roadmap.md` FR-005 row shows Complete + release tag
-- [ ] `docs/codebase-summary.md` lists `ddos/` module
-- [ ] `CHANGELOG.md` entry under correct version heading
-- [ ] No broken markdown links (run `mlc` or equivalent)
-- [ ] Mermaid renders without syntax error
-- [ ] Operator can configure DDoS protection from `docs/ddos-protection.md` alone (smoke-tested by team-member dry read)
+- [x] `docs/ddos-protection.md` published; matches operator-guide tone of sibling docs
+- [x] `docs/request-pipeline.md` diagram includes FR-005 box, ordered after FR-008 allowlist + before FR-004 rate_limit
+- [x] `docs/project-roadmap.md` FR-005 row shows Complete + release tag
+- [x] `docs/codebase-summary.md` lists `ddos/` module
+- [x] `CHANGELOG.md` entry under correct version heading
+- [x] No broken markdown links (run `mlc` or equivalent)
+- [x] Mermaid renders without syntax error
+- [x] Operator can configure DDoS protection from `docs/ddos-protection.md` alone (smoke-tested by team-member dry read)
 
 ## Risk Assessment
 
