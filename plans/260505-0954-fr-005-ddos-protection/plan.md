@@ -53,9 +53,9 @@ Production-ready L7 DDoS protection. Adds burst detection on two new axes (per-d
 | 4 | [Per-Tier Detector & Redis Store](./phase-04-per-tier-detector-redis-store.md) | Complete |
 | 5 | [Action Ban & Risk Bump](./phase-05-action-ban-risk-bump.md) | Complete |
 | 6 | [Degrade & Circuit Breaker](./phase-06-degrade-circuit-breaker.md) | Complete |
-| 7 | [Pipeline Wiring & Observability](./phase-07-pipeline-wiring-observability.md) | Pending |
-| 8 | [Unit Property Loom Tests](./phase-08-unit-property-loom-tests.md) | Pending |
-| 9 | [Integration & Scenario E2E](./phase-09-integration-scenario-e2e.md) | Pending |
+| 7 | [Pipeline Wiring & Observability](./phase-07-pipeline-wiring-observability.md) | Complete |
+| 8 | [Unit Property Loom Tests](./phase-08-unit-property-loom-tests.md) | Complete |
+| 9 | [Integration & Scenario E2E](./phase-09-integration-scenario-e2e.md) | Complete |
 | 10 | [Docs & Roadmap Update](./phase-10-docs-roadmap-update.md) | Pending |
 
 ## Dependencies

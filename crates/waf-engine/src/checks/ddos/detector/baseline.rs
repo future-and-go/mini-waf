@@ -240,7 +240,7 @@ mod tests {
 
         // Should have ~100 in bucket 5 (small race tolerance)
         let total = mm.total();
-        assert!(total >= 99 && total <= 100, "got {total}, expected ~100");
+        assert!((99..=100).contains(&total), "got {total}, expected ~100");
     }
 
     #[test]
