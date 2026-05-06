@@ -101,6 +101,19 @@ fn default_format() -> String {
 
 // ── Filesystem scanner ────────────────────────────────────────────────────────
 
+/// YAML files that live under `rules/` but are NOT WAF rule files. They use
+/// their own schema and are loaded by other subsystems:
+///
+/// * `sync-config.yaml`   — cluster rule-sync metadata
+/// * `cache.yaml`         — FR-009 per-route response cache rules
+///   (loaded by `gateway::cache::CacheRuleWatcher`)
+/// * `access-lists.yaml`  — parses fine because its top-level has no `rules:`
+///   key (serde defaults `Vec` to empty), so it doesn't need an entry here.
+///
+/// Without this list the registry warning floods boot logs with
+/// `Cannot parse cache.yaml: rules[0]: missing field 'name'` etc.
+const NON_RULE_META_FILES: &[&str] = &["sync-config.yaml", "cache.yaml"];
+
 /// Scan all `.yaml` files under `rules_dir` recursively and return rule entries.
 fn scan_yaml_rules(rules_dir: &Path) -> Vec<(String, String, Vec<YamlRuleEntry>)> {
     let mut results: Vec<(String, String, Vec<YamlRuleEntry>)> = Vec::new();
@@ -126,8 +139,12 @@ fn collect_yaml_files(base: &Path, dir: &Path, out: &mut Vec<(String, String, Ve
         if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
             continue;
         }
-        // Skip the sync-config.yaml meta file
-        if path.file_name().and_then(|n| n.to_str()) == Some("sync-config.yaml") {
+        // Skip non-rule meta files (cluster sync, FR-009 cache rules, etc.).
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|name| NON_RULE_META_FILES.contains(&name))
+        {
             continue;
         }
 
@@ -260,6 +277,56 @@ pub async fn toggle_rule(
 pub async fn reload_rule_registry(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
     state.engine.reload_rules().await.map_err(ApiError::Internal)?;
     Ok(Json(json!({ "success": true, "data": "Rules reloaded" })))
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+#[allow(clippy::expect_used)] // Tests use .expect() for controlled panics
+mod registry_scan_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Mirror of the layout the warning was observed with: a real WAF rule
+    /// file plus FR-009 `cache.yaml`. The cache rule entries lack the `name`
+    /// field that `YamlRuleEntry` requires, so naïve iteration would log
+    /// `Cannot parse cache.yaml: rules[0]: missing field 'name'`. The skip
+    /// list must keep the scanner silent on that file while still picking
+    /// up the real WAF rule.
+    ///
+    /// To prove it is the **filename skip** (not the parse-error path) that
+    /// excludes `cache.yaml`, we deliberately give the cache file a body that
+    /// WOULD parse as a `YamlRuleFile` if it were attempted — a rule entry
+    /// with a `name`. The skip list must still drop it on the file-name
+    /// check before parsing kicks in. Without the `cache.yaml` entry in
+    /// `NON_RULE_META_FILES`, this rule would leak into the registry
+    /// response and the assertion below would fail.
+    #[test]
+    fn cache_yaml_is_skipped_by_filename_not_by_parse_error() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        fs::write(
+            root.join("real-rules.yaml"),
+            "source: test\nrules:\n  - id: r1\n    name: Real WAF rule\n    category: sqli\n",
+        )
+        .expect("write real-rules");
+        // Note: this synthetic cache.yaml has `name:` so it WOULD parse as a
+        // WAF rule. The skip list must catch it by filename anyway.
+        fs::write(
+            root.join("cache.yaml"),
+            "rules:\n  - id: cache-not-a-waf-rule\n    name: Should be skipped by filename\n    category: cache\n",
+        )
+        .expect("write cache.yaml");
+        fs::write(root.join("sync-config.yaml"), "rules:\n  - id: x\n    name: y\n").expect("write sync-config");
+
+        let groups = scan_yaml_rules(root);
+        let files: Vec<&str> = groups.iter().map(|(f, _, _)| f.as_str()).collect();
+        assert_eq!(files, vec!["real-rules.yaml"]);
+        let entries = groups.first().expect("at least one group");
+        assert_eq!(entries.2.len(), 1);
+        assert_eq!(entries.2.first().expect("rule entry").id, "r1");
+    }
 }
 
 /// POST /api/rules/import — import rules from a local file path (YAML only for now)

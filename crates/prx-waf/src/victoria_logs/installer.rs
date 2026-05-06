@@ -364,7 +364,9 @@ mod tests {
     #[test]
     fn binary_candidate_rejects_tarball_with_matching_prefix() {
         assert!(!is_binary_candidate(std::path::Path::new("victoria-logs.tar.gz")));
-        assert!(!is_binary_candidate(std::path::Path::new("victoria-logs-linux-amd64-v1.50.0.tar.gz")));
+        assert!(!is_binary_candidate(std::path::Path::new(
+            "victoria-logs-linux-amd64-v1.50.0.tar.gz"
+        )));
         assert!(!is_binary_candidate(std::path::Path::new("victoria-logs.tgz")));
         assert!(!is_binary_candidate(std::path::Path::new("victoria-logs.zip")));
     }

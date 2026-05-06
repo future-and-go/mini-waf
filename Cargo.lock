@@ -5589,6 +5589,7 @@ dependencies = [
  "serde_yaml_ng",
  "sha2",
  "sqlx",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tower",
