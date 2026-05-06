@@ -1010,11 +1010,15 @@ async fn run_seed_admin(config: &AppConfig) -> anyhow::Result<()> {
 
     let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
     let router = Arc::new(HostRouter::new());
+    // `seed-admin` only writes the default admin row; it never serves traffic
+    // and never reads/writes the response cache. Build a zero-sized in-memory
+    // cache so this path stays decoupled from `[cache]` config tuning — if the
+    // operator later changes max_size_mb / TTLs the seed run does not skew.
     let state = Arc::new(AppState::new(
         Arc::clone(&db),
         engine,
         router,
-        gateway::ResponseCache::new(256, 60, 3600),
+        gateway::ResponseCache::new(0, 0, 0),
     )?);
 
     waf_api::auth::ensure_default_admin(&state).await?;

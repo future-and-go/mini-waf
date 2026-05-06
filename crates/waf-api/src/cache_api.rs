@@ -338,6 +338,17 @@ mod tests {
         assert_eq!(validate_tag("rule:123"), Ok("rule:123"));
     }
 
+    /// Regression: every `_`, `-`, `:` plus alnum coexisting in one tag must
+    /// pass the allow-list check. The single-char tests above verify each
+    /// punctuation in isolation but a mixed combination historically caught
+    /// off-by-one regressions in the matcher (e.g. only allowing one kind of
+    /// punctuation per tag).
+    #[test]
+    fn validate_tag_accepts_mixed_valid_chars() {
+        assert_eq!(validate_tag("app_cache-v1:beta123"), Ok("app_cache-v1:beta123"));
+        assert_eq!(validate_tag("Route_42:edge-pop"), Ok("Route_42:edge-pop"));
+    }
+
     #[test]
     fn validate_tag_trims_whitespace() {
         assert_eq!(validate_tag("  catalog  "), Ok("catalog"));

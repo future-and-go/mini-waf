@@ -291,7 +291,19 @@ impl CacheBackend for ValkeyStore {
         let keys = self.scan_keys(&pattern, 100).await;
         let count = keys.len();
         for vk in &keys {
-            let _: Option<()> = self.timed(self.client.del(vk.as_str())).await;
+            // Mirror `remove()` cleanup: drop the cache entry, then for every
+            // tag still associated with this key SREM the key from `prx:tag:{t}`,
+            // and finally drop the `prx:key_tags:{vk}` index set itself.
+            // Without this, purging a host leaves stale references in tag sets
+            // which causes phantom hits in `tag_entry_counts`.
+            let key_tags_k = Self::key_tags_key(vk);
+            if let Some(tags) = self.timed::<_, Vec<String>>(self.client.smembers(&key_tags_k)).await {
+                for tag in &tags {
+                    let tag_k = Self::tag_key(tag);
+                    let _: Option<()> = self.timed(self.client.srem(&tag_k, vk.as_str())).await;
+                }
+            }
+            let _: Option<()> = self.timed(self.client.del(&[vk.as_str(), key_tags_k.as_str()])).await;
         }
         count
     }

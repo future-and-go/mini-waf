@@ -125,22 +125,26 @@ fallback_to_memory         = true
 
 ## 3. Deployment
 
-### 3.1 Standard Docker Compose (memory or embedded backend)
+### 3.1 Standard Docker Compose
 
 ```bash
-# Default: memory backend
+# Default for the bundled stack: standalone Valkey (service `valkey`)
 podman-compose up -d --build
 
-# Switch to embedded Valkey at startup
-CACHE_BACKEND=embedded podman-compose up -d --build
+# Override at runtime — switch to a memory-only run (skip the valkey container)
+CACHE_BACKEND=memory podman-compose up -d --build
 ```
 
-The `CACHE_BACKEND` environment variable overrides `[cache] backend` in the config at startup. Valid values: `memory`, `embedded`, `standalone`, `cluster`.
+`configs/default.toml` ships with `[cache] backend = "memory"` so a bare-metal
+`cargo run` works without any extra services. `docker-compose.yml` then sets
+`CACHE_BACKEND=standalone` so the Compose stack uses the bundled `valkey:6379`
+service automatically. Valid values for the env var: `memory`, `embedded`,
+`standalone`, `cluster`. Anything else is rejected at config-load time.
 
 ```yaml
 # docker-compose.yml excerpt
 environment:
-  CACHE_BACKEND: ${CACHE_BACKEND:-memory}
+  CACHE_BACKEND: ${CACHE_BACKEND:-standalone}
 ```
 
 ---
