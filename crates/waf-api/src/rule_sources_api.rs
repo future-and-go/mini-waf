@@ -11,7 +11,7 @@
 //! ## Scope
 //!
 //! Wires the admin UI page at `/ui/#/rule-sources` to the existing
-//! `rule_sources` PostgreSQL table (`migrations/0007_rule_management.sql`).
+//! `rule_sources` `PostgreSQL` table (`migrations/0007_rule_management.sql`).
 //! The page previously emitted `Network Error` because no backend handler
 //! existed for `/api/rule-sources`.
 //!
@@ -108,8 +108,8 @@ pub struct CreateRuleSourceRequest {
     /// no `update_interval` column on `rule_sources` and the engine doesn't
     /// consume it yet. Field kept on the request type so the existing FE
     /// payload deserialises cleanly without a `400 Bad Request`.
-    #[serde(default, rename = "update_interval")]
-    pub _update_interval: Option<u64>,
+    #[serde(default)]
+    pub update_interval: Option<u64>,
 }
 
 fn default_format() -> String {
@@ -252,8 +252,7 @@ pub async fn delete_rule_source(
         .bind(&name)
         .execute(state.db.pool())
         .await
-        .map(|r| r.rows_affected())
-        .unwrap_or(0);
+        .map_or(0, |r| r.rows_affected());
 
     if affected == 0 {
         return (
@@ -400,6 +399,6 @@ mod tests {
         let body = r#"{"name":"x","source_type":"remote_url","url":"https://e/r.yaml","format":"yaml","update_interval":86400}"#;
         let parsed: CreateRuleSourceRequest = serde_json::from_str(body).expect("parse body");
         assert_eq!(parsed.name, "x");
-        assert_eq!(parsed._update_interval, Some(86400));
+        assert_eq!(parsed.update_interval, Some(86400));
     }
 }
