@@ -53,9 +53,10 @@ services:
     environment:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-with-a-long-random-secret}
       DATABASE_URL: postgresql://prx_waf:prx_waf@postgres:5432/prx_waf
-      # Cache: set [cache] backend = "standalone" and [cache.valkey] seeds in
-      # configs/default.toml (see docs/valkey-cache-guide.md §2.3). Compose does
-      # not override TOML via env.
+      # Cache backend: override the "memory" default in configs/default.toml so
+      # the Compose stack uses the bundled `valkey` service automatically.
+      # Valid values: memory | embedded | standalone | cluster (see docs/valkey-cache-guide.md §3.1).
+      CACHE_BACKEND: ${CACHE_BACKEND:-standalone}
     volumes:
       - ./configs:/app/configs      # rw: waf-panel.toml is written by the admin API
       - ./rules:/app/rules:ro

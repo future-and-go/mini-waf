@@ -158,10 +158,20 @@ fn find_binary(config_path: &str) -> anyhow::Result<PathBuf> {
 }
 
 /// Minimal `which`-like lookup: scan each component of `PATH`.
+///
+/// Uses [`std::env::split_paths`] so the OS-correct separator is honoured
+/// (`:` on Unix, `;` on Windows). The whole `embedded_valkey` module only
+/// compiles under the `valkey` Cargo feature *and* spawns a child via UNIX
+/// socket — Windows is therefore not a supported runtime for this code path,
+/// but the cross-platform splitter avoids producing a single bogus candidate
+/// like `C\Program Files\valkey\valkey-server.exe` on a developer's Windows
+/// host while running `cargo check --features gateway/valkey`.
 fn which_binary(name: &str) -> anyhow::Result<PathBuf> {
-    let path_var = std::env::var("PATH").unwrap_or_default();
-    for dir in path_var.split(':') {
-        let candidate = PathBuf::from(dir).join(name);
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return Err(anyhow::anyhow!("{name} not found (PATH unset)"));
+    };
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(name);
         if candidate.exists() {
             return Ok(candidate);
         }

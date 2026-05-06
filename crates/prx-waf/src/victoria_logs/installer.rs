@@ -100,7 +100,13 @@ pub async fn ensure_binary(cfg: &VictoriaLogsConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| format!("create staging dir '{}'", staging.display()))?;
 
-    let archive_path = staging.join("victoria-logs.tar.gz");
+    // Name the staged archive `archive.tar.gz` (NOT `victoria-logs.tar.gz`):
+    // `find_extracted_binary` scans the same staging directory and matches by
+    // `starts_with("victoria-logs")`, which would otherwise pick up the
+    // tarball itself and install it as the executable — producing the
+    // `Exec format error (os error 8)` failure observed when the sidecar then
+    // tries to spawn a gzipped tarball.
+    let archive_path = staging.join("archive.tar.gz");
     tokio::fs::write(&archive_path, &archive_bytes)
         .await
         .with_context(|| format!("write archive to '{}'", archive_path.display()))?;
@@ -241,24 +247,17 @@ async fn extract_tar_gz(archive: &Path, dest: &Path) -> anyhow::Result<()> {
 /// (or `victoria-logs` in older releases). The walk depth is intentionally
 /// tiny (≤ 2 levels) — the archive layout is well-known.
 fn find_extracted_binary(staging: &Path) -> anyhow::Result<PathBuf> {
-    const CANDIDATES: &[&str] = &["victoria-logs-prod", "victoria-logs"];
     for entry in std::fs::read_dir(staging).with_context(|| format!("read staging dir '{}'", staging.display()))? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_file()
-            && let Some(name) = path.file_name().and_then(|n| n.to_str())
-            && CANDIDATES.iter().any(|c| name.starts_with(c))
-        {
+        if path.is_file() && is_binary_candidate(&path) {
             return Ok(path);
         }
         if path.is_dir() {
             for sub in std::fs::read_dir(&path).with_context(|| format!("read '{}'", path.display()))? {
                 let sub = sub?;
                 let sub_path = sub.path();
-                if sub_path.is_file()
-                    && let Some(name) = sub_path.file_name().and_then(|n| n.to_str())
-                    && CANDIDATES.iter().any(|c| name.starts_with(c))
-                {
+                if sub_path.is_file() && is_binary_candidate(&sub_path) {
                     return Ok(sub_path);
                 }
             }
@@ -268,6 +267,23 @@ fn find_extracted_binary(staging: &Path) -> anyhow::Result<PathBuf> {
         "could not find an extracted `victoria-logs` binary inside '{}'",
         staging.display()
     )
+}
+
+/// Returns `true` when `path` looks like the upstream `victoria-logs(-prod)`
+/// executable. Archive-like extensions are explicitly rejected so the
+/// freshly-downloaded `archive.tar.gz` (or any leftover `*.tar.gz` from a
+/// previous staging run) cannot be returned as the binary even if the file
+/// name happened to start with `victoria-logs`.
+fn is_binary_candidate(path: &Path) -> bool {
+    const CANDIDATES: &[&str] = &["victoria-logs-prod", "victoria-logs"];
+    const ARCHIVE_SUFFIXES: &[&str] = &[".tar.gz", ".tgz", ".gz", ".zip", ".tar"];
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if ARCHIVE_SUFFIXES.iter().any(|s| name.ends_with(s)) {
+        return false;
+    }
+    CANDIDATES.iter().any(|c| name.starts_with(c))
 }
 
 #[cfg(unix)]
@@ -336,5 +352,33 @@ mod tests {
     fn sha256_hex_round_trips_known_vector() {
         let hash = sha256_hex(b"abc");
         assert_eq!(hash, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+
+    /// Regression for the `Exec format error (os error 8)` startup crash:
+    /// `find_extracted_binary` used to match by `name.starts_with("victoria-logs")`,
+    /// which also matched the staged `victoria-logs.tar.gz` archive. Depending on
+    /// `read_dir` ordering, the tarball was returned as the "binary", renamed
+    /// into place, chmod +x'd, and then handed to the sidecar — which the kernel
+    /// rejected with `ENOEXEC`. The candidate check must reject anything ending
+    /// in an archive extension.
+    #[test]
+    fn binary_candidate_rejects_tarball_with_matching_prefix() {
+        assert!(!is_binary_candidate(std::path::Path::new("victoria-logs.tar.gz")));
+        assert!(!is_binary_candidate(std::path::Path::new("victoria-logs-linux-amd64-v1.50.0.tar.gz")));
+        assert!(!is_binary_candidate(std::path::Path::new("victoria-logs.tgz")));
+        assert!(!is_binary_candidate(std::path::Path::new("victoria-logs.zip")));
+    }
+
+    #[test]
+    fn binary_candidate_accepts_canonical_executable_names() {
+        assert!(is_binary_candidate(std::path::Path::new("victoria-logs-prod")));
+        assert!(is_binary_candidate(std::path::Path::new("victoria-logs")));
+    }
+
+    #[test]
+    fn binary_candidate_rejects_unrelated_files() {
+        assert!(!is_binary_candidate(std::path::Path::new("README.md")));
+        assert!(!is_binary_candidate(std::path::Path::new("LICENSE")));
+        assert!(!is_binary_candidate(std::path::Path::new("victoria-metrics-prod")));
     }
 }

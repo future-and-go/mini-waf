@@ -604,8 +604,14 @@ impl ProxyHttp for WafProxy {
     where
         Self::CTX: Send + Sync,
     {
-        // Body mask runs first: when enabled, `begin_upstream_cache_capture` already
-        // declined capture (`capture_started == false`), so the cache branch below is a no-op.
+        // Body mask and response cache are mutually exclusive *by design*:
+        // mask rewrites bytes in place (length differs from match length →
+        // chunked encoding) so the bytes streamed downstream are NOT what the
+        // cache would replay. `response_filter` enforces the contract by
+        // passing `body_mask_enabled` into `begin_upstream_cache_capture`,
+        // which short-circuits and clears `ctx.response_cache_store` to `None`.
+        // We early-return here so the cache branch never even runs the
+        // `pending.is_none()` check on a hot path.
         if ctx.body_mask.enabled {
             let Some(hc) = &ctx.host_config else {
                 return Ok(None);

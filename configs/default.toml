@@ -12,13 +12,17 @@ max_connections = 20
 # ── FR-009: Response Caching ──────────────────────────────────────────────────
 #
 # backend choices:
-#   "memory"     — in-process Moka LRU (no extra process; use for local run without Valkey)
+#   "memory"     — in-process Moka LRU (no extra process; default for local dev)
 #   "embedded"   — spawn valkey-server as a child process via UNIX socket
 #   "standalone" — connect to an external Valkey/Redis instance
 #   "cluster"    — connect to a Valkey cluster (topology auto-discovered)
 #
 # For "embedded" / "standalone" / "cluster" the binary must be built with
 # the `valkey` feature flag:  cargo build --features gateway/valkey
+#
+# The `CACHE_BACKEND` env var overrides this field at startup (see docker-compose.yml
+# and docs/valkey-cache-guide.md §3.1) so a single shared config file works for
+# both bare-metal local runs and Compose deployments.
 #
 [cache]
 enabled = true
@@ -28,11 +32,10 @@ max_ttl_secs = 3600
 # FR-009 Phase 3: per-route TTL rules. Hot-reloaded on file change.
 # Missing file is non-fatal at boot (logs warn, runs with no per-route rules).
 rules_path = "rules/cache.yaml"
-# Cache backend. Docker Compose default stack uses standalone Valkey (service
-# "valkey"); for local dev without Compose, set "memory" or "embedded".
-backend = "standalone"
-# If Valkey is not reachable at boot (e.g. Compose still starting), either wait for
-# `depends_on: service_healthy` or temporarily set backend = "memory".
+# Default to in-process moka so a fresh `cargo run` works without an external
+# Valkey/Redis. docker-compose.yml sets CACHE_BACKEND=standalone to switch the
+# stack to the bundled `valkey` service automatically.
+backend = "memory"
 
 # ── Embedded Valkey (backend = "embedded") ────────────────────────────────────
 # Spawns a valkey-server child process using a UNIX socket.

@@ -48,15 +48,9 @@ base64 = { workspace = true }
 futures-util = { workspace = true }
 
 # Valkey/Redis async client — only compiled when the `valkey` feature is enabled.
-# Feature flags reference: https://docs.rs/fred/latest/fred/#features
-fred = { version = "9", features = [
-    "i-keys",       # GET, SET, DEL, SCAN, EXPIRE, TTL
-    "i-sets",       # SADD, SREM, SMEMBERS (tag index operations)
-    "i-server",     # INFO, DBSIZE, PING, CONFIG
-    "i-cluster",    # Cluster topology discovery + MOVED/ASK handling
-    "rustls-native-certs",  # TLS using rustls + OS trust store
-    "unix-sockets", # UNIX domain socket support (embedded mode)
-], optional = true }
+# Feature set + version are pinned in the workspace root Cargo.toml; we only
+# inherit + re-declare optionality so the `dep:fred` feature gate below works.
+fred = { workspace = true, optional = true }
 
 [features]
 # Enable Valkey/Redis cache backends (ValkeyStore + EmbeddedValkey supervisor).

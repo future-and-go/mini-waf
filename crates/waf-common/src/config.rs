@@ -839,12 +839,93 @@ impl VictoriaLogsConfig {
     }
 }
 
-/// Load configuration from a TOML file
+/// Load configuration from a TOML file.
+///
+/// After parsing the TOML, environment variables can override individual
+/// fields so docker-compose / kubernetes can flip backends without rewriting
+/// the mounted config. Currently supported overrides:
+///
+/// | Env var          | Field             | Accepted values                              |
+/// |------------------|-------------------|----------------------------------------------|
+/// | `CACHE_BACKEND`  | `cache.backend`   | `memory` · `embedded` · `standalone` · `cluster` |
 pub fn load_config(path: &str) -> anyhow::Result<AppConfig> {
     let content = std::fs::read_to_string(path)?;
-    let config: AppConfig = toml::from_str(&content)?;
+    let mut config: AppConfig = toml::from_str(&content)?;
+    apply_env_overrides(&mut config)?;
     config.victoria_logs.validate()?;
     Ok(config)
+}
+
+fn apply_env_overrides(config: &mut AppConfig) -> anyhow::Result<()> {
+    if let Ok(raw) = std::env::var("CACHE_BACKEND")
+        && let Some(kind) = parse_cache_backend_override(&raw)?
+    {
+        config.cache.backend = kind;
+    }
+    Ok(())
+}
+
+/// Pure parser for `CACHE_BACKEND` so the env-driven branch above stays a
+/// thin shell. Returns `Ok(None)` when the value is empty/whitespace (treated
+/// as "no override"), and `Err` for an unrecognised label.
+fn parse_cache_backend_override(raw: &str) -> anyhow::Result<Option<CacheBackendKind>> {
+    let v = raw.trim();
+    if v.is_empty() {
+        return Ok(None);
+    }
+    match v.to_ascii_lowercase().as_str() {
+        "memory" => Ok(Some(CacheBackendKind::Memory)),
+        "embedded" => Ok(Some(CacheBackendKind::Embedded)),
+        "standalone" => Ok(Some(CacheBackendKind::Standalone)),
+        "cluster" => Ok(Some(CacheBackendKind::Cluster)),
+        other => Err(anyhow::anyhow!(
+            "invalid CACHE_BACKEND={other:?} (expected memory|embedded|standalone|cluster)"
+        )),
+    }
+}
+
+#[cfg(test)]
+mod env_override_tests {
+    use super::{CacheBackendKind, parse_cache_backend_override};
+
+    #[test]
+    fn empty_or_whitespace_means_no_override() {
+        assert!(matches!(parse_cache_backend_override(""), Ok(None)));
+        assert!(matches!(parse_cache_backend_override("   "), Ok(None)));
+        assert!(matches!(parse_cache_backend_override("\t"), Ok(None)));
+    }
+
+    #[test]
+    fn valid_labels_are_case_insensitive_and_trimmed() {
+        assert!(matches!(
+            parse_cache_backend_override("memory"),
+            Ok(Some(CacheBackendKind::Memory))
+        ));
+        assert!(matches!(
+            parse_cache_backend_override("  Embedded  "),
+            Ok(Some(CacheBackendKind::Embedded))
+        ));
+        assert!(matches!(
+            parse_cache_backend_override("STANDALONE"),
+            Ok(Some(CacheBackendKind::Standalone))
+        ));
+        assert!(matches!(
+            parse_cache_backend_override("Cluster"),
+            Ok(Some(CacheBackendKind::Cluster))
+        ));
+    }
+
+    #[test]
+    fn unknown_label_is_rejected_at_load_time() {
+        let result = parse_cache_backend_override("redis");
+        assert!(result.is_err(), "unknown label must be rejected");
+        if let Err(e) = result {
+            assert!(
+                e.to_string().contains("invalid CACHE_BACKEND"),
+                "error must mention CACHE_BACKEND, got: {e}"
+            );
+        }
+    }
 }
 
 // --- Cluster Configuration ---
