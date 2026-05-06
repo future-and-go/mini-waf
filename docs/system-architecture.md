@@ -927,6 +927,26 @@ All events logged via `tracing` crate:
 - Authentication failures
 - High request latency
 
+### VictoriaLogs Archive (opt-in)
+
+When `[victoria_logs] enabled = true`, the WAF runs a managed VictoriaLogs
+sidecar (loopback only, validated at config load) and ships two independent
+streams into it:
+
+| Stream | Source | Schema |
+|--------|--------|--------|
+| `waf_tracing` | `tracing_subscriber::Layer` (`waf-engine::logging::VictoriaLogsLayer`) | `_time`, `_msg`, `level`, `target`, span fields |
+| `waf_audit` | `WafEngine::send_audit_event` (one record per non-Allow decision) | `event_type`, `rule_name`, `client_ip`, `host`, `method`, `path`, `tier`, `detail`, `req_id` |
+
+Both streams share a fail-open batch buffer (`waf-engine::logging::BatchSender`):
+saturated channels drop entries with a 30 s rate-limited warn, so the WAF
+request path never blocks on observability.
+
+The admin panel queries this archive through admin-only proxy endpoints —
+`GET /api/v1/logs/{query,stats,streams}` — which validate JWT + role,
+reject `LogsQL` write/delete pipes, and cap responses at 50 MiB. No SSRF
+surface: the proxy targets only the loopback `base_url()`.
+
 ---
 
 ## Disaster Recovery

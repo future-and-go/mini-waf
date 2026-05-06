@@ -17,6 +17,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+# Phase 02 — VictoriaLogs `tracing` Layer impl lives in `logging::vlogs_layer`.
+tracing-subscriber = { workspace = true }
 bytes = { workspace = true }
 dashmap = { workspace = true }
 regex = { workspace = true }

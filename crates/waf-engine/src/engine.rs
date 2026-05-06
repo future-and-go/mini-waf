@@ -28,6 +28,7 @@ use crate::checks::{
 use crate::community::{CommunityChecker, CommunityReporter, RequestInfo};
 use crate::crowdsec::{AppSecClient, AppSecResult, CrowdSecChecker, appsec_to_detection};
 use crate::geoip::GeoIpService;
+use crate::logging::{AuditEvent, AuditEventType, AuditSender};
 use crate::rules::custom_file_loader::CustomRuleFileWatcher;
 use crate::rules::engine::{CustomRulesEngine, from_db_rule};
 
@@ -101,6 +102,11 @@ pub struct WafEngine {
     /// File watcher for `configs/tx-velocity.yaml`. Lazy via
     /// `start_tx_velocity_watcher`; held to keep the OS watch alive.
     tx_velocity_reloader: OnceLock<TxVelocityReloader>,
+    // ── Phase 02: VictoriaLogs audit sender ───────────────────────────────────
+    /// Structured audit-event sink. `None` until [`set_audit_sender`] is
+    /// called by the binary boot path.  When set, every non-Allow decision
+    /// from `inspect()` is mirrored into `VictoriaLogs` as an audit record.
+    audit_sender: OnceLock<Arc<AuditSender>>,
 }
 
 impl WafEngine {
@@ -165,6 +171,7 @@ impl WafEngine {
             tx_velocity_cfg,
             tx_velocity_store,
             tx_velocity_reloader: OnceLock::new(),
+            audit_sender: OnceLock::new(),
         }
     }
 
@@ -289,6 +296,12 @@ impl WafEngine {
         let _ = self.geoip.set(service);
     }
 
+    /// Plug the `VictoriaLogs` audit sender into the engine (called once
+    /// after init when `[victoria_logs] enabled = true`).
+    pub fn set_audit_sender(&self, sender: Arc<AuditSender>) {
+        let _ = self.audit_sender.set(sender);
+    }
+
     /// Return a reference to the `GeoCheck` so callers can load rules.
     pub const fn geo_check(&self) -> &Arc<GeoCheck> {
         &self.geo_check
@@ -407,6 +420,7 @@ impl WafEngine {
         if !ip_blacklist.is_allowed() {
             self.log_attack(ctx, &ip_blacklist);
             self.report_community_signal(ctx, &ip_blacklist);
+            self.send_audit_event(ctx, &ip_blacklist);
             return ip_blacklist;
         }
 
@@ -421,6 +435,7 @@ impl WafEngine {
         if !url_bl.is_allowed() {
             self.log_attack(ctx, &url_bl);
             self.report_community_signal(ctx, &url_bl);
+            self.send_audit_event(ctx, &url_bl);
             return url_bl;
         }
 
@@ -440,6 +455,7 @@ impl WafEngine {
             };
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
+            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -475,6 +491,7 @@ impl WafEngine {
             };
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
+            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -495,6 +512,7 @@ impl WafEngine {
 
                 self.log_security_event(ctx, &decision);
                 self.report_community_signal(ctx, &decision);
+                self.send_audit_event(ctx, &decision);
                 return decision;
             }
         }
@@ -513,6 +531,7 @@ impl WafEngine {
             };
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
+            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -533,6 +552,7 @@ impl WafEngine {
                     };
                     self.log_security_event(ctx, &decision);
                     self.report_community_signal(ctx, &decision);
+                    self.send_audit_event(ctx, &decision);
                     return decision;
                 }
                 AppSecResult::Allow | AppSecResult::Unavailable => {}
@@ -553,6 +573,7 @@ impl WafEngine {
             };
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
+            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -570,6 +591,7 @@ impl WafEngine {
             };
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
+            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -587,6 +609,7 @@ impl WafEngine {
             };
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
+            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -604,6 +627,7 @@ impl WafEngine {
             };
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
+            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -702,6 +726,46 @@ impl WafEngine {
                 warn!("Failed to log security event: {}", e);
             }
         });
+    }
+
+    /// Mirror a non-Allow decision into the `VictoriaLogs` audit stream.
+    ///
+    /// Fire-and-forget: drops silently when the audit sender is unset
+    /// (`[victoria_logs] enabled = false`) or its buffer is saturated.
+    /// The hot path never blocks on observability.
+    fn send_audit_event(&self, ctx: &RequestCtx, decision: &WafDecision) {
+        let Some(sender) = self.audit_sender.get() else {
+            return;
+        };
+        let Some(result) = &decision.result else {
+            return;
+        };
+
+        let event_type = match &decision.action {
+            WafAction::Block { .. } => AuditEventType::Block,
+            WafAction::Allow => AuditEventType::Allow,
+            WafAction::LogOnly => AuditEventType::LogOnly,
+            // Redirects in this codebase are used as challenge-style
+            // responses (CAPTCHA, soft block). Map to the closest LogsQL
+            // category so analysts can filter them out from hard blocks.
+            WafAction::Redirect { .. } => AuditEventType::Challenge,
+        };
+
+        let event = AuditEvent {
+            timestamp: chrono::Utc::now(),
+            event_type,
+            rule_name: result.rule_name.clone(),
+            rule_id: result.rule_id.clone(),
+            phase: Some(result.phase.to_string()),
+            client_ip: ctx.client_ip.to_string(),
+            host: ctx.host.clone(),
+            method: ctx.method.clone(),
+            path: ctx.path.clone(),
+            tier: Some(format!("{:?}", ctx.tier)),
+            detail: Some(result.detail.clone()),
+            req_id: Some(ctx.req_id.clone()),
+        };
+        sender.send(event);
     }
 
     /// Push a detection signal to the community reporter via bounded channel.
