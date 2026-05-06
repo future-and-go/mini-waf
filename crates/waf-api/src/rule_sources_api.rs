@@ -163,15 +163,11 @@ fn validate_request(req: &CreateRuleSourceRequest) -> Result<(), &'static str> {
     // remote_url MUST have url; local_* MUST have path. We don't validate the
     // URL scheme here — a separate FR-002b SSRF guard owns that surface.
     match req.source_type.as_str() {
-        "remote_url" => {
-            if req.url.as_deref().is_none_or(str::is_empty) {
-                return Err("remote_url source requires a non-empty url");
-            }
+        "remote_url" if req.url.as_deref().is_none_or(str::is_empty) => {
+            return Err("remote_url source requires a non-empty url");
         }
-        "local_file" | "local_dir" => {
-            if req.path.as_deref().is_none_or(str::is_empty) {
-                return Err("local_file/local_dir source requires a non-empty path");
-            }
+        "local_file" | "local_dir" if req.path.as_deref().is_none_or(str::is_empty) => {
+            return Err("local_file/local_dir source requires a non-empty path");
         }
         _ => {}
     }
@@ -331,7 +327,7 @@ mod tests {
             url: url.map(str::to_string),
             path: path.map(str::to_string),
             format: "yaml".to_string(),
-            _update_interval: None,
+            update_interval: None,
         }
     }
 
