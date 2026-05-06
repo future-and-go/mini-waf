@@ -119,6 +119,8 @@ zstd = "0.13"
 [workspace.lints.rust]
 unsafe_code = "deny"
 unused_must_use = "deny"
+# Allow loom cfg for concurrency tests (waf-engine/tests/ddos_loom.rs)
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

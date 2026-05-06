@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn warmed_baseline_adapts_threshold() {
-        let store = Arc::new(MemoryCounterStore::new(100000, 60));
+        let store = Arc::new(MemoryCounterStore::new(100_000, 60));
         let clock = Arc::new(MockClock::new(0));
         let detector = PerTierDetector::new(store, clock, 10);
 

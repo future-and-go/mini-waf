@@ -7,24 +7,30 @@
 //! - [`detector`] — `Detector` trait + per-IP detector (phase 2)
 //! - [`action`]   — action executors for bans and risk bumps (phase 5)
 //! - [`degrade`]  — circuit breaker & fail-mode resolution (phase 6)
+//! - [`check`]    — `DdosCheck` pipeline integration (phase 7)
+//! - [`metrics`]  — atomic counters for observability (phase 7)
 
 use std::collections::HashMap;
 
 use waf_common::tier::Tier;
 
 pub mod action;
+pub mod check;
 pub mod config;
 pub mod degrade;
 pub mod detector;
+pub mod metrics;
 pub mod reload;
 pub mod store;
 
 pub use action::{
     ActionExecutor, ActionResult, BanAction, BanSchedule, CombinedAction, DynamicBanTable, RiskBumpAction,
 };
+pub use check::DdosCheck;
 pub use config::DdosFileConfig;
 pub use degrade::{DegradeAction, ErrorKind, InFlightGuard, OverloadGuard};
 pub use detector::{Detector, DetectorVerdict, PerIpDetector};
+pub use metrics::{DdosMetrics, DdosMetricsSnapshot};
 pub use reload::DdosReloader;
 pub use store::{CounterStore, MemoryCounterStore};
 

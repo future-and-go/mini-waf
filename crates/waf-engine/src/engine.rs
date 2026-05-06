@@ -15,6 +15,13 @@ use crate::block_page::render_block_page;
 use crate::checker::{RuleStore, check_ip_blacklist, check_ip_whitelist, check_url_blacklist, check_url_whitelist};
 use waf_common::config::SqliScanConfig;
 
+use crate::checks::ddos::action::{BanAction, CombinedAction};
+use crate::checks::ddos::detector::PerIpDetector;
+use crate::checks::ddos::reload::DEFAULT_DEBOUNCE_MS as DDOS_DEBOUNCE_MS;
+use crate::checks::ddos::store::MemoryCounterStore as DdosMemoryStore;
+use crate::checks::ddos::{
+    DdosCheck, DdosConfig, DdosFileConfig, DdosMetrics, DdosReloader, DynamicBanTable, OverloadGuard,
+};
 use crate::checks::rate_limit::reload::{DEFAULT_DEBOUNCE_MS as RL_DEBOUNCE_MS, RateLimitReloader};
 use crate::checks::rate_limit::store::MemoryStore as RlMemoryStore;
 use crate::checks::rate_limit::{RateLimitFileConfig, store::RateLimitStore};
@@ -102,6 +109,14 @@ pub struct WafEngine {
     /// File watcher for `configs/tx-velocity.yaml`. Lazy via
     /// `start_tx_velocity_watcher`; held to keep the OS watch alive.
     tx_velocity_reloader: OnceLock<TxVelocityReloader>,
+    // ── FR-005 ddos-protection (phase-07) ────────────────────────────────────
+    /// Hot-reloadable `DDoS` config snapshot.
+    ddos_cfg: Arc<ArcSwap<DdosConfig>>,
+    /// `DdosCheck` instance for pipeline integration.
+    ddos_check: Arc<DdosCheck>,
+    /// File watcher for `configs/ddos.yaml`. Lazy via
+    /// `start_ddos_watcher`; held to keep the OS watch alive.
+    ddos_reloader: OnceLock<DdosReloader>,
     // ── Phase 02: VictoriaLogs audit sender ───────────────────────────────────
     /// Structured audit-event sink. `None` until [`set_audit_sender`] is
     /// called by the binary boot path.  When set, every non-Allow decision
@@ -134,6 +149,36 @@ impl WafEngine {
         // Inert until `start_tx_velocity_watcher` loads config.
         let tx_velocity_cfg = Arc::new(ArcSwap::from(Arc::new(TxVelocityConfig::default())));
         let tx_velocity_store = Arc::new(TxStore::new(Arc::clone(&tx_velocity_cfg)));
+
+        // FR-005 DdosCheck: burst detection and banning.
+        // Runs BEFORE rate-limit in the pipeline (separate from checkers vec).
+        // Inert until `start_ddos_watcher` loads config.
+        let ddos_cfg = Arc::new(ArcSwap::from(Arc::new(DdosConfig::default())));
+        // Reuse rate-limit store for per-IP detection (same token bucket algorithm)
+        let ddos_rl_store: Arc<dyn RateLimitStore> = Arc::new(RlMemoryStore::new());
+        // Separate counter store for offense tracking (ban escalation)
+        let ddos_counter_store: Arc<dyn crate::checks::ddos::store::CounterStore> =
+            Arc::new(DdosMemoryStore::new(100_000, 60));
+        let ddos_ban_table = Arc::new(DynamicBanTable::new());
+        let ddos_guard = Arc::new(OverloadGuard::default());
+        let ddos_metrics = Arc::new(DdosMetrics::new());
+
+        // Build detectors (cheap-first order)
+        let ddos_detectors: Vec<Box<dyn crate::checks::ddos::detector::Detector>> =
+            vec![Box::new(PerIpDetector::new(ddos_rl_store))];
+
+        // Build action executors (ban only — risk bump requires FR-010 aggregator)
+        let ddos_ban_action = BanAction::with_defaults(Arc::clone(&ddos_ban_table), ddos_counter_store);
+        let ddos_action = Arc::new(CombinedAction::new(vec![Box::new(ddos_ban_action)]));
+
+        let ddos_check = Arc::new(DdosCheck::new(
+            Arc::clone(&ddos_cfg),
+            ddos_detectors,
+            ddos_action,
+            Arc::clone(&ddos_guard),
+            Arc::clone(&ddos_ban_table),
+            Arc::clone(&ddos_metrics),
+        ));
 
         let checkers: Vec<Box<dyn Check>> = vec![
             Box::new(RateLimitCheck::new(rl_store, Arc::clone(&rate_limit_cfg))),
@@ -171,6 +216,9 @@ impl WafEngine {
             tx_velocity_cfg,
             tx_velocity_store,
             tx_velocity_reloader: OnceLock::new(),
+            ddos_cfg,
+            ddos_check,
+            ddos_reloader: OnceLock::new(),
             audit_sender: OnceLock::new(),
         }
     }
@@ -240,6 +288,48 @@ impl WafEngine {
                 "tx_velocity: hot-reload watcher failed to start; running without hot-reload"
             ),
         }
+    }
+
+    /// Load `configs/ddos.yaml` once and start the hot-reload watcher.
+    ///
+    /// Bad YAML or a missing file logs a warning and leaves the subsystem
+    /// inert (default empty config) — the gateway never refuses to start
+    /// because of a `DDoS` config issue.
+    pub fn start_ddos_watcher(&self, path: &Path) {
+        if self.ddos_reloader.get().is_some() {
+            return;
+        }
+        match DdosFileConfig::from_path(path) {
+            Ok(cfg) => {
+                self.ddos_cfg.store(cfg);
+                info!(file = %path.display(), "ddos: initial config loaded");
+            }
+            Err(e) => {
+                warn!(file = %path.display(), error = %e, "ddos: initial load failed; using empty config");
+            }
+        }
+        match DdosReloader::start(path.to_path_buf(), Arc::clone(&self.ddos_cfg), DDOS_DEBOUNCE_MS) {
+            Ok(r) => {
+                let _ = self.ddos_reloader.set(r);
+            }
+            Err(e) => warn!(
+                file = %path.display(),
+                error = %e,
+                "ddos: hot-reload watcher failed to start; running without hot-reload"
+            ),
+        }
+    }
+
+    /// Get reference to `DDoS` metrics for external access.
+    #[must_use]
+    pub fn ddos_metrics(&self) -> &Arc<DdosMetrics> {
+        self.ddos_check.metrics()
+    }
+
+    /// Get reference to `DDoS` ban table for external access (e.g., purge task).
+    #[must_use]
+    pub fn ddos_ban_table(&self) -> &Arc<DynamicBanTable> {
+        self.ddos_check.ban_table()
     }
 
     /// Set the root rules directory used by the file-based custom rule
@@ -437,6 +527,25 @@ impl WafEngine {
             self.report_community_signal(ctx, &url_bl);
             self.send_audit_event(ctx, &url_bl);
             return url_bl;
+        }
+
+        // ── Phase 19: DDoS burst detection (FR-005) ───────────────────────────
+        // Runs AFTER allowlist/blacklist (fast-path) and BEFORE rate-limit.
+        // Banned IPs are blocked here; burst detection may trigger new bans.
+        if let Some(result) = self.ddos_check.check(ctx) {
+            let rule_name = result.rule_name.clone();
+            let decision = if ctx.host_config.log_only_mode {
+                WafDecision {
+                    action: WafAction::LogOnly,
+                    result: Some(result),
+                }
+            } else {
+                let body = render_block_page(ctx, &rule_name);
+                WafDecision::block(403, Some(body), result)
+            };
+            self.log_security_event(ctx, &decision);
+            self.report_community_signal(ctx, &decision);
+            return decision;
         }
 
         // ── Phase 16a: CrowdSec Bouncer — fast cache lookup ───────────────────

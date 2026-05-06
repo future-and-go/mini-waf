@@ -16,6 +16,7 @@ pub mod xss;
 
 pub use anti_hotlink::AntiHotlinkCheck;
 pub use bot::BotCheck;
+pub use ddos::{DdosCheck, DdosConfig, DdosFileConfig, DdosMetrics, DdosReloader};
 pub use dir_traversal::DirTraversalCheck;
 pub use geo::{GeoCheck, GeoRule, GeoRuleMode};
 pub use owasp::OWASPCheck;
