@@ -279,6 +279,41 @@ pub async fn reload_rule_registry(State(state): State<Arc<AppState>>) -> ApiResu
     Ok(Json(json!({ "success": true, "data": "Rules reloaded" })))
 }
 
+/// POST /api/rules/import — import rules from a local file path (YAML only for now)
+pub async fn import_rules(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ImportRulesRequest>,
+) -> ApiResult<Json<Value>> {
+    if req.format != "yaml" {
+        return Err(ApiError::BadRequest(
+            "Only 'yaml' format is supported for file import".into(),
+        ));
+    }
+
+    let path = Path::new(&req.source);
+    if !path.exists() {
+        return Err(ApiError::NotFound(format!("File not found: {}", req.source)));
+    }
+
+    let content = std::fs::read_to_string(path).map_err(|e| ApiError::Internal(anyhow!("Cannot read file: {e}")))?;
+
+    let rulefile: YamlRuleFile =
+        serde_yaml::from_str(&content).map_err(|e| ApiError::BadRequest(format!("Invalid YAML: {e}")))?;
+
+    let count = rulefile.rules.len();
+
+    // Trigger engine reload to pick up new files
+    state.engine.reload_rules().await.map_err(ApiError::Internal)?;
+
+    Ok(Json(json!({
+        "success": true,
+        "data": {
+            "imported": count,
+            "source": req.source,
+        }
+    })))
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -327,39 +362,4 @@ mod registry_scan_tests {
         assert_eq!(entries.2.len(), 1);
         assert_eq!(entries.2.first().expect("rule entry").id, "r1");
     }
-}
-
-/// POST /api/rules/import — import rules from a local file path (YAML only for now)
-pub async fn import_rules(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<ImportRulesRequest>,
-) -> ApiResult<Json<Value>> {
-    if req.format != "yaml" {
-        return Err(ApiError::BadRequest(
-            "Only 'yaml' format is supported for file import".into(),
-        ));
-    }
-
-    let path = Path::new(&req.source);
-    if !path.exists() {
-        return Err(ApiError::NotFound(format!("File not found: {}", req.source)));
-    }
-
-    let content = std::fs::read_to_string(path).map_err(|e| ApiError::Internal(anyhow!("Cannot read file: {e}")))?;
-
-    let rulefile: YamlRuleFile =
-        serde_yaml::from_str(&content).map_err(|e| ApiError::BadRequest(format!("Invalid YAML: {e}")))?;
-
-    let count = rulefile.rules.len();
-
-    // Trigger engine reload to pick up new files
-    state.engine.reload_rules().await.map_err(ApiError::Internal)?;
-
-    Ok(Json(json!({
-        "success": true,
-        "data": {
-            "imported": count,
-            "source": req.source,
-        }
-    })))
 }
