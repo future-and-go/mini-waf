@@ -40,6 +40,9 @@ use crate::notifications::{
 };
 use crate::panel_api::{get_panel_config, put_panel_config};
 use crate::plugins::{delete_plugin, disable_plugin, enable_plugin, list_plugins, upload_plugin};
+use crate::rule_sources_api::{
+    create_rule_source, delete_rule_source, list_rule_sources, sync_all_rule_sources, sync_rule_source,
+};
 use crate::rules_api::{get_rule_registry, import_rules, reload_rule_registry, toggle_rule};
 use crate::security::{admin_ip_check_middleware, list_audit_log, rate_limit_middleware, security_headers_middleware};
 use crate::state::AppState;
@@ -186,6 +189,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/rules/registry/{id}", patch(toggle_rule))
         .route("/api/rules/reload", post(reload_rule_registry))
         .route("/api/rules/import", post(import_rules))
+        // FR-007: rule sources (DB-backed external sources CRUD)
+        .route("/api/rule-sources", get(list_rule_sources).post(create_rule_source))
+        .route("/api/rule-sources/sync", post(sync_all_rule_sources))
+        .route("/api/rule-sources/{name}", delete(delete_rule_source))
+        .route("/api/rule-sources/{name}/sync", post(sync_rule_source))
         // Phase 7: Cluster
         .route("/api/cluster/status", get(cluster_status))
         .route("/api/cluster/nodes", get(list_cluster_nodes))
