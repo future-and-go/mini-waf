@@ -222,11 +222,7 @@ pub async fn create_rule_source(
     .await;
 
     match result {
-        Ok(_) => (
-            StatusCode::CREATED,
-            Json(json!({ "ok": true, "name": req.name })),
-        )
-            .into_response(),
+        Ok(_) => (StatusCode::CREATED, Json(json!({ "ok": true, "name": req.name }))).into_response(),
         Err(e) => {
             if let Some(db_err) = e.as_database_error()
                 && db_err.is_unique_violation()
@@ -355,10 +351,7 @@ mod tests {
     #[test]
     fn validate_rejects_remote_url_without_url() {
         let r = req("missing", "remote_url", None, None);
-        assert_eq!(
-            validate_request(&r),
-            Err("remote_url source requires a non-empty url")
-        );
+        assert_eq!(validate_request(&r), Err("remote_url source requires a non-empty url"));
     }
 
     #[test]
@@ -380,10 +373,7 @@ mod tests {
     fn validate_rejects_unknown_format() {
         let mut r = req("x", "remote_url", Some("https://e/r.yaml"), None);
         r.format = "xml".to_string();
-        assert_eq!(
-            validate_request(&r),
-            Err("format must be one of: yaml, json, modsec")
-        );
+        assert_eq!(validate_request(&r), Err("format must be one of: yaml, json, modsec"));
     }
 
     #[test]
