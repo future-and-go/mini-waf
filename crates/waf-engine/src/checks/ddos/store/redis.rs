@@ -239,7 +239,7 @@ mod tests {
         assert!(!store.breaker_open());
     }
 
-    /// Verify purge_expired is no-op (Redis handles TTL natively).
+    /// Verify `purge_expired` is no-op (Redis handles TTL natively).
     #[tokio::test]
     async fn purge_expired_is_noop() {
         let Ok(url) = std::env::var("REDIS_TEST_URL") else {
