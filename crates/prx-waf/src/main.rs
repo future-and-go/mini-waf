@@ -1010,7 +1010,16 @@ async fn run_seed_admin(config: &AppConfig) -> anyhow::Result<()> {
 
     let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
     let router = Arc::new(HostRouter::new());
-    let state = Arc::new(AppState::new(Arc::clone(&db), engine, router)?);
+    // `seed-admin` only writes the default admin row; it never serves traffic
+    // and never reads/writes the response cache. Build a zero-sized in-memory
+    // cache so this path stays decoupled from `[cache]` config tuning — if the
+    // operator later changes max_size_mb / TTLs the seed run does not skew.
+    let state = Arc::new(AppState::new(
+        Arc::clone(&db),
+        engine,
+        router,
+        gateway::ResponseCache::new(0, 0, 0),
+    )?);
 
     waf_api::auth::ensure_default_admin(&state).await?;
     info!("Default admin user seeded (username=admin, password=admin). Change it immediately!");
@@ -1341,6 +1350,20 @@ fn run_server(config: &AppConfig, config_file_path: &str, vlogs_layer_slot: Laye
         })
         .collect();
 
+    proxy.response_cache = Some(Arc::clone(&api_state.cache));
+
+    let cache_for_timeseries = Arc::clone(&api_state.cache);
+    rt.spawn(async move {
+        use tokio::time::MissedTickBehavior;
+        #[allow(clippy::duration_suboptimal_units)] // `from_secs(60)` — stable MSRV parity
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            cache_for_timeseries.tick_timeseries().await;
+        }
+    });
+
     // Warn when XFF trust is enabled but no trusted proxy CIDRs are configured,
     // meaning XFF headers from ANY source will be honoured (fail-open).
     if proxy.trust_proxy_headers && proxy.trusted_proxies.is_empty() {
@@ -1395,6 +1418,10 @@ struct ShutdownGuards {
     _crowdsec: Option<tokio::sync::watch::Sender<bool>>,
     /// Keeps the Community background worker alive while the server runs.
     _community: Option<tokio::sync::watch::Sender<bool>>,
+    /// FR-009: `CacheRuleWatcher` must not be dropped while serving.
+    _cache_rules_watcher: Option<gateway::cache::CacheRuleWatcher>,
+    /// FR-009: embedded `valkey-server` child handle (opaque).
+    _embedded_valkey: Option<Box<dyn Send + Sync + 'static>>,
 }
 
 fn resolve_panel_config_path(main_config_file: &str, configured: Option<&str>) -> Option<std::path::PathBuf> {
@@ -1591,8 +1618,19 @@ async fn init_async(
 
     info!("Registered {} host routes", router.len());
 
+    let gateway::cache::CacheInit {
+        cache,
+        rules_watcher,
+        embedded_supervisor,
+    } = gateway::cache::init_response_cache(&config.cache).await?;
+
     // Build app state
-    let mut api_state = AppState::new(Arc::clone(&db), Arc::clone(&engine), Arc::clone(&router))?;
+    let mut api_state = AppState::new(
+        Arc::clone(&db),
+        Arc::clone(&engine),
+        Arc::clone(&router),
+        Arc::clone(&cache),
+    )?;
 
     // Plug the cluster's NodeState into AppState so /api/cluster/status,
     // /api/cluster/nodes etc. can read role / term / peers. Without this the
@@ -1749,6 +1787,8 @@ async fn init_async(
     let guards = ShutdownGuards {
         _crowdsec: crowdsec_shutdown_guard,
         _community: community_shutdown_guard,
+        _cache_rules_watcher: rules_watcher,
+        _embedded_valkey: embedded_supervisor,
     };
 
     Ok((engine, router, Arc::new(api_state), guards, vlogs_sidecar))
