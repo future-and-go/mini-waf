@@ -10,6 +10,7 @@ pub mod middleware;
 pub mod notifications;
 pub mod panel_api;
 pub mod plugins;
+pub mod rule_sources_api;
 pub mod rules_api;
 pub mod security;
 pub mod server;
