@@ -2,9 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Coding Principles
-
-```
 ## Coding Principles
 
 Four guardrails against the most common LLM coding failures (source: Andrej Karpathy).
@@ -37,7 +34,6 @@ Four guardrails against the most common LLM coding failures (source: Andrej Karp
 - "Fix the bug" → "Write a test that reproduces it, then make it pass"
 - "Refactor X" → "Ensure tests pass before and after"
 - Multi-step plans must have explicit verify conditions per step
-```
 
 ## Role & Responsibilities
 
