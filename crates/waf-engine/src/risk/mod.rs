@@ -18,6 +18,7 @@
 
 pub mod anomaly;
 pub mod canary;
+pub mod challenge_credit;
 pub mod config;
 pub mod decay;
 pub mod ingest;
@@ -36,7 +37,8 @@ mod tests;
 
 pub use anomaly::{AnomalyCtx, AnomalyLayer};
 pub use canary::CanaryLayer;
-pub use config::{CanaryConfig, IngestConfig, RiskConfig};
+pub use challenge_credit::{ChallengeBuilder, ChallengeIssuer, ChallengeVerifier, InvalidReason, VerifyOutcome};
+pub use config::{CanaryConfig, ChallengeConfig, IngestConfig, RiskConfig};
 pub use ingest::{IngestMetrics, IngestMetricsSnapshot, ScoringAggregator, SignalWeights};
 pub use key::{RiskKey, SessionId};
 pub use reload::RiskReloader;
@@ -46,7 +48,7 @@ pub use score::{
 };
 pub use scorer::Scorer;
 pub use seed::{SeedDeltas, SeedLayer, SeedPaths, SeedReloader, SeedTables, SeedVerdict};
-pub use state::{Contributor, ContributorKind, RiskState, SeedKind};
+pub use state::{Contributor, ContributorKind, CreditOutcome, RiskState, SeedKind};
 pub use store::{MemoryRiskStore, RiskStore};
 #[cfg(feature = "redis-store")]
 pub use store::{RedisRiskConfig, RedisRiskStore};

@@ -435,6 +435,131 @@ store:
 
 ---
 
+## Challenge Credit HMAC Secret (FR-006 / FR-025 Phase 8)
+
+Challenge credit tokens protect against challenge sharing and replay attacks. Each token is HMAC-signed and bound to the requesting actor (IP, device fingerprint, or session). Token verification outcomes map to configurable risk score deltas.
+
+### Configuration
+
+```toml
+[risk.challenge]
+enabled = true
+ttl_secs = 300                  # Token validity (5 minutes)
+hmac_secret_path = "/var/lib/waf/challenge-hmac.key"
+lru_size = 100000               # In-process nonce cache (consumed tokens)
+header_name = "X-WAF-Cred"      # Request header for token
+valid_delta = -25               # Risk delta: token valid (credit)
+invalid_delta = +20             # Risk delta: bad signature / binding mismatch
+replay_delta = +30              # Risk delta: token already consumed
+expired_delta = +10             # Risk delta: token past TTL
+```
+
+### Secret Management
+
+**Auto-generation**: On first boot, if `hmac_secret_path` doesn't exist, a cryptographically secure 32-byte random secret is generated and persisted to disk.
+
+**Permissions**: Secret file is created with `0600` mode (owner read/write only) on Unix systems. Windows has no file-mode enforcement.
+
+**Persistence**: Secret NEVER auto-rotates. Persists across restarts and container deployments. All nodes in a cluster MUST share the identical secret file to verify tokens issued by any peer.
+
+**Binding**: Each token encodes the actor identity (IP, fingerprint, or session ID from the request context). Verification fails if a different actor presents the token — preventing cross-actor sharing.
+
+### Rotation Procedure
+
+Schedule rotation during low-traffic windows to minimize impact:
+
+1. **Generate new secret**:
+   ```bash
+   head -c 32 /dev/urandom > /var/lib/waf/challenge-hmac.key.new
+   chmod 600 /var/lib/waf/challenge-hmac.key.new
+   ```
+
+2. **Drain in-flight tokens**:
+   - Wait 5 minutes (token TTL) for all outstanding tokens to expire naturally
+   - Or restart with brief downtime (30s)
+
+3. **Stop all WAF nodes** (coordinated):
+   ```bash
+   # Cluster-wide stop
+   docker compose -f docker-compose.cluster.yml down
+   ```
+
+4. **Replace secret on all nodes**:
+   ```bash
+   # Each node:
+   mv /var/lib/waf/challenge-hmac.key.new /var/lib/waf/challenge-hmac.key
+   ```
+
+5. **Restart all nodes**:
+   ```bash
+   docker compose -f docker-compose.cluster.yml up -d
+   ```
+
+**Impact**: All in-flight challenge credit tokens become invalid and will fail verification. Clients must re-complete the challenge to obtain new tokens. Risk scores bump by `invalid_delta` (+20) for replayed old tokens.
+
+### Token Lifecycle
+
+```
+[Client] → Challenge page → JS-PoW completion → /api/challenge/mint (POST)
+                                                       ↓
+                                         [Server issues token]
+                                         (HMAC-signed payload)
+                                                       ↓
+[Client] → Subsequent request with X-WAF-Cred header
+                                                       ↓
+           [WafEngine verifies signature + binding + TTL + nonce uniqueness]
+                                                       ↓
+                  Valid: -25 delta (credit)
+                  Invalid: +20 delta (bad sig/binding)
+                  Replay: +30 delta (nonce consumed)
+                  Expired: +10 delta (past TTL)
+```
+
+### Nonce Cache
+
+The nonce cache is an in-memory LRU tracking consumed tokens (nonce uniqueness check). Size is configurable via `lru_size` (default: 100,000 entries).
+
+- **Capacity**: ~50 bytes per entry → ~5 MB for 100K entries
+- **Eviction**: When full, LRU evicts oldest nonce
+- **TTL**: Entries auto-expire after `ttl_secs + grace_period` (default ~6 minutes)
+- **Per-node**: Cache is node-local; clustering does NOT synchronize nonces
+
+**Cluster caveat**: In a multi-node cluster, a token issued by node-a can be replayed on node-b (if node-b's nonce cache hasn't seen it yet). Mitigation: Redis-backed nonce store (feature flag `redis-store`; Phase 9).
+
+### Risk Deltas (Configurable)
+
+| Outcome | Default | Description |
+|---------|---------|-------------|
+| Valid | -25 | Challenge passed; actor earns credit |
+| Invalid | +20 | Malformed token, bad HMAC, or actor binding mismatch |
+| Replay | +30 | Token already consumed (nonce in cache) |
+| Expired | +10 | Token past TTL; mild penalty to encourage fresh challenges |
+
+Adjust deltas in config to tune sensitivity. Example: increase `replay_delta` to +50 to penalize aggressive replay attempts.
+
+### Troubleshooting
+
+**Tokens failing verification consistently**:
+- Check HMAC secret is identical on all nodes
+- Verify `hmac_secret_path` is readable by WAF process (check permissions)
+- Monitor logs: `RUST_LOG=debug prx-waf run` shows token decode errors
+
+**"Nonce already consumed" on fresh tokens**:
+- LRU cache may have collisions (rare). Increase `lru_size` in config
+- Or check token TTL hasn't expired (default 5 min)
+
+**File permission errors**:
+```bash
+# Verify ownership/perms on secret file
+ls -la /var/lib/waf/challenge-hmac.key
+
+# Must be readable by WAF process user (e.g., prx-waf)
+sudo chown prx-waf:prx-waf /var/lib/waf/challenge-hmac.key
+sudo chmod 600 /var/lib/waf/challenge-hmac.key
+```
+
+---
+
 ### Cache Rules Operator File (rules/cache.yaml)
 
 **FR-009 Phase 3 feature:** Per-route TTL configuration with hot-reload.

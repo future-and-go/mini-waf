@@ -20,6 +20,19 @@ pub enum SeedKind {
     BadASN,
 }
 
+/// Outcome of challenge credit verification (FR-006).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CreditOutcome {
+    /// Valid challenge token — grant credit.
+    Valid,
+    /// Invalid token (bad signature, binding mismatch, malformed).
+    Invalid,
+    /// Token replay detected — already consumed.
+    Replay,
+    /// Token expired.
+    Expired,
+}
+
 /// What kind of event contributed to the risk score.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ContributorKind {
@@ -35,6 +48,8 @@ pub enum ContributorKind {
     Override,
     /// Decay credit applied.
     Decay,
+    /// FR-006 challenge credit verification result.
+    ChallengeCredit(CreditOutcome),
 }
 
 /// A single risk contribution event.
