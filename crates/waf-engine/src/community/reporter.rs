@@ -88,6 +88,8 @@ const fn compute_confidence(phase: Phase) -> f64 {
         // Whitelist phases rarely trigger signal reporting,
         // but covered for exhaustive matching.
         Phase::IpWhitelist | Phase::UrlWhitelist => 0.30,
+        // FR-025 risk scoring — moderate confidence based on accumulated signals
+        Phase::RiskScore => 0.65,
     }
 }
 

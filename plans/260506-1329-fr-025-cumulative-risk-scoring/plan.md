@@ -39,7 +39,7 @@ Build the cumulative scorer that turns existing detection signals (FR-005 DDoS, 
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Skeleton & Store Trait](./phase-01-skeleton-store-trait.md) | Pending |
+| 1 | [Skeleton & Store Trait](./phase-01-skeleton-store-trait.md) | Complete (11/11 %) |
 | 2 | [Reputation Seed L0](./phase-02-reputation-seed-l0.md) | Pending |
 | 3 | [Rule Deltas L1](./phase-03-rule-deltas-l1.md) | Pending |
 | 4 | [Async Ingest Pipeline](./phase-04-async-ingest-pipeline.md) | Pending |
@@ -126,8 +126,9 @@ risk:
 
 ## Open Questions (defer; recorded for ops & integration)
 
-1. Audit log integration — piggyback per-request VictoriaLogs entry vs. dedicated risk topic? (Recommend piggyback.)
-2. Session cookie discovery — per-host config vs. autodetect? (Recommend per-host config + default list fallback.)
-3. HMAC secret rotation cadence — manual via runbook only (recommended); never auto-rotate.
-4. LSH fuzzy JA4 (FR-RS-041) — defer to P9, feature-flagged.
-5. `X-WAF-Risk-Score` jitter (±2) in production mode vs. deterministic for benchmarks — defer wiring to P9.
+1. **TOCTOU race in `apply()` (Phase 1 code review)** — Between triple-index lookup and write lock, two concurrent requests could both miss and create separate states. Deferred to Phase 7 (Redis cluster backend provides atomic compare-and-swap). Mitigation: in-memory backend only runs single-node, collision probability low.
+2. Audit log integration — piggyback per-request VictoriaLogs entry vs. dedicated risk topic? (Recommend piggyback.)
+3. Session cookie discovery — per-host config vs. autodetect? (Recommend per-host config + default list fallback.)
+4. HMAC secret rotation cadence — manual via runbook only (recommended); never auto-rotate.
+5. LSH fuzzy JA4 (FR-RS-041) — defer to P9, feature-flagged.
+6. `X-WAF-Risk-Score` jitter (±2) in production mode vs. deterministic for benchmarks — defer wiring to P9.

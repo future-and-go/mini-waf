@@ -45,7 +45,14 @@ src/
 │   ├── capture/             # tls, h2, client_hello_inspector, h2_frame_inspector, conn_ctx
 │   ├── fingerprint/         # ja3, ja4, h2_akamai (+ trait)
 │   ├── identity/            # memory + redis stores (redis gated by feature)
+│   ├── behavior/            # FR-011 behavioral anomaly detection (per-actor cadence/path classifiers)
 │   └── providers/           # ua_blocklist, ua_entropy, fp_conflict, ip_hopping, h2_anomaly
+├── risk/                    # FR-025 cumulative risk scoring (in-memory + config hot-reload)
+│   ├── config.rs, scorer.rs, score.rs, decay.rs, threshold.rs
+│   ├── key.rs               # RiskKey (triple-index: IP/fingerprint/session)
+│   ├── state.rs             # RiskState, Contributor, ContributorKind
+│   ├── reload.rs            # notify-based hot-reload with ArcSwap
+│   └── store/               # RiskStore trait + MemoryRiskStore backend
 ├── crowdsec/                # appsec, cache, client, sync, pusher, models
 ├── community/               # blocklist, client, enroll, reporter, checker
 └── plugins/                 # WASM + Rhai plugin manager

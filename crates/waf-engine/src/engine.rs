@@ -756,6 +756,7 @@ impl WafEngine {
             WafAction::Allow => "allow",
             WafAction::LogOnly => "log_only",
             WafAction::Redirect { .. } => "redirect",
+            WafAction::Challenge => "challenge",
         };
 
         let log = AttackLog {
@@ -807,6 +808,7 @@ impl WafEngine {
             WafAction::Allow => "allow",
             WafAction::LogOnly => "log_only",
             WafAction::Redirect { .. } => "redirect",
+            WafAction::Challenge => "challenge",
         };
 
         let event = CreateSecurityEvent {
@@ -857,7 +859,7 @@ impl WafEngine {
             // Redirects in this codebase are used as challenge-style
             // responses (CAPTCHA, soft block). Map to the closest LogsQL
             // category so analysts can filter them out from hard blocks.
-            WafAction::Redirect { .. } => AuditEventType::Challenge,
+            WafAction::Redirect { .. } | WafAction::Challenge => AuditEventType::Challenge,
         };
 
         let event = AuditEvent {

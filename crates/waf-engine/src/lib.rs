@@ -11,6 +11,7 @@ pub mod geoip_updater;
 pub mod logging;
 pub mod plugins;
 pub mod relay;
+pub mod risk;
 pub mod rules;
 
 pub use checker::RuleStore;
