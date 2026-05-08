@@ -13,6 +13,7 @@ rules:
     operator: "regex"
     value: "(?i)(?:\\xac\\xed\\x00\\x05|rO0AB|%ac%ed%00%05|\\\\xac\\\\xed\\\\x00\\\\x05)"
     action: "block"
+    risk_delta: 60
     tags: ["advanced", "deserialization", "java", "rce"]
     reference: "https://portswigger.net/web-security/deserialization/exploiting"
 

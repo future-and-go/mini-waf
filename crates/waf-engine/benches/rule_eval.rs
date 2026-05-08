@@ -67,6 +67,8 @@ fn make_rules() -> Vec<CustomRule> {
             action_msg: None,
             script: None,
             match_tree: None,
+            risk_delta: None,
+            risk_action: None,
         });
     }
     rules

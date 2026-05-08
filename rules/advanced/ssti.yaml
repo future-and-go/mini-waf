@@ -13,6 +13,7 @@ rules:
     operator: "regex"
     value: "(?i)(?:\\$\\{\\s*[0-9]+\\s*\\*\\s*[0-9]+\\s*\\}|\\{\\{\\s*[0-9]+\\s*\\*\\s*[0-9]+\\s*\\}\\}|<%=\\s*[0-9]+\\s*\\*\\s*[0-9]+\\s*%>|#\\{[0-9]+\\s*\\*\\s*[0-9]+\\})"
     action: "block"
+    risk_delta: 60
     tags: ["advanced", "ssti", "template-injection", "rce"]
     reference: "https://portswigger.net/research/server-side-template-injection"
 
@@ -25,6 +26,7 @@ rules:
     operator: "regex"
     value: "(?i)\\{\\{\\s*(?:config|settings|self|request|g\\.|current_app|url_for|get_flashed_messages|lipsum|dict|cycler|namespace)\\s*(?:\\.|\\[|\\}\\})"
     action: "block"
+    risk_delta: 60
     tags: ["advanced", "ssti", "jinja2", "flask", "rce"]
     reference: "https://portswigger.net/research/server-side-template-injection"
 

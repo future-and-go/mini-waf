@@ -39,6 +39,12 @@ struct YamlCustomRule {
     action_msg: Option<String>,
     #[serde(default)]
     script: Option<String>,
+    /// FR-025: Risk score delta when this rule matches.
+    #[serde(default)]
+    risk_delta: Option<i16>,
+    /// FR-025: Override action for risk scoring.
+    #[serde(default)]
+    risk_action: Option<String>,
 }
 
 fn default_host() -> String {
@@ -112,6 +118,8 @@ fn to_custom_rule(dto: YamlCustomRule) -> CustomRule {
         action_msg: dto.action_msg,
         script: dto.script,
         match_tree: dto.match_tree,
+        risk_delta: dto.risk_delta,
+        risk_action: dto.risk_action,
     }
 }
 

@@ -13,6 +13,7 @@ rules:
     operator: "regex"
     value: "(?i)\"__proto__\"\\s*:"
     action: "block"
+    risk_delta: 50
     tags: ["advanced", "prototype-pollution", "nodejs", "rce"]
     reference: "https://portswigger.net/web-security/prototype-pollution"
 

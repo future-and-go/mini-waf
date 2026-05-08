@@ -766,6 +766,55 @@ fn validate_header(s: &str) -> Cow<'_, str> {
 }
 ```
 
+## FR-025 Risk Delta Convention
+
+Rules can contribute to cumulative risk scoring via the optional `risk_delta` field.
+Per-request deltas are clamped to `[0, 100]` to prevent score explosion.
+
+### Risk Delta Table
+
+| Attack Category       | risk_delta | Rationale                              |
+|-----------------------|------------|----------------------------------------|
+| RCE (command exec)    | 60         | Direct system compromise               |
+| SSTI                  | 60         | Template injection → RCE               |
+| Deserialization       | 60         | Object injection → RCE                 |
+| XXE                   | 60         | Entity injection → file read / RCE     |
+| Webshell upload       | 60         | Persistent backdoor                    |
+| SSRF                  | 55         | Internal network / cloud metadata      |
+| LFI                   | 50         | Local file inclusion                   |
+| Prototype pollution   | 50         | JS object prototype manipulation       |
+| Path traversal        | 45         | Directory escape                       |
+| SQLi                  | 40         | Database compromise                    |
+| XSS                   | 35         | Client-side script injection           |
+| Scanner UA            | 20         | Recon activity                         |
+| Suspicious header     | 15         | Anomalous but not definitive           |
+
+### Rule YAML Example
+
+```yaml
+- id: "ADV-SSTI-001"
+  name: "SSTI - Generic Expression Evaluation"
+  category: "ssti"
+  severity: "critical"
+  field: "all"
+  operator: "regex"
+  value: "(?i)\\$\\{\\s*[0-9]+\\s*\\*\\s*[0-9]+\\s*\\}"
+  action: "block"
+  risk_delta: 60          # FR-025: contributes to cumulative score
+  risk_action: "block"    # Optional: override to immediate block
+  tags: ["ssti", "rce"]
+```
+
+### Clamping Behavior
+
+When multiple rules match in a single request:
+1. All positive deltas are summed
+2. If sum > 100, oldest positive deltas are truncated (newest kept)
+3. Negative deltas (credits) are always preserved
+4. `X-WAF-Rule-Id` header set to dominant contributor (max |delta|)
+
+---
+
 ## Vendored Dependencies
 
 ### Pingora Patch (FR-010)

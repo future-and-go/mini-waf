@@ -154,6 +154,8 @@ mod tests {
             pattern: None,
             tags: vec![],
             metadata: HashMap::new(),
+            risk_delta: None,
+            risk_action: None,
         }
     }
 

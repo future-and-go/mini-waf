@@ -53,6 +53,8 @@ fn make_test_rule(id: &str) -> Rule {
         pattern: Some(r"SELECT\s+.+\s+FROM".to_string()),
         tags: vec![],
         metadata: HashMap::new(),
+        risk_delta: None,
+        risk_action: None,
     }
 }
 

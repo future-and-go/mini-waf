@@ -18,6 +18,8 @@ fn rule(id: &str, name: &str, pattern: &str, severity: &str) -> Rule {
         pattern: Some(pattern.to_string()),
         tags: vec!["scanner".to_string(), "builtin".to_string()],
         metadata: meta,
+        risk_delta: None,
+        risk_action: None,
     }
 }
 

@@ -13,6 +13,7 @@ rules:
     operator: "regex"
     value: "(?i)/(?:upload[s]?|files?|media|static|assets?|img|images?|docs?|documents?|public|tmp|temp|cache)/[^/]*\\.(?:php[0-9]?|phtml|phar|phps|php-s|pht|pgif|shtml|shtm|phtml|php[0-9]{1,2})"
     action: "block"
+    risk_delta: 60
     tags: ["advanced", "webshell", "php", "upload"]
     reference: "https://owasp.org/www-community/vulnerabilities/Unrestricted_File_Upload"
 
