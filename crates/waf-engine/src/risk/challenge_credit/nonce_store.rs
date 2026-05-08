@@ -7,7 +7,7 @@
 //! A nonce is "consumed" when a valid token is verified. Replay attempts
 //! return false from `try_consume`.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashSet, VecDeque};
 #[cfg(feature = "redis-store")]
 use std::time::Duration;
 
@@ -15,7 +15,7 @@ use parking_lot::Mutex;
 
 /// LRU cache for consumed nonces. Not thread-safe; wrap in Mutex.
 struct LruCache {
-    entries: HashMap<String, ()>,
+    entries: HashSet<String>,
     order: VecDeque<String>,
     capacity: usize,
 }
@@ -23,7 +23,7 @@ struct LruCache {
 impl LruCache {
     fn new(capacity: usize) -> Self {
         Self {
-            entries: HashMap::with_capacity(capacity),
+            entries: HashSet::with_capacity(capacity),
             order: VecDeque::with_capacity(capacity),
             capacity,
         }
@@ -31,24 +31,24 @@ impl LruCache {
 
     /// Check if nonce exists in cache.
     fn contains(&self, nonce: &str) -> bool {
-        self.entries.contains_key(nonce)
+        self.entries.contains(nonce)
     }
 
     /// Insert nonce into cache, evicting oldest if at capacity.
     /// Returns true if newly inserted, false if already present.
     fn insert(&mut self, nonce: String) -> bool {
-        if self.entries.contains_key(&nonce) {
+        if self.entries.contains(&nonce) {
             return false;
         }
 
-        if self.entries.len() >= self.capacity {
-            if let Some(oldest) = self.order.pop_front() {
-                self.entries.remove(&oldest);
-            }
+        if self.entries.len() >= self.capacity
+            && let Some(oldest) = self.order.pop_front()
+        {
+            self.entries.remove(&oldest);
         }
 
         self.order.push_back(nonce.clone());
-        self.entries.insert(nonce, ());
+        self.entries.insert(nonce);
         true
     }
 }
@@ -86,7 +86,7 @@ pub struct NonceRedisBackend {
 impl NonceRedisBackend {
     /// Create a new Redis backend from an existing connection manager.
     #[must_use]
-    pub fn new(conn: redis::aio::ConnectionManager, op_timeout: Duration) -> Self {
+    pub const fn new(conn: redis::aio::ConnectionManager, op_timeout: Duration) -> Self {
         Self { conn, op_timeout }
     }
 }
@@ -152,6 +152,7 @@ impl NonceStore {
                         return ConsumeResult::Replay;
                     }
                     lru.insert(nonce.to_string());
+                    drop(lru);
                     return ConsumeResult::ConsumedWithWarning;
                 }
             }
