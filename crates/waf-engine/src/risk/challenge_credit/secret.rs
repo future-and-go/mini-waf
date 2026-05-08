@@ -93,7 +93,7 @@ impl HmacSecret {
     /// Create secret from raw bytes (test-only, no file I/O).
     #[cfg(test)]
     #[must_use]
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
 }
