@@ -363,6 +363,78 @@ curl http://localhost:16827/health
 
 ## Configuration Reference
 
+### Risk Scorer Backend: Memory vs Redis (FR-025 Phase 7)
+
+**FR-025 Phase 7 feature:** Cumulative risk scoring with pluggable storage backends.
+
+**Memory Backend (single-node default)**
+```yaml
+# configs/risk.yaml
+[risk]
+enabled = true
+store:
+  backend = "memory"
+```
+- Best for: Development, small single-node deployments
+- No external dependencies
+- Risk state lost on restart
+- Suitable for <100 RPS
+
+**Redis Backend (cluster / high-volume)**
+```yaml
+# configs/risk.yaml
+[risk]
+enabled = true
+store:
+  backend = "redis"
+  redis:
+    url = "redis://localhost:6379"            # Single node or cluster endpoint
+    key_prefix = "waf:risk:"                  # Namespace prefix (customizable)
+    op_timeout_ms = 100                       # Per-operation timeout
+    breaker_threshold = 5                     # Circuit breaker trips after N failures
+    cache_capacity = 10000                    # LRU cache for fail-open fallback
+```
+
+**Key Layout (Redis)**
+- `waf:risk:state:{owner_id}` → JSON-encoded RiskState (TTL via EXPIRE)
+- `waf:risk:idx:ip:{ip}` → owner_id (collision index)
+- `waf:risk:idx:fp:{fp_hash}` → owner_id (fingerprint index)
+- `waf:risk:idx:sid:{session_id}` → owner_id (session index)
+
+**Requirements**
+- Redis 6.0+ (supports Lua scripting + EXPIRE)
+- Single-node Redis or Redis Cluster (both supported)
+- Network connectivity: WAF → Redis on configured URL port
+- Recommended: Redis Persistence (RDB/AOF) to survive restarts
+
+**Atomic Lua Scripts**
+All Redis operations use atomic Lua scripts for single round-trip consistency:
+- `apply_script` — Decay + fold deltas + threshold check (single RTT)
+- `mint_or_get_owner_script` — Idempotent owner UUID creation
+- `force_max_script` — Merge colliding keys (max score wins)
+
+**Circuit Breaker & Fail-Open**
+- After `breaker_threshold` (default: 5) consecutive Redis failures, circuit opens
+- Opened circuit falls back to in-memory LRU cache (`cache_capacity`, default: 10k entries)
+- Risk state still updated locally; next Redis success resyncs
+- No request blocking during Redis outage (graceful degrade)
+
+**Tuning**
+```yaml
+store:
+  redis:
+    op_timeout_ms = 50          # Faster: fail quicker if Redis slow
+    breaker_threshold = 3       # Stricter: open circuit sooner
+    cache_capacity = 50000      # Larger: more fallback capacity
+```
+
+**Monitoring**
+- Log entries for circuit breaker open/close events
+- Metrics: `redis_ops_total`, `redis_failures_total`, `redis_cache_hits_total`
+- Check Redis connectivity: `redis-cli -h <host> -p <port> PING`
+
+---
+
 ### Cache Rules Operator File (rules/cache.yaml)
 
 **FR-009 Phase 3 feature:** Per-route TTL configuration with hot-reload.

@@ -73,6 +73,75 @@ pub struct StoreConfig {
     /// Backend type: "memory" or "redis" (redis requires feature flag).
     #[serde(default = "default_backend")]
     pub backend: String,
+
+    /// Redis configuration (only used when backend = "redis").
+    #[serde(default)]
+    pub redis: RedisStoreConfig,
+}
+
+/// Redis store configuration (Phase 7).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct RedisStoreConfig {
+    /// Redis URL, e.g. `redis://127.0.0.1:6379`.
+    #[serde(default = "default_redis_url")]
+    pub url: String,
+    /// Key prefix for namespacing (default: `waf:risk:`).
+    #[serde(default = "default_redis_key_prefix")]
+    pub key_prefix: String,
+    /// Per-operation timeout in milliseconds (default: 100).
+    #[serde(default = "default_redis_op_timeout_ms")]
+    pub op_timeout_ms: u64,
+    /// Consecutive failures before circuit breaker opens (default: 5).
+    #[serde(default = "default_redis_breaker_threshold")]
+    pub breaker_threshold: u32,
+    /// LRU cache capacity for fail-open fallback (default: 10000).
+    #[serde(default = "default_redis_cache_capacity")]
+    pub cache_capacity: usize,
+}
+
+impl Default for RedisStoreConfig {
+    fn default() -> Self {
+        Self {
+            url: default_redis_url(),
+            key_prefix: default_redis_key_prefix(),
+            op_timeout_ms: default_redis_op_timeout_ms(),
+            breaker_threshold: default_redis_breaker_threshold(),
+            cache_capacity: default_redis_cache_capacity(),
+        }
+    }
+}
+
+impl RedisStoreConfig {
+    /// Convert to runtime `RedisRiskConfig` (requires `redis-store` feature).
+    #[cfg(feature = "redis-store")]
+    #[must_use]
+    pub fn to_runtime_config(&self, ttl_secs: u64) -> crate::risk::store::redis::RedisRiskConfig {
+        crate::risk::store::redis::RedisRiskConfig {
+            url: self.url.clone(),
+            key_prefix: self.key_prefix.clone(),
+            #[allow(clippy::cast_possible_truncation)]
+            ttl_secs: ttl_secs as u32, // safe: ttl_secs capped at ~49 days
+            op_timeout: std::time::Duration::from_millis(self.op_timeout_ms),
+            breaker_threshold: self.breaker_threshold,
+            cache_capacity: self.cache_capacity,
+        }
+    }
+}
+
+fn default_redis_url() -> String {
+    "redis://127.0.0.1:6379".to_string()
+}
+fn default_redis_key_prefix() -> String {
+    "waf:risk:".to_string()
+}
+const fn default_redis_op_timeout_ms() -> u64 {
+    100
+}
+const fn default_redis_breaker_threshold() -> u32 {
+    5
+}
+const fn default_redis_cache_capacity() -> usize {
+    10_000
 }
 
 /// Decay behavior configuration.

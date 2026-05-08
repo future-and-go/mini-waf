@@ -27,6 +27,13 @@ risk:
   # Store backend configuration.
   store:
     backend: memory    # memory | redis (redis requires feature flag)
+    # Uncomment for Redis backend (FR-025 Phase 7):
+    # redis:
+    #   url: "redis://127.0.0.1:6379"      # Single node or cluster endpoint
+    #   key_prefix: "waf:risk:"             # Namespace prefix
+    #   op_timeout_ms: 100                  # Per-operation timeout in milliseconds
+    #   breaker_threshold: 5                # Circuit breaker opens after N failures
+    #   cache_capacity: 10000               # LRU cache capacity for fail-open fallback
 
   # Decay behavior — how risk scores reduce over time for "clean" requests.
   decay:

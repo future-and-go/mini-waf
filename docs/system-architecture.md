@@ -223,7 +223,7 @@ let detector = DeviceFpDetector::new(cfg, registry)
 
 ### WafEngine → Risk Scorer (FR-025)
 
-**Cumulative risk scoring subsystem** — Tracks per-actor risk state and applies threshold gates to emit Allow / Challenge / Block decisions. Integrates signals from all upstream checks (rule matches, anomalies, DDoS) and decays stale risk.
+**Cumulative risk scoring subsystem** — Tracks per-actor risk state and applies threshold gates to emit Allow / Challenge / Block decisions. Integrates signals from all upstream checks (rule matches, anomalies, DDoS) and decays stale risk. Pluggable backend (memory or Redis).
 
 **L0 seed layer evaluation:** IP reputation baseline (Tor exits, ASN classification, whitelist) evaluated before other risk layers via file-based data sources (`configs/seed/`). Whitelist entries bypass all scoring (immediate Allow).
 
@@ -235,11 +235,15 @@ Upstream Signals (rules, ddos, etc.)├──► Scorer::score(ctx, fp_key, delt
     ├─ Build RiskKey (IP, fingerprint, session triple-index)
     │
     ├─ RiskStore::apply(key, deltas, now_ms)
-    │   └─ Fetch or create RiskState
-    │   └─ Apply decay (raw_score decays by 0-50 points)
-    │   └─ Fold in new contributors (signal deltas)
-    │   └─ Clamp score to [0, 100]
-    │   └─ Return updated state
+    │   │ (Memory or Redis backend)
+    │   ├─ Memory: in-process HashMap with optional decay call
+    │   │
+    │   └─ Redis: Lua script atomically (single RTT)
+    │       ├─ Fetch or create RiskState + owner_id
+    │       ├─ Apply decay (raw_score decays by 0-50 points)
+    │       ├─ Fold in new contributors (signal deltas)
+    │       ├─ Clamp score to [0, 100]
+    │       └─ EXPIRE key (per ttl_secs config)
     │
     ├─ Threshold gate: decide(score, tier_policy.risk_thresholds)
     │   ├─ score < allow_threshold    → Allow
@@ -250,11 +254,33 @@ Upstream Signals (rules, ddos, etc.)├──► Scorer::score(ctx, fp_key, delt
 ```
 
 **RiskKey triple-index (collision & merge strategy):**
-- IP-based: `risk:{host}:{client_ip}` — primary key
-- Fingerprint-based: `risk:{host}:{fp_hash}` — secondary if configured
-- Session-based: `risk:{host}:{session_id}` — tertiary if session cookie present
+- IP-based: `waf:risk:idx:ip:{client_ip}` (Redis) or memory key
+- Fingerprint-based: `waf:risk:idx:fp:{fp_hash}` (Redis) or memory key
+- Session-based: `waf:risk:idx:sid:{session_id}` (Redis) or memory key
 
-When multiple keys match a single request, all three states merge (highest score wins, then contributors union).
+When multiple keys match a single request, all three states merge via `force_max_script` (Redis) or in-memory merge (highest score wins, contributors union).
+
+**Backend Configuration (Phase 7)**
+
+| Aspect | Memory | Redis |
+|--------|--------|-------|
+| **Deployment** | Single-node / dev | Cluster / high-volume |
+| **Storage** | In-process HashMap | Distributed key-value |
+| **Persistence** | Lost on restart | Persisted (RDB/AOF) |
+| **Consistency** | Per-request local | Atomic Lua scripts |
+| **Failover** | N/A | Circuit breaker + LRU fallback |
+| **Config** | `store.backend = "memory"` | `store.backend = "redis"` + redis.* |
+
+**Redis Lua Scripts (Atomic Operations)**
+1. `apply_script` — Decay + fold deltas + EXPIRE in single RTT
+2. `mint_or_get_owner_script` — Idempotent owner_id creation (UUID v4)
+3. `force_max_script` — Merge colliding keys by score (used during incident response)
+
+**Circuit Breaker & Fail-Open (Redis Only)**
+- Opens after `breaker_threshold` (default: 5) consecutive failures
+- Falls back to in-memory LRU cache (`cache_capacity`, default: 10k)
+- Requests proceed with local cache; Redis resync on next success
+- No request blocking during Redis outage
 
 **L2 Anomaly Layer (Phase 5):** Inline synchronous detectors evaluated per-request: (1) JA4↔UA mismatch (TLS fingerprint vs User-Agent family incompatibility, +20), (2) XFF chain sanity (malformed or excessive hop counts, +10 cap), (3) Header sanity (missing required headers or impossible combinations, +15 cap).
 

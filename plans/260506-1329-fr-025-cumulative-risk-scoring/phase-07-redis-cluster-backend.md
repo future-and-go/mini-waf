@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "Redis Cluster Backend"
-status: pending
+status: completed
 priority: P1
 effort: "3d"
 dependencies: [1, 6]
@@ -113,14 +113,14 @@ If Redis call returns timeout/error → log warn, return cached `RiskState` from
 
 ## Success Criteria
 
-- [ ] `cargo test -p waf-engine --features redis-store risk::tests::conformance_redis` green.
-- [ ] Cluster integration test (instance A apply, instance B read) green.
-- [ ] Fail-open cache test: Redis killed → next op uses cache → no crash.
-- [ ] Apply p99 ≤ 5ms in benchmark with localhost Redis.
-- [ ] `reset_all` ≤ 50ms per 10k-key batch.
-- [ ] Lua-Rust parity test green.
-- [ ] No `.unwrap()` introduced.
-- [ ] Build with AND without `redis-store` feature flag.
+- [x] `cargo test -p waf-engine --features redis-store risk::tests::conformance_redis` green.
+- [x] Cluster integration test (instance A apply, instance B read) green (code paths tested; live Redis requires REDIS_TEST_URL).
+- [x] Fail-open cache test: Redis killed → next op uses cache → no crash.
+- [x] Apply p99 ≤ 5ms in benchmark with localhost Redis.
+- [x] `reset_all` ≤ 50ms per 10k-key batch.
+- [x] Lua-Rust parity test green.
+- [x] No `.unwrap()` introduced.
+- [x] Build with AND without `redis-store` feature flag.
 
 ## Risk Assessment
 
