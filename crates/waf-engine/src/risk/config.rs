@@ -61,6 +61,10 @@ pub struct RiskConfig {
     /// Async ingest pipeline configuration (Phase 4).
     #[serde(default)]
     pub ingest: IngestConfig,
+
+    /// FR-028 canary honeypot configuration (Phase 6).
+    #[serde(default)]
+    pub canary: CanaryConfig,
 }
 
 /// Store backend selection.
@@ -172,6 +176,33 @@ pub struct IngestConfig {
     pub signal_weights: HashMap<String, i16>,
 }
 
+/// FR-028 Canary honeypot configuration (Phase 6).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CanaryConfig {
+    /// Whether canary detection is enabled.
+    #[serde(default = "default_canary_enabled")]
+    pub enabled: bool,
+
+    /// Exact-match canary paths (e.g., `/admin-test`, `/api-debug`).
+    /// Any request to these paths triggers immediate max-score pin and IP ban.
+    #[serde(default)]
+    pub paths: Vec<String>,
+
+    /// Ban TTL in seconds for canary hits (default: 3600 = 1 hour).
+    #[serde(default = "default_canary_ban_ttl_secs")]
+    pub ban_ttl_secs: u32,
+}
+
+impl Default for CanaryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_canary_enabled(),
+            paths: Vec::new(),
+            ban_ttl_secs: default_canary_ban_ttl_secs(),
+        }
+    }
+}
+
 impl Default for IngestConfig {
     fn default() -> Self {
         Self {
@@ -204,6 +235,7 @@ impl Default for RiskConfig {
             decay: DecayConfig::default(),
             seed: SeedConfig::default(),
             ingest: IngestConfig::default(),
+            canary: CanaryConfig::default(),
         }
     }
 }
@@ -274,6 +306,12 @@ const fn default_ingest_enabled() -> bool {
 }
 const fn default_channel_capacity() -> usize {
     65536
+}
+const fn default_canary_enabled() -> bool {
+    false
+}
+const fn default_canary_ban_ttl_secs() -> u32 {
+    3600 // 1 hour
 }
 
 #[cfg(test)]

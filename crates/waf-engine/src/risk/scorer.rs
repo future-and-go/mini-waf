@@ -4,15 +4,18 @@
 //! sets `X-WAF-Risk-Score` header, returns `WafAction`.
 //!
 //! Phase 5 adds L2 detectors (anomaly + velocity) evaluated inline.
+//! Phase 6 adds canary honeypot layer (FR-028) for scanner detection.
 
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
+use tracing::info;
 
 use waf_common::{RequestCtx, WafAction};
 
 use crate::device_fp::types::FpKey;
 use crate::risk::anomaly::{AnomalyCtx, AnomalyLayer};
+use crate::risk::canary::CanaryLayer;
 use crate::risk::config::RiskConfig;
 use crate::risk::key::{RiskKey, SessionId};
 use crate::risk::seed::{SeedLayer, SeedVerdict};
@@ -36,10 +39,13 @@ pub struct ScorerResult {
 ///
 /// Owns a reference to the store and config snapshot. Thread-safe via `Arc`.
 /// Phase 5 adds L2 detectors: anomaly layer and velocity layer.
+/// Phase 6 adds canary honeypot layer (FR-028).
 pub struct Scorer<S: RiskStore> {
     store: Arc<S>,
     cfg: Arc<ArcSwap<RiskConfig>>,
     seed: Option<Arc<SeedLayer>>,
+    /// FR-028 canary honeypot layer for scanner detection.
+    pub canary: Option<Arc<CanaryLayer>>,
     /// L2 anomaly detection layer (JA4↔UA mismatch, XFF, header sanity).
     anomaly: AnomalyLayer,
     /// L2 velocity detection layer (sliding window, sequence FSM).
@@ -54,6 +60,7 @@ impl<S: RiskStore> Scorer<S> {
             store,
             cfg,
             seed: None,
+            canary: None,
             anomaly: AnomalyLayer::new(),
             velocity: VelocityLayer::with_defaults(),
         }
@@ -66,6 +73,7 @@ impl<S: RiskStore> Scorer<S> {
             store,
             cfg,
             seed: Some(seed),
+            canary: None,
             anomaly: AnomalyLayer::new(),
             velocity: VelocityLayer::with_defaults(),
         }
@@ -78,6 +86,7 @@ impl<S: RiskStore> Scorer<S> {
             store,
             cfg,
             seed: None,
+            canary: None,
             anomaly: AnomalyLayer::new(),
             velocity: VelocityLayer::new(threshold),
         }
@@ -86,6 +95,11 @@ impl<S: RiskStore> Scorer<S> {
     /// Set the seed layer.
     pub fn set_seed(&mut self, seed: Arc<SeedLayer>) {
         self.seed = Some(seed);
+    }
+
+    /// Set the canary layer.
+    pub fn set_canary(&mut self, canary: Arc<CanaryLayer>) {
+        self.canary = Some(canary);
     }
 
     /// Load the current config snapshot.
@@ -142,6 +156,34 @@ impl<S: RiskStore> Scorer<S> {
                 }
                 SeedVerdict::None => {}
             }
+        }
+
+        // FR-028 Canary honeypot check — AFTER whitelist, BEFORE other layers
+        // On canary hit: force_max + return Block immediately
+        if let Some(ref canary) = self.canary
+            && cfg.canary.enabled
+            && canary.check_and_ban(&ctx.path, ctx.client_ip, now_ms)
+        {
+            // Pin score to 100 and add to ban table
+            let until_ms = now_ms.saturating_add(canary.ban_ttl_ms());
+            if let Err(e) = self.force_max(ctx, fp_key, until_ms, now_ms).await {
+                tracing::warn!(error = %e, "canary: force_max failed");
+            }
+
+            info!(
+                path = %ctx.path,
+                client_ip = %ctx.client_ip,
+                "canary honeypot: blocking scanner"
+            );
+
+            return Ok(ScorerResult {
+                action: WafAction::Block {
+                    status: 403,
+                    body: Some("canary_honeypot".to_string()),
+                },
+                score: 100,
+                is_new: false,
+            });
         }
 
         self.score_with_l2(ctx, fp_key, sync_deltas, tx_endpoint, now_ms, &cfg)

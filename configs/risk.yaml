@@ -56,3 +56,24 @@ risk:
     tor_delta: 30          # Tor exit IPs
     datacenter_delta: 15   # AWS, GCP, Azure, etc.
     bad_asn_delta: 25      # Operator-curated bad ASN list
+
+  # FR-028 canary honeypot layer — scanner detection.
+  # Configured paths that no legitimate user should hit. When triggered:
+  # 1. Score pinned to 100 until ban_ttl_secs expires
+  # 2. IP added to dynamic ban table (FR-005)
+  # 3. Request blocked immediately (bypasses threshold gate)
+  # Evaluated AFTER seed whitelist, BEFORE all other layers.
+  canary:
+    enabled: false
+
+    # Exact-match paths (case-sensitive). Partial matches do NOT trigger.
+    # Example: "/admin-test" matches only "/admin-test", not "/admin-test/foo"
+    paths:
+      # - "/admin-test"
+      # - "/api-debug"
+      # - "/.git/config"
+      # - "/wp-admin/install.php"
+
+    # Ban TTL in seconds for canary hits (default: 1 hour).
+    # Both the risk score pin and dynamic ban table use this TTL.
+    ban_ttl_secs: 3600
