@@ -17,6 +17,7 @@
 //! - [`store`]     — `RiskStore` trait + `MemoryRiskStore` backend
 
 pub mod anomaly;
+pub mod canary;
 pub mod config;
 pub mod decay;
 pub mod ingest;
@@ -34,7 +35,8 @@ pub mod velocity;
 mod tests;
 
 pub use anomaly::{AnomalyCtx, AnomalyLayer};
-pub use config::{IngestConfig, RiskConfig};
+pub use canary::CanaryLayer;
+pub use config::{CanaryConfig, IngestConfig, RiskConfig};
 pub use ingest::{IngestMetrics, IngestMetricsSnapshot, ScoringAggregator, SignalWeights};
 pub use key::{RiskKey, SessionId};
 pub use reload::RiskReloader;
