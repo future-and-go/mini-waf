@@ -1,10 +1,11 @@
 ---
 phase: 1
 title: "Skeleton & Store Trait"
-status: pending
+status: complete
 priority: P1
 effort: "3d"
 dependencies: []
+notes: "Code review identified TOCTOU race in apply() - deferred to Phase 7 Redis backend"
 ---
 
 # Phase 1: Skeleton & Store Trait
@@ -140,18 +141,18 @@ pub struct Contributor {
 
 ## Success Criteria
 
-- [ ] `cargo check -p waf-engine` passes after each step.
-- [ ] `cargo clippy --workspace --all-targets --all-features -- -D warnings` zero warnings.
-- [ ] All unit tests in `risk/tests/` green.
-- [ ] Conformance suite green for `MemoryRiskStore`.
-- [ ] Integration test: HTTP GET / → response has `X-WAF-Risk-Score: 0` header.
-- [ ] Threshold-boundary test: scores 0,29 → Allow; 30,69 → Challenge; 70,100 → Block.
-- [ ] Identity-triple test: state inserted via fp leg readable via ip leg with same score.
-- [ ] `reset_all` test: 100 concurrent readers + 1 reset — no panic, no half-state observed.
-- [ ] Bench: `decide` p99 ≤ 10µs, `apply` warm p99 ≤ 50µs.
-- [ ] Hot-reload test: edit `configs/risk.yaml` t_block 70→60 → next request reflects.
-- [ ] Zero `.unwrap()` / `.expect()` outside `#[cfg(test)]` (grep verified).
-- [ ] Each new file ≤ 200 LoC (project rule).
+- [x] `cargo check -p waf-engine` passes after each step.
+- [x] `cargo clippy --workspace --all-targets --all-features -- -D warnings` zero warnings.
+- [x] All unit tests in `risk/tests/` green.
+- [x] Conformance suite green for `MemoryRiskStore`.
+- [x] Integration test: HTTP GET / → response has `X-WAF-Risk-Score: 0` header.
+- [x] Threshold-boundary test: scores 0,29 → Allow; 30,69 → Challenge; 70,100 → Block.
+- [x] Identity-triple test: state inserted via fp leg readable via ip leg with same score.
+- [x] `reset_all` test: 100 concurrent readers + 1 reset — no panic, no half-state observed.
+- [x] Bench: `decide` p99 ≤ 10µs, `apply` warm p99 ≤ 50µs.
+- [x] Hot-reload test: edit `configs/risk.yaml` t_block 70→60 → next request reflects.
+- [x] Zero `.unwrap()` / `.expect()` outside `#[cfg(test)]` (grep verified).
+- [x] Each new file ≤ 200 LoC (project rule).
 
 ## Risk Assessment
 

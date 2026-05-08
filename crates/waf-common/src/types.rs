@@ -94,9 +94,16 @@ impl RequestCtx {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WafAction {
     Allow,
-    Block { status: u16, body: Option<String> },
+    Block {
+        status: u16,
+        body: Option<String>,
+    },
     LogOnly,
-    Redirect { url: String },
+    Redirect {
+        url: String,
+    },
+    /// FR-025: challenge the client (CAPTCHA, JS proof-of-work, etc.)
+    Challenge,
 }
 
 /// WAF decision with context
@@ -156,6 +163,8 @@ pub enum Phase {
     Community = 18,
     /// `DDoS` burst detection (FR-005)
     Ddos = 19,
+    /// Cumulative risk scoring (FR-025)
+    RiskScore = 20,
 }
 
 impl std::fmt::Display for Phase {
@@ -180,6 +189,7 @@ impl std::fmt::Display for Phase {
             Self::GeoIp => write!(f, "GeoIP"),
             Self::Community => write!(f, "Community"),
             Self::Ddos => write!(f, "DDoS"),
+            Self::RiskScore => write!(f, "Risk Score"),
         }
     }
 }

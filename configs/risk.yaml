@@ -1,0 +1,39 @@
+# FR-025 cumulative risk scoring — default configuration.
+# Schema v1. Empty / absent file = subsystem disabled.
+# Hot-reload watches this file; bad edits log a warning and the previous
+# snapshot is retained.
+
+risk:
+  schema_version: 1
+  enabled: false
+
+  # TTL for idle entries (seconds). Entries not updated within this window
+  # are purged by the background GC task. Default: 30 minutes.
+  ttl_secs: 1800
+
+  # GC interval (seconds) for the purge loop.
+  gc_interval_secs: 60
+
+  # Session cookie name to extract SessionId from. When set, the session
+  # axis is included in the triple-index lookup. Leave empty to disable.
+  # session_cookie: "session_id"
+
+  # Header name for the egress risk score.
+  header_name: "X-WAF-Risk-Score"
+
+  # Whether to emit the risk score header on responses.
+  emit_header: true
+
+  # Store backend configuration.
+  store:
+    backend: memory    # memory | redis (redis requires feature flag)
+
+  # Decay behavior — how risk scores reduce over time for "clean" requests.
+  decay:
+    # Minimum consecutive clean requests before decay starts.
+    min_clean_streak: 10
+    # Points decayed per clean request after min_clean_streak is reached.
+    decay_rate: 1
+    # Floor below which automatic decay stops. Scores can only go below this
+    # via explicit credits (e.g., completed CAPTCHA, manual override).
+    max_decay: 50

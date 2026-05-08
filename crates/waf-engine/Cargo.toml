@@ -43,6 +43,7 @@ zstd = { workspace = true }
 hex = { workspace = true }
 url = { workspace = true }
 ahash = "0.8"
+smallvec = { version = "1", features = ["serde"] }
 globset = "0.4"
 ip_network_table = "0.2"
 ip_network = "0.4"

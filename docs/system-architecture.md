@@ -68,9 +68,9 @@ Per-request flow runs in five stages:
 1. **Pre-Phase — Relay Detection (FR-007)** — `RelayDetector::evaluate` validates XFF / X-Real-IP headers, detects trusted-proxy chains, classifies ASN (residential/datacenter/Tor), and emits signals. Output `ClientIdentity { real_ip, asn_class, asn, signals }` attached to `RequestCtx` for downstream rule predicates.
 2. **Pre-Phase — Tier Classification (FR-002)** — `TierPolicyRegistry::classify` resolves `(Tier, Arc<TierPolicy>)` from request parts; result attached to `RequestCtx` before any phase.
 3. **Phase-0 — Access Gate (FR-008)** — Host gate → IP blacklist → IP whitelist (per-tier `full_bypass`/`blacklist_only` dispatch). *Future*: IP evaluation to use `ClientIdentity.real_ip` instead of peer IP. Short-circuits before the rule pipeline.
-4. **Phases 1–16 — Rule Pipeline** — IP/URL filtering → **FR-004 rate limiting (IP + session keys, token-bucket + sliding-window per tier)** → **FR-005 DDoS detection (per-IP/per-fingerprint/per-tier sliding-window with dynamic banning and graceful degrade)** → **FR-011 behavioral anomaly detection (per-actor cadence/path classifiers, 16-slot ring, signal cap ≤40)** → payload attacks (SQLi/XSS/RCE/traversal) → custom rules → OWASP CRS → sensitive data → anti-hotlink → CrowdSec. Final decision: Allow / Block / Challenge.
-5. **Post-Decision — FR-009 Smart Caching** — If Allow: tier gate (CRITICAL never cached) → Chain-of-Responsibility gates → store response in moka LRU if eligible (tags indexed for purge).
-6. **Risk Scoring (FR-025/026)** — Per-signal `risk_score_delta` from YAML; aggregated risk score influences final decision (future integration).
+4. **Phases 1–16 — Rule Pipeline** — IP/URL filtering → **FR-004 rate limiting (IP + session keys, token-bucket + sliding-window per tier)** → **FR-005 DDoS detection (per-IP/per-fingerprint/per-tier sliding-window with dynamic banning and graceful degrade)** → **FR-011 behavioral anomaly detection (per-actor cadence/path classifiers, 16-slot ring, signal cap ≤40)** → **FR-012 transaction velocity (session role-tagging, sequence timing, withdrawal bursts)** → payload attacks (SQLi/XSS/RCE/traversal) → custom rules → OWASP CRS → sensitive data → anti-hotlink → CrowdSec. Final decision: Allow / Block / Challenge.
+5. **Risk Scoring (FR-025)** — **Cumulative per-actor risk state machine (IP/fingerprint/session triple-index with merge-on-collide)**. Risk deltas accumulated from all upstream checks and signals. Decay mechanism reduces stale risk. Thresholds gate: Allow (<X) / Challenge (X–Y) / Block (>Y). Hot-reload config via ArcSwap. Emits `X-WAF-Risk-Score` header. Integrates with tier-specific risk policies.
+6. **Post-Decision — FR-009 Smart Caching** — If Allow: tier gate (CRITICAL never cached) → Chain-of-Responsibility gates → store response in moka LRU if eligible (tags indexed for purge).
 
 Full per-phase walkthrough, mermaid diagrams, and post-decision handling: see **[request-pipeline.md](./request-pipeline.md)**.
 
@@ -220,6 +220,72 @@ let detector = DeviceFpDetector::new(cfg, registry)
 - `device_fp/` never depends on the FR-025 crate — wiring lives at the binary entry point only.
 
 `LoggingAggregator` (same module) is a test/dev impl that records submissions into a bounded ring buffer for assertions.
+
+### WafEngine → Risk Scorer (FR-025)
+
+**Cumulative risk scoring subsystem** — Tracks per-actor risk state and applies threshold gates to emit Allow / Challenge / Block decisions. Integrates signals from all upstream checks (rule matches, anomalies, DDoS) and decays stale risk.
+
+```
+Upstream Signals (rules, ddos, behavioral, etc.)
+    │
+    ▼
+Scorer::score(ctx, fp_key, deltas, now_ms)
+    │
+    ├─ Build RiskKey (IP, fingerprint, session triple-index)
+    │
+    ├─ RiskStore::apply(key, deltas, now_ms)
+    │   └─ Fetch or create RiskState
+    │   └─ Apply decay (raw_score decays by 0-50 points)
+    │   └─ Fold in new contributors (signal deltas)
+    │   └─ Clamp score to [0, 100]
+    │   └─ Return updated state
+    │
+    ├─ Threshold gate: decide(score, tier_policy.risk_thresholds)
+    │   ├─ score < allow_threshold    → Allow
+    │   ├─ score < challenge_threshold → Challenge (CAPTCHA, JS POW)
+    │   └─ score >= challenge_threshold → Block
+    │
+    └─ Emit X-WAF-Risk-Score header + return WafAction
+```
+
+**RiskKey triple-index (collision & merge strategy):**
+- IP-based: `risk:{host}:{client_ip}` — primary key
+- Fingerprint-based: `risk:{host}:{fp_hash}` — secondary if configured
+- Session-based: `risk:{host}:{session_id}` — tertiary if session cookie present
+
+When multiple keys match a single request, all three states merge (highest score wins, then contributors union).
+
+**Risk contributions:**
+- Rule matches (e.g., SQLi detected) — delta from `rule.risk_score_delta` in YAML (0–50 points)
+- Signal providers (FR-010, FR-011, FR-012 anomalies) — delta from signal enum (5–20 points)
+- DDoS detector verdicts (FR-005) — delta bump for detected floods (5–30 points)
+
+**Decay mechanism:**
+- Linear decay: `raw_score -= decay_factor * time_ms` (configurable, default 1 pt/min)
+- Floor: score never drops below 0 or above 100
+- Clean streak: increments when no new signals in a window (soft reset threshold)
+
+**Configuration (hot-reload via `configs/risk.yaml`):**
+```yaml
+[risk]
+enabled = true
+decay_enabled = true
+decay_factor_per_min = 1.0        # Points lost per minute of inactivity
+allow_threshold = 30              # Risk score below this → Always Allow
+challenge_threshold = 60          # Risk score [allow, challenge) → Challenge
+use_ip_key = true
+use_fingerprint_key = true
+use_session_key = true            # Requires session cookie / FR-010 FpKey
+max_state_age_secs = 3600         # Purge risk states older than this
+```
+
+**Integration points:**
+- **During rule evaluation** (Phase N) — Accumulate risk deltas in `RequestCtx.risk_deltas`
+- **Post-rule pipeline** — `Scorer::score()` applies accumulated deltas + applies decay + thresholds
+- **Header emission** — `X-WAF-Risk-Score: <0-100>` sent in all responses
+- **Tier policy** — `tier_policy.risk_thresholds` (allow/challenge/block points) per tier
+
+**Module:** `crates/waf-engine/src/risk/` (key.rs, state.rs, score.rs, decay.rs, threshold.rs, scorer.rs, config.rs, reload.rs, store/).
 
 ### WafEngine → PostgreSQL Storage
 

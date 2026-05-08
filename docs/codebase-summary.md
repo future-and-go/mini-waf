@@ -130,6 +130,17 @@ prx-waf/
 │   │   │   │   └── providers/     # burst_interval, regularity, zero_depth, missing_referer
 │   │   │   └── mod.rs         # DeviceFpDetector facade (process pipeline)
 │   │   │
+│   │   ├── risk/              # FR-025 cumulative risk scoring (triple-index IP/fingerprint/session, decay, thresholds)
+│   │   │   ├── scorer.rs      # Scorer orchestrator (pipeline integration, WafAction gating)
+│   │   │   ├── config.rs      # TOML schema + ArcSwap hot-reload
+│   │   │   ├── key.rs         # RiskKey builder (IP/fingerprint/session triple-index merge strategy)
+│   │   │   ├── state.rs       # RiskState, Contributor, ContributorKind (ring buffer of events)
+│   │   │   ├── score.rs       # Pure fold function (deltas → updated state, no I/O)
+│   │   │   ├── decay.rs       # Pure decay mechanism (linear, configurable, floor at 0)
+│   │   │   ├── threshold.rs   # Pure decide function (score + tier_policy → WafAction)
+│   │   │   ├── reload.rs      # notify-based hot-reload with ArcSwap
+│   │   │   └── store/         # RiskStore trait + MemoryRiskStore (in-memory state machine)
+│   │   │
 │   │   ├── security/
 │   │   │   ├── geoip.rs       # GeoIP lookup (ip2region)
 │   │   │   └── url_validator.rs # SSRF protection, DNS rebinding guard
@@ -432,6 +443,10 @@ Per-actor sliding-window cadence/path classifiers layered on top of FR-010 devic
 ### Transaction Velocity Anomaly Detection (FR-012)
 
 Session-level transaction velocity and sequence anomalies for fintech fraud detection. `TxVelocityCheck` (signal-only, never blocks) records inbound requests keyed by session identity (cookie preferred, falls back to device fingerprint via FR-010 FpKey). Three classifiers run independently on the recorded event stream: (1) `SequenceTimingClassifier` detects suspicious gaps in multi-factor sequences (e.g., login → OTP in >1500ms, or OTP without prior login), (2) `WithdrawalVelocityClassifier` flags ≥3 withdrawal events within a 60s window, (3) `LimitChangeBurstClassifier` detects rapid limit-increase requests. Each classifier emits risk signals to the aggregator with severity deltas (+5 to +15 points). State machine: `DashMap<SessionKey, ActorTx>` (lock-free shards) where `ActorTx` is a 32-slot ring buffer (~1.5 KB, alloc-free after init) indexed by role-tagged path. TTL janitor purges idle sessions (default 3600s). Hot-path budget: ~94 ns (record + classifier eval, sub-microsecond); benched with Criterion at full scale (50k sessions, linear scaling). Hot-reload via `ArcSwap<TxVelocityConfig>` (YAML schema: `configs/tx-velocity.yaml`, thresholds configurable per classifier). Engine integration: positioned after `RateLimitCheck`, before `ScannerCheck` in the 16-phase pipeline to shed flood traffic first. Module: `crates/waf-engine/src/checks/tx_velocity/`. Tests: 9 integration + 15 unit (role_tagger, recorder, classifiers), 6 Criterion benchmarks in `crates/waf-engine/benches/tx_velocity_bench.rs`.
+
+### Cumulative Risk Scoring (FR-025)
+
+Per-actor risk state machine accumulating signal deltas from all upstream detection layers (rules, FR-005 DDoS, FR-010/011/012 anomalies) into a single 0–100 clamped score. Triple-index keying (IP / device fingerprint / session) with merge-on-collide strategy: multiple keys affecting one request blend their risk states (highest score + union of contributors). Pure functional core: `fold(state, deltas) → state` (no I/O), `decay(score, time_ms) → decayed_score` (linear, configurable, floor 0), `decide(score, tier_thresholds) → WafAction` (Allow/Challenge/Block). Decay mechanism: raw score decays by 1 point per minute of inactivity (configurable); clean streak counter tracks consecutive signal-free windows. State ring buffer stores last N contributors (configurable, default 32) for forensics. Hot-reload via `ArcSwap<RiskConfig>` (TOML `[risk]` section, schema v1): `enable`, `decay_factor_per_min`, `allow_threshold`, `challenge_threshold`, `use_ip_key`, `use_fingerprint_key`, `use_session_key`, `max_state_age_secs`. Scorer orchestrator (`Scorer<S: RiskStore>`) builds keys, invokes store, applies thresholds, emits `X-WAF-Risk-Score` header. `RiskStore` trait supports in-memory + Redis backends (async). In-memory store: `DashMap<RiskKey, RiskState>` + background TTL janitor (150s idle eviction). Tier policy integration: each tier defines `risk_thresholds { allow, challenge }` in TOML; scorer gates all decisions. New `WafAction::Challenge` variant for middle-ground responses. Module: `crates/waf-engine/src/risk/` (8 files). Validated via inline unit tests + integration fixtures. See `system-architecture.md` § FR-025 for pipeline integration diagram.
 
 ### Access Lists (FR-008)
 
