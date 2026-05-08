@@ -69,7 +69,7 @@ Per-request flow runs in five stages:
 2. **Pre-Phase — Tier Classification (FR-002)** — `TierPolicyRegistry::classify` resolves `(Tier, Arc<TierPolicy>)` from request parts; result attached to `RequestCtx` before any phase.
 3. **Phase-0 — Access Gate (FR-008)** — Host gate → IP blacklist → IP whitelist (per-tier `full_bypass`/`blacklist_only` dispatch). *Future*: IP evaluation to use `ClientIdentity.real_ip` instead of peer IP. Short-circuits before the rule pipeline.
 4. **Phases 1–16 — Rule Pipeline** — IP/URL filtering → **FR-004 rate limiting (IP + session keys, token-bucket + sliding-window per tier)** → **FR-005 DDoS detection (per-IP/per-fingerprint/per-tier sliding-window with dynamic banning and graceful degrade)** → **FR-011 behavioral anomaly detection (per-actor cadence/path classifiers, 16-slot ring, signal cap ≤40)** → **FR-012 transaction velocity (session role-tagging, sequence timing, withdrawal bursts)** → payload attacks (SQLi/XSS/RCE/traversal) → custom rules → OWASP CRS → sensitive data → anti-hotlink → CrowdSec. Final decision: Allow / Block / Challenge.
-5. **Risk Scoring (FR-025)** — **Cumulative per-actor risk state machine (IP/fingerprint/session triple-index with merge-on-collide)**. Risk deltas accumulated from all upstream checks and signals. Decay mechanism reduces stale risk. Thresholds gate: Allow (<X) / Challenge (X–Y) / Block (>Y). Hot-reload config via ArcSwap. Emits `X-WAF-Risk-Score` header. Integrates with tier-specific risk policies.
+5. **Risk Scoring (FR-025)** — **L0 Seed (Tor/ASN/whitelist baseline) + L1 Accumulation (per-actor state machine, IP/fingerprint/session triple-index with merge-on-collide) + L2 Anomaly (JA4↔UA mismatch, XFF chain, header sanity) + L2 Velocity (sliding window, sequence FSM)**. Risk deltas accumulated from all upstream checks and signals. Decay mechanism reduces stale risk. Thresholds gate: Allow (<X) / Challenge (X–Y) / Block (>Y). Hot-reload config via ArcSwap. Emits `X-WAF-Risk-Score` header. Integrates with tier-specific risk policies.
 6. **Post-Decision — FR-009 Smart Caching** — If Allow: tier gate (CRITICAL never cached) → Chain-of-Responsibility gates → store response in moka LRU if eligible (tags indexed for purge).
 
 Full per-phase walkthrough, mermaid diagrams, and post-decision handling: see **[request-pipeline.md](./request-pipeline.md)**.
@@ -256,10 +256,16 @@ Upstream Signals (rules, ddos, etc.)├──► Scorer::score(ctx, fp_key, delt
 
 When multiple keys match a single request, all three states merge (highest score wins, then contributors union).
 
+**L2 Anomaly Layer (Phase 5):** Inline synchronous detectors evaluated per-request: (1) JA4↔UA mismatch (TLS fingerprint vs User-Agent family incompatibility, +20), (2) XFF chain sanity (malformed or excessive hop counts, +10 cap), (3) Header sanity (missing required headers or impossible combinations, +15 cap).
+
+**L2 Velocity Layer (Phase 5):** Request-rate and transaction-sequence detectors: (1) Sliding window (60×1s ring buffer; request-rate threshold breach → +25), (2) Sequence FSM (Login→OTP→Withdrawal path validation; out-of-order or timing anomalies → +30).
+
 **Risk contributions:**
 - Rule matches (e.g., SQLi detected) — delta from `rule.risk_score_delta` in YAML (0–50 points)
 - Signal providers (FR-010, FR-011, FR-012 anomalies) — delta from signal enum (5–20 points)
 - DDoS detector verdicts (FR-005) — delta bump for detected floods (5–30 points)
+- L2 Anomaly detectors (JA4↔UA, XFF, headers) — delta 10–20 points
+- L2 Velocity detectors (sliding window, sequence FSM) — delta 25–30 points
 
 **Decay mechanism:**
 - Linear decay: `raw_score -= decay_factor * time_ms` (configurable, default 1 pt/min)
@@ -286,7 +292,7 @@ max_state_age_secs = 3600         # Purge risk states older than this
 - **Header emission** — `X-WAF-Risk-Score: <0-100>` sent in all responses
 - **Tier policy** — `tier_policy.risk_thresholds` (allow/challenge/block points) per tier
 
-**Module:** `crates/waf-engine/src/risk/` (key.rs, state.rs, score.rs, decay.rs, threshold.rs, scorer.rs, config.rs, reload.rs, store/).
+**Module:** `crates/waf-engine/src/risk/` (scorer.rs, key.rs, state.rs, score.rs, decay.rs, threshold.rs, config.rs, reload.rs, store/, seed/, anomaly/, velocity/, ingest/, tests/).
 
 ### WafEngine → PostgreSQL Storage
 

@@ -16,6 +16,7 @@
 //! - [`scorer`]    — Scorer orchestrator (pipeline integration)
 //! - [`store`]     — `RiskStore` trait + `MemoryRiskStore` backend
 
+pub mod anomaly;
 pub mod config;
 pub mod decay;
 pub mod ingest;
@@ -27,7 +28,12 @@ pub mod seed;
 pub mod state;
 pub mod store;
 pub mod threshold;
+pub mod velocity;
 
+#[cfg(test)]
+mod tests;
+
+pub use anomaly::{AnomalyCtx, AnomalyLayer};
 pub use config::{IngestConfig, RiskConfig};
 pub use ingest::{IngestMetrics, IngestMetricsSnapshot, ScoringAggregator, SignalWeights};
 pub use key::{RiskKey, SessionId};
@@ -40,3 +46,4 @@ pub use scorer::Scorer;
 pub use seed::{SeedDeltas, SeedLayer, SeedPaths, SeedReloader, SeedTables, SeedVerdict};
 pub use state::{Contributor, ContributorKind, RiskState, SeedKind};
 pub use store::{MemoryRiskStore, RiskStore};
+pub use velocity::{SequenceStore, TxEndpoint, VelocityLayer, VelocityStore};

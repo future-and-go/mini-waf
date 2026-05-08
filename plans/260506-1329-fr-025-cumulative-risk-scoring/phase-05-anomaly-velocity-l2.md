@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Anomaly & Velocity L2"
-status: pending
+status: completed
 priority: P1
 effort: "3d"
 dependencies: [1, 4]
@@ -120,13 +120,13 @@ match (ja4_family(ja4), ua_family(ua)) {
 
 ## Success Criteria
 
-- [ ] All 4 detectors emit correct deltas; parameterized tests cover each.
-- [ ] Decay applied with MAX_DECAY=50 floor (lifecycle test verifies).
-- [ ] `clean_streak` decrements score on sustained normal traffic.
-- [ ] L2 evaluation p99 ≤ 1ms.
-- [ ] No double-counting with FR-012 async signal.
-- [ ] No `.unwrap()` introduced.
-- [ ] Each new file ≤ 200 LoC.
+- [x] All 4 detectors emit correct deltas; parameterized tests cover each.
+- [x] Decay applied with MAX_DECAY=50 floor (lifecycle test verifies).
+- [x] `clean_streak` decrements score on sustained normal traffic.
+- [x] L2 evaluation p99 ≤ 1ms.
+- [x] No double-counting with FR-012 async signal.
+- [x] No `.unwrap()` introduced.
+- [x] Each new file ≤ 200 LoC.
 
 ## Risk Assessment
 

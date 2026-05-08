@@ -2,6 +2,8 @@
 //!
 //! Builds `RiskKey` from request context, calls store, applies threshold gate,
 //! sets `X-WAF-Risk-Score` header, returns `WafAction`.
+//!
+//! Phase 5 adds L2 detectors (anomaly + velocity) evaluated inline.
 
 use std::sync::Arc;
 
@@ -10,12 +12,14 @@ use arc_swap::ArcSwap;
 use waf_common::{RequestCtx, WafAction};
 
 use crate::device_fp::types::FpKey;
+use crate::risk::anomaly::{AnomalyCtx, AnomalyLayer};
 use crate::risk::config::RiskConfig;
 use crate::risk::key::{RiskKey, SessionId};
 use crate::risk::seed::{SeedLayer, SeedVerdict};
 use crate::risk::state::{Contributor, ContributorKind};
 use crate::risk::store::RiskStore;
 use crate::risk::threshold::decide;
+use crate::risk::velocity::{TxEndpoint, VelocityLayer};
 
 /// Result of scoring a request.
 #[derive(Clone, Debug)]
@@ -31,26 +35,51 @@ pub struct ScorerResult {
 /// Scorer orchestrator for the risk scoring pipeline.
 ///
 /// Owns a reference to the store and config snapshot. Thread-safe via `Arc`.
+/// Phase 5 adds L2 detectors: anomaly layer and velocity layer.
 pub struct Scorer<S: RiskStore> {
     store: Arc<S>,
     cfg: Arc<ArcSwap<RiskConfig>>,
     seed: Option<Arc<SeedLayer>>,
+    /// L2 anomaly detection layer (JA4↔UA mismatch, XFF, header sanity).
+    anomaly: AnomalyLayer,
+    /// L2 velocity detection layer (sliding window, sequence FSM).
+    velocity: VelocityLayer,
 }
 
 impl<S: RiskStore> Scorer<S> {
     /// Create a new scorer with the given store and config.
     #[must_use]
-    pub const fn new(store: Arc<S>, cfg: Arc<ArcSwap<RiskConfig>>) -> Self {
-        Self { store, cfg, seed: None }
+    pub fn new(store: Arc<S>, cfg: Arc<ArcSwap<RiskConfig>>) -> Self {
+        Self {
+            store,
+            cfg,
+            seed: None,
+            anomaly: AnomalyLayer::new(),
+            velocity: VelocityLayer::with_defaults(),
+        }
     }
 
     /// Create a scorer with seed layer.
     #[must_use]
-    pub const fn with_seed(store: Arc<S>, cfg: Arc<ArcSwap<RiskConfig>>, seed: Arc<SeedLayer>) -> Self {
+    pub fn with_seed(store: Arc<S>, cfg: Arc<ArcSwap<RiskConfig>>, seed: Arc<SeedLayer>) -> Self {
         Self {
             store,
             cfg,
             seed: Some(seed),
+            anomaly: AnomalyLayer::new(),
+            velocity: VelocityLayer::with_defaults(),
+        }
+    }
+
+    /// Create a scorer with custom velocity threshold.
+    #[must_use]
+    pub fn with_velocity_threshold(store: Arc<S>, cfg: Arc<ArcSwap<RiskConfig>>, threshold: u32) -> Self {
+        Self {
+            store,
+            cfg,
+            seed: None,
+            anomaly: AnomalyLayer::new(),
+            velocity: VelocityLayer::new(threshold),
         }
     }
 
@@ -68,15 +97,17 @@ impl<S: RiskStore> Scorer<S> {
     /// Score a request and return the result.
     ///
     /// # Arguments
-    /// * `ctx` - The request context (contains IP, tier, cookies)
+    /// * `ctx` - The request context (contains IP, tier, cookies, headers)
     /// * `fp_key` - Optional device fingerprint key
     /// * `sync_deltas` - Risk deltas from earlier checks (e.g., rule matches)
+    /// * `tx_endpoint` - Optional transaction endpoint for sequence FSM
     /// * `now_ms` - Current timestamp in milliseconds
     pub async fn score(
         &self,
         ctx: &RequestCtx,
         fp_key: Option<&FpKey>,
         sync_deltas: &[Contributor],
+        tx_endpoint: Option<TxEndpoint>,
         now_ms: i64,
     ) -> anyhow::Result<ScorerResult> {
         let cfg = self.config();
@@ -105,21 +136,25 @@ impl<S: RiskStore> Scorer<S> {
                     let seed_contrib = Contributor::new(ContributorKind::Seed(kind), i16::from(delta), now_ms);
                     let mut all_deltas = vec![seed_contrib];
                     all_deltas.extend_from_slice(sync_deltas);
-                    return self.score_with_deltas(ctx, fp_key, &all_deltas, now_ms, &cfg).await;
+                    return self
+                        .score_with_l2(ctx, fp_key, &all_deltas, tx_endpoint, now_ms, &cfg)
+                        .await;
                 }
                 SeedVerdict::None => {}
             }
         }
 
-        self.score_with_deltas(ctx, fp_key, sync_deltas, now_ms, &cfg).await
+        self.score_with_l2(ctx, fp_key, sync_deltas, tx_endpoint, now_ms, &cfg)
+            .await
     }
 
-    /// Internal scoring with prepared deltas.
-    async fn score_with_deltas(
+    /// Internal scoring with L2 layer evaluation.
+    async fn score_with_l2(
         &self,
         ctx: &RequestCtx,
         fp_key: Option<&FpKey>,
         deltas: &[Contributor],
+        tx_endpoint: Option<TxEndpoint>,
         now_ms: i64,
         cfg: &RiskConfig,
     ) -> anyhow::Result<ScorerResult> {
@@ -133,7 +168,25 @@ impl<S: RiskStore> Scorer<S> {
             });
         }
 
-        let result = self.store.apply(&key, deltas, now_ms).await?;
+        // Collect all deltas: input + L2 anomaly + L2 velocity
+        let mut all_deltas = deltas.to_vec();
+
+        // L2 Anomaly layer: JA4↔UA mismatch, XFF chain, header sanity
+        let ja4 = fp_key
+            .and_then(|k| k.ja4.as_ref())
+            .map(crate::device_fp::types::FingerprintValue::as_str);
+        let user_agent = ctx.headers.get("user-agent").map_or("", String::as_str);
+        let xff = ctx.headers.get("x-forwarded-for").map(String::as_str);
+        let anomaly_ctx = AnomalyCtx::new(ja4, user_agent, xff, &ctx.headers);
+        let anomaly_deltas = self.anomaly.evaluate(&anomaly_ctx, now_ms);
+        all_deltas.extend(anomaly_deltas);
+
+        // L2 Velocity layer: sliding window + sequence FSM
+        let velocity_deltas = self.velocity.evaluate(&key, tx_endpoint, now_ms);
+        all_deltas.extend(velocity_deltas);
+
+        // Apply to store (decay happens inside store.apply before fold)
+        let result = self.store.apply(&key, &all_deltas, now_ms).await?;
         let state = &result.state;
 
         let override_block = state.is_pinned(now_ms);
@@ -294,7 +347,7 @@ mod tests {
         let scorer = make_scorer();
         let ctx = make_ctx();
 
-        let result = scorer.score(&ctx, None, &[], 1000).await.unwrap();
+        let result = scorer.score(&ctx, None, &[], None, 1000).await.unwrap();
         assert_eq!(result.score, 0);
         assert!(matches!(result.action, WafAction::Allow));
     }
@@ -307,7 +360,7 @@ mod tests {
         let scorer = Scorer::new(store, swap);
         let ctx = make_ctx();
 
-        let result = scorer.score(&ctx, None, &[], 1000).await.unwrap();
+        let result = scorer.score(&ctx, None, &[], None, 1000).await.unwrap();
         assert_eq!(result.score, 0);
         assert!(matches!(result.action, WafAction::Allow));
     }
@@ -320,7 +373,7 @@ mod tests {
         let ctx = make_ctx();
 
         let deltas = vec![Contributor::new(ContributorKind::Seed(SeedKind::Generic), 35, 1000)];
-        let result = scorer.score(&ctx, None, &deltas, 1000).await.unwrap();
+        let result = scorer.score(&ctx, None, &deltas, None, 1000).await.unwrap();
 
         assert_eq!(result.score, 35);
         assert!(matches!(result.action, WafAction::Challenge));
@@ -334,7 +387,7 @@ mod tests {
         let ctx = make_ctx();
 
         let deltas = vec![Contributor::new(ContributorKind::Seed(SeedKind::Generic), 95, 1000)];
-        let result = scorer.score(&ctx, None, &deltas, 1000).await.unwrap();
+        let result = scorer.score(&ctx, None, &deltas, None, 1000).await.unwrap();
 
         assert_eq!(result.score, 95);
         assert!(matches!(result.action, WafAction::Block { .. }));

@@ -107,6 +107,10 @@ harness = false
 name = "ddos_counter"
 harness = false
 
+[[bench]]
+name = "risk_anomaly"
+harness = false
+
 [features]
 default = []
 # FR-010 device fingerprinting — Redis-backed identity store (phase-08).
