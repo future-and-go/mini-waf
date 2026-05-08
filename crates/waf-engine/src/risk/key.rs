@@ -36,7 +36,7 @@ impl SessionId {
 ///
 /// At least one leg (IP) is always present. Fingerprint hash and session may
 /// be `None` depending on request context.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct RiskKey {
     pub ip: Option<IpAddr>,
     pub fp_hash: Option<u64>,

@@ -14,6 +14,7 @@ use parking_lot::RwLock;
 use tokio::time::interval;
 use tracing::{debug, info};
 
+use crate::risk::decay::apply_decay;
 use crate::risk::key::RiskKey;
 use crate::risk::score::fold;
 use crate::risk::state::{Contributor, RiskState};
@@ -144,9 +145,13 @@ impl RiskStore for MemoryRiskStore {
             (new_ref, true)
         };
 
-        // Apply deltas under write lock
+        // Apply decay then fold deltas under write lock (atomic)
         {
             let mut state = state_ref.write();
+            // Decay BEFORE fold (FR-025 §4): read state → decay → fold new deltas
+            if !is_new {
+                apply_decay(&mut state, now_ms);
+            }
             fold(&mut state, deltas, now_ms);
         }
 

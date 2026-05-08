@@ -163,6 +163,7 @@ pub fn signals_to_contributors(signals: &[Signal], weights: &SignalWeights, ts_m
 }
 
 #[cfg(test)]
+#[allow(clippy::uninlined_format_args)]
 mod tests {
     use super::*;
     use crate::checks::tx_velocity::EndpointRole;
