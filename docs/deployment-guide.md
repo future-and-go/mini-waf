@@ -415,6 +415,43 @@ rules:
 prx-waf rules validate rules/cache.yaml
 ```
 
+### Seed Layer Data Files (FR-025 Phase 1)
+
+**IP reputation baseline evaluation (L0 risk assessment)** — Evaluates Tor exits, datacenter ASN classes, and whitelist before other risk layers.
+
+**File locations:**
+- Dev: `configs/seed/` (project directory)
+- Prod: `/etc/prx-waf/seed/` (systemd deployment)
+
+**File formats:**
+
+| File | Format | Refresh | Purpose |
+|------|--------|---------|---------|
+| `tor-exits.txt` | Newline-delimited IPs | Hourly via check.torproject.org | Identifies Tor exit nodes |
+| `asn-classes.csv` | CSV: `cidr,asn,classification` | Manual (operator updates) | IP blocks tagged datacenter/badlist/normal |
+| `risk-whitelist.txt` | Newline-delimited CIDRs | Manual (operator updates) | Bypasses all risk scoring (full Allow) |
+
+**Example schemas:**
+```
+# tor-exits.txt
+198.51.100.45
+203.0.113.89
+192.0.2.200
+
+# asn-classes.csv
+10.0.0.0/8,16509,datacenter
+192.168.1.0/24,65001,normal
+203.0.113.0/24,65432,badlist
+
+# risk-whitelist.txt
+10.20.0.0/16
+2001:db8::/32
+```
+
+**Hot-reload:** Files watched automatically; changes take effect within 500ms via ArcSwap (lock-free). Syntax errors logged, previous version retained.
+
+---
+
 ### Cache Admin API Endpoints (FR-009 Phase 4)
 
 **Tag-based purge** — Invalidate logical groups of cached entries without flushing the entire cache.

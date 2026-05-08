@@ -225,11 +225,12 @@ let detector = DeviceFpDetector::new(cfg, registry)
 
 **Cumulative risk scoring subsystem** — Tracks per-actor risk state and applies threshold gates to emit Allow / Challenge / Block decisions. Integrates signals from all upstream checks (rule matches, anomalies, DDoS) and decays stale risk.
 
+**L0 seed layer evaluation:** IP reputation baseline (Tor exits, ASN classification, whitelist) evaluated before other risk layers via file-based data sources (`configs/seed/`). Whitelist entries bypass all scoring (immediate Allow).
+
 ```
-Upstream Signals (rules, ddos, behavioral, etc.)
-    │
-    ▼
-Scorer::score(ctx, fp_key, deltas, now_ms)
+Seed Layer (Tor/ASN/Whitelist) ─────┐
+                                    │
+Upstream Signals (rules, ddos, etc.)├──► Scorer::score(ctx, fp_key, deltas, now_ms)
     │
     ├─ Build RiskKey (IP, fingerprint, session triple-index)
     │

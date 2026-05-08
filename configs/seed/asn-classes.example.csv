@@ -1,0 +1,38 @@
+# FR-025 Phase 2: ASN Classification Data
+# Format: cidr,asn,classification
+# Classifications: datacenter, badlist, normal
+# Lines starting with # are comments
+
+# AWS (AS16509)
+52.0.0.0/8,16509,datacenter
+54.0.0.0/8,16509,datacenter
+3.0.0.0/8,16509,datacenter
+
+# Google Cloud (AS15169)
+35.192.0.0/11,15169,datacenter
+34.0.0.0/9,15169,datacenter
+
+# Microsoft Azure (AS8075)
+40.64.0.0/10,8075,datacenter
+20.0.0.0/8,8075,datacenter
+
+# DigitalOcean (AS14061)
+167.99.0.0/16,14061,datacenter
+206.189.0.0/16,14061,datacenter
+
+# OVH (AS16276)
+51.38.0.0/16,16276,datacenter
+51.68.0.0/16,16276,datacenter
+
+# Hetzner (AS24940)
+95.216.0.0/16,24940,datacenter
+135.181.0.0/16,24940,datacenter
+
+# Linode (AS63949)
+172.104.0.0/15,63949,datacenter
+
+# Example bad ASN (replace with operator-curated list)
+# 185.220.0.0/16,12345,badlist
+
+# The file is hot-reloaded on change.
+# For production, use iptoasn.com or similar service.

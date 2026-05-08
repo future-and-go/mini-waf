@@ -37,3 +37,22 @@ risk:
     # Floor below which automatic decay stops. Scores can only go below this
     # via explicit credits (e.g., completed CAPTCHA, manual override).
     max_decay: 50
+
+  # L0 seed layer — Tor exit, ASN classification, whitelist short-circuit.
+  # Evaluated FIRST, before any other risk layers.
+  seed:
+    enabled: true
+
+    # Path to Tor exit list (newline IPs). Update from check.torproject.org.
+    # tor_exits_path: "/etc/prx-waf/tor-exits.txt"
+
+    # Path to ASN classification CSV (cidr,asn,classification).
+    # asn_classes_path: "/etc/prx-waf/asn-classes.csv"
+
+    # Path to whitelist CIDRs (newline CIDRs). Whitelist = score 0, skip all layers.
+    # whitelist_path: "/etc/prx-waf/risk-whitelist.txt"
+
+    # Risk deltas for each classification.
+    tor_delta: 30          # Tor exit IPs
+    datacenter_delta: 15   # AWS, GCP, Azure, etc.
+    bad_asn_delta: 25      # Operator-curated bad ASN list

@@ -12,7 +12,8 @@ use waf_common::{RequestCtx, WafAction};
 use crate::device_fp::types::FpKey;
 use crate::risk::config::RiskConfig;
 use crate::risk::key::{RiskKey, SessionId};
-use crate::risk::state::Contributor;
+use crate::risk::seed::{SeedLayer, SeedVerdict};
+use crate::risk::state::{Contributor, ContributorKind};
 use crate::risk::store::RiskStore;
 use crate::risk::threshold::decide;
 
@@ -33,13 +34,29 @@ pub struct ScorerResult {
 pub struct Scorer<S: RiskStore> {
     store: Arc<S>,
     cfg: Arc<ArcSwap<RiskConfig>>,
+    seed: Option<Arc<SeedLayer>>,
 }
 
 impl<S: RiskStore> Scorer<S> {
     /// Create a new scorer with the given store and config.
     #[must_use]
     pub const fn new(store: Arc<S>, cfg: Arc<ArcSwap<RiskConfig>>) -> Self {
-        Self { store, cfg }
+        Self { store, cfg, seed: None }
+    }
+
+    /// Create a scorer with seed layer.
+    #[must_use]
+    pub const fn with_seed(store: Arc<S>, cfg: Arc<ArcSwap<RiskConfig>>, seed: Arc<SeedLayer>) -> Self {
+        Self {
+            store,
+            cfg,
+            seed: Some(seed),
+        }
+    }
+
+    /// Set the seed layer.
+    pub fn set_seed(&mut self, seed: Arc<SeedLayer>) {
+        self.seed = Some(seed);
     }
 
     /// Load the current config snapshot.
@@ -72,7 +89,41 @@ impl<S: RiskStore> Scorer<S> {
             });
         }
 
-        let key = Self::build_key(ctx, fp_key, &cfg);
+        // L0 seed layer evaluation FIRST — whitelist short-circuits everything
+        if let Some(ref seed) = self.seed
+            && cfg.seed.enabled
+        {
+            match seed.evaluate(ctx.client_ip) {
+                SeedVerdict::Whitelisted => {
+                    return Ok(ScorerResult {
+                        action: WafAction::Allow,
+                        score: 0,
+                        is_new: false,
+                    });
+                }
+                SeedVerdict::Score { delta, kind } => {
+                    let seed_contrib = Contributor::new(ContributorKind::Seed(kind), i16::from(delta), now_ms);
+                    let mut all_deltas = vec![seed_contrib];
+                    all_deltas.extend_from_slice(sync_deltas);
+                    return self.score_with_deltas(ctx, fp_key, &all_deltas, now_ms, &cfg).await;
+                }
+                SeedVerdict::None => {}
+            }
+        }
+
+        self.score_with_deltas(ctx, fp_key, sync_deltas, now_ms, &cfg).await
+    }
+
+    /// Internal scoring with prepared deltas.
+    async fn score_with_deltas(
+        &self,
+        ctx: &RequestCtx,
+        fp_key: Option<&FpKey>,
+        deltas: &[Contributor],
+        now_ms: i64,
+        cfg: &RiskConfig,
+    ) -> anyhow::Result<ScorerResult> {
+        let key = Self::build_key(ctx, fp_key, cfg);
 
         if key.is_empty() {
             return Ok(ScorerResult {
@@ -82,7 +133,7 @@ impl<S: RiskStore> Scorer<S> {
             });
         }
 
-        let result = self.store.apply(&key, sync_deltas, now_ms).await?;
+        let result = self.store.apply(&key, deltas, now_ms).await?;
         let state = &result.state;
 
         let override_block = state.is_pinned(now_ms);
@@ -263,12 +314,12 @@ mod tests {
 
     #[tokio::test]
     async fn score_accumulates_deltas() {
-        use crate::risk::state::ContributorKind;
+        use crate::risk::state::{ContributorKind, SeedKind};
 
         let scorer = make_scorer();
         let ctx = make_ctx();
 
-        let deltas = vec![Contributor::new(ContributorKind::Seed, 35, 1000)];
+        let deltas = vec![Contributor::new(ContributorKind::Seed(SeedKind::Generic), 35, 1000)];
         let result = scorer.score(&ctx, None, &deltas, 1000).await.unwrap();
 
         assert_eq!(result.score, 35);
@@ -277,12 +328,12 @@ mod tests {
 
     #[tokio::test]
     async fn score_blocks_at_threshold() {
-        use crate::risk::state::ContributorKind;
+        use crate::risk::state::{ContributorKind, SeedKind};
 
         let scorer = make_scorer();
         let ctx = make_ctx();
 
-        let deltas = vec![Contributor::new(ContributorKind::Seed, 95, 1000)];
+        let deltas = vec![Contributor::new(ContributorKind::Seed(SeedKind::Generic), 95, 1000)];
         let result = scorer.score(&ctx, None, &deltas, 1000).await.unwrap();
 
         assert_eq!(result.score, 95);

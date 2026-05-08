@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Reputation Seed L0"
-status: pending
+status: complete
 priority: P1
 effort: "2d"
 dependencies: [1]
@@ -101,12 +101,12 @@ Use `ip_network_table` if FR-008 dyn blacklist already uses it (grep first), els
 
 ## Success Criteria
 
-- [ ] `evaluate` p99 ≤ 100µs (bench gate).
-- [ ] Whitelist short-circuit verified by integration test (Allow even when other detectors WOULD have triggered).
-- [ ] Hot-reload test: append IP to tor-exits.txt → within 2s next request scored +30.
-- [ ] Malformed CSV line → loader logs warn, skips, no crash.
-- [ ] IPv6 lookup tested.
-- [ ] All Iron Rules respected (no `.unwrap()`, ≤200 LoC per file).
+- [x] `evaluate` p99 ≤ 100µs (bench gate).
+- [x] Whitelist short-circuit verified by integration test (Allow even when other detectors WOULD have triggered).
+- [x] Hot-reload test: append IP to tor-exits.txt → within 2s next request scored +30.
+- [x] Malformed CSV line → loader logs warn, skips, no crash.
+- [x] IPv6 lookup tested.
+- [x] All Iron Rules respected (no `.unwrap()`, ≤200 LoC per file).
 
 ## Risk Assessment
 

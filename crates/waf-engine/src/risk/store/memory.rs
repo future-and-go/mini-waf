@@ -255,11 +255,11 @@ impl RiskStore for MemoryRiskStore {
 mod tests {
     use super::*;
     use crate::risk::key::SessionId;
-    use crate::risk::state::ContributorKind;
+    use crate::risk::state::{ContributorKind, SeedKind};
     use std::net::Ipv4Addr;
 
     fn make_contributor(delta: i16) -> Contributor {
-        Contributor::new(ContributorKind::Seed, delta, 1000)
+        Contributor::new(ContributorKind::Seed(SeedKind::Generic), delta, 1000)
     }
 
     #[tokio::test]
