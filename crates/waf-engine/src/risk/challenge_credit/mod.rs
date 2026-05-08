@@ -216,8 +216,8 @@ mod tests {
     use super::*;
 
     fn test_secret() -> Arc<HmacSecret> {
-        // Create in-memory secret for testing
-        Arc::new(HmacSecret::load_or_init(Path::new("/tmp/test-hmac.key")).unwrap())
+        // Fixed 32-byte key for deterministic tests (no file I/O, no race conditions)
+        Arc::new(HmacSecret::from_bytes([42u8; 32]))
     }
 
     #[tokio::test]
