@@ -18,6 +18,7 @@
 
 pub mod config;
 pub mod decay;
+pub mod ingest;
 pub mod key;
 pub mod reload;
 pub mod score;
@@ -27,7 +28,8 @@ pub mod state;
 pub mod store;
 pub mod threshold;
 
-pub use config::RiskConfig;
+pub use config::{IngestConfig, RiskConfig};
+pub use ingest::{IngestMetrics, IngestMetricsSnapshot, ScoringAggregator, SignalWeights};
 pub use key::{RiskKey, SessionId};
 pub use reload::RiskReloader;
 pub use score::{

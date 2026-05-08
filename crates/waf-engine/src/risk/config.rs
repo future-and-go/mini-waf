@@ -2,6 +2,7 @@
 //!
 //! YAML schema for `configs/risk.yaml`. Hot-reload via `ArcSwap` + `notify`.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -56,6 +57,10 @@ pub struct RiskConfig {
     /// L0 seed layer configuration.
     #[serde(default)]
     pub seed: SeedConfig,
+
+    /// Async ingest pipeline configuration (Phase 4).
+    #[serde(default)]
+    pub ingest: IngestConfig,
 }
 
 /// Store backend selection.
@@ -150,6 +155,41 @@ impl SeedConfig {
     }
 }
 
+/// Async ingest pipeline configuration (Phase 4).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct IngestConfig {
+    /// Whether async ingest is enabled.
+    #[serde(default = "default_ingest_enabled")]
+    pub enabled: bool,
+
+    /// Bounded channel capacity (default 65536).
+    #[serde(default = "default_channel_capacity")]
+    pub channel_capacity: usize,
+
+    /// Custom signal weights (`signal_name` → delta).
+    /// Missing keys use built-in defaults.
+    #[serde(default)]
+    pub signal_weights: HashMap<String, i16>,
+}
+
+impl Default for IngestConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_ingest_enabled(),
+            channel_capacity: default_channel_capacity(),
+            signal_weights: HashMap::new(),
+        }
+    }
+}
+
+impl IngestConfig {
+    /// Convert to `SignalWeights` for the ingest worker.
+    #[must_use]
+    pub fn to_signal_weights(&self) -> crate::risk::ingest::SignalWeights {
+        crate::risk::ingest::SignalWeights::from_overrides(&self.signal_weights)
+    }
+}
+
 impl Default for RiskConfig {
     fn default() -> Self {
         Self {
@@ -163,6 +203,7 @@ impl Default for RiskConfig {
             store: StoreConfig::default(),
             decay: DecayConfig::default(),
             seed: SeedConfig::default(),
+            ingest: IngestConfig::default(),
         }
     }
 }
@@ -227,6 +268,12 @@ const fn default_datacenter_delta() -> u8 {
 }
 const fn default_bad_asn_delta() -> u8 {
     25
+}
+const fn default_ingest_enabled() -> bool {
+    true
+}
+const fn default_channel_capacity() -> usize {
+    65536
 }
 
 #[cfg(test)]
