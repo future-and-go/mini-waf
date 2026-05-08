@@ -92,6 +92,28 @@ impl RiskKey {
     pub fn axis_count(&self) -> usize {
         usize::from(self.ip.is_some()) + usize::from(self.fp_hash.is_some()) + usize::from(self.session.is_some())
     }
+
+    /// Derive a canonical owner ID string for challenge credit binding.
+    ///
+    /// Priority: session (strongest binding) > fingerprint > IP.
+    /// Returns a deterministic string that uniquely identifies this actor.
+    #[must_use]
+    pub fn owner_id(&self) -> String {
+        // Prefer session (strongest identity binding)
+        if let Some(ref session) = self.session {
+            return format!("sid:{}", hex::encode(session.as_bytes()));
+        }
+        // Fall back to fingerprint hash
+        if let Some(fp_hash) = self.fp_hash {
+            return format!("fp:{fp_hash:016x}");
+        }
+        // Last resort: IP
+        if let Some(ip) = self.ip {
+            return format!("ip:{ip}");
+        }
+        // Should not happen if is_empty() was checked
+        "unknown".to_string()
+    }
 }
 
 #[cfg(test)]

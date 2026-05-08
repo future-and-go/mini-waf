@@ -65,6 +65,10 @@ pub struct RiskConfig {
     /// FR-028 canary honeypot configuration (Phase 6).
     #[serde(default)]
     pub canary: CanaryConfig,
+
+    /// FR-006/FR-025 Phase 8 challenge credit configuration.
+    #[serde(default)]
+    pub challenge: ChallengeConfig,
 }
 
 /// Store backend selection.
@@ -262,12 +266,68 @@ pub struct CanaryConfig {
     pub ban_ttl_secs: u32,
 }
 
+/// FR-006/FR-025 Phase 8 Challenge credit configuration.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ChallengeConfig {
+    /// Whether challenge credit verification is enabled.
+    #[serde(default = "default_challenge_enabled")]
+    pub enabled: bool,
+
+    /// Token TTL in seconds (default: 300 = 5 minutes).
+    #[serde(default = "default_challenge_ttl_secs")]
+    pub ttl_secs: u32,
+
+    /// Path to HMAC secret file. Generated on first boot if absent.
+    #[serde(default)]
+    pub hmac_secret_path: Option<String>,
+
+    /// In-process LRU cache size for consumed nonces (default: 100000).
+    #[serde(default = "default_challenge_lru_size")]
+    pub lru_size: usize,
+
+    /// Header name for challenge credit token (default: X-WAF-Cred).
+    #[serde(default = "default_challenge_header")]
+    pub header_name: String,
+
+    /// Risk delta for valid challenge (negative = credit). Default: -25.
+    #[serde(default = "default_credit_valid_delta")]
+    pub valid_delta: i16,
+
+    /// Risk delta for invalid challenge. Default: +20.
+    #[serde(default = "default_credit_invalid_delta")]
+    pub invalid_delta: i16,
+
+    /// Risk delta for replay attempt. Default: +30.
+    #[serde(default = "default_credit_replay_delta")]
+    pub replay_delta: i16,
+
+    /// Risk delta for expired token. Default: +10.
+    #[serde(default = "default_credit_expired_delta")]
+    pub expired_delta: i16,
+}
+
 impl Default for CanaryConfig {
     fn default() -> Self {
         Self {
             enabled: default_canary_enabled(),
             paths: Vec::new(),
             ban_ttl_secs: default_canary_ban_ttl_secs(),
+        }
+    }
+}
+
+impl Default for ChallengeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_challenge_enabled(),
+            ttl_secs: default_challenge_ttl_secs(),
+            hmac_secret_path: None,
+            lru_size: default_challenge_lru_size(),
+            header_name: default_challenge_header(),
+            valid_delta: default_credit_valid_delta(),
+            invalid_delta: default_credit_invalid_delta(),
+            replay_delta: default_credit_replay_delta(),
+            expired_delta: default_credit_expired_delta(),
         }
     }
 }
@@ -305,6 +365,7 @@ impl Default for RiskConfig {
             seed: SeedConfig::default(),
             ingest: IngestConfig::default(),
             canary: CanaryConfig::default(),
+            challenge: ChallengeConfig::default(),
         }
     }
 }
@@ -381,6 +442,30 @@ const fn default_canary_enabled() -> bool {
 }
 const fn default_canary_ban_ttl_secs() -> u32 {
     3600 // 1 hour
+}
+const fn default_challenge_enabled() -> bool {
+    false
+}
+const fn default_challenge_ttl_secs() -> u32 {
+    300 // 5 minutes
+}
+const fn default_challenge_lru_size() -> usize {
+    100_000
+}
+fn default_challenge_header() -> String {
+    "X-WAF-Cred".to_string()
+}
+const fn default_credit_valid_delta() -> i16 {
+    -25
+}
+const fn default_credit_invalid_delta() -> i16 {
+    20
+}
+const fn default_credit_replay_delta() -> i16 {
+    30
+}
+const fn default_credit_expired_delta() -> i16 {
+    10
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@
 //!
 //! Phase 5 adds L2 detectors (anomaly + velocity) evaluated inline.
 //! Phase 6 adds canary honeypot layer (FR-028) for scanner detection.
+//! Phase 8 adds challenge credit verification (FR-006 wiring).
 
 use std::sync::Arc;
 
@@ -16,10 +17,11 @@ use waf_common::{RequestCtx, WafAction};
 use crate::device_fp::types::FpKey;
 use crate::risk::anomaly::{AnomalyCtx, AnomalyLayer};
 use crate::risk::canary::CanaryLayer;
+use crate::risk::challenge_credit::{ChallengeVerifier, VerifyOutcome};
 use crate::risk::config::RiskConfig;
 use crate::risk::key::{RiskKey, SessionId};
 use crate::risk::seed::{SeedLayer, SeedVerdict};
-use crate::risk::state::{Contributor, ContributorKind};
+use crate::risk::state::{Contributor, ContributorKind, CreditOutcome};
 use crate::risk::store::RiskStore;
 use crate::risk::threshold::decide;
 use crate::risk::velocity::{TxEndpoint, VelocityLayer};
@@ -40,12 +42,15 @@ pub struct ScorerResult {
 /// Owns a reference to the store and config snapshot. Thread-safe via `Arc`.
 /// Phase 5 adds L2 detectors: anomaly layer and velocity layer.
 /// Phase 6 adds canary honeypot layer (FR-028).
+/// Phase 8 adds challenge credit verifier (FR-006).
 pub struct Scorer<S: RiskStore> {
     store: Arc<S>,
     cfg: Arc<ArcSwap<RiskConfig>>,
     seed: Option<Arc<SeedLayer>>,
     /// FR-028 canary honeypot layer for scanner detection.
     pub canary: Option<Arc<CanaryLayer>>,
+    /// FR-006 challenge credit verifier.
+    challenge_verifier: Option<Arc<ChallengeVerifier>>,
     /// L2 anomaly detection layer (JA4↔UA mismatch, XFF, header sanity).
     anomaly: AnomalyLayer,
     /// L2 velocity detection layer (sliding window, sequence FSM).
@@ -61,6 +66,7 @@ impl<S: RiskStore> Scorer<S> {
             cfg,
             seed: None,
             canary: None,
+            challenge_verifier: None,
             anomaly: AnomalyLayer::new(),
             velocity: VelocityLayer::with_defaults(),
         }
@@ -74,6 +80,7 @@ impl<S: RiskStore> Scorer<S> {
             cfg,
             seed: Some(seed),
             canary: None,
+            challenge_verifier: None,
             anomaly: AnomalyLayer::new(),
             velocity: VelocityLayer::with_defaults(),
         }
@@ -87,6 +94,7 @@ impl<S: RiskStore> Scorer<S> {
             cfg,
             seed: None,
             canary: None,
+            challenge_verifier: None,
             anomaly: AnomalyLayer::new(),
             velocity: VelocityLayer::new(threshold),
         }
@@ -100,6 +108,11 @@ impl<S: RiskStore> Scorer<S> {
     /// Set the canary layer.
     pub fn set_canary(&mut self, canary: Arc<CanaryLayer>) {
         self.canary = Some(canary);
+    }
+
+    /// Set the challenge credit verifier.
+    pub fn set_challenge_verifier(&mut self, verifier: Arc<ChallengeVerifier>) {
+        self.challenge_verifier = Some(verifier);
     }
 
     /// Load the current config snapshot.
@@ -227,6 +240,11 @@ impl<S: RiskStore> Scorer<S> {
         let velocity_deltas = self.velocity.evaluate(&key, tx_endpoint, now_ms);
         all_deltas.extend(velocity_deltas);
 
+        // FR-006 Challenge credit verification
+        if let Some(credit_delta) = self.evaluate_challenge_credit(ctx, &key, now_ms, cfg).await {
+            all_deltas.push(credit_delta);
+        }
+
         // Apply to store (decay happens inside store.apply before fold)
         let result = self.store.apply(&key, &all_deltas, now_ms).await?;
         let state = &result.state;
@@ -257,6 +275,49 @@ impl<S: RiskStore> Scorer<S> {
         }
 
         key
+    }
+
+    /// Evaluate challenge credit header and return contributor if present.
+    async fn evaluate_challenge_credit(
+        &self,
+        ctx: &RequestCtx,
+        key: &RiskKey,
+        now_ms: i64,
+        cfg: &RiskConfig,
+    ) -> Option<Contributor> {
+        if !cfg.challenge.enabled {
+            return None;
+        }
+
+        let verifier = self.challenge_verifier.as_ref()?;
+        let credit_header = ctx.headers.get(&cfg.challenge.header_name)?;
+
+        // Resolve owner_id from RiskKey for binding check
+        let owner_id = key.owner_id();
+
+        let outcome = verifier.verify(credit_header, &owner_id, now_ms).await;
+
+        let (delta, credit_outcome) = match outcome {
+            VerifyOutcome::Valid { nonce } => {
+                tracing::debug!(nonce = %nonce, "challenge credit: valid token applied");
+                (cfg.challenge.valid_delta, CreditOutcome::Valid)
+            }
+            VerifyOutcome::Invalid(reason) => {
+                tracing::debug!(reason = %reason, "challenge credit: invalid token");
+                (cfg.challenge.invalid_delta, CreditOutcome::Invalid)
+            }
+            VerifyOutcome::Replay => (cfg.challenge.replay_delta, CreditOutcome::Replay),
+            VerifyOutcome::Expired => {
+                tracing::debug!("challenge credit: expired token");
+                (cfg.challenge.expired_delta, CreditOutcome::Expired)
+            }
+        };
+
+        Some(Contributor::new(
+            ContributorKind::ChallengeCredit(credit_outcome),
+            delta,
+            now_ms,
+        ))
     }
 
     /// Read the current risk state without applying any deltas.

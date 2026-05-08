@@ -139,6 +139,11 @@ prx-waf/
 │   │   │   ├── decay.rs       # Pure decay mechanism (linear, configurable, floor at 0)
 │   │   │   ├── threshold.rs   # Pure decide function (score + tier_policy → WafAction)
 │   │   │   ├── reload.rs      # notify-based hot-reload with ArcSwap
+│   │   │   ├── challenge_credit/ # FR-006/FR-025 Phase 8: Challenge credit token system
+│   │   │   │   ├── mod.rs         # ChallengeIssuer, VerifyOutcome, InvalidReason
+│   │   │   │   ├── secret.rs      # HmacSecret (load/generate/persist 32-byte key, mode 0600)
+│   │   │   │   ├── token.rs       # TokenPayload, encode/decode, HMAC-SHA256 signing
+│   │   │   │   └── nonce_store.rs # NonceStore trait + MemoryNonceStore (LRU, replay detection)
 │   │   │   └── store/         # RiskStore trait + MemoryRiskStore (in-memory state machine)
 │   │   │
 │   │   ├── security/
@@ -454,9 +459,11 @@ Session-level transaction velocity and sequence anomalies for fintech fraud dete
 
 **L2 Velocity Layer:** Request-rate and transaction-sequence detectors. Two components: (1) Sliding window (60×1s ring buffer, request-rate threshold breach → +25), (2) Sequence FSM (Login→OTP→Withdrawal path validation, out-of-order/too-fast → +30). Module: `velocity/` (3 files: window.rs, sequence.rs, mod.rs).
 
-**Scorer Orchestrator:** `Scorer<S: RiskStore>` owns L0 seed, L2 anomaly, L2 velocity layers; builds RiskKey, invokes store, applies thresholds, emits `X-WAF-Risk-Score` header. Hot-reload via `ArcSwap<RiskConfig>` (TOML `[risk]` section): `enable`, `decay_factor_per_min`, `allow_threshold`, `challenge_threshold`, `use_ip_key`, `use_fingerprint_key`, `use_session_key`, `max_state_age_secs`. Tier policy integration: each tier defines `risk_thresholds { allow, challenge }` in TOML. New `WafAction::Challenge` variant for middle-ground responses.
+**Challenge Credit System (Phase 8):** Token-based challenge completion verification. Tokens are HMAC-SHA256 signed, bound to actor identity (IP/fingerprint/session), and single-use (nonce-tracked). Outcomes: Valid (-25 credit), Invalid (+20 penalty), Replay (+30 penalty), Expired (+10 penalty). HMAC secret persists to disk (32 bytes, mode 0600) and NEVER auto-rotates; all cluster nodes must share the same secret. In-memory nonce cache (LRU, 100K default) prevents token replay attacks. Config: `[risk.challenge]` with `enabled`, `ttl_secs`, `hmac_secret_path`, `lru_size`, delta overrides. Module: `challenge_credit/` (4 files: mod.rs, secret.rs, token.rs, nonce_store.rs).
 
-**Module:** `crates/waf-engine/src/risk/` (34 files: core scorer/key/state/score/decay/threshold + L0 seed/ + L2 anomaly/ + L2 velocity/ + store/ + ingest/ + tests/ + reload.rs, config.rs). Validated via inline unit tests + integration fixtures. See `system-architecture.md` § FR-025 for pipeline integration diagram.
+**Scorer Orchestrator:** `Scorer<S: RiskStore>` owns L0 seed, L2 anomaly, L2 velocity, and challenge credit verification layers; builds RiskKey, invokes store, applies thresholds, emits `X-WAF-Risk-Score` header. Hot-reload via `ArcSwap<RiskConfig>` (TOML `[risk]` section): `enable`, `decay_factor_per_min`, `allow_threshold`, `challenge_threshold`, `use_ip_key`, `use_fingerprint_key`, `use_session_key`, `max_state_age_secs`. Tier policy integration: each tier defines `risk_thresholds { allow, challenge }` in TOML. New `WafAction::Challenge` variant for middle-ground responses.
+
+**Module:** `crates/waf-engine/src/risk/` (40 files: core scorer/key/state/score/decay/threshold + L0 seed/ + L2 anomaly/ + L2 velocity/ + challenge_credit/ + store/ + ingest/ + tests/ + reload.rs, config.rs). Validated via inline unit tests + integration fixtures. See `system-architecture.md` § FR-025 for pipeline integration diagram.
 
 ### Access Lists (FR-008)
 

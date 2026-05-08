@@ -54,6 +54,11 @@ pingora-core = { workspace = true }
 # FR-010 phase-04 fingerprint hashers.
 md-5 = { workspace = true }
 sha2 = { workspace = true }
+# FR-025 phase-08 challenge credit (HMAC tokens).
+hmac = { workspace = true }
+subtle = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
 # FR-010 phase-08 — Redis identity store backend; gated by `redis-store` feature.
 redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager", "tls-rustls", "tokio-rustls-comp", "script"], optional = true }
 

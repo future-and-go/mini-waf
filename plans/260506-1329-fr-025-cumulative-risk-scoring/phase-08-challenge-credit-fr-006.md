@@ -1,10 +1,11 @@
 ---
 phase: 8
 title: "Challenge Credit FR-006"
-status: pending
+status: completed
 priority: P1
 effort: "3d"
 dependencies: [1, 7]
+completedAt: "2026-05-08"
 ---
 
 # Phase 8: Challenge Credit — FR-006 Wiring
