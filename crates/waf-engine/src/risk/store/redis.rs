@@ -1,10 +1,10 @@
 //! FR-025 Phase 7: Redis-backed `RiskStore` for cluster-wide risk state.
 //!
 //! Key layout:
-//! - `waf:risk:state:{owner_id}` → JSON-encoded RiskState (TTL: ttl_secs)
-//! - `waf:risk:idx:ip:{ip}` → owner_id
-//! - `waf:risk:idx:fp:{fp_hash}` → owner_id
-//! - `waf:risk:idx:sid:{session_hex}` → owner_id
+//! - `waf:risk:state:{owner_id}` → JSON-encoded `RiskState` (TTL: `ttl_secs`)
+//! - `waf:risk:idx:ip:{ip}` → `owner_id`
+//! - `waf:risk:idx:fp:{fp_hash}` → `owner_id`
+//! - `waf:risk:idx:sid:{session_hex}` → `owner_id`
 //!
 //! `owner_id` is a UUID minted on first apply for a new actor. Triple-key
 //! indices converge to a single owner on collision (max-score wins).
@@ -97,10 +97,10 @@ impl LruCache {
     }
 
     fn insert(&mut self, key: String, entry: CacheEntry) {
-        if self.entries.len() >= self.capacity {
-            if let Some(oldest) = self.order.pop_front() {
-                self.entries.remove(&oldest);
-            }
+        if self.entries.len() >= self.capacity
+            && let Some(oldest) = self.order.pop_front()
+        {
+            self.entries.remove(&oldest);
         }
         self.order.retain(|k| k != &key);
         self.order.push_back(key.clone());
@@ -190,7 +190,7 @@ impl RedisRiskStore {
         format!("{}idx:sid:{}", self.cfg.key_prefix, hex::encode(session_bytes))
     }
 
-    /// Build index keys for a RiskKey (only populated axes).
+    /// Build index keys for a `RiskKey` (only populated axes).
     fn index_keys(&self, key: &RiskKey) -> Vec<String> {
         let mut keys = Vec::with_capacity(3);
         if let Some(ip) = key.ip {
@@ -210,17 +210,18 @@ impl RedisRiskStore {
         uuid::Uuid::new_v4().to_string()
     }
 
-    /// Cache key from RiskKey (for LRU lookup).
+    /// Cache key from `RiskKey` (for LRU lookup).
     fn cache_key(key: &RiskKey) -> String {
+        use std::fmt::Write;
         let mut s = String::new();
         if let Some(ip) = key.ip {
-            s.push_str(&format!("ip:{ip}|"));
+            let _ = write!(s, "ip:{ip}|");
         }
         if let Some(fp) = key.fp_hash {
-            s.push_str(&format!("fp:{fp}|"));
+            let _ = write!(s, "fp:{fp}|");
         }
         if let Some(ref sess) = key.session {
-            s.push_str(&format!("sid:{}", hex::encode(sess.as_bytes())));
+            let _ = write!(s, "sid:{}", hex::encode(sess.as_bytes()));
         }
         s
     }
@@ -245,7 +246,7 @@ impl RedisRiskStore {
 
     // ── Redis operations ──────────────────────────────────────────────────────
 
-    /// Resolve owner_id from index keys via pipelined GET, mint if not found.
+    /// Resolve `owner_id` from index keys via pipelined GET, mint if not found.
     async fn resolve_or_mint_owner(&self, key: &RiskKey) -> anyhow::Result<(String, bool)> {
         let idx_keys = self.index_keys(key);
         if idx_keys.is_empty() {
@@ -273,7 +274,10 @@ impl RedisRiskStore {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow!("missing owner_id"))?
                     .to_string();
-                let is_new = parsed.get("is_new").and_then(|v| v.as_bool()).unwrap_or(false);
+                let is_new = parsed
+                    .get("is_new")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
                 Ok((owner_id, is_new))
             }
             Ok(Err(e)) => {
@@ -290,7 +294,7 @@ impl RedisRiskStore {
         }
     }
 
-    /// Lookup owner_id from multiple indices, returning all found owners.
+    /// Lookup `owner_id` from multiple indices, returning all found owners.
     async fn lookup_owners(&self, key: &RiskKey) -> anyhow::Result<Vec<String>> {
         let idx_keys = self.index_keys(key);
         if idx_keys.is_empty() {
@@ -323,7 +327,7 @@ impl RedisRiskStore {
         }
     }
 
-    /// Read state JSON from Redis by owner_id.
+    /// Read state JSON from Redis by `owner_id`.
     async fn read_state(&self, owner_id: &str) -> anyhow::Result<Option<RiskState>> {
         let state_key = self.state_key(owner_id);
         let mut conn = self.conn.clone();
@@ -640,6 +644,10 @@ mod tests {
     /// Integration test — runs only when `REDIS_TEST_URL` is set.
     #[tokio::test]
     async fn basic_apply_and_read() {
+        use crate::risk::key::RiskKey;
+        use crate::risk::state::{Contributor, ContributorKind, SeedKind};
+        use std::net::Ipv4Addr;
+
         let Ok(url) = std::env::var("REDIS_TEST_URL") else {
             tracing::info!("skipping: REDIS_TEST_URL unset");
             return;
@@ -655,10 +663,6 @@ mod tests {
         })
         .await
         .expect("connect to REDIS_TEST_URL");
-
-        use crate::risk::key::RiskKey;
-        use crate::risk::state::{Contributor, ContributorKind, SeedKind};
-        use std::net::Ipv4Addr;
 
         let key = RiskKey::from_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)));
         let deltas = vec![Contributor::new(ContributorKind::Seed(SeedKind::Generic), 25, 1000)];

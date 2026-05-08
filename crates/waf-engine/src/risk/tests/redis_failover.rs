@@ -118,7 +118,7 @@ async fn empty_key_returns_default_state() {
     assert_eq!(result.state.clamped_score, 0); // Empty key doesn't persist
 }
 
-/// Test purge_expired is a no-op (Redis TTL handles this).
+/// Test `purge_expired` is a no-op (Redis TTL handles this).
 #[tokio::test]
 async fn purge_expired_is_noop() {
     let Ok(url) = std::env::var("REDIS_TEST_URL") else {
@@ -138,7 +138,7 @@ async fn purge_expired_is_noop() {
     assert_eq!(purged, 0, "Redis store purge_expired should be no-op");
 }
 
-/// Test len() returns correct count of state keys.
+/// Test `len()` returns correct count of state keys.
 #[tokio::test]
 async fn len_counts_state_keys() {
     use std::net::{IpAddr, Ipv4Addr};

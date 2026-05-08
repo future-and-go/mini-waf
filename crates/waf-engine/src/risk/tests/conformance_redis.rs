@@ -144,7 +144,7 @@ async fn redis_triple_key_converges() {
     assert_eq!(state.unwrap().clamped_score, 50);
 }
 
-/// Test force_max sets score to 100 with pin.
+/// Test `force_max` sets score to 100 with pin.
 #[tokio::test]
 async fn redis_force_max_pins_score() {
     use crate::risk::key::RiskKey;
@@ -184,7 +184,7 @@ async fn redis_force_max_pins_score() {
     assert_eq!(state.pinned_until_ms, Some(10_000));
 }
 
-/// Test reset_all clears all keys.
+/// Test `reset_all` clears all keys.
 #[tokio::test]
 async fn redis_reset_all_clears_store() {
     use crate::risk::key::RiskKey;

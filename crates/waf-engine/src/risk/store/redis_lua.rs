@@ -5,16 +5,16 @@
 
 /// Apply script: GET state → decay → fold deltas → SET with TTL → return state.
 ///
-/// KEYS[1]: state key (waf:risk:state:{owner_id})
-/// ARGV[1]: now_ms (current timestamp in milliseconds)
-/// ARGV[2]: deltas_json (JSON array of {kind, delta, ts_ms})
-/// ARGV[3]: ttl_sec (TTL for the key)
-/// ARGV[4]: min_clean_streak (decay threshold)
-/// ARGV[5]: decay_rate (points per clean request)
-/// ARGV[6]: max_decay (floor for automatic decay)
+/// KEYS[1]: state key (`waf:risk:state:{owner_id`})
+/// ARGV[1]: `now_ms` (current timestamp in milliseconds)
+/// ARGV[2]: `deltas_json` (JSON array of {kind, delta, `ts_ms`})
+/// ARGV[3]: `ttl_sec` (TTL for the key)
+/// ARGV[4]: `min_clean_streak` (decay threshold)
+/// ARGV[5]: `decay_rate` (points per clean request)
+/// ARGV[6]: `max_decay` (floor for automatic decay)
 ///
-/// Returns: JSON-encoded RiskState after apply
-pub const APPLY_SCRIPT: &str = r#"
+/// Returns: JSON-encoded `RiskState` after apply
+pub const APPLY_SCRIPT: &str = r"
 local state_key = KEYS[1]
 local now_ms = tonumber(ARGV[1])
 local deltas_json = ARGV[2]
@@ -107,14 +107,14 @@ redis.call('SET', state_key, result_json, 'EX', ttl_sec)
 
 -- Return state JSON plus is_new flag
 return cjson.encode({state = state, is_new = is_new})
-"#;
+";
 
 /// Force-max script: Set state to score=100 with pin until timestamp.
 ///
 /// KEYS[1]: state key
-/// ARGV[1]: until_ms (pin expiry timestamp)
-/// ARGV[2]: now_ms (current timestamp)
-/// ARGV[3]: ttl_sec (key TTL)
+/// ARGV[1]: `until_ms` (pin expiry timestamp)
+/// ARGV[2]: `now_ms` (current timestamp)
+/// ARGV[3]: `ttl_sec` (key TTL)
 ///
 /// Returns: "OK"
 pub const FORCE_MAX_SCRIPT: &str = r#"
@@ -151,16 +151,16 @@ redis.call('SET', state_key, cjson.encode(state), 'EX', ttl_sec)
 return "OK"
 "#;
 
-/// Mint-or-get owner script: Atomically get existing owner_id or create new one.
+/// Mint-or-get owner script: Atomically get existing `owner_id` or create new one.
 ///
 /// Uses SETNX pattern to prevent race conditions where two concurrent requests
 /// both see no owner and mint different IDs.
 ///
 /// KEYS[1..N]: index keys (ip, fp, session) - only populated ones
-/// ARGV[1]: new_owner_id (UUID to use if minting)
-/// ARGV[2]: ttl_sec
+/// ARGV[1]: `new_owner_id` (UUID to use if minting)
+/// ARGV[2]: `ttl_sec`
 ///
-/// Returns: {owner_id, is_new} JSON
+/// Returns: {`owner_id`, `is_new`} JSON
 pub const MINT_OR_GET_OWNER_SCRIPT: &str = r"
 local new_owner_id = ARGV[1]
 local ttl_sec = tonumber(ARGV[2])

@@ -112,7 +112,7 @@ async fn test_reset_all<S: RiskStore>(store: &S) {
     );
 }
 
-/// Test purge_expired behavior.
+/// Test `purge_expired` behavior.
 ///
 /// Note: Redis backend returns 0 (no-op) because Redis TTL handles expiration
 /// natively. Memory backend actively purges. Both are correct implementations.

@@ -63,7 +63,7 @@ impl std::fmt::Display for InvalidReason {
 
 /// Issues challenge credit tokens.
 ///
-/// Called by the challenge page (FR-006) on successful PoW completion.
+/// Called by the challenge page (FR-006) on successful `PoW` completion.
 pub struct ChallengeIssuer {
     secret: Arc<HmacSecret>,
     ttl_secs: u32,
@@ -72,13 +72,13 @@ pub struct ChallengeIssuer {
 impl ChallengeIssuer {
     /// Create a new issuer with the given secret and TTL.
     #[must_use]
-    pub fn new(secret: Arc<HmacSecret>, ttl_secs: u32) -> Self {
+    pub const fn new(secret: Arc<HmacSecret>, ttl_secs: u32) -> Self {
         Self { secret, ttl_secs }
     }
 
     /// Issue a token for the given actor owner ID.
     ///
-    /// The token binds to this owner_id — verification will fail if presented
+    /// The token binds to this `owner_id` — verification will fail if presented
     /// by a different actor.
     #[must_use]
     pub fn issue(&self, owner_id: &str, now_ms: i64) -> String {
@@ -109,7 +109,7 @@ pub struct ChallengeVerifier {
 impl ChallengeVerifier {
     /// Create a new verifier with the given secret and nonce store.
     #[must_use]
-    pub fn new(secret: Arc<HmacSecret>, nonce_store: Arc<NonceStore>) -> Self {
+    pub const fn new(secret: Arc<HmacSecret>, nonce_store: Arc<NonceStore>) -> Self {
         Self { secret, nonce_store }
     }
 

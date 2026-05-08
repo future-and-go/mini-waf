@@ -179,8 +179,8 @@ mod tests {
         let token = encode(&payload, &secret);
         // Tamper with the payload by flipping a byte
         let mut bytes: Vec<u8> = token.into_bytes();
-        if bytes.len() > 5 {
-            bytes[5] = bytes[5].wrapping_add(1);
+        if let Some(b) = bytes.get_mut(5) {
+            *b = b.wrapping_add(1);
         }
         let tampered = String::from_utf8_lossy(&bytes).to_string();
 
@@ -242,7 +242,7 @@ mod tests {
 
         // Valid base64 but not JSON
         let not_json = URL_SAFE_NO_PAD.encode(b"not json");
-        let fake_sig = URL_SAFE_NO_PAD.encode(&[0u8; 32]);
+        let fake_sig = URL_SAFE_NO_PAD.encode([0u8; 32]);
         assert!(matches!(
             decode_and_verify(&format!("{not_json}.{fake_sig}"), &secret, 0),
             Err(VerifyError::BadSignature | VerifyError::MalformedToken)
