@@ -26,6 +26,12 @@ pub struct Rule {
     pub tags: Vec<String>,
     #[serde(default)]
     pub metadata: HashMap<String, String>,
+    /// FR-025: Risk score delta when this rule matches. Positive increases risk.
+    #[serde(default)]
+    pub risk_delta: Option<i16>,
+    /// FR-025: Override action for risk scoring. "block" forces immediate block regardless of score.
+    #[serde(default)]
+    pub risk_action: Option<String>,
 }
 
 /// Global rule registry with versioning.
@@ -187,6 +193,8 @@ mod tests {
             pattern: None,
             tags: vec![],
             metadata: HashMap::new(),
+            risk_delta: None,
+            risk_action: None,
         }
     }
 

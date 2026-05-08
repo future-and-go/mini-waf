@@ -395,6 +395,12 @@ File watcher (notify) ─┘
 
 File watcher on `rules/custom/*.yaml` auto-loads YAML docs marked `kind: custom_rule_v1`. Per-file error isolation (bad files skip, previous version retained). 500ms debounce. Schema via `custom_rule_yaml.rs` enforces version discriminator; forward-compat rejects unknown `custom_rule_v*`. Atomically loaded via RuleRegistry; no in-flight disruption.
 
+**Extended Rule Schema (FR-025):** Rules support optional risk scoring fields:
+- `risk_delta: i16` — Score contribution when rule matches (positive increases risk, negative decreases)
+- `risk_action: String` — Override action ("block" forces immediate block regardless of score)
+
+Per-request delta clamping: positive deltas summed, capped at 100, oldest truncated if exceeded. `X-WAF-Rule-Id` header set to dominant contributor (rule with max |delta|). See `docs/code-standards.md` for delta convention table.
+
 ### Logs (Per-Request → Batch → Database)
 
 ```

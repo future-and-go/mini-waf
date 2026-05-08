@@ -104,6 +104,8 @@ fn rule_flat(id: &str, op: ConditionOp, conditions: Vec<Condition>) -> CustomRul
         action_msg: None,
         script: None,
         match_tree: None,
+        risk_delta: None,
+        risk_action: None,
     }
 }
 
@@ -121,6 +123,8 @@ fn rule_tree(id: &str, tree: ConditionNode) -> CustomRule {
         action_msg: None,
         script: None,
         match_tree: Some(tree),
+        risk_delta: None,
+        risk_action: None,
     }
 }
 

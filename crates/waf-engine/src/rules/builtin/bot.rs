@@ -24,6 +24,8 @@ fn rule(id: &str, name: &str, pattern: &str, action: &str, severity: &str, tags:
         pattern: Some(pattern.to_string()),
         tags: tags.iter().copied().map(ToString::to_string).collect(),
         metadata: meta,
+        risk_delta: None,
+        risk_action: None,
     }
 }
 

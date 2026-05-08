@@ -16,6 +16,8 @@ fn rule(id: &str, name: &str, category: &str, pattern: &str, severity: &str) -> 
         pattern: Some(pattern.to_string()),
         tags: vec!["owasp".to_string(), "builtin".to_string()],
         metadata: HashMap::new(),
+        risk_delta: None,
+        risk_action: None,
     }
 }
 

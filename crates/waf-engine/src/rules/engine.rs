@@ -243,6 +243,33 @@ pub struct CustomRule {
     /// Optional nested AND/OR/Not condition tree. When `Some`, takes precedence
     /// over the flat `conditions` + `condition_op` legacy pair at compile time.
     pub match_tree: Option<ConditionNode>,
+    /// FR-025: Risk score delta when this rule matches.
+    pub risk_delta: Option<i16>,
+    /// FR-025: Override action for risk scoring ("block" forces immediate block).
+    pub risk_action: Option<String>,
+}
+
+// ── FR-025 Rule Verdict ───────────────────────────────────────────────────────
+
+/// A single risk delta contribution from a matched rule.
+#[derive(Debug, Clone)]
+pub struct RiskDelta {
+    pub rule_id: String,
+    pub delta: i16,
+}
+
+/// Result of rule engine evaluation with risk scoring support.
+///
+/// Contains the detection result (if any rules matched) plus accumulated
+/// risk deltas and override flags for the scorer.
+#[derive(Debug, Clone, Default)]
+pub struct RuleVerdict {
+    /// Detection result from the first blocking rule, if any.
+    pub result: Option<DetectionResult>,
+    /// Risk deltas from ALL matched rules (not just the first).
+    pub risk_deltas: Vec<RiskDelta>,
+    /// True if any matched rule has `risk_action: "block"`.
+    pub override_block: bool,
 }
 
 // ── Custom rules engine ───────────────────────────────────────────────────────
@@ -371,29 +398,38 @@ impl CustomRulesEngine {
     /// Evaluate all rules against the request context.
     ///
     /// Returns the first matching `DetectionResult`, or `None`.
+    /// For FR-025 risk scoring, use [`check_with_verdict`] instead.
     pub fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+        self.check_with_verdict(ctx).result
+    }
+
+    /// FR-025: Evaluate all rules and return a full `RuleVerdict`.
+    ///
+    /// Collects ALL matching rules' risk deltas and override flags, not just
+    /// the first blocking rule. The `result` field contains the first blocking
+    /// detection (for action determination), while `risk_deltas` contains all
+    /// matched rules' contributions for scoring.
+    pub fn check_with_verdict(&self, ctx: &RequestCtx) -> RuleVerdict {
         let host_code = &ctx.host_config.code;
+        let mut verdict = RuleVerdict::default();
 
         // Host-specific rules first
-        if let Some(rules) = self.rules.get(host_code)
-            && let Some(r) = self.eval_list(ctx, &rules)
-        {
-            return Some(r);
+        if let Some(rules) = self.rules.get(host_code) {
+            self.eval_list_with_verdict(ctx, &rules, &mut verdict);
         }
 
         // Global rules
-        if let Some(rules) = self.rules.get("*")
-            && let Some(r) = self.eval_list(ctx, &rules)
-        {
-            return Some(r);
+        if let Some(rules) = self.rules.get("*") {
+            self.eval_list_with_verdict(ctx, &rules, &mut verdict);
         }
 
-        None
+        verdict
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    fn eval_list(&self, ctx: &RequestCtx, rules: &[RuleEntry]) -> Option<DetectionResult> {
+    /// Evaluate a list of rules, accumulating risk deltas into the verdict.
+    fn eval_list_with_verdict(&self, ctx: &RequestCtx, rules: &[RuleEntry], verdict: &mut RuleVerdict) {
         for entry in rules {
             let rule = &entry.raw;
             if !rule.enabled {
@@ -415,15 +451,30 @@ impl CustomRulesEngine {
             );
 
             if matched {
-                return Some(DetectionResult {
-                    rule_id: Some(rule.id.clone()),
-                    rule_name: rule.name.clone(),
-                    phase: Phase::CustomRule,
-                    detail: format!("Custom rule '{}' matched", rule.name),
-                });
+                // Collect risk delta if present
+                if let Some(delta) = rule.risk_delta {
+                    verdict.risk_deltas.push(RiskDelta {
+                        rule_id: rule.id.clone(),
+                        delta,
+                    });
+                }
+
+                // Check for override_block
+                if rule.risk_action.as_deref() == Some("block") {
+                    verdict.override_block = true;
+                }
+
+                // Set the first blocking detection result
+                if verdict.result.is_none() {
+                    verdict.result = Some(DetectionResult {
+                        rule_id: Some(rule.id.clone()),
+                        rule_name: rule.name.clone(),
+                        phase: Phase::CustomRule,
+                        detail: format!("Custom rule '{}' matched", rule.name),
+                    });
+                }
             }
         }
-        None
     }
 
     fn eval_script(&self, ctx: &RequestCtx, script: &str) -> bool {
@@ -533,6 +584,8 @@ pub fn from_db_rule(row: &DbCustomRule) -> anyhow::Result<CustomRule> {
         action_msg: row.action_msg.clone(),
         script: row.script.clone(),
         match_tree,
+        risk_delta: row.risk_delta,
+        risk_action: row.risk_action.clone(),
     })
 }
 
@@ -858,6 +911,8 @@ mod tests {
             action_msg: None,
             script: None,
             match_tree: None,
+            risk_delta: None,
+            risk_action: None,
         };
         engine.add_rule(rule);
 
@@ -888,6 +943,8 @@ mod tests {
             action_msg: None,
             script: None,
             match_tree: None,
+            risk_delta: None,
+            risk_action: None,
         };
         engine.add_rule(rule);
 
@@ -914,6 +971,8 @@ mod tests {
             action_msg: None,
             script: Some(r#"method == "DELETE" && path.starts_with("/api")"#.into()),
             match_tree: None,
+            risk_delta: None,
+            risk_action: None,
         };
         engine.add_rule(rule);
 
@@ -940,6 +999,8 @@ mod tests {
             action_msg: None,
             script: None,
             match_tree: None,
+            risk_delta: None,
+            risk_action: None,
         }
     }
 
@@ -1075,6 +1136,8 @@ mod tests {
             action_msg: None,
             script: None,
             match_tree: None,
+            risk_delta: None,
+            risk_action: None,
         });
 
         assert!(engine.check(&make_ctx("/api/v1/admin", "GET", "1.2.3.4")).is_some());
@@ -1204,6 +1267,8 @@ mod tests {
             action_msg: None,
             script: None,
             match_tree: None,
+            risk_delta: None,
+            risk_action: None,
         });
 
         assert!(engine.check(&make_ctx("/admin/x", "POST", "1.2.3.4")).is_some());
@@ -1242,6 +1307,8 @@ mod tests {
             action_msg: None,
             script: None,
             match_tree: None,
+            risk_delta: None,
+            risk_action: None,
         });
 
         assert!(engine.check(&make_ctx_with_cookies("session=abc; other=x")).is_some());
@@ -1270,6 +1337,8 @@ mod tests {
             action_msg: None,
             script: None,
             match_tree: None,
+            risk_delta: None,
+            risk_action: None,
         });
 
         assert!(engine.check(&make_ctx_with_cookies("a=b; track=1")).is_some());
@@ -1328,6 +1397,8 @@ mod tests {
             action_msg: None,
             script: None,
             match_tree: Some(tree),
+            risk_delta: None,
+            risk_action: None,
         }
     }
 
@@ -1482,6 +1553,8 @@ mod tests {
             script: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            risk_delta: None,
+            risk_action: None,
         };
         let rule = from_db_rule(&row).expect("parse db row");
         assert!(rule.match_tree.is_some());
@@ -1514,6 +1587,8 @@ mod tests {
             script: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            risk_delta: None,
+            risk_action: None,
         };
         let rule = from_db_rule(&row).expect("parse legacy row");
         assert!(rule.match_tree.is_none());

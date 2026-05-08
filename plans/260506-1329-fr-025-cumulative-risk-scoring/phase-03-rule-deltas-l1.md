@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Rule Deltas L1"
-status: pending
+status: completed
 priority: P1
 effort: "2d"
 dependencies: [1, 2]
@@ -105,13 +105,13 @@ rule_engine.evaluate(req) ─►  RuleVerdict {
 
 ## Success Criteria
 
-- [ ] Rule engine extended; existing tests green.
-- [ ] Per-request clamp enforced; raw_score retained in audit.
-- [ ] `X-WAF-Rule-Id` set to dominant contributor.
-- [ ] `override_block` short-circuits to Block.
-- [ ] Sample rules populated, documented.
-- [ ] Score-fold p99 ≤ 50µs.
-- [ ] No `.unwrap()` introduced.
+- [x] Rule engine extended; existing tests green.
+- [x] Per-request clamp enforced; raw_score retained in audit.
+- [x] `X-WAF-Rule-Id` set to dominant contributor.
+- [x] `override_block` short-circuits to Block.
+- [x] Sample rules populated, documented.
+- [x] Score-fold p99 ≤ 50µs.
+- [x] No `.unwrap()` introduced.
 
 ## Risk Assessment
 

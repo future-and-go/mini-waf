@@ -135,6 +135,8 @@ fn parse_secrule(line: &str, line_no: usize) -> Result<Rule> {
         pattern: Some(op_value),
         tags: vec!["modsec".to_string()],
         metadata,
+        risk_delta: None,
+        risk_action: None,
     })
 }
 

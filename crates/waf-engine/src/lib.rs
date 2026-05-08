@@ -28,7 +28,7 @@ pub use engine::{WafEngine, WafEngineConfig};
 pub use geoip::{GeoIpService, cache_policy_from_str};
 pub use geoip_updater::{UpdateResult, XdbUpdater, spawn_auto_updater};
 pub use plugins::{PluginAction, PluginInfo, PluginManager, WasmPlugin};
-pub use rules::engine::{CustomRule, CustomRulesEngine};
+pub use rules::engine::{CustomRule, CustomRulesEngine, RiskDelta, RuleVerdict};
 pub use rules::formats::{ExportFormat, RuleFormat, ValidationError};
 pub use rules::manager::RuleManager;
 pub use rules::registry::{Rule, RuleRegistry, RuleStats};

@@ -30,6 +30,10 @@ pub mod threshold;
 pub use config::RiskConfig;
 pub use key::{RiskKey, SessionId};
 pub use reload::RiskReloader;
+pub use score::{
+    MAX_PER_REQUEST_DELTA, clamp_per_request_deltas, dominant_contributor, rule_delta_to_contributor,
+    rule_deltas_to_contributors,
+};
 pub use scorer::Scorer;
 pub use seed::{SeedDeltas, SeedLayer, SeedPaths, SeedReloader, SeedTables, SeedVerdict};
 pub use state::{Contributor, ContributorKind, RiskState, SeedKind};

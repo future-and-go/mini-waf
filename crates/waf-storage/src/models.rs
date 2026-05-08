@@ -149,6 +149,14 @@ pub struct CustomRule {
     pub script: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// FR-025: Risk score delta when this rule matches.
+    #[serde(default)]
+    #[sqlx(default)]
+    pub risk_delta: Option<i16>,
+    /// FR-025: Override action for risk scoring ("block" forces immediate block).
+    #[serde(default)]
+    #[sqlx(default)]
+    pub risk_action: Option<String>,
 }
 
 /// Sensitive pattern entry

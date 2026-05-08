@@ -30,6 +30,12 @@ struct JsonRule {
     tags: Vec<String>,
     #[serde(default)]
     metadata: HashMap<String, String>,
+    /// FR-025: Risk score delta when this rule matches.
+    #[serde(default)]
+    risk_delta: Option<i16>,
+    /// FR-025: Override action for risk scoring.
+    #[serde(default)]
+    risk_action: Option<String>,
 }
 
 fn default_category() -> String {
@@ -62,6 +68,8 @@ pub fn parse(content: &str) -> Result<Vec<Rule>> {
             pattern: r.pattern,
             tags: r.tags,
             metadata: r.metadata,
+            risk_delta: r.risk_delta,
+            risk_action: r.risk_action,
         })
         .collect())
 }
