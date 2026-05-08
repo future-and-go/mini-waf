@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Canary Honeypot FR-028"
-status: pending
+status: complete
 priority: P1
 effort: "1d"
 dependencies: [1, 5]

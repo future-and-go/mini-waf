@@ -148,15 +148,6 @@ We keep all important docs in `./docs` folder and keep updating them, structure 
 6. Explicit error handling — validate external inputs, never panic instead of error branch
 7. Minimize allocations — prefer &str over String, Cow over clone, Arc over deep copy
 
-## Build & Test
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test
-cargo build --release
-```
-
 ## Pre-Push Formatting (MANDATORY)
 
 **Always run `cargo fmt --all` before `git push`.** CI enforces `cargo fmt --all -- --check` strictly — any drift fails the Lint job and blocks the PR.
@@ -193,27 +184,3 @@ podman-compose down && podman-compose up -d --build
 - Sync: `parking_lot::Mutex` (no poison, no unwrap)
 - Async: `tokio::sync::Mutex` (.lock().await)
 - BANNED: `std::sync::Mutex` in production
-
-### SQL Safety
-
-- Parameterized queries only: `sqlx::query("...WHERE id = $1").bind(id)`
-- Validate dynamic identifiers: `^[a-zA-Z_][a-zA-Z0-9_]{0,62}$`
-
-### No Secret Logging
-
-- Never log tokens, keys, passwords
-- Sanitize URLs before logging
-
-### Unsafe
-
-- Requires `// SAFETY:` comment
-- Validate inputs before unsafe block
-
-## Architecture
-
-- Workspace: 7 crates (prx-waf, gateway, waf-engine, waf-storage, waf-api, waf-common, waf-cluster)
-- WAF engine: Pingora-based reverse proxy
-- Rules: YAML files in rules/ directory
-- Admin UI: Vue 3 + Tailwind in web/admin-ui/
-- Config: TOML in configs/
-- English in code/commits

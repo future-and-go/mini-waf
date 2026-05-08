@@ -44,7 +44,7 @@ Build the cumulative scorer that turns existing detection signals (FR-005 DDoS, 
 | 3 | [Rule Deltas L1](./phase-03-rule-deltas-l1.md) | Complete (100 %) |
 | 4 | [Async Ingest Pipeline](./phase-04-async-ingest-pipeline.md) | Complete (100 %) |
 | 5 | [Anomaly & Velocity L2](./phase-05-anomaly-velocity-l2.md) | Complete (100 %) |
-| 6 | [Canary Honeypot FR-028](./phase-06-canary-honeypot-fr-028.md) | Pending |
+| 6 | [Canary Honeypot FR-028](./phase-06-canary-honeypot-fr-028.md) | Complete (100 %) |
 | 7 | [Redis Cluster Backend](./phase-07-redis-cluster-backend.md) | Pending |
 | 8 | [Challenge Credit FR-006](./phase-08-challenge-credit-fr-006.md) | Pending |
 | 9 | [Tuning Replay & Dashboard](./phase-09-tuning-replay-dashboard.md) | Pending |
