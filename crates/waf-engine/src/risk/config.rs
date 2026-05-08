@@ -52,6 +52,10 @@ pub struct RiskConfig {
     /// Decay configuration.
     #[serde(default)]
     pub decay: DecayConfig,
+
+    /// L0 seed layer configuration.
+    #[serde(default)]
+    pub seed: SeedConfig,
 }
 
 /// Store backend selection.
@@ -88,6 +92,64 @@ impl Default for DecayConfig {
     }
 }
 
+/// L0 seed layer configuration.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SeedConfig {
+    /// Whether seed layer is enabled.
+    #[serde(default = "default_seed_enabled")]
+    pub enabled: bool,
+
+    /// Path to Tor exit list file (newline IPs).
+    #[serde(default)]
+    pub tor_exits_path: Option<String>,
+
+    /// Path to ASN classification CSV (cidr,asn,classification).
+    #[serde(default)]
+    pub asn_classes_path: Option<String>,
+
+    /// Path to whitelist CIDR file (newline CIDRs).
+    #[serde(default)]
+    pub whitelist_path: Option<String>,
+
+    /// Risk delta for Tor exit IPs.
+    #[serde(default = "default_tor_delta")]
+    pub tor_delta: u8,
+
+    /// Risk delta for datacenter ASNs.
+    #[serde(default = "default_datacenter_delta")]
+    pub datacenter_delta: u8,
+
+    /// Risk delta for known-bad ASNs.
+    #[serde(default = "default_bad_asn_delta")]
+    pub bad_asn_delta: u8,
+}
+
+impl Default for SeedConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_seed_enabled(),
+            tor_exits_path: None,
+            asn_classes_path: None,
+            whitelist_path: None,
+            tor_delta: default_tor_delta(),
+            datacenter_delta: default_datacenter_delta(),
+            bad_asn_delta: default_bad_asn_delta(),
+        }
+    }
+}
+
+impl SeedConfig {
+    /// Convert to `SeedDeltas` for the seed layer.
+    #[must_use]
+    pub const fn to_deltas(&self) -> crate::risk::seed::SeedDeltas {
+        crate::risk::seed::SeedDeltas {
+            tor_exit: self.tor_delta,
+            datacenter: self.datacenter_delta,
+            bad_asn: self.bad_asn_delta,
+        }
+    }
+}
+
 impl Default for RiskConfig {
     fn default() -> Self {
         Self {
@@ -100,6 +162,7 @@ impl Default for RiskConfig {
             emit_header: default_emit_header(),
             store: StoreConfig::default(),
             decay: DecayConfig::default(),
+            seed: SeedConfig::default(),
         }
     }
 }
@@ -152,6 +215,18 @@ const fn default_decay_rate() -> u16 {
 }
 const fn default_max_decay() -> u32 {
     50
+}
+const fn default_seed_enabled() -> bool {
+    true
+}
+const fn default_tor_delta() -> u8 {
+    30
+}
+const fn default_datacenter_delta() -> u8 {
+    15
+}
+const fn default_bad_asn_delta() -> u8 {
+    25
 }
 
 #[cfg(test)]

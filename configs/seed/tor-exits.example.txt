@@ -1,0 +1,13 @@
+# FR-025 Phase 2: Tor Exit Node List
+# One IP address per line (IPv4 or IPv6)
+# Lines starting with # are comments
+# Update this file from: https://check.torproject.org/torbulkexitlist
+
+# Example Tor exit IPs (replace with actual list)
+# 185.220.100.240
+# 185.220.100.241
+# 185.220.100.242
+# 2001:470:1:1b7::7
+
+# The file is hot-reloaded on change.
+# For production, use a scheduled job to fetch from Tor Project.

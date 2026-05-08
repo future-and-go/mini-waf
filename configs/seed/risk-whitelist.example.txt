@@ -1,0 +1,25 @@
+# FR-025 Phase 2: Risk Whitelist
+# CIDRs listed here bypass ALL risk scoring layers (score = 0)
+# One CIDR per line (IPv4 or IPv6)
+# Lines starting with # are comments
+
+# Internal networks
+10.0.0.0/8
+172.16.0.0/12
+192.168.0.0/16
+
+# IPv6 link-local
+fe80::/10
+
+# Loopback
+127.0.0.0/8
+::1/128
+
+# Example: trusted monitoring IPs
+# 203.0.113.0/24
+
+# Example: trusted partner networks
+# 198.51.100.0/24
+
+# The file is hot-reloaded on change.
+# Whitelist matches short-circuit ALL subsequent risk layers.

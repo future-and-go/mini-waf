@@ -7,6 +7,19 @@
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
+/// Seed layer classification source (L0 reputation).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SeedKind {
+    /// Generic seed (baseline, tests, or unclassified).
+    Generic,
+    /// IP is a known Tor exit node.
+    TorExit,
+    /// IP belongs to a datacenter ASN (AWS, GCP, Azure, etc.).
+    DatacenterASN,
+    /// IP belongs to a known-bad ASN (operator-curated list).
+    BadASN,
+}
+
 /// What kind of event contributed to the risk score.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ContributorKind {
@@ -14,8 +27,8 @@ pub enum ContributorKind {
     Rule(String),
     /// Behavioral anomaly detected (FR-011).
     Anomaly,
-    /// Initial seed score (baseline).
-    Seed,
+    /// L0 seed layer classification (Tor exit, datacenter ASN, bad ASN).
+    Seed(SeedKind),
     /// Named signal from device-fingerprinting or relay intel.
     Signal(String),
     /// Manual override (admin action, honeypot trap).
@@ -139,7 +152,11 @@ mod tests {
     fn push_contributor_evicts_oldest() {
         let mut s = RiskState::new(1000);
         for i in 0..10 {
-            s.push_contributor(Contributor::new(ContributorKind::Seed, i, 1000 + i64::from(i)));
+            s.push_contributor(Contributor::new(
+                ContributorKind::Seed(SeedKind::Generic),
+                i,
+                1000 + i64::from(i),
+            ));
         }
         assert_eq!(s.contributors.len(), 8);
         assert_eq!(s.contributors.first().map(|c| c.delta), Some(2));

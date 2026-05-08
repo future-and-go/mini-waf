@@ -39,8 +39,8 @@ Build the cumulative scorer that turns existing detection signals (FR-005 DDoS, 
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Skeleton & Store Trait](./phase-01-skeleton-store-trait.md) | Complete (11/11 %) |
-| 2 | [Reputation Seed L0](./phase-02-reputation-seed-l0.md) | Pending |
+| 1 | [Skeleton & Store Trait](./phase-01-skeleton-store-trait.md) | Complete (100 %) |
+| 2 | [Reputation Seed L0](./phase-02-reputation-seed-l0.md) | Complete (100 %) |
 | 3 | [Rule Deltas L1](./phase-03-rule-deltas-l1.md) | Pending |
 | 4 | [Async Ingest Pipeline](./phase-04-async-ingest-pipeline.md) | Pending |
 | 5 | [Anomaly & Velocity L2](./phase-05-anomaly-velocity-l2.md) | Pending |

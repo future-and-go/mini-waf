@@ -36,10 +36,10 @@ pub fn sum_deltas(deltas: &[Contributor]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::risk::state::ContributorKind;
+    use crate::risk::state::{ContributorKind, SeedKind};
 
     fn make_contributor(delta: i16) -> Contributor {
-        Contributor::new(ContributorKind::Seed, delta, 1000)
+        Contributor::new(ContributorKind::Seed(SeedKind::Generic), delta, 1000)
     }
 
     #[test]

@@ -6,11 +6,11 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use crate::risk::key::{RiskKey, SessionId};
-use crate::risk::state::{Contributor, ContributorKind};
+use crate::risk::state::{Contributor, ContributorKind, SeedKind};
 use crate::risk::store::RiskStore;
 
 fn make_contributor(delta: i16, ts_ms: i64) -> Contributor {
-    Contributor::new(ContributorKind::Seed, delta, ts_ms)
+    Contributor::new(ContributorKind::Seed(SeedKind::Generic), delta, ts_ms)
 }
 
 /// Run all conformance tests against the given store.
