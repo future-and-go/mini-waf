@@ -89,6 +89,13 @@ impl HmacSecret {
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
+
+    /// Create secret from raw bytes (test-only, no file I/O).
+    #[cfg(test)]
+    #[must_use]
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
 }
 
 #[cfg(test)]
