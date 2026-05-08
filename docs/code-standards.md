@@ -766,6 +766,88 @@ fn validate_header(s: &str) -> Cow<'_, str> {
 }
 ```
 
+## Redis Store Backend Conventions (FR-025 Phase 7)
+
+### When to Use Memory vs Redis
+
+**Use Memory backend when:**
+- Single-node deployment (<100 RPS)
+- Development / testing environment
+- Risk state loss on restart is acceptable
+- Redis dependency unwanted
+
+**Use Redis backend when:**
+- Multi-node cluster deployment
+- High-volume traffic (>100 RPS)
+- Risk state must persist across restarts
+- Centralized risk tracking across nodes required
+- Incident response (merge scores across nodes via Lua script)
+
+### Key Design Patterns
+
+**Key Namespace Hygiene**
+```rust
+// All risk store keys use prefix for isolation
+const KEY_PREFIX: &str = "waf:risk:";
+const STATE_KEY_FORMAT: &str = "waf:risk:state:{}";    // owner_id
+const IP_INDEX_KEY_FORMAT: &str = "waf:risk:idx:ip:{}";   // ip
+const FP_INDEX_KEY_FORMAT: &str = "waf:risk:idx:fp:{}";   // fp_hash
+const SID_INDEX_KEY_FORMAT: &str = "waf:risk:idx:sid:{}"; // session_id
+```
+
+**TTL Management via Redis EXPIRE**
+```rust
+// All state keys expire per config.ttl_secs
+let ttl_seconds = config.ttl_secs;
+redis_client.expire(state_key, ttl_seconds).await?;
+
+// Index keys also expire (no stale indices)
+redis_client.expire(ip_index_key, ttl_seconds).await?;
+```
+
+**Atomic Lua Scripts**
+- Always use Lua scripts for multi-step operations
+- Single RTT consistency: fetch + decay + merge + expire
+- Example: `apply_script` in `risk/store/redis_lua.rs`
+- Never use pipeline for critical operations (non-atomic)
+
+**Error Handling in Hot Path**
+```rust
+// Apply with timeout
+match timeout(config.op_timeout, redis_apply()).await {
+    Ok(Ok(result)) => result,           // Success
+    Ok(Err(e)) => {
+        tracing::warn!("redis apply error: {e}");
+        breaker.record_failure();
+        fallback_to_lru_cache(key)        // Fail-open
+    },
+    Err(_timeout) => {
+        breaker.record_failure();
+        fallback_to_lru_cache(key)        // Timeout = failure
+    }
+}
+```
+
+### Testing
+
+**Integration Tests with Redis**
+```bash
+# Run with local Redis (requires redis-server running)
+REDIS_TEST_URL=redis://127.0.0.1:6379 cargo test --features redis-store
+
+# Or use test container
+docker run -d -p 6379:6379 redis:7-alpine
+REDIS_TEST_URL=redis://127.0.0.1:6379 cargo test --all
+```
+
+**Conformance Tests**
+- Memory and Redis backends must pass identical conformance suite
+- File: `crates/waf-engine/src/risk/store/conformance.rs`
+- Tests: decay, collision merge, TTL expiry, circuit breaker fallback
+- Run: `cargo test --all risk::store::conformance`
+
+---
+
 ## FR-025 Risk Delta Convention
 
 Rules can contribute to cumulative risk scoring via the optional `risk_delta` field.

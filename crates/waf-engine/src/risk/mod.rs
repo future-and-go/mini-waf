@@ -48,4 +48,6 @@ pub use scorer::Scorer;
 pub use seed::{SeedDeltas, SeedLayer, SeedPaths, SeedReloader, SeedTables, SeedVerdict};
 pub use state::{Contributor, ContributorKind, RiskState, SeedKind};
 pub use store::{MemoryRiskStore, RiskStore};
+#[cfg(feature = "redis-store")]
+pub use store::{RedisRiskConfig, RedisRiskStore};
 pub use velocity::{SequenceStore, TxEndpoint, VelocityLayer, VelocityStore};
