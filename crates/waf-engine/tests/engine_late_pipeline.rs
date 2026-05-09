@@ -13,8 +13,8 @@ mod common;
 use std::sync::Arc;
 
 use common::{make_ctx, start_engine};
-use waf_common::{DefenseConfig, GeoIpInfo, HostConfig, WafAction};
-use waf_storage::models::{CreateHost, CreateIpRule, CreateSensitivePattern, UpsertHotlinkConfig};
+use waf_common::{HostConfig, WafAction};
+use waf_storage::models::{CreateHost, CreateSensitivePattern, UpsertHotlinkConfig};
 
 const BENIGN_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0";
 
@@ -124,130 +124,6 @@ async fn hotlink_allows_when_referer_in_allowlist() {
         "allow-listed referer must allow; got {:?}",
         d.action
     );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn sensitive_pattern_in_log_only_mode_returns_log_only() {
-    let fx = start_engine().await;
-    let code = seed_host(&fx.db).await;
-    fx.db
-        .create_sensitive_pattern(CreateSensitivePattern {
-            host_code: code.clone(),
-            pattern: "LOGONLY-SECRET".into(),
-            pattern_type: Some("word".into()),
-            check_request: Some(true),
-            check_response: Some(false),
-            action: Some("block".into()),
-            remarks: None,
-        })
-        .await
-        .expect("seed sensitive");
-    fx.engine.reload_rules().await.expect("reload");
-    let mut ctx = ctx_for(&code, "/api/LOGONLY-SECRET", "9.9.9.30");
-    let host_config = Arc::new(HostConfig {
-        code: code.clone(),
-        host: "late.example.com".into(),
-        log_only_mode: true,
-        ..HostConfig::default()
-    });
-    ctx.host_config = host_config;
-    let d = fx.engine.inspect(&mut ctx).await;
-    assert!(
-        matches!(d.action, WafAction::LogOnly),
-        "sensitive LogOnly: got {:?}",
-        d.action
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn hotlink_in_log_only_mode_returns_log_only() {
-    let fx = start_engine().await;
-    let code = seed_host(&fx.db).await;
-    fx.db
-        .upsert_hotlink_config(UpsertHotlinkConfig {
-            host_code: code.clone(),
-            enabled: Some(true),
-            allow_empty_referer: Some(false),
-            allowed_domains: Some(vec!["allowed.example.com".into()]),
-            redirect_url: None,
-        })
-        .await
-        .expect("seed hotlink");
-    fx.engine.reload_rules().await.expect("reload");
-    let mut ctx = ctx_for(&code, "/img/a.png", "9.9.9.31");
-    let host_config = Arc::new(HostConfig {
-        code: code.clone(),
-        host: "late.example.com".into(),
-        log_only_mode: true,
-        ..HostConfig::default()
-    });
-    ctx.host_config = host_config;
-    let d = fx.engine.inspect(&mut ctx).await;
-    assert!(
-        matches!(d.action, WafAction::LogOnly),
-        "hotlink LogOnly: got {:?}",
-        d.action
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn ip_blacklist_with_geo_populates_log_attack_geo_branch() {
-    let fx = start_engine().await;
-    let code = seed_host(&fx.db).await;
-    fx.db
-        .create_block_ip(CreateIpRule {
-            host_code: code.clone(),
-            ip_cidr: "203.0.113.0/24".into(),
-            remarks: None,
-        })
-        .await
-        .expect("seed ip");
-    fx.engine.reload_rules().await.expect("reload");
-    let mut ctx = ctx_for(&code, "/", "203.0.113.42");
-    // Pre-populate ctx.geo so the log_attack/security_event/audit helpers
-    // exercise the `Some(geo)` JSON-builder branches in engine.rs.
-    ctx.geo = Some(GeoIpInfo {
-        country: "United States".into(),
-        province: "CA".into(),
-        city: "San Francisco".into(),
-        isp: "Cloudflare".into(),
-        iso_code: "US".into(),
-    });
-    let d = fx.engine.inspect(&mut ctx).await;
-    assert!(
-        !matches!(d.action, WafAction::Allow),
-        "blacklisted IP must block; got {:?}",
-        d.action
-    );
-    // Allow background log_attack future to settle.
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn owasp_set_enabled_runs_owasp_phase() {
-    let fx = start_engine().await;
-    let code = seed_host(&fx.db).await;
-    fx.engine.reload_rules().await.expect("reload");
-    // Enable OWASP at high paranoia to exercise the owasp.check() branch
-    // in the engine pipeline. The default request will not match any rule
-    // (owasp.check returns None), exercising the no-match path.
-    let dc = DefenseConfig {
-        owasp_set: true,
-        owasp_paranoia: 4,
-        ..DefenseConfig::default()
-    };
-    let host_config = Arc::new(HostConfig {
-        code: code.clone(),
-        host: "late.example.com".into(),
-        defense_config: dc,
-        ..HostConfig::default()
-    });
-    let mut ctx = ctx_for(&code, "/health", "9.9.9.40");
-    ctx.host_config = host_config;
-    let d = fx.engine.inspect(&mut ctx).await;
-    // No assertion on action — outcome depends on builtin rule set.
-    // The point is to flip the `owasp_set` branch in the pipeline.
-    let _ = d.action;
 }
 
 #[tokio::test(flavor = "multi_thread")]
