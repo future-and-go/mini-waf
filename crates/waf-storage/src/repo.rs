@@ -320,7 +320,7 @@ impl Database {
                 id, host_code, host, client_ip, method, path, query,
                 rule_id, rule_name, action, phase, detail,
                 request_headers, geo_info, created_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
+            ) VALUES ($1,$2,$3,$4::inet,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
         )
         .bind(log.id)
         .bind(&log.host_code)
