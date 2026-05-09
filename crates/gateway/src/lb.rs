@@ -369,6 +369,63 @@ mod tests {
     }
 
     #[test]
+    fn fnv_hash_ipv6_differs_from_ipv4() {
+        let v4: IpAddr = "127.0.0.1".parse().unwrap();
+        let v6: IpAddr = "::1".parse().unwrap();
+        let h4 = fnv_hash_ip(v4);
+        let h6 = fnv_hash_ip(v6);
+        assert_ne!(h4, h6, "v4 and v6 hashes must differ");
+        // Hash is deterministic.
+        assert_eq!(fnv_hash_ip(v6), h6);
+    }
+
+    #[test]
+    fn ip_hash_stable_for_ipv6() {
+        let lb = make_lb(LoadBalanceStrategy::IpHash);
+        let ip: IpAddr = "2001:db8::1".parse().unwrap();
+        let first = lb.next_backend(ip).unwrap();
+        for _ in 0..5 {
+            assert_eq!(lb.next_backend(ip).unwrap(), first);
+        }
+    }
+
+    #[tokio::test]
+    async fn tcp_health_check_localhost_unreachable() {
+        // Port 1 is conventionally closed.
+        let ok = tcp_health_check("127.0.0.1", 1, Duration::from_millis(50)).await;
+        assert!(!ok);
+    }
+
+    #[tokio::test]
+    async fn tcp_health_check_unresolvable_host_returns_false() {
+        let ok = tcp_health_check("invalid.host.does.not.exist.local", 1, Duration::from_millis(100)).await;
+        assert!(!ok, "DNS failure must surface as unhealthy, not panic");
+    }
+
+    #[tokio::test]
+    async fn spawn_health_checker_marks_closed_port_unhealthy() {
+        let lb = Arc::new(LoadBalancer::new(LoadBalanceStrategy::RoundRobin));
+        lb.add_backend(Backend::new("dead", "127.0.0.1", 1, 1));
+        // Initially mark healthy so the checker has work to do.
+        for b in lb.all_backends() {
+            b.set_healthy(true);
+        }
+
+        let handle = spawn_health_checker(Arc::clone(&lb), Duration::from_millis(10));
+        // Wait long enough for at least one tick + connect-refused.
+        for _ in 0..40 {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            let still_healthy = lb.all_backends().iter().any(Backend::is_healthy);
+            if !still_healthy {
+                break;
+            }
+        }
+        handle.abort();
+        let unhealthy = lb.all_backends().iter().all(|b| !b.is_healthy());
+        assert!(unhealthy, "closed port → background task flips backend to unhealthy");
+    }
+
+    #[test]
     #[allow(clippy::indexing_slicing)]
     fn test_unhealthy_backend_skipped() {
         let lb = make_lb(LoadBalanceStrategy::RoundRobin);
