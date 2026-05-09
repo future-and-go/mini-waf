@@ -155,4 +155,85 @@ mod tests {
         assert!(key.is_empty());
         assert_eq!(key.axis_count(), 0);
     }
+
+    #[test]
+    fn axis_count_combinations() {
+        let mut k = RiskKey::default();
+        assert_eq!(k.axis_count(), 0);
+
+        k.ip = Some(IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(k.axis_count(), 1);
+
+        k.fp_hash = Some(0xAA);
+        assert_eq!(k.axis_count(), 2);
+
+        k.session = Some(SessionId::new(vec![1, 2, 3]));
+        assert_eq!(k.axis_count(), 3);
+        assert!(!k.is_empty());
+    }
+
+    #[test]
+    fn owner_id_prefers_session_over_fp_and_ip() {
+        let key = RiskKey {
+            ip: Some(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))),
+            fp_hash: Some(0x1234_5678_ABCD_EF00),
+            session: Some(SessionId::new(vec![0xDE, 0xAD])),
+        };
+        let id = key.owner_id();
+        assert!(id.starts_with("sid:"), "session takes priority: {id}");
+        assert!(id.contains("dead"));
+    }
+
+    #[test]
+    fn owner_id_falls_back_to_fp_when_no_session() {
+        let key = RiskKey {
+            ip: Some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            fp_hash: Some(0xCAFEF00D),
+            session: None,
+        };
+        let id = key.owner_id();
+        assert!(id.starts_with("fp:"), "{id}");
+        assot_contains(&id, "00000000cafef00d");
+    }
+
+    #[test]
+    fn owner_id_falls_back_to_ip_when_no_session_no_fp() {
+        let key = RiskKey::from_ip(IpAddr::V4(Ipv4Addr::new(8, 8, 4, 4)));
+        let id = key.owner_id();
+        assert_eq!(id, "ip:8.8.4.4");
+    }
+
+    #[test]
+    fn owner_id_handles_fully_empty_key() {
+        let key = RiskKey::default();
+        assert_eq!(key.owner_id(), "unknown");
+    }
+
+    #[test]
+    fn hash_fp_key_changes_with_fields() {
+        let fp_a = FpKey {
+            ja3: Some(FingerprintValue::new("v1")),
+            ja4: None,
+            h2_akamai: None,
+        };
+        let fp_b = FpKey {
+            ja3: Some(FingerprintValue::new("v2")),
+            ja4: None,
+            h2_akamai: None,
+        };
+        let fp_full = FpKey {
+            ja3: Some(FingerprintValue::new("v1")),
+            ja4: Some(FingerprintValue::new("ja4-x")),
+            h2_akamai: Some(FingerprintValue::new("h2-y")),
+        };
+        let h_a = RiskKey::hash_fp_key(&fp_a).unwrap();
+        let h_b = RiskKey::hash_fp_key(&fp_b).unwrap();
+        let h_full = RiskKey::hash_fp_key(&fp_full).unwrap();
+        assert_ne!(h_a, h_b);
+        assert_ne!(h_a, h_full);
+    }
+
+    fn assot_contains(haystack: &str, needle: &str) {
+        assert!(haystack.contains(needle), "{haystack} should contain {needle}");
+    }
 }

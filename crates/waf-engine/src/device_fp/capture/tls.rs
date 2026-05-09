@@ -409,4 +409,77 @@ mod tests {
         inspector.on_client_hello(&[0x16, 0x03]); // junk
         assert!(ctx.snapshot().tls.is_none());
     }
+
+    #[test]
+    fn parse_error_display_and_error_trait() {
+        let e = ParseError::UnexpectedEof;
+        assert!(format!("{e}").contains("EOF"));
+        let e = ParseError::BadHandshakeType(0x42);
+        assert!(format!("{e}").contains("0x42"));
+        let e = ParseError::LengthMismatch;
+        assert!(format!("{e}").contains("length"));
+        let _: &dyn std::error::Error = &ParseError::UnexpectedEof;
+    }
+
+    #[test]
+    fn empty_buffer_returns_unexpected_eof() {
+        assert!(matches!(parse_client_hello(&[]), Err(ParseError::UnexpectedEof)));
+    }
+
+    #[test]
+    fn declared_length_exceeds_buffer_returns_length_mismatch() {
+        // Handshake type ok, but body length massive — must be LengthMismatch.
+        let bytes = [0x01u8, 0xFF, 0xFF, 0xFF, 0x03, 0x03];
+        assert!(matches!(parse_client_hello(&bytes), Err(ParseError::LengthMismatch)));
+    }
+
+    #[test]
+    fn no_extensions_returns_partial_parse() {
+        // Build a hello with no extensions section at all (TLS 1.2 legal).
+        let mut body = Vec::new();
+        body.extend_from_slice(&0x0303u16.to_be_bytes());
+        body.extend_from_slice(&[0u8; 32]);
+        body.push(0); // sid len
+        body.extend_from_slice(&2u16.to_be_bytes()); // 1 cipher
+        body.extend_from_slice(&[0x13, 0x01]);
+        body.push(1);
+        body.push(0);
+        // Note: NO extensions length field — buffer ends here.
+
+        let mut msg = vec![0x01];
+        let blen = u32::try_from(body.len()).unwrap_or(u32::MAX);
+        msg.extend_from_slice(&[
+            ((blen >> 16) & 0xff) as u8,
+            ((blen >> 8) & 0xff) as u8,
+            (blen & 0xff) as u8,
+        ]);
+        msg.extend_from_slice(&body);
+
+        let parsed = parse_client_hello(&msg).unwrap();
+        assert_eq!(parsed.cipher_suites, vec![0x1301]);
+        assert!(parsed.extensions.is_empty());
+        assert!(parsed.sni.is_none());
+    }
+
+    #[test]
+    fn sni_with_non_host_name_type_returns_none() {
+        // SNI extension with a non-zero name_type → parse_sni iterates and exits.
+        let mut sni_data = Vec::new();
+        sni_data.extend_from_slice(&u16_be(5)); // list len
+        sni_data.push(0xFF); // unknown name_type
+        sni_data.extend_from_slice(&u16_be(2));
+        sni_data.extend_from_slice(b"xx");
+        let bytes = build_client_hello(&[0x1301], &[(0, sni_data)]);
+        let parsed = parse_client_hello(&bytes).unwrap();
+        assert!(parsed.sni.is_none(), "non-host SNI should yield no name");
+    }
+
+    #[test]
+    fn sig_algs_odd_length_returns_length_mismatch() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&u16_be(3)); // odd
+        data.extend_from_slice(&[0, 0, 0]);
+        let bytes = build_client_hello(&[0x1301], &[(13, data)]);
+        assert!(matches!(parse_client_hello(&bytes), Err(ParseError::LengthMismatch)));
+    }
 }

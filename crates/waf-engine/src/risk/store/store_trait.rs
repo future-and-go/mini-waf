@@ -114,3 +114,114 @@ impl Default for RiskKeyBuilder {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::risk::state::RiskState;
+    use std::net::Ipv4Addr;
+
+    /// Minimal `RiskStore` impl that only implements required methods —
+    /// drives default `is_empty` impl through the trait.
+    struct NoopStore {
+        len: std::sync::atomic::AtomicUsize,
+    }
+
+    impl NoopStore {
+        const fn new() -> Self {
+            Self {
+                len: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+
+        fn set_len(&self, n: usize) {
+            self.len.store(n, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[async_trait]
+    impl RiskStore for NoopStore {
+        async fn read(&self, _key: &RiskKey) -> anyhow::Result<Option<RiskState>> {
+            Ok(None)
+        }
+
+        async fn apply(&self, _key: &RiskKey, _deltas: &[Contributor], now_ms: i64) -> anyhow::Result<ApplyResult> {
+            Ok(ApplyResult {
+                state: RiskState::new(now_ms),
+                is_new: true,
+            })
+        }
+
+        async fn force_max(&self, _key: &RiskKey, _until_ms: i64, _now_ms: i64) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn purge_expired(&self, _ttl_ms: i64, _now_ms: i64) -> anyhow::Result<usize> {
+            Ok(0)
+        }
+
+        async fn reset_all(&self) -> anyhow::Result<()> {
+            self.set_len(0);
+            Ok(())
+        }
+
+        async fn len(&self) -> usize {
+            self.len.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    #[tokio::test]
+    async fn default_is_empty_uses_len() {
+        let s = NoopStore::new();
+        assert!(s.is_empty().await, "len 0 → is_empty true");
+        s.set_len(3);
+        assert!(!s.is_empty().await, "len > 0 → is_empty false");
+        s.reset_all().await.unwrap();
+        assert!(s.is_empty().await);
+    }
+
+    #[tokio::test]
+    async fn trait_methods_callable_through_dyn() {
+        let s: Box<dyn RiskStore> = Box::new(NoopStore::new());
+        let key = RiskKey::from_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert!(s.read(&key).await.unwrap().is_none());
+        let r = s.apply(&key, &[], 100).await.unwrap();
+        assert!(r.is_new);
+        s.force_max(&key, 1000, 0).await.unwrap();
+        assert_eq!(s.purge_expired(0, 0).await.unwrap(), 0);
+        assert_eq!(s.len().await, 0);
+        assert!(s.is_empty().await);
+    }
+
+    #[test]
+    fn key_builder_with_each_axis() {
+        use crate::risk::key::SessionId;
+        let key = RiskKeyBuilder::new()
+            .with_ip(IpAddr::V4(Ipv4Addr::LOCALHOST))
+            .with_fp_hash(0xDEAD_BEEF)
+            .with_session(SessionId::new(b"abc".to_vec()))
+            .build();
+        assert_eq!(key.axis_count(), 3);
+        assert!(key.ip.is_some());
+        assert!(key.fp_hash.is_some());
+        assert!(key.session.is_some());
+    }
+
+    #[test]
+    fn key_builder_default_is_empty() {
+        let key = RiskKeyBuilder::default().build();
+        assert!(key.is_empty());
+    }
+
+    #[test]
+    fn apply_result_clone_preserves_state() {
+        let r = ApplyResult {
+            state: RiskState::new(42),
+            is_new: true,
+        };
+        let r2 = r.clone();
+        assert_eq!(r2.state.created_ms, 42);
+        assert!(r2.is_new);
+        let _dbg = format!("{r2:?}");
+    }
+}
