@@ -1,0 +1,63 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: coverage-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: Coverage (${{ matrix.crate }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: prx_waf
+          POSTGRES_PASSWORD: prx_waf
+          POSTGRES_DB: prx_waf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U prx_waf"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { crate: waf-common,  floor: 88 }
+          - { crate: waf-storage, floor: 82 }
+          - { crate: waf-cluster, floor: 82 }
+          - { crate: waf-api,     floor: 78 }
+          - { crate: gateway,     floor: 82 }
+          - { crate: waf-engine,  floor: 80 }
+          - { crate: prx-waf,     floor: 5 }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage-${{ matrix.crate }}
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Enforce coverage floor
+        run: bash .github/scripts/coverage-check.sh ${{ matrix.crate }} ${{ matrix.floor }}
