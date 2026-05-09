@@ -203,3 +203,84 @@ pub trait CacheBackend: Send + Sync + 'static {
     /// Per-tag counts (keys associated with each tag) for dashboard top-routes.
     async fn tag_entry_counts(&self) -> Vec<(String, u64)>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wire_from_cached_response_clones_fields() {
+        let cr = CachedResponse {
+            status: 201,
+            headers: vec![("x-foo".into(), "bar".into())],
+            body: Bytes::from_static(b"hello"),
+            max_age: 42,
+        };
+        let w = WireCachedResponse::from(&cr);
+        assert_eq!(w.status, 201);
+        assert_eq!(w.headers, vec![("x-foo".to_string(), "bar".to_string())]);
+        assert_eq!(w.body, b"hello".to_vec());
+        assert_eq!(w.max_age, 42);
+    }
+
+    #[test]
+    fn cached_response_from_wire_round_trips_body() {
+        let w = WireCachedResponse {
+            status: 304,
+            headers: vec![("etag".into(), "\"abc\"".into())],
+            body: vec![1, 2, 3, 4],
+            max_age: 7,
+        };
+        let cr: CachedResponse = w.into();
+        assert_eq!(cr.status, 304);
+        assert_eq!(cr.headers.len(), 1);
+        assert_eq!(cr.body.as_ref(), &[1u8, 2, 3, 4]);
+        assert_eq!(cr.max_age, 7);
+    }
+
+    #[test]
+    fn wire_serde_json_round_trip_preserves_body_via_base64() {
+        let original = CachedResponse {
+            status: 200,
+            headers: vec![
+                ("content-type".into(), "application/octet-stream".into()),
+                ("x-bin".into(), "y".into()),
+            ],
+            body: Bytes::from_static(&[0u8, 1, 2, 250, 251, 252, 253, 254, 255]),
+            max_age: 600,
+        };
+        let wire = WireCachedResponse::from(&original);
+        let json = serde_json::to_string(&wire).expect("serialize");
+        // base64 of [0,1,2,250,251,252,253,254,255] = "AAEC+vv8/f7/"
+        assert!(json.contains("\"AAEC+vv8/f7/\""), "json = {json}");
+
+        let back: WireCachedResponse = serde_json::from_str(&json).expect("deserialize");
+        let restored: CachedResponse = back.into();
+        assert_eq!(restored.status, original.status);
+        assert_eq!(restored.headers, original.headers);
+        assert_eq!(restored.body, original.body);
+        assert_eq!(restored.max_age, original.max_age);
+    }
+
+    #[test]
+    fn wire_deserialize_rejects_invalid_base64() {
+        let bad = r#"{"status":200,"headers":[],"body":"!!!not-base64!!!","max_age":1}"#;
+        let res: Result<WireCachedResponse, _> = serde_json::from_str(bad);
+        assert!(res.is_err(), "invalid base64 must error, not panic");
+    }
+
+    #[test]
+    fn backend_health_healthy_const() {
+        let h = BackendHealth::healthy(99);
+        assert!(h.ok);
+        assert_eq!(h.latency_us, 99);
+        assert!(h.error.is_none());
+    }
+
+    #[test]
+    fn backend_health_unhealthy_helper() {
+        let h = BackendHealth::unhealthy("down");
+        assert!(!h.ok);
+        assert_eq!(h.error.as_deref(), Some("down"));
+    }
+}
