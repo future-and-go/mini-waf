@@ -84,3 +84,50 @@ fn import_from_file_returns_count() {
     let n = mgr.import_from_file(&p).expect("import");
     assert!(n >= 1);
 }
+
+#[tokio::test]
+async fn import_from_url_rejects_ssrf_target() {
+    let tmp = tempdir().expect("tmp");
+    let mut mgr = RuleManager::new(&make_config(tmp.path()));
+    // Loopback addr is rejected by waf_common::url_validator before any I/O.
+    let err = mgr.import_from_url("http://127.0.0.1/evil.yaml").await;
+    assert!(err.is_err(), "loopback URL must be rejected by SSRF guard");
+}
+
+#[tokio::test]
+async fn import_from_url_with_format_rejects_ssrf_target() {
+    use waf_engine::rules::formats::RuleFormat;
+    let tmp = tempdir().expect("tmp");
+    let mut mgr = RuleManager::new(&make_config(tmp.path()));
+    let err = mgr
+        .import_from_url_with_format("http://10.0.0.1/rules.json", RuleFormat::Json)
+        .await;
+    assert!(err.is_err(), "private IP URL must be rejected by SSRF guard");
+}
+
+#[tokio::test]
+async fn load_remote_sources_with_blocked_url_records_error_and_continues() {
+    use waf_common::config::RuleSourceEntry;
+    let tmp = tempdir().expect("tmp");
+    let cfg = waf_common::config::RulesConfig {
+        dir: tmp.path().display().to_string(),
+        hot_reload: false,
+        reload_debounce_ms: 0,
+        enable_builtin_owasp: false,
+        enable_builtin_bot: false,
+        enable_builtin_scanner: false,
+        sources: vec![RuleSourceEntry {
+            name: "blocked-remote".into(),
+            path: None,
+            url: Some("http://127.0.0.1/blocked.yaml".into()),
+            format: "yaml".into(),
+            update_interval: 0,
+        }],
+    };
+    let mut mgr = RuleManager::new(&cfg);
+    let results = mgr.load_remote_sources().await;
+    assert_eq!(results.len(), 1);
+    let (name, result) = &results[0];
+    assert_eq!(name, "blocked-remote");
+    assert!(result.is_err(), "blocked remote URL must surface error");
+}
