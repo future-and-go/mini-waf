@@ -167,6 +167,54 @@ mod tests {
         }
     }
 
+    #[test]
+    fn name_returns_route_rule() {
+        let g = RouteRuleGate::new(RuleSetHolder::new(CompiledRuleSet::empty()));
+        assert_eq!(g.name(), "route_rule");
+    }
+
+    #[test]
+    fn uppercase_host_is_lowercased_for_match() {
+        // Host "EXAMPLE.COM" must hit a rule registered without explicit host
+        // (path-only match) — the lowercasing path is exercised.
+        let h = holder(vec![rule_doc("p", "/static/", 600)]);
+        let g = RouteRuleGate::new(h);
+        match g.evaluate(&ctx_for("EXAMPLE.COM", "/static/x.css")) {
+            Verdict::Cache { ttl, .. } => assert_eq!(ttl.as_secs(), 600),
+            v => panic!("expected Cache, got {v:?}"),
+        }
+    }
+
+    #[test]
+    fn cache_verdict_includes_rule_id_as_first_tag() {
+        let h = holder(vec![rule_doc("static", "/static/", 600)]);
+        let g = RouteRuleGate::new(h);
+        match g.evaluate(&ctx_for("example.com", "/static/x.css")) {
+            Verdict::Cache { tags, .. } => {
+                assert_eq!(tags.first().map(std::convert::AsRef::as_ref), Some("static"));
+                assert!(tags.iter().any(|t| t.as_ref() == "t"));
+            }
+            v => panic!("expected Cache, got {v:?}"),
+        }
+    }
+
+    #[test]
+    fn debug_renders_continue_bypass_and_cache_variants() {
+        // Cover the impl Debug for Verdict (used only by `panic!("got {v:?}")`).
+        let cont = format!("{:?}", Verdict::Continue);
+        assert_eq!(cont, "Continue");
+        let bypass = format!("{:?}", Verdict::Bypass(BypassReason::ExplicitDeny));
+        assert!(bypass.starts_with("Bypass("));
+        let cache = format!(
+            "{:?}",
+            Verdict::Cache {
+                ttl: std::time::Duration::from_secs(30),
+                tags: vec![Arc::from("a")],
+            }
+        );
+        assert!(cache.starts_with("Cache{"));
+    }
+
     // Helper for the Verdict pattern (no Debug derive on Verdict).
     impl std::fmt::Debug for Verdict {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

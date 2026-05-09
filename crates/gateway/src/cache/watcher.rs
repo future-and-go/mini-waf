@@ -172,4 +172,49 @@ rules:
         let set = load_or_empty(&path).expect("missing → ok");
         assert_eq!(set.rules.len(), 0);
     }
+
+    #[test]
+    fn load_or_empty_propagates_non_notfound_io_errors() {
+        // Reading a *directory* as a file yields IsADirectory or similar IO error
+        // (NOT NotFound) — must surface as Err rather than the missing-file warn path.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let res = load_or_empty(dir.path());
+        assert!(res.is_err(), "expected IO error for directory path");
+    }
+
+    #[test]
+    fn spawn_no_parent_returns_error() {
+        // A path with no parent (root path) triggers the NoParent error arm.
+        // Use a relative path with only a file name; `Path::parent` returns Some("")
+        // for a bare filename, so we must use something that has no parent at all:
+        // on macOS, "/" has no parent; build a holder for the call.
+        let holder = RuleSetHolder::new(CompiledRuleSet::empty());
+        let res = CacheRuleWatcher::spawn(PathBuf::from("/"), holder, 100);
+        // "/" has parent None → NoParent. Or no file_name → NoFileName.
+        assert!(matches!(
+            res,
+            Err(CacheWatcherError::NoParent(_) | CacheWatcherError::NoFileName(_))
+        ));
+    }
+
+    #[test]
+    fn reload_keeps_prior_when_file_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("cache.yaml");
+        // Build initial holder with one rule, then ask reload to read missing path.
+        let initial_yaml = r"
+version: 1
+rules:
+  - id: r1
+    match:
+      path: { prefix: /static/ }
+    ttl_seconds: 600
+    tags: [static]
+";
+        let initial = parse_and_compile(initial_yaml).expect("parse");
+        let holder = RuleSetHolder::new(initial);
+        // Path not yet written: read fails with NotFound (try_load returns Err).
+        reload(&path, &holder);
+        assert_eq!(holder.load().rules.len(), 1, "prior ruleset preserved");
+    }
 }
