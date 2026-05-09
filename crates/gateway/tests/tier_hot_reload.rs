@@ -11,9 +11,20 @@
 // Test conventions: unwrap/index/panic are idiomatic in tests; loosen pedantic.
 #![allow(
     clippy::unwrap_used,
+    clippy::expect_used,
     clippy::indexing_slicing,
     clippy::panic,
-    clippy::items_after_statements
+    clippy::items_after_statements,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::redundant_closure_for_method_calls,
+    clippy::field_reassign_with_default,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::unreadable_literal,
+    clippy::approx_constant,
+    clippy::doc_markdown
 )]
 
 use std::sync::Arc;

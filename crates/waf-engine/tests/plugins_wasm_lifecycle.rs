@@ -4,6 +4,20 @@
 //! hot-reload (load v2 over v1), rejection of invalid bytes,
 //! isolation (one plugin error does not crash others), list/get.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::doc_markdown,
+    clippy::needless_raw_string_hashes,
+    clippy::default_trait_access
+)]
+
 use uuid::Uuid;
 use waf_engine::plugins::manager::{LoadPluginParams, PluginAction, PluginManager, WasmPlugin};
 

@@ -5,6 +5,23 @@
 //! original untouched, xdb_file_info helpers, parse_duration all units,
 //! build_client success, update no-op when check_update returns false.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::doc_markdown,
+    clippy::duration_suboptimal_units,
+    clippy::items_after_statements,
+    clippy::default_trait_access,
+    dead_code,
+    unused_imports
+)]
+
 use std::path::Path;
 use waf_engine::geoip_updater::{UpdateResult, XdbUpdater, parse_duration, xdb_file_info};
 use wiremock::matchers::{method, path};

@@ -6,7 +6,18 @@
 // * Valid token (Authorization header / Sec-WebSocket-Protocol / ?token=)
 //   → upgrade succeeds (101) and the connection accepts a message exchange.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::undocumented_unsafe_blocks,
+    clippy::doc_markdown,
+    clippy::redundant_clone,
+    clippy::err_expect,
+    clippy::format_push_string
+)]
 
 #[path = "common/mod.rs"]
 mod common;

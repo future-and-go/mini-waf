@@ -97,7 +97,13 @@ async fn stream_to_tmp(tmp: &Path, response: Response, bounds: &SizeBounds) -> R
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::doc_markdown
+)]
 mod tests {
     use super::*;
     use std::path::PathBuf;

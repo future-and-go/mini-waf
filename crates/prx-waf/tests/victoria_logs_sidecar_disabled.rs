@@ -3,7 +3,27 @@
 //! cannot be tested without spawning a real `victoria-logs` binary, but the
 //! disabled branch is the one operators rely on most often.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::redundant_closure_for_method_calls,
+    clippy::field_reassign_with_default,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::unreadable_literal,
+    clippy::approx_constant,
+    clippy::doc_markdown,
+    clippy::items_after_statements,
+    clippy::format_push_string,
+    clippy::err_expect,
+    clippy::needless_pass_by_value,
+    clippy::manual_let_else,
+    unused_imports
+)]
 
 use waf_common::config::VictoriaLogsConfig;
 

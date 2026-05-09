@@ -5,7 +5,22 @@
 //! This is the only test that drives `transport::server::serve` and
 //! `transport::client::run_with_reconnect` past their TLS-config builders into
 //! actual network I/O — it pays for the bulk of those files' coverage.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::redundant_closure_for_method_calls,
+    clippy::field_reassign_with_default,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::unreadable_literal,
+    clippy::approx_constant,
+    clippy::doc_markdown,
+    clippy::map_unwrap_or
+)]
 
 use std::net::SocketAddr;
 use std::sync::Arc;

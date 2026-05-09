@@ -2,6 +2,23 @@
 //! exercises the `notify` background watcher (debounce, reload, fail-soft).
 //! Mirrors patterns from `access_hot_reload.rs` so review surface stays small.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::redundant_closure_for_method_calls,
+    clippy::field_reassign_with_default,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::unreadable_literal,
+    clippy::approx_constant,
+    clippy::doc_markdown,
+    clippy::needless_raw_string_hashes
+)]
+
 use std::sync::Arc;
 use std::time::Duration;
 

@@ -2,7 +2,16 @@
 // channel_type reporting. These exercise `build_channel` directly without
 // requiring a Postgres testcontainer.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::undocumented_unsafe_blocks,
+    clippy::doc_markdown,
+    clippy::redundant_clone
+)]
 
 use serde_json::json;
 use waf_api::notifications::{build_channel, new_rate_limiter};

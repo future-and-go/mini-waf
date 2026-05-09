@@ -125,6 +125,7 @@ pub fn register_sighup_handler(manager: Arc<Mutex<RuleManager>>) {
 pub fn register_sighup_handler(_manager: Arc<Mutex<RuleManager>>) {}
 
 #[cfg(test)]
+#[allow(clippy::redundant_clone)]
 mod tests {
     use super::*;
     use waf_common::RulesConfig;

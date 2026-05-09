@@ -3,7 +3,29 @@
 //! Verifies each detector emits correct deltas and that combinations
 //! accumulate properly without exceeding individual caps.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::uninlined_format_args)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::redundant_closure_for_method_calls,
+    clippy::field_reassign_with_default,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::unreadable_literal,
+    clippy::approx_constant,
+    clippy::doc_markdown,
+    clippy::missing_const_for_fn,
+    clippy::items_after_statements,
+    clippy::format_push_string,
+    clippy::err_expect,
+    clippy::needless_pass_by_value,
+    clippy::needless_raw_string_hashes,
+    clippy::uninlined_format_args,
+    unused_imports
+)]
 
 use std::collections::HashMap;
 

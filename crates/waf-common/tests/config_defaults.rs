@@ -3,6 +3,8 @@
 //! Each test instantiates the `Default` impl and asserts the
 //! field values match the documented defaults so accidental drift breaks here.
 
+#![allow(clippy::redundant_clone, clippy::no_effect_underscore_binding)]
+
 use waf_common::config::{
     ApiConfig, AppConfig, CacheBackendKind, CacheConfig, ClusterConfig, ClusterCryptoConfig, ClusterElectionConfig,
     ClusterHealthConfig, ClusterSyncConfig, CommunityConfig, CrowdSecConfig, EmbeddedValkeyConfig,

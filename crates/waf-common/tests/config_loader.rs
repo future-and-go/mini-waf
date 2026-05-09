@@ -4,7 +4,14 @@
 //! `CACHE_BACKEND` collisions by serializing env-var tests via
 //! `std::sync::Mutex`.
 
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::undocumented_unsafe_blocks,
+    clippy::indexing_slicing,
+    clippy::print_stderr
+)]
 
 use std::io::Write;
 use std::sync::Mutex;

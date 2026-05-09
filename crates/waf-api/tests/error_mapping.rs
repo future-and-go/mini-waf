@@ -4,7 +4,16 @@
 // We test it through `IntoResponse` directly to avoid depending on a real
 // handler that returns the variant.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::undocumented_unsafe_blocks,
+    clippy::doc_markdown,
+    clippy::redundant_clone
+)]
 
 use axum::body::to_bytes;
 use axum::response::IntoResponse;

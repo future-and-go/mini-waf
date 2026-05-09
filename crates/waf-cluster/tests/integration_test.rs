@@ -3,7 +3,28 @@
 //! Spins up a real in-process QUIC server and client, verifies the mTLS
 //! handshake succeeds, and asserts that heartbeat messages sent by the
 //! heartbeat-sender task are received by the peer.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::redundant_closure_for_method_calls,
+    clippy::field_reassign_with_default,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::unreadable_literal,
+    clippy::approx_constant,
+    clippy::doc_markdown,
+    clippy::missing_const_for_fn,
+    clippy::items_after_statements,
+    clippy::format_push_string,
+    clippy::err_expect,
+    clippy::needless_pass_by_value,
+    clippy::needless_raw_string_hashes,
+    unused_imports
+)]
 
 use std::sync::{
     Arc,

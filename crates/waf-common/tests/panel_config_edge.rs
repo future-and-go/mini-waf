@@ -1,5 +1,7 @@
 //! Edge-case coverage for `waf_common::panel_config`.
 
+#![allow(clippy::write_with_newline)]
+
 use std::io::Write;
 use tempfile::NamedTempFile;
 use waf_common::panel_config::{
@@ -215,7 +217,7 @@ fn panel_config_error_display_strings() {
     let s = PanelConfigError::RiskOrdering.to_string();
     assert!(s.contains("risk"));
     let s = PanelConfigError::HoneypotPath.to_string();
-    assert!(s.contains("/"));
+    assert!(s.contains('/'));
     let s = PanelConfigError::RedactField.to_string();
     assert!(s.contains("JSON"));
     let s = PanelConfigError::BadCidr("x".into(), "y".into()).to_string();

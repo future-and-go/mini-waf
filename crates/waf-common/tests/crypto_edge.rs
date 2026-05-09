@@ -1,6 +1,12 @@
 //! Edge-case coverage for `waf_common::crypto` AES-GCM helpers.
 
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::undocumented_unsafe_blocks,
+    clippy::indexing_slicing
+)]
 
 use std::sync::Mutex;
 use waf_common::crypto::{decrypt_field, derive_key, encrypt_field, master_key};
