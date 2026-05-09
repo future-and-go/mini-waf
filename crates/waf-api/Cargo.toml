@@ -42,6 +42,10 @@ url = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 base64 = { workspace = true }
 tempfile = "3"
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["postgres"] }
+tokio-tungstenite = "0.24"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "multipart", "stream"] }
 
 [lints]
 workspace = true
