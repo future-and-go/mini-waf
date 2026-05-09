@@ -73,3 +73,31 @@ async fn engine_reload_rules_against_empty_db_succeeds() {
     let fx = start_engine().await;
     fx.engine.reload_rules().await.expect("reload");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn engine_start_watchers_with_valid_yaml_succeeds() {
+    let fx = start_engine().await;
+    let tmp = tempfile::tempdir().expect("tmp");
+
+    // Minimal valid rate-limit YAML.
+    let rl_path = tmp.path().join("rl.yaml");
+    std::fs::write(
+        &rl_path,
+        "rate_limit:\n  schema_version: 1\n  enabled: false\n  hot_reload: true\n",
+    )
+    .expect("write rl");
+    fx.engine.start_rate_limit_watcher(&rl_path);
+
+    // Minimal valid tx-velocity YAML.
+    let tx_path = tmp.path().join("tx.yaml");
+    std::fs::write(
+        &tx_path,
+        "tx_velocity:\n  schema_version: 1\n  enabled: false\n  signal_cooldown_ms: 5000\n  session_ttl_secs: 600\n  janitor_period_secs: 60\n",
+    )
+    .expect("write tx");
+    fx.engine.start_tx_velocity_watcher(&tx_path);
+
+    // Idempotent — second call is a no-op (OnceLock guard).
+    fx.engine.start_rate_limit_watcher(&rl_path);
+    fx.engine.start_tx_velocity_watcher(&tx_path);
+}
