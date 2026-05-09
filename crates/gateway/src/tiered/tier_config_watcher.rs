@@ -137,3 +137,79 @@ pub fn try_reload(path: &Path) -> anyhow::Result<TierSnapshot> {
         .ok_or_else(|| anyhow::anyhow!("[tiered_protection] table missing"))?;
     Ok(TierSnapshot::try_from_config(cfg)?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_reload_returns_err_on_missing_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("does-not-exist.toml");
+        assert!(try_reload(&missing).is_err());
+    }
+
+    #[test]
+    fn try_reload_returns_err_on_missing_section() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("waf.toml");
+        std::fs::write(&path, "[other]\nk = \"v\"\n").expect("write");
+        let err = try_reload(&path).unwrap_err();
+        assert!(format!("{err}").contains("tiered_protection"));
+    }
+
+    #[test]
+    fn spawn_returns_no_parent_on_root_path() {
+        // "/" has no parent or no file_name on Unix.
+        let registry = Arc::new(TierPolicyRegistry::new(blank_snapshot()));
+        let res = TierConfigWatcher::spawn(PathBuf::from("/"), registry, 100);
+        assert!(matches!(
+            res,
+            Err(WatcherError::NoParent(_) | WatcherError::NoFileName(_))
+        ));
+    }
+
+    #[test]
+    fn watcher_error_display_strings_are_distinct() {
+        let no_parent = WatcherError::NoParent(PathBuf::from("/x"));
+        let no_name = WatcherError::NoFileName(PathBuf::from("/y"));
+        assert!(format!("{no_parent}").contains("parent"));
+        assert!(format!("{no_name}").contains("file name"));
+    }
+
+    fn blank_snapshot() -> TierSnapshot {
+        // Build via the same path the real bootstrap takes: parse a minimal
+        // TOML envelope and run try_from_config.
+        let raw = r#"
+[tiered_protection]
+default_tier = "catch_all"
+
+[tiered_protection.policies.critical]
+fail_mode = "close"
+ddos_threshold_rps = 1000
+cache_policy = { mode = "no_cache" }
+risk_thresholds = { allow = 10, challenge = 50, block = 100 }
+
+[tiered_protection.policies.high]
+fail_mode = "close"
+ddos_threshold_rps = 1000
+cache_policy = { mode = "no_cache" }
+risk_thresholds = { allow = 10, challenge = 50, block = 100 }
+
+[tiered_protection.policies.medium]
+fail_mode = "open"
+ddos_threshold_rps = 1000
+cache_policy = { mode = "no_cache" }
+risk_thresholds = { allow = 10, challenge = 50, block = 100 }
+
+[tiered_protection.policies.catch_all]
+fail_mode = "open"
+ddos_threshold_rps = 1000
+cache_policy = { mode = "no_cache" }
+risk_thresholds = { allow = 10, challenge = 50, block = 100 }
+"#;
+        let env: TomlEnvelope = toml::from_str(raw).expect("parse");
+        let cfg = env.tiered_protection.expect("section");
+        TierSnapshot::try_from_config(cfg).expect("snapshot")
+    }
+}

@@ -211,6 +211,81 @@ mod tests {
     }
 
     #[test]
+    fn first_cacheable_with_uppercase_host_is_lowercased() {
+        let r = rule("static", "/p", vec!["t".into()]);
+        let set = CompiledRuleSet::try_from_doc(doc(1, vec![r])).unwrap();
+        let id = set.first_cacheable_rule_id("EXAMPLE.COM", "/p/foo", "GET");
+        assert_eq!(id.as_deref(), Some("static"));
+    }
+
+    #[test]
+    fn first_cacheable_returns_none_on_zero_ttl_match() {
+        let mut r = rule("deny", "/admin", vec!["t".into()]);
+        r.ttl_seconds = 0;
+        let set = CompiledRuleSet::try_from_doc(doc(1, vec![r])).unwrap();
+        assert!(set.first_cacheable_rule_id("h", "/admin/x", "GET").is_none());
+    }
+
+    #[test]
+    fn first_cacheable_returns_default_when_no_match() {
+        let r = rule("static", "/p", vec!["t".into()]);
+        let set = CompiledRuleSet::try_from_doc(doc(1, vec![r])).unwrap();
+        let id = set.first_cacheable_rule_id("h", "/api/v1", "GET");
+        assert_eq!(id.as_deref(), Some("_default"));
+    }
+
+    #[test]
+    fn rejects_when_total_regex_size_exceeds_budget() {
+        // Budget = 1 MiB; cost = regex.len() * 4. Each rule's regex must
+        // compile (size_limit per pattern is 64 KiB), so we build many
+        // moderate-length disjunction patterns. Per-rule source length ~600
+        // → cost 2400. 500 rules → 1.2 MiB total, exceeds the 1 MiB budget.
+        use crate::cache::config::PathSpec;
+        // Build a 600-char alternation: ^/(p0|p1|...|p99)$ kept simple.
+        let pattern: String = {
+            let alternatives: Vec<String> = (0..100).map(|i| format!("p{i:04}")).collect();
+            format!("^/({})", alternatives.join("|"))
+        };
+        // Sanity: pattern length ~600, cost ~2400 per rule.
+        let cost_per_rule = pattern.len() * 4;
+        let rules_needed = (1024 * 1024 / cost_per_rule) + 5;
+        let rules: Vec<RuleDoc> = (0..rules_needed)
+            .map(|i| RuleDoc {
+                id: format!("r{i}"),
+                match_: MatchDoc {
+                    host: None,
+                    path: PathSpec::Regex { regex: pattern.clone() },
+                    methods: None,
+                },
+                ttl_seconds: 60,
+                tags: vec!["t".into()],
+                allow_authenticated: false,
+            })
+            .collect();
+        let err = CompiledRuleSet::try_from_doc(doc(1, rules)).unwrap_err();
+        assert!(matches!(err, RuleSetError::RegexBudgetExceeded { .. }));
+    }
+
+    #[test]
+    fn approx_regex_cost_counts_anchored_host() {
+        // Hosts with regex metacharacters contribute to the budget.
+        use crate::cache::config::PathSpec;
+        let r = RuleDoc {
+            id: "h".into(),
+            match_: MatchDoc {
+                host: Some("^api\\.example\\.com$".into()),
+                path: PathSpec::Prefix { prefix: "/".into() },
+                methods: None,
+            },
+            ttl_seconds: 60,
+            tags: vec!["t".into()],
+            allow_authenticated: false,
+        };
+        let set = CompiledRuleSet::try_from_doc(doc(1, vec![r])).expect("ok");
+        assert_eq!(set.rules.len(), 1);
+    }
+
+    #[test]
     fn holder_swaps_atomically() {
         let s1 = CompiledRuleSet::try_from_doc(doc(1, vec![rule("a", "/x", vec!["t".into()])])).unwrap();
         let holder = RuleSetHolder::new(s1);

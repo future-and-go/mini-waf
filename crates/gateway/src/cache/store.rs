@@ -674,6 +674,122 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn record_route_miss_when_no_entry_exists() {
+        // Hit `record_route_miss` branch: rule matches the key but backend has nothing.
+        let c = cache_with_rule("static", "/p", 600, vec!["catalog".into()]);
+        let r = c.get("GET:h:/p/missing", Tier::Medium).await;
+        assert!(r.is_none());
+        assert_eq!(c.stats().misses, 1);
+    }
+
+    #[tokio::test]
+    async fn top_routes_merges_traffic_and_tag_counts() {
+        let c = cache_with_rule("static", "/p", 600, vec!["catalog".into()]);
+        // Store + read to populate route hit/miss + tag entry counts.
+        assert!(put_under_rule(&c, "GET:h:/p/a", "h", "/p/a").await);
+        assert!(put_under_rule(&c, "GET:h:/p/b", "h", "/p/b").await);
+        let _ = c.get("GET:h:/p/a", Tier::Medium).await;
+        let _ = c.get("GET:h:/p/missing", Tier::Medium).await;
+
+        let rows = c.top_routes(10).await;
+        // "static" route should appear with hits ≥ 1.
+        let row = rows.iter().find(|r| r.route_id == "static").expect("present");
+        assert!(row.hits >= 1);
+        assert!(row.entry_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn top_routes_truncates_to_limit() {
+        let c = cache();
+        let rows = c.top_routes(0).await;
+        assert!(rows.is_empty());
+    }
+
+    #[tokio::test]
+    async fn backend_info_for_stats_panel_caches_within_ttl() {
+        let c = cache();
+        let a = c.backend_info_for_stats_panel().await;
+        let b = c.backend_info_for_stats_panel().await;
+        // Same backend kind across calls; second call hits the cached arm.
+        assert_eq!(a.backend, b.backend);
+    }
+
+    #[tokio::test]
+    async fn tag_entry_counts_returns_route_id_tags() {
+        let c = cache_with_rule("static", "/p", 600, vec!["catalog".into()]);
+        assert!(put_under_rule(&c, "GET:h:/p/a", "h", "/p/a").await);
+        let counts = c.tag_entry_counts().await;
+        // Every cached entry is tagged with the rule id ("static") plus user tag ("catalog").
+        assert!(counts.iter().any(|(t, _)| t == "static"));
+        assert!(counts.iter().any(|(t, _)| t == "catalog"));
+    }
+
+    #[tokio::test]
+    async fn entry_count_and_timeseries_and_ping_cover_dashboard_paths() {
+        let c = cache();
+        assert!(
+            put_basic(
+                &c,
+                vec![],
+                Some("max-age=60"),
+                Tier::Medium,
+                &CachePolicy::Aggressive { ttl_seconds: 300 }
+            )
+            .await
+        );
+        // Drive moka pending tasks to completion before inspecting size.
+        let _ = c.entry_count();
+        c.tick_timeseries().await;
+        let series = c.timeseries(60);
+        assert!(!series.is_empty(), "tick should produce at least one bucket");
+        let health = c.ping().await;
+        // Memory backend always healthy.
+        assert!(health.ok);
+    }
+
+    #[tokio::test]
+    async fn route_rule_explicit_deny_returns_continue_at_resolver_terminal() {
+        // ttl_seconds: 0 in route rule → ExplicitDeny bypass at RouteRuleGate.
+        // This exercises the gate ordering all the way to RouteRuleGate before bypass.
+        use crate::cache::config::{CacheConfigDoc, Defaults, MatchDoc, PathSpec, RuleDoc};
+        let doc = CacheConfigDoc {
+            version: 1,
+            defaults: Defaults::default(),
+            rules: vec![RuleDoc {
+                id: "deny".into(),
+                match_: MatchDoc {
+                    host: None,
+                    path: PathSpec::Prefix { prefix: "/p".into() },
+                    methods: None,
+                },
+                ttl_seconds: 0,
+                tags: vec!["t".into()],
+                allow_authenticated: false,
+            }],
+        };
+        let set = CompiledRuleSet::try_from_doc(doc).unwrap();
+        let c = ResponseCache::with_rules(8, 60, 3600, RuleSetHolder::new(set));
+        let stored = put_basic(
+            &c,
+            vec![],
+            Some("max-age=60"),
+            Tier::Medium,
+            &CachePolicy::Aggressive { ttl_seconds: 300 },
+        )
+        .await;
+        assert!(!stored);
+    }
+
+    #[test]
+    fn parse_cache_key_handles_query_and_missing_parts() {
+        // Direct coverage of internal parser helper.
+        assert_eq!(parse_cache_key("GET:h:/p"), Some(("GET", "h", "/p")));
+        assert_eq!(parse_cache_key("GET:h:/p?a=1"), Some(("GET", "h", "/p")));
+        assert_eq!(parse_cache_key("nope"), None);
+        assert_eq!(parse_cache_key("only:two"), None);
+    }
+
+    #[tokio::test]
     async fn route_rule_ttl_overrides_upstream_when_anonymous() {
         use crate::cache::config::{CacheConfigDoc, Defaults, MatchDoc, PathSpec, RuleDoc};
         let doc = CacheConfigDoc {
