@@ -1808,6 +1808,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-test",
  "toml",
  "tower",
  "tracing",
