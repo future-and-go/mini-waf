@@ -227,11 +227,13 @@ pub async fn start_test_server_with_cluster() -> TestServer {
     let mut state_inner =
         AppState::new(Arc::clone(&db), Arc::clone(&engine), Arc::clone(&router), cache).expect("AppState::new");
 
-    let mut cfg = ClusterConfig::default();
-    cfg.enabled = true;
-    cfg.node_id = "test-node".to_string();
-    cfg.role = "main".to_string();
-    cfg.listen_addr = "127.0.0.1:0".to_string();
+    let cfg = ClusterConfig {
+        enabled: true,
+        node_id: "test-node".to_string(),
+        role: "main".to_string(),
+        listen_addr: "127.0.0.1:0".to_string(),
+        ..Default::default()
+    };
     let node_state = Arc::new(NodeState::new(cfg, StorageMode::Full).expect("node state"));
     // Seed a CA key so /api/cluster/token can succeed.
     *node_state.ca_key_pem.lock() = Some("-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEINTuctv5E0hK1MZmuuFQfbCYpV4i40K9OFDHIPEMd2K2\n-----END PRIVATE KEY-----\n".to_string());
