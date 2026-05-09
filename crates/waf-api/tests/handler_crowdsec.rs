@@ -1,7 +1,16 @@
 // Integration tests for CrowdSec endpoints — degraded responses when
 // crowdsec_cache/crowdsec_client are None.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::undocumented_unsafe_blocks,
+    clippy::doc_markdown,
+    clippy::redundant_clone
+)]
 
 #[path = "common/mod.rs"]
 mod common;

@@ -117,6 +117,7 @@ impl RiskKey {
 }
 
 #[cfg(test)]
+#[allow(clippy::unreadable_literal)]
 mod tests {
     use super::*;
     use crate::device_fp::types::FingerprintValue;

@@ -7,6 +7,23 @@
 //! delta_pull (version 0 returns false, GONE returns false, valid delta applied,
 //! invalid sig rejected), check_ip, len, is_empty, run_sync_task shutdown.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::redundant_closure_for_method_calls,
+    clippy::field_reassign_with_default,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::unreadable_literal,
+    clippy::approx_constant,
+    clippy::doc_markdown,
+    clippy::needless_pass_by_value
+)]
+
 use std::net::IpAddr;
 use std::sync::Arc;
 

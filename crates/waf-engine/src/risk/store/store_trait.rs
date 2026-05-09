@@ -116,6 +116,7 @@ impl Default for RiskKeyBuilder {
 }
 
 #[cfg(test)]
+#[allow(clippy::redundant_clone, clippy::uninlined_format_args)]
 mod tests {
     use super::*;
     use crate::risk::state::RiskState;

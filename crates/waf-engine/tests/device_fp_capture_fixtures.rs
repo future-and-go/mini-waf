@@ -18,6 +18,24 @@
 // Phase 09 (perf bench + docs) replaces these with real captures
 // dumped via a `--collect-fixtures` test harness against rustls.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::redundant_closure_for_method_calls,
+    clippy::field_reassign_with_default,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::unreadable_literal,
+    clippy::approx_constant,
+    clippy::missing_docs_in_private_items,
+    clippy::doc_markdown,
+    clippy::missing_const_for_fn
+)]
+
 use waf_engine::device_fp::capture::{ParsedClientHello, parse_client_hello};
 
 mod h {

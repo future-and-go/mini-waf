@@ -7,6 +7,19 @@
 //! verify_signature roundtrip, enroll propagates network error,
 //! run_sync_task shutdown via watch channel.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::doc_markdown,
+    clippy::items_after_statements
+)]
+
 use std::net::IpAddr;
 use std::sync::Arc;
 

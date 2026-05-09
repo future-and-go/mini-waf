@@ -1,7 +1,22 @@
 //! Tests for the static seed discovery helper.
 //!
 //! Covers parse success, malformed entries, IPv4/IPv6, and duplicate handling.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::redundant_closure_for_method_calls,
+    clippy::field_reassign_with_default,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::unreadable_literal,
+    clippy::approx_constant,
+    clippy::doc_markdown,
+    clippy::map_unwrap_or
+)]
 
 use waf_cluster::discovery::StaticSeeds;
 use waf_common::config::ClusterConfig;

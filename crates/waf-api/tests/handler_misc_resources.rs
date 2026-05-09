@@ -1,7 +1,16 @@
 // Integration tests for less-covered REST endpoints in handlers.rs:
 // custom rules, certificates (CRUD via JSON, no upload), LB backends.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::undocumented_unsafe_blocks,
+    clippy::doc_markdown,
+    clippy::redundant_clone
+)]
 
 #[path = "common/mod.rs"]
 mod common;

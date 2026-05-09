@@ -3,6 +3,23 @@
 //! Covers: send when active, skip when inactive (buffer gone), path truncation,
 //! all AuditEventType variants serialise correctly.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::redundant_closure_for_method_calls,
+    clippy::field_reassign_with_default,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::unreadable_literal,
+    clippy::approx_constant,
+    clippy::doc_markdown,
+    clippy::used_underscore_binding
+)]
+
 use chrono::Utc;
 use waf_engine::logging::audit_sender::{AuditEvent, AuditEventType, AuditSender};
 use waf_engine::logging::batch_buffer::{BatchConfig, spawn_batch_flusher};

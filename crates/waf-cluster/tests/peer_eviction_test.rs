@@ -12,7 +12,23 @@
 //! (real wall clock).  Heartbeats recorded at timestamps far in the past
 //! (e.g. 0 and 100 ms) will always appear stale relative to the current
 //! wall-clock reading, so dead-peer detection works without any trickery.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::redundant_closure_for_method_calls,
+    clippy::field_reassign_with_default,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::unreadable_literal,
+    clippy::approx_constant,
+    clippy::missing_docs_in_private_items,
+    clippy::doc_markdown,
+    clippy::missing_const_for_fn
+)]
 
 use std::net::SocketAddr;
 use std::sync::Arc;

@@ -3,6 +3,24 @@
 //! Covers: enroll_machine success (200 with/without credential), 4xx error,
 //! bad JSON response → error.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    clippy::redundant_clone,
+    clippy::redundant_closure_for_method_calls,
+    clippy::field_reassign_with_default,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::unreadable_literal,
+    clippy::approx_constant,
+    clippy::missing_docs_in_private_items,
+    clippy::doc_markdown,
+    clippy::missing_const_for_fn
+)]
+
 use waf_engine::community::client::CommunityClient;
 use waf_engine::community::enroll::enroll_machine;
 use wiremock::matchers::{method, path};
