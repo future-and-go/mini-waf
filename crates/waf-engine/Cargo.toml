@@ -74,6 +74,8 @@ tracing-test = "0.2"
 reqwest = { workspace = true, features = ["stream", "gzip"] }
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["postgres"] }
+wat = "1"
+tracing-subscriber = { workspace = true }
 
 [target.'cfg(loom)'.dev-dependencies]
 loom = "0.7"
