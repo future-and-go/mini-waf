@@ -166,4 +166,44 @@ mod tests {
         // Yield so the spawned task can install the signal handler.
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+
+    #[test]
+    fn watcher_handles_file_create_modify_remove_events() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let rules_dir = tmp.path().to_path_buf();
+        let mgr = empty_manager();
+        let _hr = HotReloader::start(Arc::clone(&mgr), rules_dir.clone(), 50).expect("start");
+
+        // Wait for watcher thread to start.
+        std::thread::sleep(Duration::from_millis(60));
+
+        // Create a file → CreateEvent → triggers reload after debounce.
+        let f = rules_dir.join("rule.yaml");
+        std::fs::write(&f, "- id: A\n  name: a\n").expect("write");
+        std::thread::sleep(Duration::from_millis(150));
+
+        // Modify event.
+        std::fs::write(&f, "- id: A\n  name: aa\n").expect("modify");
+        std::thread::sleep(Duration::from_millis(150));
+
+        // Remove event.
+        std::fs::remove_file(&f).expect("remove");
+        std::thread::sleep(Duration::from_millis(150));
+
+        // Did not panic — manager still callable.
+        let stats = mgr.lock().stats();
+        assert_eq!(stats.total, 0);
+    }
+
+    #[test]
+    fn watcher_drop_stops_thread() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let rules_dir = tmp.path().to_path_buf();
+        let mgr = empty_manager();
+        {
+            let _hr = HotReloader::start(Arc::clone(&mgr), rules_dir.clone(), 30).expect("start");
+            std::thread::sleep(Duration::from_millis(50));
+        } // dropped here — channel closes, thread should exit cleanly
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }

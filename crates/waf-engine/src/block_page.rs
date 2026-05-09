@@ -125,4 +125,58 @@ mod tests {
         let page = render_block_page(&ctx, "XSS");
         assert_eq!(page, "blocked: XSS | req-xyz | 5.6.7.8");
     }
+
+    #[test]
+    fn escapes_xss_payload_in_rule_name() {
+        let ctx = make_ctx("rid-1", "10.0.0.1");
+        let payload = "<script>alert(1)</script>";
+        let page = render_block_page(&ctx, payload);
+        assert!(!page.contains("<script>"), "raw <script> tag must be escaped");
+        assert!(page.contains("&lt;script&gt;"));
+        assert!(page.contains("alert(1)"));
+    }
+
+    #[test]
+    fn escapes_xss_payload_in_req_id() {
+        let ctx = make_ctx("\"><svg/onload=alert(1)>", "10.0.0.2");
+        let page = render_block_page(&ctx, "rule");
+        assert!(!page.contains("\"><svg"));
+        assert!(page.contains("&quot;&gt;&lt;svg"));
+    }
+
+    #[test]
+    fn escapes_ampersand_quote_apostrophe() {
+        let ctx = make_ctx("a&b'c\"d", "10.0.0.3");
+        let page = render_block_page(&ctx, "rule");
+        assert!(page.contains("a&amp;b&#x27;c&quot;d"));
+    }
+
+    #[test]
+    fn renders_default_template_with_v6_client_ip() {
+        let ctx = make_ctx("v6-req", "::1");
+        let page = render_block_page(&ctx, "rule");
+        assert!(page.contains("::1"));
+    }
+
+    #[test]
+    fn html_escape_passes_through_safe_chars() {
+        assert_eq!(html_escape("hello world"), "hello world");
+        assert_eq!(html_escape(""), "");
+        assert_eq!(html_escape("123-_.+*"), "123-_.+*");
+    }
+
+    #[test]
+    fn custom_template_escapes_attacker_supplied_values() {
+        let ctx_arc = Arc::new(HostConfig {
+            block_page_template: Some("name={{rule_name}} ip={{client_ip}} id={{req_id}}".to_string()),
+            ..HostConfig::default()
+        });
+        let mut ctx = make_ctx("<id>", "127.0.0.1");
+        ctx.host_config = ctx_arc;
+        let page = render_block_page(&ctx, "<rule>");
+        assert!(page.contains("&lt;rule&gt;"));
+        assert!(page.contains("&lt;id&gt;"));
+        assert!(!page.contains("<id>"));
+        assert!(!page.contains("<rule>"));
+    }
 }
