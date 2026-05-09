@@ -97,13 +97,107 @@ async fn stream_to_tmp(tmp: &Path, response: Response, bounds: &SizeBounds) -> R
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn tmp_path_appends_suffix() {
         let p = PathBuf::from("/tmp/foo.mmdb");
         assert_eq!(tmp_path_for(&p), PathBuf::from("/tmp/foo.mmdb.tmp"));
+    }
+
+    /// Build a reqwest::Client with no timeout for local tests.
+    fn client() -> reqwest::Client {
+        reqwest::Client::new()
+    }
+
+    #[tokio::test]
+    async fn write_atomic_success_creates_file_with_content() {
+        let server = MockServer::start().await;
+        let body = vec![b'A'; 1024]; // 1 KiB
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()))
+            .mount(&server)
+            .await;
+
+        let tmp_dir = tempfile::tempdir().expect("tmp dir");
+        let target = tmp_dir.path().join("out.dat");
+        let bounds: SizeBounds = 512..=2048;
+
+        let resp = client().get(server.uri()).send().await.expect("get");
+        write_atomic(&target, resp, &bounds).await.expect("ok");
+
+        assert!(target.exists());
+        let content = std::fs::read(&target).expect("read");
+        assert_eq!(content.len(), 1024);
+    }
+
+    #[tokio::test]
+    async fn write_atomic_body_too_small_returns_error_and_no_file() {
+        let server = MockServer::start().await;
+        // Body = 10 bytes; lower bound = 100 bytes → should fail
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0u8; 10]))
+            .mount(&server)
+            .await;
+
+        let tmp_dir = tempfile::tempdir().expect("tmp dir");
+        let target = tmp_dir.path().join("out.dat");
+        let bounds: SizeBounds = 100..=2048;
+
+        let resp = client().get(server.uri()).send().await.expect("get");
+        let result = write_atomic(&target, resp, &bounds).await;
+        assert!(result.is_err(), "expected error for body too small");
+        assert!(!target.exists(), "target should not exist on failure");
+    }
+
+    #[tokio::test]
+    async fn write_atomic_content_length_too_large_rejects_before_download() {
+        let server = MockServer::start().await;
+        // Body exactly matches the declared content-length (200 bytes) but
+        // the upper bound is 100 bytes → fast-path reject via content-length check.
+        let body = vec![0u8; 200];
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+            .mount(&server)
+            .await;
+
+        let tmp_dir = tempfile::tempdir().expect("tmp dir");
+        let target = tmp_dir.path().join("out.dat");
+        // Upper bound = 100, body = 200 → content-length (200) > 100 → fast-path reject
+        let bounds: SizeBounds = 10..=100;
+
+        let resp = client().get(server.uri()).send().await.expect("get");
+        let result = write_atomic(&target, resp, &bounds).await;
+        assert!(result.is_err(), "expected content-length fast-path rejection");
+        // tmp file should be cleaned up or never created
+        let tmp = tmp_dir.path().join("out.dat.tmp");
+        assert!(!tmp.exists(), "tmp file should not exist after fast-path rejection");
+    }
+
+    #[tokio::test]
+    async fn write_atomic_creates_parent_dirs_if_missing() {
+        let server = MockServer::start().await;
+        let body = vec![b'Z'; 512];
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+            .mount(&server)
+            .await;
+
+        let tmp_dir = tempfile::tempdir().expect("tmp dir");
+        // Target in a non-existent subdirectory
+        let target = tmp_dir.path().join("sub").join("dir").join("out.dat");
+        let bounds: SizeBounds = 1..=2048;
+
+        let resp = client().get(server.uri()).send().await.expect("get");
+        write_atomic(&target, resp, &bounds)
+            .await
+            .expect("should create parent dirs");
+        assert!(target.exists());
     }
 }
