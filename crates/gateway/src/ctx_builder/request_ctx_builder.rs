@@ -197,7 +197,7 @@ fn extract_client_ip_from_session(
     trust_proxy_headers: bool,
     trusted_proxies: &[ipnet::IpNet],
 ) -> IpAddr {
-    let xff = session.get_header("x-forwarded-for").map(|h| h.as_bytes());
+    let xff = session.get_header("x-forwarded-for").map(http::HeaderValue::as_bytes);
     resolve_client_ip(peer_ip, trust_proxy_headers, trusted_proxies, xff)
 }
 
