@@ -197,6 +197,219 @@ pub async fn start_test_server_with_panel() -> (TestServer, std::path::PathBuf) 
     (server, panel_path)
 }
 
+/// Variant that wires a real `cluster_state` (single-node) so cluster_*
+/// handlers can exercise their populated branches.
+pub async fn start_test_server_with_cluster() -> TestServer {
+    use waf_cluster::{NodeState, StorageMode};
+    use waf_common::config::ClusterConfig;
+
+    unsafe {
+        std::env::set_var("JWT_SECRET", "integration-test-secret-key-32bytes-min");
+        std::env::set_var("MASTER_KEY", "integration-test-master-key-32bytes-min");
+    }
+
+    let container = PostgresImage::default()
+        .with_tag("16-alpine")
+        .start()
+        .await
+        .expect("start postgres testcontainer");
+    let host = container.get_host().await.expect("container host");
+    let port = container.get_host_port_ipv4(5432).await.expect("container port");
+    let url = format!("postgres://postgres:postgres@{host}:{port}/postgres");
+
+    let db = Database::connect(&url, 5).await.expect("db connect");
+    db.migrate().await.expect("migrate");
+    let db = Arc::new(db);
+
+    let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
+    let router = Arc::new(HostRouter::new());
+    let cache = ResponseCache::new(8, 60, 300);
+    let mut state_inner =
+        AppState::new(Arc::clone(&db), Arc::clone(&engine), Arc::clone(&router), cache).expect("AppState::new");
+
+    let mut cfg = ClusterConfig::default();
+    cfg.enabled = true;
+    cfg.node_id = "test-node".to_string();
+    cfg.role = "main".to_string();
+    cfg.listen_addr = "127.0.0.1:0".to_string();
+    let node_state = Arc::new(NodeState::new(cfg, StorageMode::Full).expect("node state"));
+    // Seed a CA key so /api/cluster/token can succeed.
+    *node_state.ca_key_pem.lock() = Some("-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEINTuctv5E0hK1MZmuuFQfbCYpV4i40K9OFDHIPEMd2K2\n-----END PRIVATE KEY-----\n".to_string());
+    state_inner.cluster_state = Some(node_state);
+    let state = Arc::new(state_inner);
+
+    let admin_password = "test-admin-password".to_string();
+    let hash = hash_password(&admin_password).expect("hash password");
+    let admin = db
+        .create_admin_user(
+            CreateAdminUser {
+                username: "admin".into(),
+                email: Some("admin@example.com".into()),
+                password: admin_password.clone(),
+                role: Some("admin".into()),
+            },
+            &hash,
+        )
+        .await
+        .expect("seed admin");
+
+    let admin_token =
+        generate_access_token(admin.id, &admin.username, &admin.role, &state.jwt_secret).expect("issue admin token");
+
+    let app = build_router(Arc::clone(&state));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local_addr");
+    let server_task = tokio::spawn(async move {
+        let _ = serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await;
+    });
+
+    TestServer {
+        addr,
+        db,
+        admin_token,
+        admin_password,
+        admin_id: admin.id,
+        state,
+        server_task: Some(server_task),
+        _container: container,
+    }
+}
+
+/// Variant that populates `crowdsec_cache` (and `crowdsec_lapi_url`) so the
+/// active branches in /api/crowdsec/* are exercised.
+pub async fn start_test_server_with_crowdsec() -> TestServer {
+    use waf_engine::DecisionCache;
+
+    unsafe {
+        std::env::set_var("JWT_SECRET", "integration-test-secret-key-32bytes-min");
+        std::env::set_var("MASTER_KEY", "integration-test-master-key-32bytes-min");
+    }
+
+    let container = PostgresImage::default()
+        .with_tag("16-alpine")
+        .start()
+        .await
+        .expect("start postgres testcontainer");
+    let host = container.get_host().await.expect("container host");
+    let port = container.get_host_port_ipv4(5432).await.expect("container port");
+    let url = format!("postgres://postgres:postgres@{host}:{port}/postgres");
+
+    let db = Database::connect(&url, 5).await.expect("db connect");
+    db.migrate().await.expect("migrate");
+    let db = Arc::new(db);
+
+    let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
+    let router = Arc::new(HostRouter::new());
+    let cache = ResponseCache::new(8, 60, 300);
+    let mut state_inner =
+        AppState::new(Arc::clone(&db), Arc::clone(&engine), Arc::clone(&router), cache).expect("AppState::new");
+    state_inner.crowdsec_cache = Some(Arc::new(DecisionCache::new(0)));
+    state_inner.crowdsec_lapi_url = Some("http://127.0.0.1:18080".into());
+    let state = Arc::new(state_inner);
+
+    let admin_password = "test-admin-password".to_string();
+    let hash = hash_password(&admin_password).expect("hash password");
+    let admin = db
+        .create_admin_user(
+            CreateAdminUser {
+                username: "admin".into(),
+                email: Some("admin@example.com".into()),
+                password: admin_password.clone(),
+                role: Some("admin".into()),
+            },
+            &hash,
+        )
+        .await
+        .expect("seed admin");
+
+    let admin_token =
+        generate_access_token(admin.id, &admin.username, &admin.role, &state.jwt_secret).expect("issue admin token");
+
+    let app = build_router(Arc::clone(&state));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local_addr");
+    let server_task = tokio::spawn(async move {
+        let _ = serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await;
+    });
+
+    TestServer {
+        addr,
+        db,
+        admin_token,
+        admin_password,
+        admin_id: admin.id,
+        state,
+        server_task: Some(server_task),
+        _container: container,
+    }
+}
+
+/// Variant that wires `victoria_logs_base_url` to a controllable mock HTTP
+/// server so /api/v1/logs/* can hit the active branches.
+pub async fn start_test_server_with_logs(vl_base: String) -> TestServer {
+    unsafe {
+        std::env::set_var("JWT_SECRET", "integration-test-secret-key-32bytes-min");
+        std::env::set_var("MASTER_KEY", "integration-test-master-key-32bytes-min");
+    }
+
+    let container = PostgresImage::default()
+        .with_tag("16-alpine")
+        .start()
+        .await
+        .expect("start postgres testcontainer");
+    let host = container.get_host().await.expect("container host");
+    let port = container.get_host_port_ipv4(5432).await.expect("container port");
+    let url = format!("postgres://postgres:postgres@{host}:{port}/postgres");
+
+    let db = Database::connect(&url, 5).await.expect("db connect");
+    db.migrate().await.expect("migrate");
+    let db = Arc::new(db);
+
+    let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
+    let router = Arc::new(HostRouter::new());
+    let cache = ResponseCache::new(8, 60, 300);
+    let mut state_inner =
+        AppState::new(Arc::clone(&db), Arc::clone(&engine), Arc::clone(&router), cache).expect("AppState::new");
+    state_inner.victoria_logs_base_url = Some(vl_base);
+    let state = Arc::new(state_inner);
+
+    let admin_password = "test-admin-password".to_string();
+    let hash = hash_password(&admin_password).expect("hash password");
+    let admin = db
+        .create_admin_user(
+            CreateAdminUser {
+                username: "admin".into(),
+                email: Some("admin@example.com".into()),
+                password: admin_password.clone(),
+                role: Some("admin".into()),
+            },
+            &hash,
+        )
+        .await
+        .expect("seed admin");
+
+    let admin_token =
+        generate_access_token(admin.id, &admin.username, &admin.role, &state.jwt_secret).expect("issue admin token");
+
+    let app = build_router(Arc::clone(&state));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local_addr");
+    let server_task = tokio::spawn(async move {
+        let _ = serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await;
+    });
+
+    TestServer {
+        addr,
+        db,
+        admin_token,
+        admin_password,
+        admin_id: admin.id,
+        state,
+        server_task: Some(server_task),
+        _container: container,
+    }
+}
+
 /// Build a base URL for the test server.
 pub fn url_for(addr: SocketAddr, path: &str) -> String {
     format!("http://{addr}{path}")
