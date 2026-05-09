@@ -116,6 +116,38 @@ mod tests {
     }
 
     #[test]
+    fn render_returns_err_for_invalid_status_code() {
+        // `StatusCode::try_from(u16)` only accepts 100..=999; anything below
+        // (e.g., 0, 99) fails. The renderer must propagate that error rather
+        // than panic, since it sits in the fail-closed path.
+        for invalid in [0u16, 99] {
+            let res = ErrorPageFactory::render(invalid, None);
+            assert!(res.is_err(), "expected render({invalid}) to error");
+        }
+    }
+
+    #[test]
+    fn render_accepts_unknown_but_valid_status_with_generic_reason() {
+        // 599 is a valid HTTP status code per `StatusCode` (100..=999) but
+        // not in our `reason_for` switch — must fall through to "Error".
+        let (h, body) = ErrorPageFactory::render(599, None).expect("render");
+        assert_eq!(body.as_ref(), b"Error");
+        assert_eq!(h.status.as_u16(), 599);
+    }
+
+    #[test]
+    fn render_json_branch_with_only_application_json() {
+        // Confirms case-insensitive matcher: `APPLICATION/JSON` should still
+        // pick the JSON branch.
+        let (h, body) = ErrorPageFactory::render(403, Some("APPLICATION/JSON")).expect("render");
+        assert_eq!(
+            h.headers.get("content-type").unwrap().as_bytes(),
+            b"application/json; charset=utf-8"
+        );
+        assert_eq!(body.as_ref(), br#"{"error":"Forbidden","status":403}"#);
+    }
+
+    #[test]
     fn reason_for_known_statuses() {
         for (code, want) in [
             (400u16, "Bad Request"),
