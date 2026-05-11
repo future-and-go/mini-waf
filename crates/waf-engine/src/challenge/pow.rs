@@ -179,9 +179,7 @@ mod tests {
                 break;
             }
             nonce += 1;
-            if nonce > 1_000_000 {
-                panic!("Could not find valid nonce in reasonable time");
-            }
+            assert!(nonce <= 1_000_000, "Could not find valid nonce in reasonable time");
         }
         assert_eq!(verify_pow(token, &nonce.to_string(), 8), PowVerifyResult::Valid);
     }
