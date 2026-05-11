@@ -54,7 +54,7 @@ Request → Scorer (risk=55) → WafAction::Challenge
 | Phase | Name | Status | Effort |
 |-------|------|--------|--------|
 | 1 | [Challenge Page Renderer](./phase-01-challenge-page-renderer.md) | ✅ Complete | 1.5d |
-| 2 | [PoW Algorithm](./phase-02-pow-algorithm.md) | Pending | 1d |
+| 2 | [PoW Algorithm](./phase-02-pow-algorithm.md) | ✅ Complete | 1d |
 | 3 | [Gateway Handler Integration](./phase-03-gateway-handler-integration.md) | Pending | 0.5d |
 | 4 | [Configuration Hot-Reload](./phase-04-configuration-hot-reload.md) | Pending | 0.5d |
 | 5 | [Unit and Integration Tests](./phase-05-unit-and-integration-tests.md) | Pending | 1d |

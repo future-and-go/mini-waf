@@ -4,7 +4,9 @@
 //! and sets a cookie to allow the request through on retry.
 
 mod page_template;
+mod pow;
 mod renderer;
 
 pub use page_template::render_challenge_page;
+pub use pow::{DifficultyMap, DifficultyTier, PowSolution, PowVerifyResult, verify_pow};
 pub use renderer::{ChallengeContext, ChallengeError, ChallengeRenderer, ChallengeResponse, JsChallengeRenderer};
