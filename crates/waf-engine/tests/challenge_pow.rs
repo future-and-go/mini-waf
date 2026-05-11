@@ -72,7 +72,11 @@ fn verify_pow_accepts_higher_difficulty_than_required() {
     let nonce = find_valid_nonce(token, 12);
 
     let result = verify_pow(token, &nonce.to_string(), 8);
-    assert_eq!(result, PowVerifyResult::Valid, "higher difficulty should satisfy lower requirement");
+    assert_eq!(
+        result,
+        PowVerifyResult::Valid,
+        "higher difficulty should satisfy lower requirement"
+    );
 }
 
 #[test]
@@ -88,7 +92,11 @@ fn verify_pow_rejects_invalid_nonce_formats() {
 
     for (nonce, desc) in invalid_nonces {
         let result = verify_pow("token", nonce, 8);
-        assert_eq!(result, PowVerifyResult::InvalidFormat, "{desc} should be invalid format");
+        assert_eq!(
+            result,
+            PowVerifyResult::InvalidFormat,
+            "{desc} should be invalid format"
+        );
     }
 }
 
@@ -96,7 +104,11 @@ fn verify_pow_rejects_invalid_nonce_formats() {
 fn verify_pow_rejects_oversized_nonce() {
     let long_nonce = "1".repeat(21);
     let result = verify_pow("token", &long_nonce, 8);
-    assert_eq!(result, PowVerifyResult::InvalidFormat, "nonce >20 chars should be rejected");
+    assert_eq!(
+        result,
+        PowVerifyResult::InvalidFormat,
+        "nonce >20 chars should be rejected"
+    );
 
     let max_valid = "1".repeat(20);
     let result = verify_pow("token", &max_valid, 8);
@@ -109,7 +121,11 @@ fn verify_pow_canonicalizes_nonce() {
     let nonce = find_valid_nonce(token, 8);
     let padded = format!("{:0>10}", nonce);
     let result = verify_pow(token, &padded, 8);
-    assert_eq!(result, PowVerifyResult::Valid, "padded nonce should match canonical form");
+    assert_eq!(
+        result,
+        PowVerifyResult::Valid,
+        "padded nonce should match canonical form"
+    );
 }
 
 #[test]
@@ -145,8 +161,16 @@ fn difficulty_map_custom_tiers() {
     let map = DifficultyMap {
         default: 12,
         tiers: vec![
-            DifficultyTier { min_risk: 0, max_risk: 20, difficulty: 8 },
-            DifficultyTier { min_risk: 80, max_risk: 100, difficulty: 20 },
+            DifficultyTier {
+                min_risk: 0,
+                max_risk: 20,
+                difficulty: 8,
+            },
+            DifficultyTier {
+                min_risk: 80,
+                max_risk: 100,
+                difficulty: 20,
+            },
         ],
     };
 
@@ -219,20 +243,29 @@ fn verify_pow_with_real_computed_solution() {
     let zeros = count_leading_zero_bits(&hash);
 
     assert!(zeros >= difficulty, "computed nonce should have sufficient zeros");
-    assert_eq!(verify_pow(token, &nonce.to_string(), difficulty), PowVerifyResult::Valid);
+    assert_eq!(
+        verify_pow(token, &nonce.to_string(), difficulty),
+        PowVerifyResult::Valid
+    );
 }
 
 #[test]
 fn verify_pow_with_zero_nonce() {
     let result = verify_pow("some_token", "0", 20);
-    assert!(matches!(result, PowVerifyResult::Valid | PowVerifyResult::InvalidDifficulty));
+    assert!(matches!(
+        result,
+        PowVerifyResult::Valid | PowVerifyResult::InvalidDifficulty
+    ));
 }
 
 #[test]
 fn verify_pow_with_max_u64_nonce() {
     let max_nonce = u64::MAX.to_string();
     let result = verify_pow("token", &max_nonce, 8);
-    assert!(matches!(result, PowVerifyResult::Valid | PowVerifyResult::InvalidDifficulty));
+    assert!(matches!(
+        result,
+        PowVerifyResult::Valid | PowVerifyResult::InvalidDifficulty
+    ));
 }
 
 #[test]

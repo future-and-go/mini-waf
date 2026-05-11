@@ -13,8 +13,7 @@
 )]
 
 use waf_engine::challenge::{
-    ChallengeConfig, ChallengeContext, ChallengeRenderer, JsChallengeRenderer,
-    render_challenge_page,
+    ChallengeConfig, ChallengeContext, ChallengeRenderer, JsChallengeRenderer, render_challenge_page,
 };
 
 fn make_ctx(token: &str, difficulty: u8, redirect: &str) -> ChallengeContext {
@@ -51,9 +50,17 @@ fn renderer_trait_produces_correct_response_structure() {
 
     assert_eq!(resp.status, 429, "challenge must return 429 status");
     assert!(resp.body.contains("trait-test-token"), "token not in body");
-    assert!(resp.headers.iter().any(|(k, v)| k == "Cache-Control" && v.contains("no-store")));
+    assert!(
+        resp.headers
+            .iter()
+            .any(|(k, v)| k == "Cache-Control" && v.contains("no-store"))
+    );
     assert!(resp.headers.iter().any(|(k, v)| k == "X-Robots-Tag" && v == "noindex"));
-    assert!(resp.headers.iter().any(|(k, v)| k == "Content-Type" && v.contains("text/html")));
+    assert!(
+        resp.headers
+            .iter()
+            .any(|(k, v)| k == "Content-Type" && v.contains("text/html"))
+    );
 }
 
 #[test]
@@ -63,7 +70,8 @@ fn page_size_stays_under_5kb_with_realistic_values() {
         difficulty: 16,
         redirect_url: "https://example.com/very/long/path/to/some/resource?query=value&foo=bar".into(),
         branding_title: "Company Security Verification".into(),
-        branding_message: "Please wait while we verify that you're not a bot. This usually takes just a few seconds.".into(),
+        branding_message: "Please wait while we verify that you're not a bot. This usually takes just a few seconds."
+            .into(),
     };
 
     let html = render_challenge_page(&ctx);
@@ -174,9 +182,18 @@ fn html_output_is_well_formed() {
     assert!(html.contains("<html lang=\"en\">"), "missing html tag");
     assert!(html.contains("</html>"), "unclosed html tag");
 
-    assert!(html.contains("<head>") && html.contains("</head>"), "missing head section");
-    assert!(html.contains("<body>") && html.contains("</body>"), "missing body section");
-    assert!(html.contains("<script>") && html.contains("</script>"), "missing script section");
+    assert!(
+        html.contains("<head>") && html.contains("</head>"),
+        "missing head section"
+    );
+    assert!(
+        html.contains("<body>") && html.contains("</body>"),
+        "missing body section"
+    );
+    assert!(
+        html.contains("<script>") && html.contains("</script>"),
+        "missing script section"
+    );
 
     assert!(html.contains("<meta charset=\"utf-8\">"), "missing charset meta");
     assert!(html.contains("<meta name=\"viewport\""), "missing viewport meta");
