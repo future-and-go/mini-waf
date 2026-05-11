@@ -1,7 +1,7 @@
 ---
 title: "FR-006 Challenge Engine"
 description: "Production-ready JS Challenge + PoW engine with fingerprint-bound tokens"
-status: pending
+status: completed
 priority: P1
 effort: "5d"
 branch: "feat/fr-006-challenge-engine"
@@ -58,7 +58,7 @@ Request → Scorer (risk=55) → WafAction::Challenge
 | 3 | [Gateway Handler Integration](./phase-03-gateway-handler-integration.md) | ✅ Complete | 0.5d |
 | 4 | [Configuration Hot-Reload](./phase-04-configuration-hot-reload.md) | ✅ Complete | 0.5d |
 | 5 | [Unit and Integration Tests](./phase-05-unit-and-integration-tests.md) | ✅ Complete | 1d |
-| 6 | [Browser Tests](./phase-06-browser-tests.md) | Pending | 0.5d |
+| 6 | [Browser Tests](./phase-06-browser-tests.md) | ✅ Complete | 0.5d |
 
 ## Key Files
 

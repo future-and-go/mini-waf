@@ -1,0 +1,34 @@
+# Browser test risk config - forces challenge for all requests.
+
+risk:
+  schema_version: 1
+  enabled: true
+  ttl_secs: 300
+  gc_interval_secs: 60
+  header_name: "X-WAF-Risk-Score"
+  emit_header: true
+
+  store:
+    backend: memory
+
+  # All requests get challenged (score 50 falls between allow=0 and block=100)
+  # Thresholds are configured per-tier in tier config, but default:
+  # - allow: 0 (any score >= 0 triggers challenge or block)
+  # - block: 100 (never block for tests)
+
+  decay:
+    min_clean_streak: 100
+    decay_rate: 0
+    max_decay: 100
+
+  # Seed all IPs with risk score 50 to trigger challenge
+  seed:
+    enabled: true
+    tor_delta: 50
+    datacenter_delta: 50
+    bad_asn_delta: 50
+
+  canary:
+    enabled: false
+    paths: []
+    ban_ttl_secs: 60

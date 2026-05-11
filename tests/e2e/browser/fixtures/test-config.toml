@@ -1,0 +1,44 @@
+# Browser test configuration for Playwright E2E tests.
+# Forces challenge for all requests with low difficulty for fast tests.
+
+[proxy]
+listen_addr     = "0.0.0.0:16880"
+listen_addr_tls = "0.0.0.0:16843"
+
+[api]
+listen_addr = "0.0.0.0:16827"
+
+[storage]
+# Use in-memory SQLite for tests - no database required
+database_url    = "sqlite::memory:"
+max_connections = 5
+
+[cache]
+enabled          = false
+max_size_mb      = 16
+default_ttl_secs = 30
+max_ttl_secs     = 60
+backend          = "memory"
+
+[http3]
+enabled = false
+
+[security]
+admin_ip_allowlist     = []
+max_request_body_bytes = 1048576
+api_rate_limit_rps     = 0
+cors_origins           = []
+
+[panel]
+config_path = ""
+
+[victoria_logs]
+enabled = false
+
+# Health check endpoint for Playwright webServer
+[[hosts]]
+host        = "localhost"
+port        = 16880
+remote_host = "127.0.0.1"
+remote_port = 8080
+guard_status = false
