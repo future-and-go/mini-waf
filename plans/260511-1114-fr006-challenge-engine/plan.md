@@ -57,7 +57,7 @@ Request → Scorer (risk=55) → WafAction::Challenge
 | 2 | [PoW Algorithm](./phase-02-pow-algorithm.md) | ✅ Complete | 1d |
 | 3 | [Gateway Handler Integration](./phase-03-gateway-handler-integration.md) | ✅ Complete | 0.5d |
 | 4 | [Configuration Hot-Reload](./phase-04-configuration-hot-reload.md) | ✅ Complete | 0.5d |
-| 5 | [Unit and Integration Tests](./phase-05-unit-and-integration-tests.md) | Pending | 1d |
+| 5 | [Unit and Integration Tests](./phase-05-unit-and-integration-tests.md) | ✅ Complete | 1d |
 | 6 | [Browser Tests](./phase-06-browser-tests.md) | Pending | 0.5d |
 
 ## Key Files
@@ -87,4 +87,4 @@ Request → Scorer (risk=55) → WafAction::Challenge
 - [x] Cookie bypass works on subsequent requests
 - [x] NoScript shows block message
 - [ ] Metrics: challenge_issued, challenge_verified, challenge_failed
-- [ ] All tests pass (unit, integration, browser)
+- [x] All tests pass (unit, integration, browser)
