@@ -3,10 +3,73 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use waf_common::tier::{CachePolicy, Tier};
 use waf_common::{HostConfig, RequestCtx};
+use waf_engine::challenge::{ChallengeRenderer, DifficultyMap, JsChallengeRenderer};
 use waf_engine::device_fp::DeviceIdentity;
 use waf_engine::relay::ClientIdentity;
+use waf_engine::risk::{ChallengeIssuer, ChallengeVerifier};
 
 use crate::protocol::Protocol;
+
+/// FR-006 Phase 3: Challenge context holding issuer, verifier, and renderer.
+/// Initialized once per WafProxy and shared across all requests.
+pub struct ChallengeCtx {
+    pub issuer: Arc<ChallengeIssuer>,
+    pub verifier: Arc<ChallengeVerifier>,
+    pub renderer: Arc<dyn ChallengeRenderer>,
+    pub difficulty_map: DifficultyMap,
+    pub config: ChallengePageConfig,
+}
+
+/// Configurable branding for the challenge page.
+#[derive(Debug, Clone)]
+pub struct ChallengePageConfig {
+    pub branding_title: String,
+    pub branding_message: String,
+}
+
+impl Default for ChallengePageConfig {
+    fn default() -> Self {
+        Self {
+            branding_title: "Security Check".into(),
+            branding_message: "Please wait while we verify your browser...".into(),
+        }
+    }
+}
+
+impl ChallengeCtx {
+    /// Create a new challenge context with the given issuer and verifier.
+    #[must_use]
+    pub fn new(issuer: Arc<ChallengeIssuer>, verifier: Arc<ChallengeVerifier>) -> Self {
+        Self {
+            issuer,
+            verifier,
+            renderer: Arc::new(JsChallengeRenderer::new()),
+            difficulty_map: DifficultyMap::default(),
+            config: ChallengePageConfig::default(),
+        }
+    }
+
+    /// Set a custom renderer (for testing or alternative challenge types).
+    #[must_use]
+    pub fn with_renderer(mut self, renderer: Arc<dyn ChallengeRenderer>) -> Self {
+        self.renderer = renderer;
+        self
+    }
+
+    /// Set a custom difficulty map.
+    #[must_use]
+    pub fn with_difficulty_map(mut self, map: DifficultyMap) -> Self {
+        self.difficulty_map = map;
+        self
+    }
+
+    /// Set custom branding config.
+    #[must_use]
+    pub fn with_config(mut self, config: ChallengePageConfig) -> Self {
+        self.config = config;
+        self
+    }
+}
 
 /// Maximum request body bytes buffered for WAF inspection (64 KiB).
 pub const BODY_PREVIEW_LIMIT: usize = 64 * 1024;
