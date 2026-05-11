@@ -11,7 +11,7 @@ use waf_engine::risk::{ChallengeIssuer, ChallengeVerifier};
 use crate::protocol::Protocol;
 
 /// FR-006 Phase 3: Challenge context holding issuer, verifier, and renderer.
-/// Initialized once per WafProxy and shared across all requests.
+/// Initialized once per `WafProxy` and shared across all requests.
 pub struct ChallengeCtx {
     pub issuer: Arc<ChallengeIssuer>,
     pub verifier: Arc<ChallengeVerifier>,

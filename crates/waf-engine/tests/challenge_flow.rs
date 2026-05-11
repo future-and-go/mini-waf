@@ -186,7 +186,7 @@ async fn concurrent_challenges_no_race_conditions() {
         }
     }
 
-    assert!(failures.is_empty(), "concurrent challenges failed: {:?}", failures);
+    assert!(failures.is_empty(), "concurrent challenges failed: {failures:?}");
     assert_eq!(success_count, num_challenges, "all challenges should succeed");
 }
 

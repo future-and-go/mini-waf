@@ -25,6 +25,7 @@ use crate::context::ChallengeCtx;
 /// When `challenge_ctx` is `Some` and action is `Challenge`:
 /// - Checks for existing valid `__waf_cc` cookie (bypass if valid)
 /// - Renders JS Proof-of-Work challenge page if no valid cookie
+///
 /// When `challenge_ctx` is `None`, Challenge actions are treated as Allow.
 pub async fn write_waf_decision(
     session: &mut Session,
@@ -90,7 +91,7 @@ fn build_fingerprint_binding(ctx: &RequestCtx) -> String {
     hex::encode(hasher.finalize())
 }
 
-/// Handle WafAction::Challenge by checking cookie or rendering challenge page.
+/// Handle `WafAction::Challenge` by checking cookie or rendering challenge page.
 async fn handle_challenge(
     session: &mut Session,
     request_ctx: &RequestCtx,
@@ -102,29 +103,29 @@ async fn handle_challenge(
     };
 
     // Check for existing valid __waf_cc cookie
-    if let Some(cookie_value) = request_ctx.cookies.get("__waf_cc") {
-        if let Some(solution) = PowSolution::parse_cookie(cookie_value) {
-            // Use default difficulty for cookie verification (16 bits)
-            let difficulty = ctx.difficulty_map.difficulty_for_risk(50);
-            if verify_pow(&solution.token, &solution.nonce, difficulty) == PowVerifyResult::Valid {
-                // Verify token signature via ChallengeVerifier
-                let binding = build_fingerprint_binding(request_ctx);
-                let now_ms = chrono::Utc::now().timestamp_millis();
-                match ctx.verifier.verify(&solution.token, &binding, now_ms).await {
-                    VerifyOutcome::Valid { .. } => {
-                        debug!(
-                            req_id = %request_ctx.req_id,
-                            "Challenge credit valid, allowing request"
-                        );
-                        return Ok(false);
-                    }
-                    outcome => {
-                        debug!(
-                            req_id = %request_ctx.req_id,
-                            ?outcome,
-                            "Challenge credit invalid, issuing new challenge"
-                        );
-                    }
+    if let Some(cookie_value) = request_ctx.cookies.get("__waf_cc")
+        && let Some(solution) = PowSolution::parse_cookie(cookie_value)
+    {
+        // Use default difficulty for cookie verification (16 bits)
+        let difficulty = ctx.difficulty_map.difficulty_for_risk(50);
+        if verify_pow(&solution.token, &solution.nonce, difficulty) == PowVerifyResult::Valid {
+            // Verify token signature via ChallengeVerifier
+            let binding = build_fingerprint_binding(request_ctx);
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            match ctx.verifier.verify(&solution.token, &binding, now_ms).await {
+                VerifyOutcome::Valid { .. } => {
+                    debug!(
+                        req_id = %request_ctx.req_id,
+                        "Challenge credit valid, allowing request"
+                    );
+                    return Ok(false);
+                }
+                outcome => {
+                    debug!(
+                        req_id = %request_ctx.req_id,
+                        ?outcome,
+                        "Challenge credit invalid, issuing new challenge"
+                    );
                 }
             }
         }
