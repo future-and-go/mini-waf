@@ -84,7 +84,7 @@ pub struct WafProxy {
     /// FR-009: same `Arc` as the management API — when set, GET responses may
     /// be served from cache and cacheable upstream bodies are stored.
     pub response_cache: Option<Arc<ResponseCache>>,
-    /// FR-006 phase-03: challenge context for bot mitigation via PoW.
+    /// FR-006 phase-03: challenge context for bot mitigation via `PoW`.
     /// When set, `WafAction::Challenge` renders the JS challenge page.
     /// When unset, Challenge actions fall through as Allow (no-op).
     pub challenge_ctx: Option<Arc<ChallengeCtx>>,
