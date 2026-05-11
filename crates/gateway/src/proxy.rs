@@ -31,7 +31,7 @@ use waf_engine::relay::RelayDetector;
 use crate::tiered::TierPolicyRegistry;
 
 use crate::cache::ResponseCache;
-use crate::context::{BODY_PREVIEW_LIMIT, GatewayCtx, ResponseCachePending};
+use crate::context::{BODY_PREVIEW_LIMIT, ChallengeCtx, GatewayCtx, ResponseCachePending};
 use crate::ctx_builder::RequestCtxBuilder;
 use crate::error_page::ErrorPageFactory;
 use crate::filters::{
@@ -84,6 +84,10 @@ pub struct WafProxy {
     /// FR-009: same `Arc` as the management API — when set, GET responses may
     /// be served from cache and cacheable upstream bodies are stored.
     pub response_cache: Option<Arc<ResponseCache>>,
+    /// FR-006 phase-03: challenge context for bot mitigation via PoW.
+    /// When set, `WafAction::Challenge` renders the JS challenge page.
+    /// When unset, Challenge actions fall through as Allow (no-op).
+    pub challenge_ctx: Option<Arc<ChallengeCtx>>,
 }
 
 impl WafProxy {
@@ -106,7 +110,15 @@ impl WafProxy {
             device_fp_detector: None,
             behavior_recorder: None,
             response_cache: None,
+            challenge_ctx: None,
         }
+    }
+
+    /// Inject the FR-006 challenge context. When set, `WafAction::Challenge`
+    /// decisions render a JS Proof-of-Work page. When unset, Challenge
+    /// actions are treated as Allow (fail-open for backward compatibility).
+    pub fn with_challenge_ctx(&mut self, ctx: Arc<ChallengeCtx>) {
+        self.challenge_ctx = Some(ctx);
     }
 
     /// Inject the FR-011 behavioral recorder. When set, every request with a
@@ -437,7 +449,15 @@ impl ProxyHttp for WafProxy {
         }
 
         let decision = self.engine.inspect(&mut request_ctx).await;
-        if write_waf_decision(session, &decision, &request_ctx, &self.blocked_counter).await? {
+        if write_waf_decision(
+            session,
+            &decision,
+            &request_ctx,
+            &self.blocked_counter,
+            self.challenge_ctx.as_ref(),
+        )
+        .await?
+        {
             return Ok(true);
         }
 

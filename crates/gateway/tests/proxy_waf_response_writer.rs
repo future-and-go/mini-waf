@@ -102,7 +102,7 @@ async fn write_waf_decision_returns_false_for_allow() {
     let ctx = make_request_ctx();
     let decision = WafDecision::allow();
 
-    let result = write_waf_decision(&mut session, &decision, &ctx, &counter)
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
         .await
         .expect("write_waf_decision");
     assert!(!result, "Allow must not short-circuit the request filter");
@@ -119,7 +119,7 @@ async fn write_waf_decision_returns_false_for_log_only() {
         result: Some(detection_result()),
     };
 
-    let result = write_waf_decision(&mut session, &decision, &ctx, &counter)
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
         .await
         .expect("write_waf_decision");
     assert!(!result, "LogOnly is treated as allowed");
@@ -134,7 +134,7 @@ async fn write_waf_decision_block_writes_status_and_body() {
     let ctx = make_request_ctx();
     let decision = WafDecision::block(403, Some("Forbidden by WAF".into()), detection_result());
 
-    let result = write_waf_decision(&mut session, &decision, &ctx, &counter)
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
         .await
         .expect("write_waf_decision");
     assert!(result, "Block must signal that response was sent");
@@ -160,7 +160,7 @@ async fn write_waf_decision_block_uses_default_body_when_none() {
     let ctx = make_request_ctx();
     let decision = WafDecision::block(401, None, detection_result());
 
-    let result = write_waf_decision(&mut session, &decision, &ctx, &counter)
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
         .await
         .expect("write_waf_decision");
     assert!(result);
@@ -194,7 +194,7 @@ async fn write_waf_decision_block_without_detection_result_uses_defaults() {
         result: None,
     };
 
-    let result = write_waf_decision(&mut session, &decision, &ctx, &counter)
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
         .await
         .expect("write_waf_decision");
     assert!(result);
@@ -219,7 +219,7 @@ async fn write_waf_decision_redirect_writes_302_with_location() {
         result: None,
     };
 
-    let result = write_waf_decision(&mut session, &decision, &ctx, &counter)
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
         .await
         .expect("write_waf_decision");
     assert!(result, "Redirect must signal that response was sent");
@@ -237,21 +237,22 @@ async fn write_waf_decision_redirect_writes_302_with_location() {
 }
 
 #[tokio::test]
-async fn write_waf_decision_challenge_action_returns_false() {
+async fn write_waf_decision_challenge_action_without_ctx_returns_false() {
     let (mut session, _drain) = session_over_duplex().await;
     let counter = AtomicU64::new(0);
     let ctx = make_request_ctx();
-    // Challenge is the catch-all `_ => {}` arm: not allowed (counter bumps),
-    // but no response is written and we return Ok(false).
+    // When challenge_ctx is None, Challenge action falls through as Allow
+    // (fail-open for backward compatibility).
     let decision = WafDecision {
         action: WafAction::Challenge,
         result: None,
     };
 
-    let result = write_waf_decision(&mut session, &decision, &ctx, &counter)
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
         .await
         .expect("write_waf_decision");
-    assert!(!result, "Challenge action does not short-circuit here");
+    assert!(!result, "Challenge without ctx should not short-circuit");
+    // Counter is bumped because is_allowed() returns false for Challenge.
     assert_eq!(
         counter.load(Ordering::Relaxed),
         1,

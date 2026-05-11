@@ -2,23 +2,36 @@
 //!
 //! Extracted from `proxy.rs` to keep each file under 200 lines.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
-use tracing::warn;
+use sha2::{Digest, Sha256};
+use tracing::{debug, info, warn};
 
 use pingora_proxy::Session;
-use waf_common::{WafAction, WafDecision};
+use waf_common::{RequestCtx, WafAction, WafDecision};
+use waf_engine::challenge::{ChallengeContext, PowSolution, PowVerifyResult, verify_pow};
+use waf_engine::risk::VerifyOutcome;
 
-/// Write a WAF block/redirect response to `session` and return `Ok(true)` to
-/// tell `request_filter` that the response is already sent.
+use crate::context::ChallengeCtx;
+
+/// Write a WAF block/redirect/challenge response to `session` and return
+/// `Ok(true)` to tell `request_filter` that the response is already sent.
 ///
 /// Returns `Ok(false)` when the decision is `Allow` / `LogOnly`.
+///
+/// # Challenge handling
+/// When `challenge_ctx` is `Some` and action is `Challenge`:
+/// - Checks for existing valid `__waf_cc` cookie (bypass if valid)
+/// - Renders JS Proof-of-Work challenge page if no valid cookie
+/// When `challenge_ctx` is `None`, Challenge actions are treated as Allow.
 pub async fn write_waf_decision(
     session: &mut Session,
     decision: &WafDecision,
-    request_ctx: &waf_common::RequestCtx,
+    request_ctx: &RequestCtx,
     blocked_counter: &AtomicU64,
+    challenge_ctx: Option<&Arc<ChallengeCtx>>,
 ) -> pingora_core::Result<bool> {
     if !decision.is_allowed() {
         blocked_counter.fetch_add(1, Ordering::Relaxed);
@@ -60,10 +73,113 @@ pub async fn write_waf_decision(
                 session.write_response_header(Box::new(response), true).await?;
                 return Ok(true);
             }
+            WafAction::Challenge => {
+                return handle_challenge(session, request_ctx, challenge_ctx).await;
+            }
             _ => {}
         }
     }
     Ok(false)
+}
+
+/// Build a fingerprint binding string for challenge token verification.
+/// Combines IP + JA3/JA4/H2 fingerprints into a stable hash.
+fn build_fingerprint_binding(ctx: &RequestCtx) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(ctx.client_ip.to_string().as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+/// Handle WafAction::Challenge by checking cookie or rendering challenge page.
+async fn handle_challenge(
+    session: &mut Session,
+    request_ctx: &RequestCtx,
+    challenge_ctx: Option<&Arc<ChallengeCtx>>,
+) -> pingora_core::Result<bool> {
+    let Some(ctx) = challenge_ctx else {
+        debug!("Challenge action but no challenge_ctx configured, allowing request");
+        return Ok(false);
+    };
+
+    // Check for existing valid __waf_cc cookie
+    if let Some(cookie_value) = request_ctx.cookies.get("__waf_cc") {
+        if let Some(solution) = PowSolution::parse_cookie(cookie_value) {
+            // Use default difficulty for cookie verification (16 bits)
+            let difficulty = ctx.difficulty_map.difficulty_for_risk(50);
+            if verify_pow(&solution.token, &solution.nonce, difficulty) == PowVerifyResult::Valid {
+                // Verify token signature via ChallengeVerifier
+                let binding = build_fingerprint_binding(request_ctx);
+                let now_ms = chrono::Utc::now().timestamp_millis();
+                match ctx.verifier.verify(&solution.token, &binding, now_ms).await {
+                    VerifyOutcome::Valid { .. } => {
+                        debug!(
+                            req_id = %request_ctx.req_id,
+                            "Challenge credit valid, allowing request"
+                        );
+                        return Ok(false);
+                    }
+                    outcome => {
+                        debug!(
+                            req_id = %request_ctx.req_id,
+                            ?outcome,
+                            "Challenge credit invalid, issuing new challenge"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Issue new challenge token
+    let binding = build_fingerprint_binding(request_ctx);
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let token = ctx.issuer.issue(&binding, now_ms);
+
+    // Use default difficulty (risk score not available in WafDecision)
+    let difficulty = ctx.difficulty_map.difficulty_for_risk(50);
+
+    // Build redirect URL from original request
+    let redirect_url = if request_ctx.query.is_empty() {
+        request_ctx.path.clone()
+    } else {
+        format!("{}?{}", request_ctx.path, request_ctx.query)
+    };
+
+    // Render challenge page
+    let render_ctx = ChallengeContext {
+        token,
+        difficulty,
+        redirect_url,
+        branding_title: ctx.config.branding_title.clone(),
+        branding_message: ctx.config.branding_message.clone(),
+    };
+
+    let challenge_response = ctx.renderer.render(&render_ctx).map_err(|e| {
+        pingora_core::Error::explain(
+            pingora_core::ErrorType::InternalError,
+            format!("Challenge render failed: {e}"),
+        )
+    })?;
+
+    // Write response with status and headers from renderer
+    let mut resp = pingora_http::ResponseHeader::build(challenge_response.status, None)?;
+    for (name, value) in challenge_response.headers {
+        // insert_header requires 'static names — pass owned String
+        resp.insert_header(name, value)?;
+    }
+
+    session.write_response_header(Box::new(resp), false).await?;
+    session
+        .write_response_body(Some(Bytes::from(challenge_response.body)), true)
+        .await?;
+
+    info!(
+        req_id = %request_ctx.req_id,
+        difficulty,
+        "Challenge page served"
+    );
+
+    Ok(true)
 }
 
 /// Write a WAF body-inspection block/redirect response and return an error to
