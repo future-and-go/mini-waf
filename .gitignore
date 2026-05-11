@@ -18,3 +18,8 @@ __pycache__/
 .idea
 .repomixignore
 release-manifest.json
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/

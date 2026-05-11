@@ -1,0 +1,27 @@
+# Browser test challenge config - low difficulty for fast PoW solving.
+
+challenge:
+  enabled: true
+  type: js_challenge
+
+  # Low difficulty for fast tests (8 bits = ~256 iterations avg)
+  difficulty:
+    default: 8
+    tiers:
+      - min_risk: 0
+        max_risk: 100
+        difficulty: 8
+
+  token:
+    ttl_secs: 300
+    cookie_name: __waf_cc
+    cookie_max_age: 300
+    same_site: Strict
+    http_only: false
+
+  branding:
+    title: "Security Check"
+    message: "Verifying your browser..."
+
+  nonce_store:
+    capacity: 1000

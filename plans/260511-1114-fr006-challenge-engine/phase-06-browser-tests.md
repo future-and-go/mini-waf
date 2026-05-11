@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Browser Tests"
-status: pending
+status: completed
 priority: P2
 effort: "0.5d"
 dependencies: [1, 2, 3, 4, 5]
