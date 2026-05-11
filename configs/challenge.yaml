@@ -1,0 +1,38 @@
+# FR-006 challenge engine — default configuration.
+# Schema v1. Hot-reload watches this file; bad edits log a warning and the
+# previous snapshot is retained.
+
+challenge:
+  enabled: true
+  type: js_challenge
+
+  # PoW difficulty scales with risk score. Higher difficulty = more CPU work.
+  difficulty:
+    default: 16    # Leading zero bits required (16 ≈ 65536 iterations avg)
+    tiers:
+      - min_risk: 30
+        max_risk: 40
+        difficulty: 14
+      - min_risk: 40
+        max_risk: 55
+        difficulty: 16
+      - min_risk: 55
+        max_risk: 70
+        difficulty: 18
+
+  # Token settings for challenge cookies.
+  token:
+    ttl_secs: 300           # Token validity (5 minutes)
+    cookie_name: __waf_cc   # Cookie name for challenge token
+    cookie_max_age: 300     # Cookie expiry (matches TTL)
+    same_site: Strict       # CSRF protection
+    http_only: false        # Must be readable by JS for redirect
+
+  # Branding for the challenge page.
+  branding:
+    title: "Security Check"
+    message: "Please wait while we verify your browser..."
+
+  # Nonce store prevents replay attacks.
+  nonce_store:
+    capacity: 100000        # Max consumed nonces to track

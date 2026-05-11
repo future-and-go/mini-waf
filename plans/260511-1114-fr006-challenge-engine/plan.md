@@ -55,8 +55,8 @@ Request → Scorer (risk=55) → WafAction::Challenge
 |-------|------|--------|--------|
 | 1 | [Challenge Page Renderer](./phase-01-challenge-page-renderer.md) | ✅ Complete | 1.5d |
 | 2 | [PoW Algorithm](./phase-02-pow-algorithm.md) | ✅ Complete | 1d |
-| 3 | [Gateway Handler Integration](./phase-03-gateway-handler-integration.md) | Pending | 0.5d |
-| 4 | [Configuration Hot-Reload](./phase-04-configuration-hot-reload.md) | Pending | 0.5d |
+| 3 | [Gateway Handler Integration](./phase-03-gateway-handler-integration.md) | ✅ Complete | 0.5d |
+| 4 | [Configuration Hot-Reload](./phase-04-configuration-hot-reload.md) | ✅ Complete | 0.5d |
 | 5 | [Unit and Integration Tests](./phase-05-unit-and-integration-tests.md) | Pending | 1d |
 | 6 | [Browser Tests](./phase-06-browser-tests.md) | Pending | 0.5d |
 
@@ -82,9 +82,9 @@ Request → Scorer (risk=55) → WafAction::Challenge
 ## Success Criteria
 
 - [x] Challenge page renders in <5KB with inline JS
-- [ ] PoW solves in 100ms-750ms based on risk
-- [ ] Token binds to fingerprint (IP + JA3/JA4 + H2)
-- [ ] Cookie bypass works on subsequent requests
+- [x] PoW solves in 100ms-750ms based on risk
+- [x] Token binds to fingerprint (IP + JA3/JA4 + H2)
+- [x] Cookie bypass works on subsequent requests
 - [x] NoScript shows block message
 - [ ] Metrics: challenge_issued, challenge_verified, challenge_failed
 - [ ] All tests pass (unit, integration, browser)
