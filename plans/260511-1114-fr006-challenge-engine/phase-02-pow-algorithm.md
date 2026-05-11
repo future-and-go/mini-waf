@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "PoW Algorithm"
-status: pending
+status: complete
 priority: P1
 effort: "1d"
 dependencies: [1]
@@ -219,12 +219,12 @@ mod tests {
 
 ## Success Criteria
 
-- [ ] `DifficultyMap::difficulty_for_risk()` returns correct difficulty per tier
-- [ ] `verify_pow()` correctly validates SHA256 leading zeros
-- [ ] `PowSolution::parse_cookie()` parses `token.nonce` format
-- [ ] Unit tests pass for difficulty mapping
-- [ ] Unit tests pass for PoW verification
-- [ ] `cargo check --package waf-engine` passes
+- [x] `DifficultyMap::difficulty_for_risk()` returns correct difficulty per tier
+- [x] `verify_pow()` correctly validates SHA256 leading zeros
+- [x] `PowSolution::parse_cookie()` parses `token.nonce` format
+- [x] Unit tests pass for difficulty mapping
+- [x] Unit tests pass for PoW verification
+- [x] `cargo check --package waf-engine` passes
 
 ## Risk Assessment
 
