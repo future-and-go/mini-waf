@@ -1,7 +1,7 @@
 //! Challenge page HTML template.
 //!
 //! Renders a minimal, self-contained HTML page that:
-//! - Shows a spinner and message while computing PoW
+//! - Shows a spinner and message while computing `PoW`
 //! - Uses Web Crypto API for SHA-256 hashing
 //! - Sets cookie and redirects on success
 //! - Falls back to block message if JavaScript disabled
@@ -13,7 +13,7 @@ use super::renderer::ChallengeContext;
 /// Placeholders (all must be HTML-escaped before insertion):
 /// - `{{title}}` — Page title and heading
 /// - `{{message}}` — User-facing message
-/// - `{{token}}` — Challenge token (used in PoW computation)
+/// - `{{token}}` — Challenge token (used in `PoW` computation)
 /// - `{{difficulty}}` — Number of leading zero hex chars required
 /// - `{{redirect}}` — URL to redirect after solving
 const CHALLENGE_TEMPLATE: &str = r#"<!DOCTYPE html>

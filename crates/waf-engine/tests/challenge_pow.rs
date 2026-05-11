@@ -1,6 +1,6 @@
 //! FR-006 — Proof-of-Work verification integration tests.
 //!
-//! Tests PoW verification, difficulty mapping, and cookie parsing.
+//! Tests `PoW` verification, difficulty mapping, and cookie parsing.
 //! Focuses on edge cases and integration scenarios.
 
 #![allow(
@@ -9,7 +9,9 @@
     clippy::indexing_slicing,
     clippy::disallowed_types,
     clippy::disallowed_methods,
-    clippy::missing_docs_in_private_items
+    clippy::missing_docs_in_private_items,
+    clippy::panic,
+    clippy::unreachable
 )]
 
 use sha2::{Digest, Sha256};
@@ -26,9 +28,10 @@ fn find_valid_nonce(token: &str, difficulty: u8) -> u64 {
         if leading_zeros >= difficulty {
             return nonce;
         }
-        if nonce > 5_000_000 {
-            panic!("Could not find valid nonce for difficulty {difficulty}");
-        }
+        assert!(
+            nonce <= 5_000_000,
+            "Could not find valid nonce for difficulty {difficulty}"
+        );
     }
     unreachable!()
 }
@@ -119,7 +122,7 @@ fn verify_pow_rejects_oversized_nonce() {
 fn verify_pow_canonicalizes_nonce() {
     let token = "canonicalize_test";
     let nonce = find_valid_nonce(token, 8);
-    let padded = format!("{:0>10}", nonce);
+    let padded = format!("{nonce:0>10}");
     let result = verify_pow(token, &padded, 8);
     assert_eq!(
         result,

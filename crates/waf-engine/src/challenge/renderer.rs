@@ -6,9 +6,9 @@ use std::fmt;
 /// Context passed to the challenge renderer.
 #[derive(Debug, Clone)]
 pub struct ChallengeContext {
-    /// Challenge token from ChallengeIssuer (Phase 2)
+    /// Challenge token from `ChallengeIssuer` (Phase 2)
     pub token: String,
-    /// PoW difficulty — number of leading zero hex characters required in hash
+    /// `PoW` difficulty — number of leading zero hex characters required in hash
     pub difficulty: u8,
     /// Original request URL to redirect after solving
     pub redirect_url: String,
@@ -64,7 +64,7 @@ impl std::error::Error for ChallengeError {}
 /// Trait for rendering challenge pages.
 ///
 /// Different implementations can provide different challenge types:
-/// - `JsChallengeRenderer` — JavaScript PoW (this phase)
+/// - `JsChallengeRenderer` — JavaScript `PoW` (this phase)
 /// - Future: CAPTCHA, hCaptcha, Turnstile integrations
 pub trait ChallengeRenderer: Send + Sync {
     /// Render a challenge page for the given context.
@@ -82,7 +82,7 @@ pub trait ChallengeRenderer: Send + Sync {
 pub struct JsChallengeRenderer;
 
 impl JsChallengeRenderer {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 }
@@ -152,7 +152,7 @@ mod tests {
     fn rejects_empty_token() {
         let renderer = JsChallengeRenderer::new();
         let ctx = ChallengeContext {
-            token: "".into(),
+            token: String::new(),
             ..Default::default()
         };
 
