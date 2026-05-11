@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Configuration Hot-Reload"
-status: pending
+status: complete
 priority: P2
 effort: "0.5d"
 dependencies: [1, 2, 3]
@@ -277,11 +277,11 @@ pub use config::{ChallengeConfigLoader, ChallengeSettings, DifficultySettings};
 
 ## Success Criteria
 
-- [ ] `configs/challenge.yaml` exists with default values
-- [ ] `ChallengeConfigLoader::load()` parses YAML correctly
-- [ ] Hot-reload updates config without restart
-- [ ] `DifficultyMap` constructs from config
-- [ ] `cargo check --package waf-engine` passes
+- [x] `configs/challenge.yaml` exists with default values
+- [x] `ChallengeConfigLoader::load()` parses YAML correctly
+- [x] Hot-reload updates config without restart
+- [x] `DifficultyMap` constructs from config
+- [x] `cargo check --package waf-engine` passes
 
 ## Risk Assessment
 
