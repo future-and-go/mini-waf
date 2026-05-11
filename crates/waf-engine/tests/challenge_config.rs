@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
 use tempfile::tempdir;
-use waf_engine::challenge::{ChallengeConfig, ChallengeReloader, DifficultyMap, DEFAULT_DEBOUNCE_MS};
+use waf_engine::challenge::{ChallengeConfig, ChallengeReloader, DEFAULT_DEBOUNCE_MS, DifficultyMap};
 
 #[test]
 fn config_load_valid_yaml() {

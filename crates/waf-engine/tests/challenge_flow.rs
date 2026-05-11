@@ -54,7 +54,10 @@ async fn challenge_issue_verify_full_flow() {
     assert!(!token.is_empty(), "issued token should not be empty");
 
     let result = verifier.verify(&token, owner_id, now_ms).await;
-    assert!(matches!(result, VerifyOutcome::Valid { .. }), "valid token should verify");
+    assert!(
+        matches!(result, VerifyOutcome::Valid { .. }),
+        "valid token should verify"
+    );
 }
 
 #[tokio::test]
@@ -116,7 +119,10 @@ async fn challenge_expired_after_ttl() {
 
     let future_ms = now_ms + 2000;
     let result = verifier.verify(&token, binding, future_ms).await;
-    assert!(matches!(result, VerifyOutcome::Expired), "token should expire after TTL");
+    assert!(
+        matches!(result, VerifyOutcome::Expired),
+        "token should expire after TTL"
+    );
 }
 
 #[tokio::test]
@@ -134,7 +140,10 @@ async fn challenge_valid_just_before_expiry() {
 
     let just_before = now_ms + 9_900;
     let result = verifier.verify(&token, binding, just_before).await;
-    assert!(matches!(result, VerifyOutcome::Valid { .. }), "should be valid just before expiry");
+    assert!(
+        matches!(result, VerifyOutcome::Valid { .. }),
+        "should be valid just before expiry"
+    );
 }
 
 #[tokio::test]
@@ -177,11 +186,7 @@ async fn concurrent_challenges_no_race_conditions() {
         }
     }
 
-    assert!(
-        failures.is_empty(),
-        "concurrent challenges failed: {:?}",
-        failures
-    );
+    assert!(failures.is_empty(), "concurrent challenges failed: {:?}", failures);
     assert_eq!(success_count, num_challenges, "all challenges should succeed");
 }
 
@@ -250,13 +255,7 @@ async fn malformed_token_rejected() {
     let verifier = ChallengeVerifier::new(secret, Arc::new(NonceStore::new(100, 300)));
 
     let long_token = "x".repeat(10000);
-    let malformed_tokens = [
-        "",
-        "not-a-token",
-        "a.b",
-        "truncated.sig.nature",
-        long_token.as_str(),
-    ];
+    let malformed_tokens = ["", "not-a-token", "a.b", "truncated.sig.nature", long_token.as_str()];
 
     for token in malformed_tokens {
         let result = verifier.verify(token, "actor", 1000).await;
@@ -334,5 +333,8 @@ async fn consumed_nonce_is_introspectable() {
     };
 
     assert!(verifier.is_nonce_consumed(&nonce), "nonce should be marked consumed");
-    assert!(!verifier.is_nonce_consumed("nonexistent"), "unknown nonce should not be consumed");
+    assert!(
+        !verifier.is_nonce_consumed("nonexistent"),
+        "unknown nonce should not be consumed"
+    );
 }
