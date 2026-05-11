@@ -21,7 +21,7 @@ use waf_engine::challenge::{ChallengeConfig, ChallengeReloader, DEFAULT_DEBOUNCE
 
 #[test]
 fn config_load_valid_yaml() {
-    let yaml = r#"
+    let yaml = r"
 challenge:
   enabled: true
   type: js_challenge
@@ -42,7 +42,7 @@ challenge:
     message: Please wait while we verify your browser...
   nonce_store:
     capacity: 50000
-"#;
+";
 
     let dir = tempdir().unwrap();
     let path = dir.path().join("challenge.yaml");
@@ -65,12 +65,12 @@ challenge:
 
 #[test]
 fn config_defaults_applied() {
-    let yaml = r#"
+    let yaml = r"
 challenge:
   difficulty:
     default: 12
     tiers: []
-"#;
+";
 
     let dir = tempdir().unwrap();
     let path = dir.path().join("minimal.yaml");
@@ -90,10 +90,10 @@ challenge:
 
 #[test]
 fn config_disabled_challenge() {
-    let yaml = r#"
+    let yaml = r"
 challenge:
   enabled: false
-"#;
+";
 
     let dir = tempdir().unwrap();
     let path = dir.path().join("disabled.yaml");
@@ -105,7 +105,7 @@ challenge:
 
 #[test]
 fn difficulty_config_converts_to_map() {
-    let yaml = r#"
+    let yaml = r"
 challenge:
   difficulty:
     default: 14
@@ -116,7 +116,7 @@ challenge:
       - min_risk: 70
         max_risk: 90
         difficulty: 20
-"#;
+";
 
     let dir = tempdir().unwrap();
     let path = dir.path().join("tiers.yaml");
@@ -162,10 +162,10 @@ fn config_load_error_on_invalid_yaml() {
 
 #[test]
 fn config_load_error_on_wrong_structure() {
-    let yaml = r#"
+    let yaml = r"
 not_challenge:
   something: else
-"#;
+";
 
     let dir = tempdir().unwrap();
     let path = dir.path().join("wrong.yaml");
@@ -256,7 +256,7 @@ fn default_debounce_constant() {
 
 #[test]
 fn config_all_token_options() {
-    let yaml = r#"
+    let yaml = r"
 challenge:
   token:
     ttl_secs: 600
@@ -264,7 +264,7 @@ challenge:
     cookie_max_age: 1800
     same_site: Lax
     http_only: true
-"#;
+";
 
     let dir = tempdir().unwrap();
     let path = dir.path().join("token.yaml");
@@ -281,12 +281,12 @@ challenge:
 
 #[test]
 fn config_branding_options() {
-    let yaml = r#"
+    let yaml = r"
 challenge:
   branding:
     title: Custom Title Here
     message: Custom message for users
-"#;
+";
 
     let dir = tempdir().unwrap();
     let path = dir.path().join("branding.yaml");
@@ -300,7 +300,7 @@ challenge:
 
 #[test]
 fn config_multiple_tiers() {
-    let yaml = r#"
+    let yaml = r"
 challenge:
   difficulty:
     default: 16
@@ -317,7 +317,7 @@ challenge:
       - min_risk: 70
         max_risk: 100
         difficulty: 22
-"#;
+";
 
     let dir = tempdir().unwrap();
     let path = dir.path().join("multi_tier.yaml");

@@ -1,6 +1,6 @@
 //! FR-006 — Challenge renderer integration tests.
 //!
-//! Tests the full rendering pipeline: ChallengeContext → JsChallengeRenderer → HTML output.
+//! Tests the full rendering pipeline: `ChallengeContext` → `JsChallengeRenderer` → HTML output.
 //! Focuses on integration scenarios not covered by inline unit tests.
 
 #![allow(
@@ -228,8 +228,10 @@ fn config_branding_flows_to_rendered_page() {
 
 #[test]
 fn default_context_renders_successfully() {
-    let mut ctx = ChallengeContext::default();
-    ctx.token = "default-ctx-token".into();
+    let ctx = ChallengeContext {
+        token: "default-ctx-token".into(),
+        ..ChallengeContext::default()
+    };
 
     let renderer = JsChallengeRenderer::new();
     let result = renderer.render(&ctx);
