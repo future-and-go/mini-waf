@@ -1,5 +1,6 @@
 pub mod access;
 pub mod block_page;
+pub mod challenge;
 pub mod checker;
 pub mod checks;
 pub mod community;
