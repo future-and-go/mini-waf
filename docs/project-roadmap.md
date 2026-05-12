@@ -278,6 +278,10 @@ Atomic read/write of `waf-panel.toml` (operational policy settings) via `GET/PUT
 - [x] Frontend: `web/admin-panel/src/pages/settings/index.tsx` — settings UI with i18n
 - [x] i18n locales updated (all 11 locales)
 
+### FR-035 — Response Header Leak Prevention
+
+Outbound protection layer added via `waf-engine::outbound::HeaderFilter` and the Pingora `response_filter` hook. Strips server-fingerprint, debug/internal, and error-detail headers from upstream responses; optional PII regex on values. Disabled by default; opt in via `[outbound] enabled = true`. Standards: OWASP ASVS V14.4, CWE-200, CWE-209, RFC 9110 §7.6.
+
 ---
 
 ## v0.3.0 (Proposed — Q3 2026)
