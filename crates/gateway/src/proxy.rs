@@ -688,7 +688,16 @@ impl ProxyHttp for WafProxy {
     where
         Self::CTX: Send + Sync,
     {
+        let upstream_contacted = ctx.upstream_addr.is_some();
         if let (Some(req_ctx), Some(hc)) = (&ctx.request_ctx, &ctx.host_config) {
+            // FR-018: brute-force / credential-stuffing dispatch. Engine state
+            // advances on every upstream response status; the actual block
+            // decision surfaces at the next request via request-time check.
+            // Gated on `upstream_contacted` so self-generated WAF block pages
+            // (request-time 403/401) cannot poison BF counters.
+            if upstream_contacted {
+                self.engine.on_response(req_ctx, upstream_response.status.as_u16());
+            }
             let fctx = FilterCtx {
                 request_ctx: req_ctx,
                 host_config: hc,
