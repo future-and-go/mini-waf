@@ -79,6 +79,28 @@ impl CompiledMask {
     }
 }
 
+/// Build the content-hash half of the mask cache key.
+///
+/// Hashes every host-config field that influences `CompiledMask::build`. Used
+/// by `WafProxy::resolve_mask` so the cache is keyed by `(host_name,
+/// content_hash)` instead of `Arc::as_ptr` — the allocator may reuse a freed
+/// `Arc<HostConfig>` address for a new config, which would otherwise serve a
+/// stale `CompiledMask` across hosts on config reload (BL-001).
+pub fn mask_config_hash(internal_patterns: &[String], mask_token: &str, body_mask_max_bytes: u64) -> u64 {
+    use std::hash::Hasher;
+    use twox_hash::XxHash64;
+    let mut h = XxHash64::with_seed(0);
+    h.write_u64(internal_patterns.len() as u64);
+    for p in internal_patterns {
+        h.write_u64(p.len() as u64);
+        h.write(p.as_bytes());
+    }
+    h.write_u64(mask_token.len() as u64);
+    h.write(mask_token.as_bytes());
+    h.write_u64(body_mask_max_bytes);
+    h.finish()
+}
+
 /// Apply the masker to one chunk. `body` is taken in-place: on return, it
 /// holds the bytes to forward downstream (possibly empty when everything got
 /// buffered into the tail).
@@ -278,5 +300,20 @@ mod tests {
         assert_eq!(out1, b"xx");
         let out2 = run(&mut s, &c, b"By", true);
         assert_eq!(out2, b"[redacted]y");
+    }
+
+    #[test]
+    fn mask_config_hash_distinguishes_field_changes() {
+        // BL-001 regression: every field that influences `CompiledMask::build`
+        // must change the hash, otherwise a config reload could land on an
+        // identical key and serve a stale compiled mask.
+        let p1 = vec!["foo".to_string()];
+        let p2 = vec!["foo".to_string(), "bar".to_string()];
+        let base = mask_config_hash(&p1, "[redacted]", 1024);
+        assert_ne!(base, mask_config_hash(&p2, "[redacted]", 1024), "patterns differ");
+        assert_ne!(base, mask_config_hash(&p1, "<X>", 1024), "mask token differs");
+        assert_ne!(base, mask_config_hash(&p1, "[redacted]", 2048), "max bytes differs");
+        // Same inputs must collide.
+        assert_eq!(base, mask_config_hash(&p1, "[redacted]", 1024));
     }
 }

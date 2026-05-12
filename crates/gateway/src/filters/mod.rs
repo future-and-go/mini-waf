@@ -14,6 +14,7 @@ pub mod response_body_content_scanner;
 pub mod response_body_decompressor;
 pub mod response_body_mask_filter;
 pub mod response_header_blocklist_filter;
+pub mod response_json_field_redactor;
 pub mod response_location_rewriter;
 pub mod response_server_policy_filter;
 pub mod response_via_strip_filter;
@@ -26,8 +27,11 @@ pub use request_real_ip_filter::RequestRealIpFilter;
 pub use request_xff_filter::RequestXffFilter;
 pub use response_body_content_scanner::{CompiledScanner, apply_chunk as apply_body_scan_chunk, scanner_config_hash};
 pub use response_body_decompressor::{DecoderChain, Encoding as ResponseEncoding, parse_encoding};
-pub use response_body_mask_filter::{CompiledMask, apply_chunk as apply_body_mask_chunk};
+pub use response_body_mask_filter::{CompiledMask, apply_chunk as apply_body_mask_chunk, mask_config_hash};
 pub use response_header_blocklist_filter::ResponseHeaderBlocklistFilter;
+pub use response_json_field_redactor::{
+    BodyRedactState, CompiledRedactor, apply_chunk as apply_redact_chunk, is_json_content_type, redactor_config_hash,
+};
 pub use response_location_rewriter::ResponseLocationRewriter;
 pub use response_server_policy_filter::ResponseServerPolicyFilter;
 pub use response_via_strip_filter::ResponseViaStripFilter;
