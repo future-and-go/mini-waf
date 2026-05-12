@@ -29,8 +29,9 @@ use crate::checks::tx_velocity::{
     TxStore, TxVelocityCheck, TxVelocityConfig, TxVelocityFileConfig, TxVelocityReloader,
 };
 use crate::checks::{
-    AntiHotlinkCheck, BotCheck, Check, DirTraversalCheck, GeoCheck, OWASPCheck, RateLimitCheck, RateLimitConfig,
-    RceCheck, ScannerCheck, SensitiveCheck, SqlInjectionCheck, XssCheck,
+    AntiHotlinkCheck, BotCheck, BruteForceCheck, Check, DirTraversalCheck, GeoCheck, HeaderInjectionCheck, OWASPCheck,
+    RateLimitCheck, RateLimitConfig, RceCheck, RequestBodyAbuseCheck, ScannerCheck, SensitiveCheck, SqlInjectionCheck,
+    SsrfCheck, XssCheck,
 };
 use crate::community::{CommunityChecker, CommunityReporter, RequestInfo};
 use crate::crowdsec::{AppSecClient, AppSecResult, CrowdSecChecker, appsec_to_detection};
@@ -141,6 +142,8 @@ impl WafEngine {
         // Build the Phase 5-11 checker pipeline (SQLi handled separately for hot-reload).
         // FR-004 RateLimitCheck runs first to shed flood traffic before expensive
         // pattern checks. Inert until `start_rate_limit_watcher` loads tier config.
+        // FR-014..020 checks register here so each downstream FR PR only swaps
+        // its own check file (zero shared-edit conflicts).
         let rl_store: Arc<dyn RateLimitStore> = Arc::new(RlMemoryStore::new());
         let rate_limit_cfg = Arc::new(ArcSwap::from(Arc::new(RateLimitConfig::default())));
 
@@ -191,6 +194,10 @@ impl WafEngine {
             Box::new(XssCheck::new()),
             Box::new(RceCheck::new()),
             Box::new(DirTraversalCheck::new()),
+            Box::new(SsrfCheck::new()),
+            Box::new(HeaderInjectionCheck::new()),
+            Box::new(BruteForceCheck::new()),
+            Box::new(RequestBodyAbuseCheck::new()),
         ];
 
         Self {
@@ -741,6 +748,23 @@ impl WafEngine {
         }
 
         WafDecision::allow()
+    }
+
+    /// Dispatch an upstream response status to every registered `Check`.
+    ///
+    /// Gateway callers invoke this from Pingora's `response_filter` after
+    /// extracting the status code. Most checks inherit the no-op default and
+    /// ignore the call; FR-018 brute-force records 401/403 as login
+    /// failures and FR-019 scanner (future) will count 4xx/5xx bursts.
+    ///
+    /// Sync on purpose — there's no body or await in v1. The work inside
+    /// each `on_response` impl is a bounded state insert (`DashMap` +
+    /// `Mutex` push).
+    pub fn on_response(&self, ctx: &RequestCtx, status: u16) {
+        for check in &self.checkers {
+            check.on_response(ctx, status);
+        }
+        self.sqli_check.on_response(ctx, status);
     }
 
     // ── Logging helpers ───────────────────────────────────────────────────────
