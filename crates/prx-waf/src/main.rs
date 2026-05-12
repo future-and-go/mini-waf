@@ -1374,6 +1374,24 @@ fn run_server(config: &AppConfig, config_file_path: &str, vlogs_layer_slot: Laye
         );
     }
 
+    // FR-035 — wire outbound response-header filter when enabled.
+    // Fail-safe: a misconfigured filter logs and continues without outbound
+    // protection rather than aborting the proxy.
+    if config.outbound.enabled {
+        match waf_engine::HeaderFilter::try_new(&config.outbound.headers) {
+            Ok(filter) => {
+                proxy.header_filter = Some(Arc::new(filter));
+                tracing::info!("Outbound header-leak prevention (FR-035) enabled");
+            }
+            Err(e) => {
+                tracing::error!(
+                    "FR-035: outbound header filter config invalid — outbound \
+                     protection DISABLED: {e}"
+                );
+            }
+        }
+    }
+
     let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
     proxy_service.add_tcp(&config.proxy.listen_addr);
     server.add_service(proxy_service);

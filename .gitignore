@@ -23,3 +23,10 @@ release-manifest.json
 test-results/
 playwright-report/
 playwright/.cache/
+
+.claude
+.gitnexus
+.kiro
+.cargo
+.opencode
+AGENTS.md
