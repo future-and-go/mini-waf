@@ -7,7 +7,7 @@
 //!     `ctx.request_ctx.is_some()`) excludes self-generated WAF block pages
 //!     so they cannot poison BF counters.
 //!
-//! Engine-side behaviour (gate by route / failed-status / defense_config flag)
+//! Engine-side behaviour (gate by route / failed-status / `defense_config` flag)
 //! is covered by `crates/waf-engine/tests/p0_detection_acceptance.rs`. These
 //! gateway-layer tests exist as regression guards over the wiring contract
 //! introduced in this PR.
