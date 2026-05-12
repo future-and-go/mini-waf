@@ -1,0 +1,168 @@
+name: Review All
+
+# Comprehensive verification — fmt, strict clippy, audit, coverage gate, e2e.
+# Heavier and slower than the default CI; trigger manually when needed
+# (e.g. before a release, or to verify a branch end-to-end without burning
+# CI minutes on every push).
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch/ref to validate (default: current)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy-strict:
+    name: clippy -D warnings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: review-all
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  audit:
+    name: cargo-audit (CVE scan)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - run: cargo audit --deny warnings
+
+  test:
+    name: workspace tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: review-all
+      - run: cargo test --workspace --all-features --exclude waf-cluster
+
+  coverage:
+    name: coverage ${{ matrix.crate }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [waf-common, waf-storage, waf-engine, gateway, waf-api, prx-waf]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: review-all-cov-${{ matrix.crate }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Coverage with 90% gate
+        run: |
+          cargo llvm-cov -p ${{ matrix.crate }} \
+            --summary-only \
+            --fail-under-lines 90
+
+  e2e-circuit-breaker:
+    name: e2e — FR-039 circuit breaker
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: review-all-e2e
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev cmake build-essential clang
+      - name: Build prx-waf release
+        run: cargo build --release -p prx-waf
+      - name: Ensure data/ + web/admin-panel/dist exist
+        run: |
+          mkdir -p data
+          mkdir -p web/admin-panel/dist
+          [ -f web/admin-panel/dist/index.html ] || echo "<html><body>placeholder</body></html>" > web/admin-panel/dist/index.html
+      - name: Run e2e compose
+        working-directory: tests/e2e/circuit-breaker
+        run: docker compose up --abort-on-container-exit --exit-code-from asserter
+      - name: Show WAF logs on failure
+        if: failure()
+        working-directory: tests/e2e/circuit-breaker
+        run: docker compose logs waf
+      - name: Teardown
+        if: always()
+        working-directory: tests/e2e/circuit-breaker
+        run: docker compose down --volumes
+
+  summary:
+    name: review-all summary
+    runs-on: ubuntu-latest
+    needs: [fmt, clippy-strict, test, coverage, e2e-circuit-breaker]
+    if: always()
+    steps:
+      - name: Aggregate status
+        run: |
+          echo "fmt:               ${{ needs.fmt.result }}"
+          echo "clippy-strict:     ${{ needs.clippy-strict.result }}"
+          echo "test:              ${{ needs.test.result }}"
+          echo "coverage:          ${{ needs.coverage.result }}"
+          echo "e2e:               ${{ needs.e2e-circuit-breaker.result }}"
+          for r in "${{ needs.fmt.result }}" "${{ needs.clippy-strict.result }}" \
+                   "${{ needs.test.result }}" "${{ needs.coverage.result }}" \
+                   "${{ needs.e2e-circuit-breaker.result }}"; do
+            if [ "$r" != "success" ]; then
+              echo "::error::review-all has failing jobs"
+              exit 1
+            fi
+          done
+          echo "review-all: ALL GREEN"
