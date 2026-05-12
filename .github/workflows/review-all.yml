@@ -26,6 +26,10 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
   CARGO_INCREMENTAL: 0
+  # Opt into Node.js 24 for JS-based actions (actions/checkout@v4, etc.) so
+  # the deprecation warnings stop showing up. Node 20 is removed from
+  # GitHub runners on 2026-09-16.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   fmt:
