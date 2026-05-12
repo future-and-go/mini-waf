@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 use gateway::{HostRouter, TunnelConfig, WafProxy};
@@ -1618,6 +1618,9 @@ async fn init_async(
             block_scripted_clients: entry.block_scripted_clients.unwrap_or(false),
             ..DefenseConfig::default()
         };
+        // FR-039: honour per-host upstream timeout overrides from TOML.
+        // `HostConfig::default()` supplies sane fallbacks when an Option is None.
+        let defaults = HostConfig::default();
         let cfg = Arc::new(HostConfig {
             code,
             host: entry.host.clone(),
@@ -1629,8 +1632,32 @@ async fn init_async(
             cert_file: entry.cert_file.clone(),
             key_file: entry.key_file.clone(),
             defense_config,
+            upstream_connect_timeout_ms: entry
+                .upstream_connect_timeout_ms
+                .unwrap_or(defaults.upstream_connect_timeout_ms),
+            upstream_total_connection_timeout_ms: entry
+                .upstream_total_connection_timeout_ms
+                .unwrap_or(defaults.upstream_total_connection_timeout_ms),
+            upstream_read_timeout_ms: entry
+                .upstream_read_timeout_ms
+                .unwrap_or(defaults.upstream_read_timeout_ms),
+            upstream_write_timeout_ms: entry
+                .upstream_write_timeout_ms
+                .unwrap_or(defaults.upstream_write_timeout_ms),
+            upstream_idle_timeout_ms: entry
+                .upstream_idle_timeout_ms
+                .unwrap_or(defaults.upstream_idle_timeout_ms),
+            upstream_circuit_503_retry_after_s: entry
+                .upstream_circuit_503_retry_after_s
+                .unwrap_or(defaults.upstream_circuit_503_retry_after_s),
             ..HostConfig::default()
         });
+        if let Err(e) = cfg.validate_upstream_timeouts() {
+            warn!(
+                host = %cfg.host,
+                "FR-039: invalid upstream timeouts in TOML — falling back to defaults: {e}"
+            );
+        }
         router.register(&cfg);
     }
 

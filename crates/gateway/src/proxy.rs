@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use tracing::{debug, info, warn};
 
-use pingora_core::upstreams::peer::HttpPeer;
+use pingora_core::upstreams::peer::{HttpPeer, Peer};
 use pingora_proxy::{FailToProxy, ProxyHttp, Session};
 
 use waf_common::HostConfig;
@@ -240,10 +240,20 @@ impl WafProxy {
 /// Mirrors the default `fail_to_proxy` mapping but lives in gateway code so we
 /// can render a neutral body. `0` means "downstream is already gone — do not
 /// attempt to write a response."
+///
+/// FR-039: transport-layer failures (connect timeout, read/write timeout,
+/// connection refused, TLS handshake timeout) map to 503 — distinguishes a
+/// dead upstream ("WAF is up but backend is unreachable") from an application
+/// error ("backend replied but with 5xx"). The plain `502` we previously
+/// returned conflated the two.
 fn error_to_status(e: &pingora_core::Error) -> u16 {
     use pingora_core::{ErrorSource, ErrorType};
     if let ErrorType::HTTPStatus(code) = e.etype() {
         return *code;
+    }
+    // FR-039: transport-layer "backend unresponsive" → 503.
+    if is_transport_unresponsive(e.etype()) {
+        return 503;
     }
     match e.esource() {
         ErrorSource::Upstream => 502,
@@ -253,6 +263,36 @@ fn error_to_status(e: &pingora_core::Error) -> u16 {
         },
         ErrorSource::Internal | ErrorSource::Unset => 500,
     }
+}
+
+/// FR-039: classify whether an [`ErrorType`] indicates the upstream is
+/// unresponsive (no reply within the configured deadline OR refused
+/// connection). Pure, exhaustive on the timeout/connect family.
+const fn is_transport_unresponsive(et: &pingora_core::ErrorType) -> bool {
+    use pingora_core::ErrorType;
+    matches!(
+        et,
+        ErrorType::ConnectTimedout
+            | ErrorType::ConnectRefused
+            | ErrorType::ConnectNoRoute
+            | ErrorType::ConnectError
+            | ErrorType::ConnectProxyFailure
+            | ErrorType::TLSHandshakeTimedout
+            | ErrorType::ReadTimedout
+            | ErrorType::WriteTimedout
+    )
+}
+
+/// FR-039: copy the per-host upstream timeouts into the Pingora [`HttpPeer`]
+/// options. Pulled out of `upstream_peer()` so unit tests can verify the
+/// mapping without spinning up a full Pingora `Server`.
+pub(crate) const fn apply_fr039_timeouts(peer: &mut HttpPeer, host_config: &HostConfig) {
+    peer.options.connection_timeout = Some(Duration::from_millis(host_config.upstream_connect_timeout_ms));
+    peer.options.total_connection_timeout =
+        Some(Duration::from_millis(host_config.upstream_total_connection_timeout_ms));
+    peer.options.read_timeout = Some(Duration::from_millis(host_config.upstream_read_timeout_ms));
+    peer.options.write_timeout = Some(Duration::from_millis(host_config.upstream_write_timeout_ms));
+    peer.options.idle_timeout = Some(Duration::from_millis(host_config.upstream_idle_timeout_ms));
 }
 
 /// FR-033: gate the body content scanner on a Content-Type allowlist so we
@@ -365,11 +405,9 @@ impl ProxyHttp for WafProxy {
         }
 
         info!("Proxying {} → {}", host_header, upstream_addr);
-        Ok(Box::new(HttpPeer::new(
-            &upstream_addr,
-            use_tls,
-            host_config.remote_host.clone(),
-        )))
+        let mut peer = HttpPeer::new(&upstream_addr, use_tls, host_config.remote_host.clone());
+        apply_fr039_timeouts(&mut peer, &host_config);
+        Ok(Box::new(peer))
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut GatewayCtx) -> pingora_core::Result<bool> {
@@ -650,7 +688,16 @@ impl ProxyHttp for WafProxy {
     where
         Self::CTX: Send + Sync,
     {
+        let upstream_contacted = ctx.upstream_addr.is_some();
         if let (Some(req_ctx), Some(hc)) = (&ctx.request_ctx, &ctx.host_config) {
+            // FR-018: brute-force / credential-stuffing dispatch. Engine state
+            // advances on every upstream response status; the actual block
+            // decision surfaces at the next request via request-time check.
+            // Gated on `upstream_contacted` so self-generated WAF block pages
+            // (request-time 403/401) cannot poison BF counters.
+            if upstream_contacted {
+                self.engine.on_response(req_ctx, upstream_response.status.as_u16());
+            }
             let fctx = FilterCtx {
                 request_ctx: req_ctx,
                 host_config: hc,
@@ -844,6 +891,27 @@ impl ProxyHttp for WafProxy {
         Ok(None)
     }
 
+    /// FR-039: upstream connect failed (timeout, refused, no route, TLS
+    /// handshake timed out). We never call `e.set_retry(true)` — retrying a
+    /// timed-out upstream is exactly the hang FR-039 forbids. Falling through
+    /// to `fail_to_proxy()` lets `error_to_status()` map this to 503.
+    fn fail_to_connect(
+        &self,
+        _session: &mut Session,
+        peer: &HttpPeer,
+        _ctx: &mut Self::CTX,
+        e: Box<pingora_core::Error>,
+    ) -> Box<pingora_core::Error> {
+        if is_transport_unresponsive(e.etype()) {
+            warn!(
+                upstream = peer.address().to_string(),
+                err = ?e.etype(),
+                "FR-039: upstream unresponsive; emitting 503 (no retry)",
+            );
+        }
+        e
+    }
+
     /// AC-19: render a neutral, content-negotiated error page (no Pingora fingerprint).
     ///
     /// Maps the error to an HTTP status using the same heuristics as the trait
@@ -889,5 +957,196 @@ impl ProxyHttp for WafProxy {
                 ctx.upstream_addr.as_deref().unwrap_or("unknown"),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod fr039_tests {
+    //! FR-039 unit tests — pure-function level. Verify the timeout
+    //! mapping and the transport-error classification without spinning
+    //! up a Pingora server. End-to-end behaviour (hang backend → 503
+    //! within deadline) is covered by Phase 4 Docker e2e.
+    use super::*;
+    use pingora_core::ErrorType;
+
+    // ── apply_fr039_timeouts ────────────────────────────────────────────────
+
+    #[test]
+    fn timeouts_copied_from_host_config_default() {
+        let hc = HostConfig::default();
+        let mut peer = HttpPeer::new("127.0.0.1:8080", false, "test".into());
+        apply_fr039_timeouts(&mut peer, &hc);
+        assert_eq!(peer.options.connection_timeout, Some(Duration::from_secs(5)));
+        assert_eq!(peer.options.total_connection_timeout, Some(Duration::from_secs(10)));
+        assert_eq!(peer.options.read_timeout, Some(Duration::from_secs(30)));
+        assert_eq!(peer.options.write_timeout, Some(Duration::from_secs(10)));
+        assert_eq!(peer.options.idle_timeout, Some(Duration::from_mins(1)));
+    }
+
+    #[test]
+    fn timeouts_copied_from_host_config_custom() {
+        let hc = HostConfig {
+            upstream_connect_timeout_ms: 1_500,
+            upstream_total_connection_timeout_ms: 3_000,
+            upstream_read_timeout_ms: 7_500,
+            upstream_write_timeout_ms: 4_000,
+            upstream_idle_timeout_ms: 45_000,
+            ..HostConfig::default()
+        };
+        let mut peer = HttpPeer::new("127.0.0.1:8080", true, "test".into());
+        apply_fr039_timeouts(&mut peer, &hc);
+        assert_eq!(peer.options.connection_timeout, Some(Duration::from_millis(1_500)));
+        assert_eq!(peer.options.total_connection_timeout, Some(Duration::from_secs(3)));
+        assert_eq!(peer.options.read_timeout, Some(Duration::from_millis(7_500)));
+        assert_eq!(peer.options.write_timeout, Some(Duration::from_secs(4)));
+        assert_eq!(peer.options.idle_timeout, Some(Duration::from_secs(45)));
+    }
+
+    #[test]
+    fn timeouts_overwrite_pre_existing_options() {
+        let hc = HostConfig::default();
+        let mut peer = HttpPeer::new("127.0.0.1:8080", false, "test".into());
+        // Simulate a pre-populated peer (e.g., another filter set defaults).
+        peer.options.read_timeout = Some(Duration::from_millis(1));
+        apply_fr039_timeouts(&mut peer, &hc);
+        // FR-039 values win.
+        assert_eq!(peer.options.read_timeout, Some(Duration::from_secs(30)));
+    }
+
+    // ── is_transport_unresponsive ───────────────────────────────────────────
+
+    fn transport_unresponsive_set() -> [ErrorType; 8] {
+        [
+            ErrorType::ConnectTimedout,
+            ErrorType::ConnectRefused,
+            ErrorType::ConnectNoRoute,
+            ErrorType::ConnectError,
+            ErrorType::ConnectProxyFailure,
+            ErrorType::TLSHandshakeTimedout,
+            ErrorType::ReadTimedout,
+            ErrorType::WriteTimedout,
+        ]
+    }
+
+    fn non_transport_set() -> [ErrorType; 10] {
+        [
+            ErrorType::HTTPStatus(500),
+            ErrorType::HTTPStatus(502),
+            ErrorType::InvalidHTTPHeader,
+            ErrorType::H1Error,
+            ErrorType::H2Error,
+            ErrorType::ReadError,
+            ErrorType::WriteError,
+            ErrorType::ConnectionClosed,
+            ErrorType::InternalError,
+            ErrorType::UnknownError,
+        ]
+    }
+
+    #[test]
+    fn is_transport_unresponsive_yes() {
+        for et in transport_unresponsive_set() {
+            assert!(
+                is_transport_unresponsive(&et),
+                "expected `{et:?}` to classify as transport-unresponsive"
+            );
+        }
+    }
+
+    #[test]
+    fn is_transport_unresponsive_no() {
+        for et in non_transport_set() {
+            assert!(
+                !is_transport_unresponsive(&et),
+                "did NOT expect `{et:?}` to classify as transport-unresponsive"
+            );
+        }
+    }
+
+    // ── error_to_status ─────────────────────────────────────────────────────
+
+    #[test]
+    fn http_status_passthrough() {
+        // Explicit HTTPStatus(n) must return n directly (e.g. WAF block 403).
+        for code in [400u16, 403, 404, 413, 500, 502, 504] {
+            let e = pingora_core::Error::new(ErrorType::HTTPStatus(code));
+            assert_eq!(error_to_status(&e), code, "HTTPStatus({code}) should pass through");
+        }
+    }
+
+    #[test]
+    fn transport_errors_map_to_503() {
+        // FR-039: every whitelisted transport variant maps to 503, regardless
+        // of esource. We test with Unset (Error::new) and Upstream (new_up)
+        // — both must hit the FR-039 branch *before* the esource match.
+        for et in transport_unresponsive_set() {
+            let e = pingora_core::Error::new(et.clone());
+            assert_eq!(error_to_status(&e), 503, "FR-039: `{et:?}` (unset) → 503");
+            let e = pingora_core::Error::new_up(et.clone());
+            assert_eq!(error_to_status(&e), 503, "FR-039: `{et:?}` (upstream) → 503");
+        }
+    }
+
+    #[test]
+    fn non_transport_upstream_errors_still_502() {
+        // Application-side or framing errors that come from the upstream
+        // direction stay 502 — we did not regress the pre-FR-039 behaviour.
+        let e = pingora_core::Error::new_up(ErrorType::InvalidHTTPHeader);
+        assert_eq!(error_to_status(&e), 502);
+        let e = pingora_core::Error::new_up(ErrorType::H1Error);
+        assert_eq!(error_to_status(&e), 502);
+        let e = pingora_core::Error::new_up(ErrorType::H2Error);
+        assert_eq!(error_to_status(&e), 502);
+    }
+
+    #[test]
+    fn downstream_io_returns_zero() {
+        // Original behaviour: when the downstream socket is already gone we
+        // must not try to write a response. Sentinel value 0 means
+        // "skip response write".
+        for et in [ErrorType::WriteError, ErrorType::ReadError, ErrorType::ConnectionClosed] {
+            let e = pingora_core::Error::new_down(et.clone());
+            assert_eq!(error_to_status(&e), 0, "{et:?} downstream → 0 sentinel");
+        }
+    }
+
+    #[test]
+    fn downstream_other_returns_400() {
+        // Downstream errors that aren't the closed-socket sentinels map to 400.
+        let e = pingora_core::Error::new_down(ErrorType::InvalidHTTPHeader);
+        assert_eq!(error_to_status(&e), 400);
+    }
+
+    #[test]
+    fn internal_unspecified_returns_500() {
+        let e = pingora_core::Error::new_in(ErrorType::InternalError);
+        assert_eq!(error_to_status(&e), 500);
+        let e = pingora_core::Error::new_in(ErrorType::UnknownError);
+        assert_eq!(error_to_status(&e), 500);
+        // Unset source on a non-transport error falls into the same Internal arm.
+        let e = pingora_core::Error::new(ErrorType::UnknownError);
+        assert_eq!(error_to_status(&e), 500);
+    }
+
+    // ── retry-after header round-trip via ErrorPageFactory ───────────────────
+
+    #[test]
+    fn retry_after_present_on_503_only() {
+        use crate::error_page::ErrorPageFactory;
+        use http::HeaderValue;
+        let (h, _) = ErrorPageFactory::render(503, None).expect("render 503");
+        assert_eq!(
+            h.headers.get("retry-after").map(HeaderValue::as_bytes),
+            Some(b"5".as_slice())
+        );
+
+        let (h, _) = ErrorPageFactory::render(502, None).expect("render 502");
+        assert!(
+            h.headers.get("retry-after").is_none(),
+            "Retry-After must NOT be set on non-503"
+        );
+
+        let (h, _) = ErrorPageFactory::render(403, None).expect("render 403");
+        assert!(h.headers.get("retry-after").is_none());
     }
 }
