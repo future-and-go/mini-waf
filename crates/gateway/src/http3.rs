@@ -118,8 +118,16 @@ async fn handle_quic_connection(
         .await
         .context("h3 handshake failed")?;
 
+    // FR-039: cap H3 upstream forward time so a dead backend cannot hang the
+    // QUIC server thread. Values mirror HostConfig::default() to stay in sync
+    // with the H1/H2 path (HostConfig fields not consulted here because the
+    // H3 listener serves all hosts through one shared reqwest client; per-host
+    // tuning would require a client-per-host refactor outside FR-039 scope).
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(!upstream_tls_verify)
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(30))
+        .pool_idle_timeout(std::time::Duration::from_mins(1))
         .build()?;
 
     loop {

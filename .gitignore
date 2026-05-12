@@ -30,3 +30,8 @@ playwright/.cache/
 .cargo
 .opencode
 AGENTS.md
+
+# Session-local context written by ck:cook (rules.md line 3); never committed.
+/context.md
+/TODO.md
+/rules.md
