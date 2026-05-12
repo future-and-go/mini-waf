@@ -12,6 +12,12 @@ on:
         description: 'Branch/ref to validate (default: current)'
         required: false
         type: string
+  # Auto-run on ci/** branches so the workflow itself can be verified
+  # before merging into main. Once merged, the workflow_dispatch button
+  # appears in the Actions UI for on-demand runs against any ref.
+  push:
+    branches:
+      - 'ci/**'
 
 permissions:
   contents: read
