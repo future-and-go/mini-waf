@@ -41,16 +41,6 @@ impl ErrorPageFactory {
             .map_err(|e| {
                 pingora_core::Error::because(pingora_core::ErrorType::InternalError, "set content-length", e)
             })?;
-        // FR-039: prevent thundering-herd retry storms after a circuit-trip.
-        // The 5-second default matches `HostConfig::upstream_circuit_503_retry_after_s`
-        // (we use the constant rather than threading the per-host value
-        // through every caller; a future change can plumb the host value if
-        // operators ever need per-host tuning).
-        if status == 503 {
-            headers.insert_header("retry-after", "5").map_err(|e| {
-                pingora_core::Error::because(pingora_core::ErrorType::InternalError, "set retry-after", e)
-            })?;
-        }
         // Explicit scrub: defends against Pingora-injected defaults at h1/h2 layer.
         let _ = headers.remove_header("server");
         let _ = headers.remove_header("via");

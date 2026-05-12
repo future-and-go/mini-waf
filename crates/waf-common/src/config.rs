@@ -281,21 +281,6 @@ pub struct HostEntry {
     /// hosts reached exclusively by browsers.
     #[serde(default)]
     pub block_scripted_clients: Option<bool>,
-    /// FR-039 per-host upstream timeout overrides. Each is optional — omitted
-    /// values fall back to `HostConfig::default()` (5s connect / 30s read /
-    /// 10s write / 60s idle / 5s Retry-After).
-    #[serde(default)]
-    pub upstream_connect_timeout_ms: Option<u64>,
-    #[serde(default)]
-    pub upstream_total_connection_timeout_ms: Option<u64>,
-    #[serde(default)]
-    pub upstream_read_timeout_ms: Option<u64>,
-    #[serde(default)]
-    pub upstream_write_timeout_ms: Option<u64>,
-    #[serde(default)]
-    pub upstream_idle_timeout_ms: Option<u64>,
-    #[serde(default)]
-    pub upstream_circuit_503_retry_after_s: Option<u32>,
 }
 
 /// Storage backend selector for the response cache.
