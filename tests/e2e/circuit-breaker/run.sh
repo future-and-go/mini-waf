@@ -23,18 +23,20 @@ between() {
 }
 
 # ── E1: hang backend → 503 within (read_timeout + slack) ────────────────────
-start=$(date +%s%N)
-status=$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H 'Host: hang.test' "$PROXY/") || status=000
-elapsed_ms=$(( ( $(date +%s%N) - start ) / 1000000 ))
+# Use curl's %{time_total} (seconds with decimals) instead of `date +%N` —
+# busybox `date` in the alpine-based asserter image lacks nanosecond support.
+out=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' -m 10 -H 'Host: hang.test' "$PROXY/") || out="000 0"
+status=$(echo "$out" | awk '{print $1}')
+elapsed_ms=$(echo "$out" | awk '{printf "%d", $2 * 1000}')
 echo "E1 hang-backend → status=${status} elapsed=${elapsed_ms}ms"
 assert "E1 status=503" [ "$status" = "503" ]
 # Test-scale read_timeout is 1500ms → expect ~1.5s, allow 1.0–4.5s window.
 assert "E1 elapsed in [1000, 4500]ms" between 1000 4500 "$elapsed_ms"
 
 # ── E2: connection refused → 503 fast ───────────────────────────────────────
-start=$(date +%s%N)
-status=$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H 'Host: refused.test' "$PROXY/") || status=000
-elapsed_ms=$(( ( $(date +%s%N) - start ) / 1000000 ))
+out=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' -m 10 -H 'Host: refused.test' "$PROXY/") || out="000 0"
+status=$(echo "$out" | awk '{print $1}')
+elapsed_ms=$(echo "$out" | awk '{printf "%d", $2 * 1000}')
 echo "E2 refused-backend → status=${status} elapsed=${elapsed_ms}ms"
 assert "E2 status=503" [ "$status" = "503" ]
 assert "E2 elapsed < 2500ms" [ "$elapsed_ms" -lt 2500 ]

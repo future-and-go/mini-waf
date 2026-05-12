@@ -13,10 +13,14 @@ database_url    = "postgresql://prx_waf:prx_waf@postgres:5432/prx_waf"
 max_connections = 5
 
 [cache]
-enabled = false
+enabled          = false
+max_size_mb      = 256
+default_ttl_secs = 60
+max_ttl_secs     = 3600
 
 [http3]
-enabled = false
+enabled     = false
+listen_addr = "0.0.0.0:443"
 
 [security]
 admin_ip_allowlist     = []
