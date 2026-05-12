@@ -13,7 +13,6 @@ use std::time::Duration;
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
-use dashmap::DashMap;
 use tracing::{debug, info, warn};
 
 use pingora_core::upstreams::peer::HttpPeer;
@@ -35,10 +34,11 @@ use crate::context::{BODY_PREVIEW_LIMIT, ChallengeCtx, GatewayCtx, ResponseCache
 use crate::ctx_builder::RequestCtxBuilder;
 use crate::error_page::ErrorPageFactory;
 use crate::filters::{
-    CompiledMask, CompiledScanner, DecoderChain, RequestForwardedHostFilter, RequestForwardedProtoFilter,
-    RequestHopByHopFilter, RequestHostPolicyFilter, RequestRealIpFilter, RequestXffFilter, ResponseEncoding,
-    ResponseHeaderBlocklistFilter, ResponseLocationRewriter, ResponseServerPolicyFilter, ResponseViaStripFilter,
-    apply_body_mask_chunk, apply_body_scan_chunk, parse_encoding, scanner_config_hash,
+    CompiledMask, CompiledRedactor, CompiledScanner, DecoderChain, RequestForwardedHostFilter,
+    RequestForwardedProtoFilter, RequestHopByHopFilter, RequestHostPolicyFilter, RequestRealIpFilter, RequestXffFilter,
+    ResponseEncoding, ResponseHeaderBlocklistFilter, ResponseLocationRewriter, ResponseServerPolicyFilter,
+    ResponseViaStripFilter, apply_body_mask_chunk, apply_body_scan_chunk, apply_redact_chunk, is_json_content_type,
+    mask_config_hash, parse_encoding, redactor_config_hash, scanner_config_hash,
 };
 use crate::pipeline::{AccessGateOutcome, AccessPhaseGate, FilterCtx, RequestFilterChain, ResponseFilterChain};
 use crate::protocol::{ProtoCounters, detect_from_session};
@@ -64,9 +64,13 @@ pub struct WafProxy {
     pub request_chain: Arc<RequestFilterChain>,
     /// Ordered chain of response filters (populated by phases 02–03).
     pub response_chain: Arc<ResponseFilterChain>,
-    /// AC-17: per-host compiled mask cache, keyed by `Arc<HostConfig>` pointer
-    /// identity. Compiled lazily on first body chunk; survives until config reload.
-    pub body_mask_cache: Arc<DashMap<usize, Arc<CompiledMask>>>,
+    /// AC-17: per-host compiled mask cache, keyed by content hash
+    /// `(host_name, xxhash64(internal_patterns, mask_token, body_mask_max_bytes))`
+    /// so the allocator reusing a freed `Arc<HostConfig>` address on reload
+    /// cannot serve a stale `CompiledMask` to a different host (BL-001).
+    /// Bounded via `moka::sync::Cache` (256 entries / 1 h TTL) so config churn
+    /// cannot grow the cache without bound.
+    pub body_mask_cache: moka::sync::Cache<(String, u64), Arc<CompiledMask>>,
     /// FR-002: tier policy registry. When `None`, every request defaults to
     /// `Tier::CatchAll` + permissive policy (boot-time safety).
     pub tier_registry: Option<Arc<TierPolicyRegistry>>,
@@ -96,6 +100,9 @@ pub struct WafProxy {
     /// churn cannot grow the cache without bound (red-team review H2).
     /// AC-17 / FR-034 caches inherit the same hazard; backport tracked separately.
     pub body_scan_cache: moka::sync::Cache<(String, u64), Arc<CompiledScanner>>,
+    /// FR-034: per-host compiled JSON redactor cache. Same content-hashed
+    /// keying scheme as `body_mask_cache` (BL-001).
+    pub body_redact_cache: moka::sync::Cache<(String, u64), Arc<CompiledRedactor>>,
 }
 
 impl WafProxy {
@@ -111,7 +118,10 @@ impl WafProxy {
             proto_counters: ProtoCounters::new(),
             request_chain: Arc::new(build_request_chain()),
             response_chain: Arc::new(build_response_chain()),
-            body_mask_cache: Arc::new(DashMap::new()),
+            body_mask_cache: moka::sync::Cache::builder()
+                .max_capacity(256)
+                .time_to_live(Duration::from_hours(1))
+                .build(),
             tier_registry: None,
             access_lists: None,
             relay_detector: None,
@@ -121,7 +131,11 @@ impl WafProxy {
             challenge_ctx: None,
             body_scan_cache: moka::sync::Cache::builder()
                 .max_capacity(256)
-                .time_to_live(std::time::Duration::from_hours(1))
+                .time_to_live(Duration::from_hours(1))
+                .build(),
+            body_redact_cache: moka::sync::Cache::builder()
+                .max_capacity(256)
+                .time_to_live(Duration::from_hours(1))
                 .build(),
         }
     }
@@ -170,12 +184,15 @@ impl WafProxy {
     }
 
     /// Resolve (and lazily compile) the mask config for a given host.
-    /// Cache key is the `Arc<HostConfig>` pointer; identical configs across
-    /// requests reuse the same compiled regex.
+    /// Cache key is `(host_name, xxhash64(internal_patterns, mask_token,
+    /// body_mask_max_bytes))` — content-hashed so that an `Arc<HostConfig>`
+    /// landing at a previously-freed address on config reload cannot serve a
+    /// stale `CompiledMask` from a different host (BL-001).
     fn resolve_mask(&self, hc: &Arc<HostConfig>) -> Arc<CompiledMask> {
-        let key = Arc::as_ptr(hc) as usize;
+        let cfg_hash = mask_config_hash(&hc.internal_patterns, &hc.mask_token, hc.body_mask_max_bytes);
+        let key = (hc.host.clone(), cfg_hash);
         if let Some(existing) = self.body_mask_cache.get(&key) {
-            return Arc::clone(&existing);
+            return existing;
         }
         let compiled = Arc::new(CompiledMask::build(
             &hc.internal_patterns,
@@ -198,6 +215,19 @@ impl WafProxy {
         }
         let compiled = Arc::new(CompiledScanner::build(hc.body_scan_max_body_bytes));
         self.body_scan_cache.insert(key, Arc::clone(&compiled));
+        compiled
+    }
+
+    /// FR-034: resolve (and lazily compile) the JSON field redactor for a
+    /// given host. Mirrors `resolve_mask` keying scheme (BL-001).
+    fn resolve_redactor(&self, hc: &Arc<HostConfig>) -> Arc<CompiledRedactor> {
+        let cfg_hash = redactor_config_hash(hc);
+        let key = (hc.host.clone(), cfg_hash);
+        if let Some(existing) = self.body_redact_cache.get(&key) {
+            return existing;
+        }
+        let compiled = Arc::new(CompiledRedactor::build(hc));
+        self.body_redact_cache.insert(key, Arc::clone(&compiled));
         compiled
     }
 }
@@ -689,6 +719,28 @@ impl ProxyHttp for WafProxy {
             } else if !compiled.is_noop() {
                 debug!("body-mask: skipping non-identity content-encoding");
             }
+
+            // FR-034: decide whether JSON field redaction will run. Conditions:
+            //   * identity Content-Encoding (reuse the boolean above)
+            //   * Content-Type is application/json or application/*+json
+            //   * Compiled redactor is non-noop for this host
+            let redactor = self.resolve_redactor(hc);
+            if !redactor.is_noop() {
+                if identity {
+                    let ct_is_json = upstream_response
+                        .headers
+                        .get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .is_some_and(is_json_content_type);
+                    if ct_is_json {
+                        ctx.body_redact.enabled = true;
+                        // Length will mismatch; AC-17 may already have removed.
+                        let _ = upstream_response.remove_header("content-length");
+                    }
+                } else {
+                    debug!("json-redact: skipping non-identity content-encoding");
+                }
+            }
         }
 
         // Cache capture reads `Content-Encoding` from the same header map Pingora will
@@ -716,26 +768,33 @@ impl ProxyHttp for WafProxy {
     where
         Self::CTX: Send + Sync,
     {
-        // Body mutation (scan/mask) and response cache are mutually exclusive
-        // *by design*: mutation rewrites bytes in place (length differs from
-        // match length → chunked encoding) so the bytes streamed downstream
-        // are NOT what the cache would replay. `response_filter` enforces the
-        // contract by passing `body_mask_enabled` into
+        // Body mutation (scan/redact/mask) and response cache are mutually
+        // exclusive *by design*: mutation rewrites bytes in place (length
+        // differs from match length → chunked encoding) so the bytes streamed
+        // downstream are NOT what the cache would replay. `response_filter`
+        // enforces the contract by passing `body_mask_enabled` into
         // `begin_upstream_cache_capture`, which short-circuits and clears
         // `ctx.response_cache_store` to `None`.
-        if ctx.body_scan.enabled || ctx.body_mask.enabled {
+        if ctx.body_scan.enabled || ctx.body_redact.enabled || ctx.body_mask.enabled {
             let Some(hc) = ctx.host_config.clone() else {
                 return Ok(None);
             };
 
-            // FR-033 runs FIRST so AC-17 sees plaintext.
+            // FR-033 runs FIRST so FR-034 + AC-17 see plaintext.
             if ctx.body_scan.enabled {
                 let scanner = self.resolve_scanner(&hc);
                 let host_label: &str = hc.host.as_str();
                 apply_body_scan_chunk(&mut ctx.body_scan, &scanner, body, end_of_stream, host_label);
             }
 
-            // AC-17 — operator regex masker on (now-plaintext) bytes.
+            // FR-034: buffers JSON, sets *body = None until EOS or cap; emits
+            // redacted full body. AC-17 then runs over it as a single chunk.
+            if ctx.body_redact.enabled {
+                let redactor = self.resolve_redactor(&hc);
+                apply_redact_chunk(&mut ctx.body_redact, &redactor, body, end_of_stream);
+            }
+
+            // AC-17 — operator regex masker on (now-plaintext, redacted) bytes.
             if ctx.body_mask.enabled {
                 let compiled = self.resolve_mask(&hc);
                 apply_body_mask_chunk(&mut ctx.body_mask, &compiled, body, end_of_stream);
