@@ -1874,6 +1874,7 @@ dependencies = [
 name = "gateway"
 version = "0.2.0"
 dependencies = [
+ "aho-corasick",
  "anyhow",
  "arc-swap",
  "async-trait",
@@ -1883,6 +1884,7 @@ dependencies = [
  "chrono",
  "criterion",
  "dashmap",
+ "flate2",
  "fred",
  "futures-util",
  "h3",
@@ -1901,6 +1903,7 @@ dependencies = [
  "rand 0.8.5",
  "rcgen",
  "regex",
+ "regex-syntax",
  "reqwest",
  "rustls",
  "rustls-pki-types",
@@ -1908,6 +1911,7 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "sha2",
+ "static_assertions",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1915,6 +1919,7 @@ dependencies = [
  "toml",
  "tower",
  "tracing",
+ "twox-hash",
  "url",
  "uuid",
  "waf-common",

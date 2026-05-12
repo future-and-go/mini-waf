@@ -47,6 +47,10 @@ prx-waf/
 │   │   │   ├── stats.rs       # Cache statistics (hit/miss/bypassed/purges counters, tag_index_size)
 │   │   │   ├── watcher.rs     # File watcher for rules/cache.yaml hot-reload (notify, 500ms debounce)
 │   │   │   └── mod.rs         # Cache resolver facade
+│   │   ├── filters/
+│   │   │   ├── response_body_mask_filter.rs        # AC-17 operator regex
+│   │   │   ├── response_body_content_scanner.rs    # FR-033 built-in catalog
+│   │   │   └── response_body_decompressor.rs       # FR-033 gzip decoder
 │   │   └── tunnel.rs          # Reverse tunnel (encrypted WebSocket)
 │   │
 │   ├── waf-engine/src/

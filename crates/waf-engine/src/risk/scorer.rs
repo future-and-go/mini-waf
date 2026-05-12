@@ -418,6 +418,7 @@ mod tests {
                 internal_patterns: vec![],
                 mask_token: "[REDACTED]".to_string(),
                 body_mask_max_bytes: 1_000_000,
+                ..Default::default()
             }),
             geo: None,
             tier: waf_common::tier::Tier::CatchAll,
