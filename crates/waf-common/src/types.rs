@@ -317,32 +317,6 @@ pub struct HostConfig {
     /// deliberately distinguishes `cardNumber` from `CardNumber`.
     #[serde(default = "default_redact_case_insensitive")]
     pub redact_case_insensitive: bool,
-    /// FR-039: Pingora upstream TCP handshake timeout (milliseconds).
-    /// Applies to the TCP SYN/ACK/ACK phase only — TLS handshake is bounded
-    /// by [`Self::upstream_total_connection_timeout_ms`].
-    #[serde(default = "default_upstream_connect_timeout_ms")]
-    pub upstream_connect_timeout_ms: u64,
-    /// FR-039: TCP + TLS handshake total timeout (milliseconds). MUST be
-    /// `>= upstream_connect_timeout_ms`; validated at config load.
-    #[serde(default = "default_upstream_total_connection_timeout_ms")]
-    pub upstream_total_connection_timeout_ms: u64,
-    /// FR-039: Per-read operation timeout (milliseconds). Resets after each
-    /// successful read — streaming responses (SSE, chunked JSON) are safe
-    /// as long as individual chunks arrive within this window.
-    #[serde(default = "default_upstream_read_timeout_ms")]
-    pub upstream_read_timeout_ms: u64,
-    /// FR-039: Per-write operation timeout (milliseconds). Mirrors read
-    /// timeout semantics for upstream send.
-    #[serde(default = "default_upstream_write_timeout_ms")]
-    pub upstream_write_timeout_ms: u64,
-    /// FR-039: Pool idle-connection reuse timeout (milliseconds). Connections
-    /// idle longer than this are pruned before reuse.
-    #[serde(default = "default_upstream_idle_timeout_ms")]
-    pub upstream_idle_timeout_ms: u64,
-    /// FR-039: Value of the `Retry-After` header on 503 responses emitted
-    /// because the upstream was unresponsive (seconds).
-    #[serde(default = "default_upstream_circuit_503_retry_after_s")]
-    pub upstream_circuit_503_retry_after_s: u32,
 }
 
 const fn default_preserve_host() -> bool {
@@ -375,58 +349,6 @@ const fn default_redact_max_bytes() -> u64 {
 
 const fn default_redact_case_insensitive() -> bool {
     true
-}
-
-// FR-039: upstream timeout defaults. Values chosen per industry norms (see
-// `plans/reports/researcher-260512-1425-fr-039-pingora-circuit-breaker.md`).
-const fn default_upstream_connect_timeout_ms() -> u64 {
-    5_000
-}
-
-const fn default_upstream_total_connection_timeout_ms() -> u64 {
-    10_000
-}
-
-const fn default_upstream_read_timeout_ms() -> u64 {
-    30_000
-}
-
-const fn default_upstream_write_timeout_ms() -> u64 {
-    10_000
-}
-
-const fn default_upstream_idle_timeout_ms() -> u64 {
-    60_000
-}
-
-const fn default_upstream_circuit_503_retry_after_s() -> u32 {
-    5
-}
-
-/// FR-039 validation error: connect timeout greater than total connection
-/// timeout. Loud and specific so config-load fails fast.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub enum HostUpstreamTimeoutError {
-    #[error(
-        "upstream_connect_timeout_ms ({connect}) > upstream_total_connection_timeout_ms ({total}); connect must be <= total"
-    )]
-    ConnectExceedsTotal { connect: u64, total: u64 },
-}
-
-impl HostConfig {
-    /// FR-039: validate upstream timeout invariants. Returns `Err` when
-    /// `upstream_connect_timeout_ms > upstream_total_connection_timeout_ms`
-    /// (a Pingora `connect_timeout > total_connection_timeout` is meaningless
-    /// because the TLS handshake counts toward the total). Pure, no I/O.
-    pub const fn validate_upstream_timeouts(&self) -> Result<(), HostUpstreamTimeoutError> {
-        if self.upstream_connect_timeout_ms > self.upstream_total_connection_timeout_ms {
-            return Err(HostUpstreamTimeoutError::ConnectExceedsTotal {
-                connect: self.upstream_connect_timeout_ms,
-                total: self.upstream_total_connection_timeout_ms,
-            });
-        }
-        Ok(())
-    }
 }
 
 impl Default for HostConfig {
@@ -468,12 +390,6 @@ impl Default for HostConfig {
             redact_mask_token: default_redact_mask_token(),
             redact_max_bytes: default_redact_max_bytes(),
             redact_case_insensitive: true,
-            upstream_connect_timeout_ms: default_upstream_connect_timeout_ms(),
-            upstream_total_connection_timeout_ms: default_upstream_total_connection_timeout_ms(),
-            upstream_read_timeout_ms: default_upstream_read_timeout_ms(),
-            upstream_write_timeout_ms: default_upstream_write_timeout_ms(),
-            upstream_idle_timeout_ms: default_upstream_idle_timeout_ms(),
-            upstream_circuit_503_retry_after_s: default_upstream_circuit_503_retry_after_s(),
         }
     }
 }
@@ -708,99 +624,7 @@ impl Default for DefenseConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{HostConfig, HostUpstreamTimeoutError, parse_cookie_header};
-
-    // ── FR-039: upstream timeout schema + validator ─────────────────────────
-
-    #[test]
-    fn fr039_default_upstream_timeouts_present() {
-        let hc = HostConfig::default();
-        assert_eq!(hc.upstream_connect_timeout_ms, 5_000);
-        assert_eq!(hc.upstream_total_connection_timeout_ms, 10_000);
-        assert_eq!(hc.upstream_read_timeout_ms, 30_000);
-        assert_eq!(hc.upstream_write_timeout_ms, 10_000);
-        assert_eq!(hc.upstream_idle_timeout_ms, 60_000);
-        assert_eq!(hc.upstream_circuit_503_retry_after_s, 5);
-    }
-
-    #[test]
-    fn fr039_validate_passes_when_connect_lte_total() {
-        let hc = HostConfig {
-            upstream_connect_timeout_ms: 3_000,
-            upstream_total_connection_timeout_ms: 10_000,
-            ..HostConfig::default()
-        };
-        assert!(hc.validate_upstream_timeouts().is_ok());
-
-        // Equal is allowed.
-        let hc = HostConfig {
-            upstream_connect_timeout_ms: 10_000,
-            upstream_total_connection_timeout_ms: 10_000,
-            ..HostConfig::default()
-        };
-        assert!(hc.validate_upstream_timeouts().is_ok());
-    }
-
-    #[test]
-    fn fr039_validate_rejects_connect_greater_than_total() {
-        let hc = HostConfig {
-            upstream_connect_timeout_ms: 20_000,
-            upstream_total_connection_timeout_ms: 10_000,
-            ..HostConfig::default()
-        };
-        assert_eq!(
-            hc.validate_upstream_timeouts(),
-            Err(HostUpstreamTimeoutError::ConnectExceedsTotal {
-                connect: 20_000,
-                total: 10_000,
-            })
-        );
-    }
-
-    #[test]
-    fn fr039_serde_round_trip_with_explicit_values() {
-        // serde JSON is sufficient (TOML would re-serialize identically since
-        // these are scalar fields).
-        let hc = HostConfig {
-            upstream_connect_timeout_ms: 1_500,
-            upstream_total_connection_timeout_ms: 3_000,
-            upstream_read_timeout_ms: 7_500,
-            upstream_write_timeout_ms: 4_000,
-            upstream_idle_timeout_ms: 45_000,
-            upstream_circuit_503_retry_after_s: 2,
-            ..HostConfig::default()
-        };
-        let json = serde_json::to_string(&hc).expect("serialise");
-        let back: HostConfig = serde_json::from_str(&json).expect("deserialise");
-        assert_eq!(back.upstream_connect_timeout_ms, 1_500);
-        assert_eq!(back.upstream_total_connection_timeout_ms, 3_000);
-        assert_eq!(back.upstream_read_timeout_ms, 7_500);
-        assert_eq!(back.upstream_write_timeout_ms, 4_000);
-        assert_eq!(back.upstream_idle_timeout_ms, 45_000);
-        assert_eq!(back.upstream_circuit_503_retry_after_s, 2);
-    }
-
-    #[test]
-    fn fr039_missing_fields_in_json_fall_back_to_defaults() {
-        // Older configs without FR-039 fields must deserialise unchanged.
-        // Generate JSON from `Default`, strip every `upstream_*` key, then
-        // round-trip to confirm defaults reappear.
-        let baseline = HostConfig::default();
-        let mut value = serde_json::to_value(&baseline).expect("serialise baseline HostConfig");
-        if let serde_json::Value::Object(map) = &mut value {
-            map.retain(|k, _| !k.starts_with("upstream_"));
-        }
-        let json = serde_json::to_string(&value).expect("re-serialise stripped value");
-        let hc: HostConfig = serde_json::from_str(&json).expect("deserialise without upstream_* keys");
-        assert_eq!(hc.upstream_connect_timeout_ms, 5_000);
-        assert_eq!(hc.upstream_total_connection_timeout_ms, 10_000);
-        assert_eq!(hc.upstream_read_timeout_ms, 30_000);
-        assert_eq!(hc.upstream_write_timeout_ms, 10_000);
-        assert_eq!(hc.upstream_idle_timeout_ms, 60_000);
-        assert_eq!(hc.upstream_circuit_503_retry_after_s, 5);
-    }
-
-    // ── Existing cookie tests ───────────────────────────────────────────────
+    use super::parse_cookie_header;
 
     #[test]
     fn parse_cookie_header_basic() {
