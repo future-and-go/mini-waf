@@ -135,7 +135,10 @@
     "start": "Start",
     "on": "On",
     "off": "Off",
-    "http": "HTTP"
+    "http": "HTTP",
+    "editHost": "Edit Host",
+    "upstreamPort": "Upstream port",
+    "logOnly": "Log only"
   },
   "security": {
     "title": "Security Events",

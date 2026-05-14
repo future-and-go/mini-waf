@@ -13,8 +13,8 @@ import {
   Typography,
   Popconfirm,
 } from "antd";
-import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
-import { useTable, useCreate, useDelete } from "@refinedev/core";
+import { PlusOutlined, ReloadOutlined, EditOutlined } from "@ant-design/icons";
+import { useTable, useCreate, useDelete, useUpdate } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
@@ -47,8 +47,10 @@ const DEFAULT_FORM: HostFormShape = {
 export const HostsPage: React.FC = () => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const [form] = Form.useForm<HostFormShape>();
-  const [open, setOpen] = useState(false);
+  const [createForm] = Form.useForm<HostFormShape>();
+  const [editForm] = Form.useForm<HostFormShape>();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingHost, setEditingHost] = useState<Host | null>(null);
 
   const { tableQuery, result } = useTable<Host>({
     resource: "hosts",
@@ -57,20 +59,59 @@ export const HostsPage: React.FC = () => {
   });
 
   const { mutate: createHost, mutation: createMutation } = useCreate<Host>();
+  const { mutate: updateHost, mutation: updateMutation } = useUpdate<Host>();
   const { mutate: deleteHost } = useDelete<Host>();
   const creating = createMutation.isPending;
+  const updating = updateMutation.isPending;
 
   const data = Array.isArray(result?.data) ? result.data : [];
 
   const onSubmit = async () => {
-    const values = await form.validateFields();
+    const values = await createForm.validateFields();
     createHost(
-      { resource: "hosts", values, successNotification: false },
+      { resource: "hosts", values: { ...DEFAULT_FORM, ...values }, successNotification: false },
       {
         onSuccess: () => {
           message.success("OK");
-          setOpen(false);
-          form.resetFields();
+          setCreateOpen(false);
+          createForm.resetFields();
+          tableQuery.refetch();
+        },
+        onError: (err) => message.error(err.message),
+      },
+    );
+  };
+
+  const onOpenEdit = (host: Host) => {
+    setEditingHost(host);
+    editForm.setFieldsValue({
+      host: host.host,
+      port: host.port,
+      ssl: host.ssl,
+      guard_status: host.guard_status,
+      remote_host: host.remote_host,
+      remote_port: host.remote_port,
+      start_status: host.start_status,
+      log_only_mode: host.log_only_mode ?? false,
+      remarks: host.remarks ?? "",
+    });
+  };
+
+  const onEditSubmit = async () => {
+    if (!editingHost) return;
+    const values = await editForm.validateFields();
+    updateHost(
+      {
+        resource: "hosts",
+        id: editingHost.id,
+        values: { ...DEFAULT_FORM, ...values },
+        successNotification: false,
+      },
+      {
+        onSuccess: () => {
+          message.success("OK");
+          setEditingHost(null);
+          editForm.resetFields();
           tableQuery.refetch();
         },
         onError: (err) => message.error(err.message),
@@ -129,18 +170,61 @@ export const HostsPage: React.FC = () => {
       render: (v: boolean) => <Tag color={v ? "green" : "default"}>{v ? t("hosts.active") : t("hosts.stopped")}</Tag>,
     },
     {
-      title: "",
+      title: t("common.actions"),
       key: "ops",
-      width: 80,
+      width: 120,
       render: (_v, r) => (
-        <Popconfirm title={t("hosts.confirmDelete")} onConfirm={() => onDelete(r.id)}>
-          <Button type="link" danger size="small">
-            {t("common.delete")}
+        <Space size={0}>
+          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => onOpenEdit(r)}>
+            {t("common.edit")}
           </Button>
-        </Popconfirm>
+          <Popconfirm title={t("hosts.confirmDelete")} onConfirm={() => onDelete(r.id)}>
+            <Button type="link" danger size="small">
+              {t("common.delete")}
+            </Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
+
+  const formBody = (form: ReturnType<typeof Form.useForm<HostFormShape>>[0]) => (
+    <Form form={form} layout="vertical" initialValues={DEFAULT_FORM}>
+      <Space.Compact style={{ width: "100%" }}>
+        <Form.Item name="host" label={t("hosts.hostname")} rules={[{ required: true }]} style={{ flex: 2 }}>
+          <Input placeholder="example.com" />
+        </Form.Item>
+        <Form.Item name="port" label={t("hosts.port")} rules={[{ required: true }]} style={{ flex: 1 }}>
+          <InputNumber min={1} max={65535} style={{ width: "100%" }} />
+        </Form.Item>
+      </Space.Compact>
+      <Space.Compact style={{ width: "100%" }}>
+        <Form.Item name="remote_host" label={t("hosts.upstream")} rules={[{ required: true }]} style={{ flex: 2 }}>
+          <Input placeholder="127.0.0.1" />
+        </Form.Item>
+        <Form.Item name="remote_port" label={t("hosts.upstreamPort")} rules={[{ required: true }]} style={{ flex: 1 }}>
+          <InputNumber min={1} max={65535} style={{ width: "100%" }} />
+        </Form.Item>
+      </Space.Compact>
+      <Form.Item name="remarks" label={t("hosts.remarks")}>
+        <Input />
+      </Form.Item>
+      <Space size="large">
+        <Form.Item name="ssl" label={t("hosts.ssl")} valuePropName="checked">
+          <Switch />
+        </Form.Item>
+        <Form.Item name="guard_status" label={t("hosts.guard")} valuePropName="checked">
+          <Switch />
+        </Form.Item>
+        <Form.Item name="start_status" label={t("hosts.start")} valuePropName="checked">
+          <Switch />
+        </Form.Item>
+        <Form.Item name="log_only_mode" label={t("hosts.logOnly")} valuePropName="checked">
+          <Switch />
+        </Form.Item>
+      </Space>
+    </Form>
+  );
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -152,7 +236,7 @@ export const HostsPage: React.FC = () => {
           <Button icon={<ReloadOutlined />} onClick={() => tableQuery.refetch()}>
             {t("common.refresh")}
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
             {t("hosts.addHost")}
           </Button>
         </Space>
@@ -170,48 +254,32 @@ export const HostsPage: React.FC = () => {
         />
       </Card>
 
+      {/* Create modal */}
       <Modal
         title={t("hosts.newHost")}
-        open={open}
-        onCancel={() => setOpen(false)}
+        open={createOpen}
+        onCancel={() => { setCreateOpen(false); createForm.resetFields(); }}
         onOk={onSubmit}
         confirmLoading={creating}
         okText={t("common.create")}
         cancelText={t("common.cancel")}
         destroyOnClose
       >
-        <Form form={form} layout="vertical" initialValues={DEFAULT_FORM}>
-          <Space.Compact style={{ width: "100%" }}>
-            <Form.Item name="host" label={t("hosts.hostname")} rules={[{ required: true }]} style={{ flex: 2 }}>
-              <Input placeholder="example.com" />
-            </Form.Item>
-            <Form.Item name="port" label={t("hosts.port")} rules={[{ required: true }]} style={{ flex: 1 }}>
-              <InputNumber min={1} max={65535} style={{ width: "100%" }} />
-            </Form.Item>
-          </Space.Compact>
-          <Space.Compact style={{ width: "100%" }}>
-            <Form.Item name="remote_host" label={t("hosts.upstream")} rules={[{ required: true }]} style={{ flex: 2 }}>
-              <Input placeholder="127.0.0.1" />
-            </Form.Item>
-            <Form.Item name="remote_port" label="Upstream port" rules={[{ required: true }]} style={{ flex: 1 }}>
-              <InputNumber min={1} max={65535} style={{ width: "100%" }} />
-            </Form.Item>
-          </Space.Compact>
-          <Form.Item name="remarks" label={t("hosts.remarks")}>
-            <Input />
-          </Form.Item>
-          <Space size="large">
-            <Form.Item name="ssl" label={t("hosts.ssl")} valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item name="guard_status" label={t("hosts.guard")} valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item name="start_status" label={t("hosts.start")} valuePropName="checked">
-              <Switch />
-            </Form.Item>
-          </Space>
-        </Form>
+        {formBody(createForm)}
+      </Modal>
+
+      {/* Edit modal */}
+      <Modal
+        title={t("hosts.editHost")}
+        open={!!editingHost}
+        onCancel={() => { setEditingHost(null); editForm.resetFields(); }}
+        onOk={onEditSubmit}
+        confirmLoading={updating}
+        okText={t("common.save")}
+        cancelText={t("common.cancel")}
+        destroyOnClose
+      >
+        {formBody(editForm)}
       </Modal>
     </Space>
   );

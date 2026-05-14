@@ -221,7 +221,9 @@ pub struct CreateHost {
     pub cert_file: Option<String>,
     pub key_file: Option<String>,
     pub remarks: Option<String>,
+    #[serde(default)]
     pub start_status: bool,
+    #[serde(default)]
     pub log_only_mode: bool,
 }
 
