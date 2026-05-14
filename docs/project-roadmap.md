@@ -282,6 +282,10 @@ Atomic read/write of `waf-panel.toml` (operational policy settings) via `GET/PUT
 
 Outbound protection layer added via `waf-engine::outbound::HeaderFilter` and the Pingora `response_filter` hook. Strips server-fingerprint, debug/internal, and error-detail headers from upstream responses; optional PII regex on values. Disabled by default; opt in via `[outbound] enabled = true`. Standards: OWASP ASVS V14.4, CWE-200, CWE-209, RFC 9110 §7.6.
 
+### FR-039 — Circuit Breaker (Backend Unresponsive → 503)
+
+Stateless transport-layer circuit. `HostConfig` carries five `upstream_*_timeout_ms` knobs that `apply_fr039_timeouts()` copies into `HttpPeer.options` (connection / total / read / write / idle) in `upstream_peer()`. `error_to_status()` maps `ConnectTimedout` / `ConnectRefused` / `ConnectNoRoute` / `ConnectError` / `ConnectProxyFailure` / `TLSHandshakeTimedout` / `ReadTimedout` / `WriteTimedout` to 503 (was 502); application 5xx still maps to 502. `fail_to_connect()` override logs at `warn!` and propagates the error without retry — Pingora-default behaviour made explicit. `ErrorPageFactory::render` emits `Retry-After: 5` on 503. TOML `[[hosts]]` entries can override timeouts per host. HTTP/3 listener's shared `reqwest::Client` carries matching `connect_timeout`/`timeout` so the QUIC path also cannot hang. No state machine — YAGNI. Docker e2e harness at `tests/e2e/circuit-breaker/`.
+
 ---
 
 ## v0.3.0 (Proposed — Q3 2026)

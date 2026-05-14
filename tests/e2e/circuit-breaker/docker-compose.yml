@@ -1,0 +1,80 @@
+# FR-039 Circuit Breaker e2e — runs WAF + hang/healthy backends and a curl
+# asserter sidecar. Exits non-zero on any failed assertion.
+#
+# Run from repo root after building the prebuilt image once:
+#   cargo build --release -p prx-waf
+#   docker compose -f tests/e2e/circuit-breaker/docker-compose.yml \
+#     up --abort-on-container-exit --exit-code-from asserter
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    container_name: fr039-postgres
+    environment:
+      POSTGRES_USER: prx_waf
+      POSTGRES_PASSWORD: prx_waf
+      POSTGRES_DB: prx_waf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prx_waf -d prx_waf"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [fr039_net]
+
+  hang-backend:
+    build:
+      context: ./mocks/hang-backend
+    container_name: fr039-hang
+    networks: [fr039_net]
+
+  healthy-backend:
+    image: docker.io/library/nginx:alpine
+    container_name: fr039-healthy
+    networks: [fr039_net]
+
+  waf:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile.prebuilt
+    container_name: fr039-waf
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hang-backend:
+        condition: service_started
+      healthy-backend:
+        condition: service_started
+    environment:
+      JWT_SECRET: fr039-e2e-secret-not-for-production
+      DATABASE_URL: postgresql://prx_waf:prx_waf@postgres:5432/prx_waf
+      ADMIN_PASSWORD: admin123
+      RUST_LOG: warn
+    volumes:
+      - ../../../rules:/app/rules:ro
+      - ./waf-config.toml:/app/waf-config.toml:ro
+    command:
+      - "/usr/local/bin/prx-waf"
+      - "--config"
+      - "/app/waf-config.toml"
+      - "run"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9527/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
+    networks: [fr039_net]
+
+  asserter:
+    image: docker.io/curlimages/curl:8.10.1
+    container_name: fr039-asserter
+    depends_on:
+      waf:
+        condition: service_healthy
+    volumes:
+      - ./run.sh:/run.sh:ro
+    entrypoint: ["sh", "/run.sh"]
+    networks: [fr039_net]
+
+networks:
+  fr039_net:
+    driver: bridge
