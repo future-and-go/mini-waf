@@ -135,7 +135,10 @@
     "start": "Khởi động",
     "on": "Bật",
     "off": "Tắt",
-    "http": "HTTP"
+    "http": "HTTP",
+    "editHost": "Sửa Host",
+    "upstreamPort": "Upstream port",
+    "logOnly": "Chỉ ghi log"
   },
   "security": {
     "title": "Sự kiện bảo mật",

@@ -135,7 +135,10 @@
     "start": "启动",
     "on": "开",
     "off": "关",
-    "http": "HTTP"
+    "http": "HTTP",
+    "editHost": "编辑主机",
+    "upstreamPort": "上游端口",
+    "logOnly": "仅记录日志"
   },
   "security": {
     "title": "安全事件",
