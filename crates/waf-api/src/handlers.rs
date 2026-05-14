@@ -315,6 +315,18 @@ pub async fn list_security_events(
     })))
 }
 
+pub async fn get_security_event(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    let event = state
+        .db
+        .get_security_event(id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("Security event {id} not found")))?;
+    Ok(Json(json!({ "success": true, "data": event })))
+}
+
 // ─── Status ──────────────────────────────────────────────────────────────────
 
 pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<Value> {

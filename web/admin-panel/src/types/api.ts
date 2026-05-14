@@ -71,6 +71,7 @@ export interface Certificate {
 
 export interface SecurityEvent {
   id: string;
+  host_code: string;
   created_at: string;
   client_ip: string;
   method: string;
@@ -78,6 +79,8 @@ export interface SecurityEvent {
   rule_name: string;
   rule_id?: string;
   action: string;
+  detail?: string;
+  geo_info?: Record<string, string> | null;
   category?: string;
   country?: string;
 }

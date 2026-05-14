@@ -1409,7 +1409,9 @@ impl Database {
                  AND ($3::text IS NULL OR rule_name = $3)
                  AND ($4::text IS NULL OR action = $4)
                  AND ($5::text IS NULL OR geo_info->>'iso_code' = $5)
-                 AND ($6::text IS NULL OR geo_info->>'country' ILIKE '%' || $6 || '%')",
+                 AND ($6::text IS NULL OR geo_info->>'country' ILIKE '%' || $6 || '%')
+                 AND ($7::text IS NULL OR rule_id = $7)
+                 AND ($8::text IS NULL OR path ILIKE '%' || $8 || '%')",
         )
         .bind(&query.host_code)
         .bind(&query.client_ip)
@@ -1417,6 +1419,8 @@ impl Database {
         .bind(&query.action)
         .bind(&query.iso_code)
         .bind(&query.country)
+        .bind(&query.rule_id)
+        .bind(&query.path)
         .fetch_one(&self.pool)
         .await?;
 
@@ -1428,8 +1432,10 @@ impl Database {
                  AND ($4::text IS NULL OR action = $4)
                  AND ($5::text IS NULL OR geo_info->>'iso_code' = $5)
                  AND ($6::text IS NULL OR geo_info->>'country' ILIKE '%' || $6 || '%')
+                 AND ($7::text IS NULL OR rule_id = $7)
+                 AND ($8::text IS NULL OR path ILIKE '%' || $8 || '%')
                ORDER BY created_at DESC
-               LIMIT $7 OFFSET $8",
+               LIMIT $9 OFFSET $10",
         )
         .bind(&query.host_code)
         .bind(&query.client_ip)
@@ -1437,12 +1443,23 @@ impl Database {
         .bind(&query.action)
         .bind(&query.iso_code)
         .bind(&query.country)
+        .bind(&query.rule_id)
+        .bind(&query.path)
         .bind(page_size)
         .bind(offset)
         .fetch_all(&self.pool)
         .await?;
 
         Ok((rows, total))
+    }
+
+    pub async fn get_security_event(&self, id: Uuid) -> Result<Option<SecurityEvent>, StorageError> {
+        Ok(
+            sqlx::query_as::<_, SecurityEvent>("SELECT * FROM security_events WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
     }
 
     // ─── Phase 5: WASM Plugins ────────────────────────────────────────────────
