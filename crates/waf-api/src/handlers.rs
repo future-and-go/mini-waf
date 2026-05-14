@@ -315,10 +315,7 @@ pub async fn list_security_events(
     })))
 }
 
-pub async fn get_security_event(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<Uuid>,
-) -> ApiResult<Json<Value>> {
+pub async fn get_security_event(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
     let event = state
         .db
         .get_security_event(id)
