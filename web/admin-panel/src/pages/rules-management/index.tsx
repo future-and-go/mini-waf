@@ -18,7 +18,7 @@ import {
 import { useCustom, useCustomMutation } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import type { RegistryRule } from "../../types/api";
 
 interface RegistryResponse {
@@ -56,6 +56,12 @@ export const RulesManagementPage: React.FC = () => {
   const [filterCategory, setFilterCategory] = useState<string | undefined>();
   const [filterSource, setFilterSource] = useState<string | undefined>();
   const [filterStatus, setFilterStatus] = useState<string | undefined>();
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
+
+  // Reset to page 1 whenever any filter changes
+  useEffect(() => {
+    setPagination((p) => ({ ...p, current: 1 }));
+  }, [search, filterCategory, filterSource, filterStatus]);
   const [selected, setSelected] = useState<RegistryRule | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importForm] = Form.useForm<{ source: string; format: string }>();
@@ -203,7 +209,15 @@ export const RulesManagementPage: React.FC = () => {
           dataSource={filtered}
           columns={columns}
           loading={isLoading}
-          pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: [20, 50, 100] }}
+          pagination={{
+            current: pagination.current,
+            pageSize: pagination.pageSize,
+            total: filtered.length,
+            showSizeChanger: true,
+            pageSizeOptions: ["20", "50", "100"],
+            showTotal: (total, range) => `${range[0]}-${range[1]} / ${total}`,
+            onChange: (page, pageSize) => setPagination({ current: page, pageSize }),
+          }}
           onRow={(r) => ({ onClick: () => setSelected(r), style: { cursor: "pointer" } })}
           locale={{ emptyText: t("rules.noRulesFound") }}
         />
