@@ -28,9 +28,10 @@ use crate::handlers::{
     create_allow_ip, create_allow_url, create_block_ip, create_block_url, create_custom_rule, create_host,
     create_lb_backend, create_sensitive_pattern, delete_allow_ip, delete_allow_url, delete_block_ip, delete_block_url,
     delete_certificate, delete_custom_rule, delete_host, delete_lb_backend, delete_sensitive_pattern, get_host,
-    get_hotlink_config, get_status, list_allow_ips, list_allow_urls, list_attack_logs, list_block_ips, list_block_urls,
-    list_certificates, list_custom_rules, list_hosts, list_lb_backends, list_security_events, list_sensitive_patterns,
-    reload_rules, reload_sqli_scan_config, update_host, upload_certificate, upsert_hotlink_config,
+    get_hotlink_config, get_security_event, get_status, list_allow_ips, list_allow_urls, list_attack_logs,
+    list_block_ips, list_block_urls, list_certificates, list_custom_rules, list_hosts, list_lb_backends,
+    list_security_events, list_sensitive_patterns, reload_rules, reload_sqli_scan_config, update_host,
+    upload_certificate, upsert_hotlink_config,
 };
 use crate::health::health_check;
 use crate::logs::{logs_query, logs_stats, logs_streams};
@@ -109,6 +110,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/attack-logs", get(list_attack_logs))
         // Security events
         .route("/api/security-events", get(list_security_events))
+        .route("/api/security-events/{id}", get(get_security_event))
         // System status
         .route("/api/status", get(get_status))
         // Panel runtime TOML (admin ↔ disk)

@@ -293,6 +293,8 @@ pub struct SecurityEventQuery {
     pub host_code: Option<String>,
     pub client_ip: Option<String>,
     pub rule_name: Option<String>,
+    pub rule_id: Option<String>,
+    pub path: Option<String>,
     pub action: Option<String>,
     pub country: Option<String>,
     pub iso_code: Option<String>,

@@ -1,18 +1,206 @@
-import { Card, Table, Tag, Space, Input, Select, Button, Typography, Switch } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
-import { useTable } from "@refinedev/core";
+import {
+  Card,
+  Table,
+  Tag,
+  Space,
+  Input,
+  Select,
+  Button,
+  Typography,
+  Switch,
+  Drawer,
+  Descriptions,
+  Badge,
+  Divider,
+  Skeleton,
+} from "antd";
+import { ReloadOutlined, InfoCircleOutlined } from "@ant-design/icons";
+import { useTable, useOne } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import type { SecurityEvent } from "../../types/api";
 import { fmtDateTime } from "../../utils/format";
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function actionColor(action: string): string {
+  if (action === "block") return "red";
+  if (action === "allow") return "green";
+  return "default";
+}
+
+function methodColor(method: string): string {
+  const map: Record<string, string> = {
+    GET: "blue",
+    POST: "green",
+    PUT: "orange",
+    DELETE: "red",
+    PATCH: "purple",
+  };
+  return map[method?.toUpperCase()] ?? "default";
+}
+
+// ── Detail Drawer ──────────────────────────────────────────────────────────────
+
+interface EventDetailDrawerProps {
+  eventId: string | null;
+  onClose: () => void;
+}
+
+const EventDetailDrawer: React.FC<EventDetailDrawerProps> = ({ eventId, onClose }) => {
+  const { t } = useTranslation();
+
+  const { query } = useOne<SecurityEvent>({
+    resource: "security-events",
+    id: eventId ?? "",
+    queryOptions: { enabled: !!eventId },
+  });
+
+  const event = query.data?.data;
+  const isLoading = query.isLoading;
+
+  // geo_info may be a JSON object: { country, iso_code, city, region, isp, org, ... }
+  const geo = event?.geo_info as Record<string, string> | null | undefined;
+
+  return (
+    <Drawer
+      title={
+        <Space>
+          <InfoCircleOutlined />
+          <span>{t("security.eventDetail")}</span>
+        </Space>
+      }
+      open={!!eventId}
+      onClose={onClose}
+      width={600}
+      destroyOnClose
+    >
+      {isLoading ? (
+        <Skeleton active paragraph={{ rows: 10 }} />
+      ) : event ? (
+        <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+          {/* ── Request Info ── */}
+          <Card size="small" title={t("security.requestInfo")}>
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label={t("security.time")}>
+                <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13 }}>
+                  {fmtDateTime(event.created_at)}
+                </span>
+              </Descriptions.Item>
+              <Descriptions.Item label={t("security.hostCode")}>
+                <Tag>{event.host_code}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label={t("security.clientIP")}>
+                <span style={{ fontFamily: "ui-monospace, monospace" }}>{event.client_ip}</span>
+              </Descriptions.Item>
+              <Descriptions.Item label={t("security.method")}>
+                <Tag color={methodColor(event.method)}>{event.method}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label={t("security.path")}>
+                <Typography.Text
+                  code
+                  copyable
+                  style={{ wordBreak: "break-all", fontSize: 12 }}
+                >
+                  {event.path}
+                </Typography.Text>
+              </Descriptions.Item>
+              <Descriptions.Item label={t("security.action")}>
+                <Badge
+                  status={event.action === "block" ? "error" : "success"}
+                  text={<Tag color={actionColor(event.action)}>{event.action}</Tag>}
+                />
+              </Descriptions.Item>
+            </Descriptions>
+          </Card>
+
+          {/* ── Rule Info ── */}
+          <Card size="small" title={t("security.ruleInfo")}>
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label={t("security.ruleName")}>
+                <strong>{event.rule_name}</strong>
+              </Descriptions.Item>
+              {event.rule_id && (
+                <Descriptions.Item label={t("security.ruleId")}>
+                  <Typography.Text code copyable>
+                    {event.rule_id}
+                  </Typography.Text>
+                </Descriptions.Item>
+              )}
+            </Descriptions>
+          </Card>
+
+          {/* ── Geo Location ── */}
+          {geo && Object.keys(geo).length > 0 && (
+            <Card size="small" title={t("security.geoLocation")}>
+              <Descriptions column={1} size="small" bordered>
+                {geo.country && (
+                  <Descriptions.Item label={t("security.country")}>{geo.country}</Descriptions.Item>
+                )}
+                {geo.iso_code && (
+                  <Descriptions.Item label="ISO">{geo.iso_code}</Descriptions.Item>
+                )}
+                {geo.city && (
+                  <Descriptions.Item label={t("security.city")}>{geo.city}</Descriptions.Item>
+                )}
+                {geo.region && (
+                  <Descriptions.Item label={t("security.region")}>{geo.region}</Descriptions.Item>
+                )}
+                {geo.isp && (
+                  <Descriptions.Item label={t("security.isp")}>{geo.isp}</Descriptions.Item>
+                )}
+                {geo.org && (
+                  <Descriptions.Item label={t("security.org")}>{geo.org}</Descriptions.Item>
+                )}
+              </Descriptions>
+            </Card>
+          )}
+
+          {/* ── Attack Payload ── */}
+          {event.detail && (
+            <Card size="small" title={t("security.attackPayload")}>
+              <Typography.Text
+                code
+                copyable={{ text: event.detail }}
+                style={{
+                  display: "block",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-all",
+                  maxHeight: 300,
+                  overflowY: "auto",
+                  fontSize: 12,
+                }}
+              >
+                {event.detail}
+              </Typography.Text>
+            </Card>
+          )}
+
+          {!event.detail && (
+            <>
+              <Divider plain style={{ fontSize: 12, color: "#8c8c8c" }}>
+                {t("security.noDetail")}
+              </Divider>
+            </>
+          )}
+        </Space>
+      ) : null}
+    </Drawer>
+  );
+};
+
+// ── Main Page ──────────────────────────────────────────────────────────────────
+
 export const SecurityEventsPage: React.FC = () => {
   const { t } = useTranslation();
   const [hostCode, setHostCode] = useState("");
   const [clientIp, setClientIp] = useState("");
+  const [ruleId, setRuleId] = useState("");
+  const [path, setPath] = useState("");
   const [action, setAction] = useState<string | undefined>();
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   // Server-side pagination is the only sane default for SecurityEvents:
   // the table can be millions of rows. Filters propagate as `?host_code=...`
@@ -31,6 +219,8 @@ export const SecurityEventsPage: React.FC = () => {
       [
         { field: "host_code", operator: "eq", value: hostCode || undefined },
         { field: "client_ip", operator: "eq", value: clientIp || undefined },
+        { field: "rule_id", operator: "eq", value: ruleId || undefined },
+        { field: "path", operator: "contains", value: path || undefined },
         { field: "action", operator: "eq", value: action || undefined },
       ],
       "replace",
@@ -42,12 +232,80 @@ export const SecurityEventsPage: React.FC = () => {
   const total = result?.total ?? 0;
 
   const columns: ColumnsType<SecurityEvent> = [
-    { title: t("security.time"), dataIndex: "created_at", width: 170, render: (v: string) => <span style={{ color: "#8c8c8c", fontSize: 12 }}>{fmtDateTime(v)}</span> },
-    { title: t("security.clientIP"), dataIndex: "client_ip", width: 140, render: (v) => <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{v}</span> },
-    { title: t("security.method"), dataIndex: "method", width: 80, render: (v) => <Tag>{v}</Tag> },
-    { title: t("security.path"), dataIndex: "path", ellipsis: true, render: (v) => <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} title={v}>{v}</span> },
-    { title: t("security.ruleName"), dataIndex: "rule_name", width: 200, ellipsis: true },
-    { title: t("security.action"), dataIndex: "action", width: 90, render: (v: string) => <Tag color={v === "block" ? "red" : "green"}>{v}</Tag> },
+    {
+      title: t("security.time"),
+      dataIndex: "created_at",
+      width: 170,
+      render: (v: string) => (
+        <span style={{ color: "#8c8c8c", fontSize: 12 }}>{fmtDateTime(v)}</span>
+      ),
+    },
+    {
+      title: t("security.clientIP"),
+      dataIndex: "client_ip",
+      width: 140,
+      render: (v) => (
+        <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{v}</span>
+      ),
+    },
+    {
+      title: t("security.method"),
+      dataIndex: "method",
+      width: 80,
+      render: (v) => <Tag color={methodColor(v)}>{v}</Tag>,
+    },
+    {
+      title: t("security.path"),
+      dataIndex: "path",
+      ellipsis: true,
+      render: (v) => (
+        <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} title={v}>
+          {v}
+        </span>
+      ),
+    },
+    {
+      title: t("security.ruleName"),
+      dataIndex: "rule_name",
+      width: 180,
+      ellipsis: true,
+    },
+    {
+      title: t("security.ruleId"),
+      dataIndex: "rule_id",
+      width: 130,
+      ellipsis: true,
+      render: (v: string | undefined) =>
+        v ? (
+          <Typography.Text code copyable style={{ fontSize: 11 }}>
+            {v}
+          </Typography.Text>
+        ) : (
+          <span style={{ color: "#bfbfbf" }}>—</span>
+        ),
+    },
+    {
+      title: t("security.action"),
+      dataIndex: "action",
+      width: 90,
+      render: (v: string) => <Tag color={actionColor(v)}>{v}</Tag>,
+    },
+    {
+      title: "",
+      key: "detail",
+      width: 40,
+      render: (_: unknown, record: SecurityEvent) => (
+        <Button
+          type="text"
+          size="small"
+          icon={<InfoCircleOutlined />}
+          onClick={(e) => {
+            e.stopPropagation();
+            setSelectedEventId(record.id);
+          }}
+        />
+      ),
+    },
   ];
 
   return (
@@ -82,7 +340,21 @@ export const SecurityEventsPage: React.FC = () => {
             placeholder={t("security.clientIP")}
             value={clientIp}
             onChange={(e) => setClientIp(e.target.value)}
-            style={{ width: 180 }}
+            style={{ width: 160 }}
+            onPressEnter={applyFilters}
+          />
+          <Input
+            placeholder={t("security.ruleId")}
+            value={ruleId}
+            onChange={(e) => setRuleId(e.target.value)}
+            style={{ width: 130 }}
+            onPressEnter={applyFilters}
+          />
+          <Input
+            placeholder={t("security.path")}
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            style={{ width: 200 }}
             onPressEnter={applyFilters}
           />
           <Select
@@ -121,8 +393,17 @@ export const SecurityEventsPage: React.FC = () => {
           }}
           locale={{ emptyText: t("security.noEvents") }}
           scroll={{ x: 800 }}
+          onRow={(record) => ({
+            style: { cursor: "pointer" },
+            onClick: () => setSelectedEventId(record.id),
+          })}
         />
       </Card>
+
+      <EventDetailDrawer
+        eventId={selectedEventId}
+        onClose={() => setSelectedEventId(null)}
+      />
     </Space>
   );
 };
