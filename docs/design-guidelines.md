@@ -2,73 +2,74 @@
 
 ## Technology Stack
 
-- **Vue 3** (3.3.13) — Composition API + setup syntax
-- **TypeScript** (5.3) — Full type safety
-- **Vite** (5.1.3) — Dev server (hot reload) + production bundler
-- **Tailwind CSS** (3.4.1) — Utility-first styling
-- **Pinia** (2.1.7) — State management (replaces Vuex)
-- **Vue Router** (4.2.5) — Client-side routing (hash mode: `#/page`)
-- **Axios** (1.6) — HTTP client with interceptors
-- **vue-i18n** (9.14.5) — Internationalization (11 locales)
-- **lucide-vue-next** (0.577) — Icon library
-- **Vite Plugin Vue** — Single-file component compilation
+- **React** (18.3.1) — Hooks + functional components
+- **TypeScript** (5.7) — Full type safety
+- **Vite** (8.0.9) — Dev server (hot reload) + production bundler
+- **Refine** (5.0.12) — Admin framework (hooks, data providers, routing)
+- **Ant Design** (5.22.5) — Enterprise UI component library
+- **React Query** (5.62.7) — Server state management
+- **React Router** (7.0.0) — Client-side routing (history mode)
+- **Zustand** (5.0.2) — Lightweight client state (auth, UI state)
+- **Axios** (1.7.9) — HTTP client with interceptors
+- **i18next** (24.0.5) — Internationalization (11 locales)
+- **Ant Design Icons** (5.5.2) — Icon library
+- **Refine + Ant Design integration** — Seamless layouts, form builders, table paging
 
 ## Project Structure
 
 ```
-web/admin-ui/
+web/admin-panel/
 ├── src/
-│   ├── main.ts               # Entry point
-│   ├── App.vue               # Root component
+│   ├── main.tsx              # React root + Vite entry
+│   ├── App.tsx               # Root layout wrapper
 │   │
-│   ├── views/                # Page components (21 views)
-│   │   ├── Dashboard.vue
-│   │   ├── Login.vue
-│   │   ├── Hosts.vue
-│   │   ├── IpRules.vue
-│   │   ├── UrlRules.vue
-│   │   ├── CustomRules.vue
-│   │   ├── SecurityEvents.vue
-│   │   ├── AttackLogs.vue
-│   │   ├── Certificates.vue
-│   │   ├── RulesManagement.vue
-│   │   ├── Notifications.vue
-│   │   ├── CrowdSecSettings.vue
-│   │   ├── CrowdSecDecisions.vue
-│   │   ├── CrowdSecStats.vue
-│   │   ├── ClusterOverview.vue
-│   │   ├── ClusterNodeDetail.vue
-│   │   ├── ClusterTokens.vue
-│   │   ├── ClusterSync.vue
-│   │   ├── BotDetection.vue
-│   │   ├── SensitivePatterns.vue
-│   │   └── CCProtection.vue
+│   ├── pages/                # Route-level pages
+│   │   ├── dashboard/        # Dashboard with charts
+│   │   ├── login/            # JWT + TOTP login
+│   │   ├── hosts/            # Vhost CRUD
+│   │   ├── rules/            # Rule management (enable/disable)
+│   │   ├── ip-rules/         # IP allow/block lists
+│   │   ├── url-rules/        # URL pattern lists
+│   │   ├── security-events/  # Attack log viewer
+│   │   ├── certificates/     # TLS cert management
+│   │   ├── cluster/          # Cluster topology + health
+│   │   ├── settings/         # Panel config (risk thresholds, etc.)
+│   │   └── ...               # More pages per feature area
 │   │
-│   ├── components/           # Reusable components (5 core)
-│   │   ├── Layout.vue        # Main sidebar + header
-│   │   ├── StatCard.vue      # Metric card (RPS, blocked %, etc.)
-│   │   ├── RuleTable.vue     # Reusable rule listing + pagination
-│   │   ├── Badge.vue         # Status badges (healthy, warning, error)
-│   │   └── NavItem.vue       # Sidebar navigation item
+│   ├── components/           # Reusable components
+│   │   ├── Layout.tsx        # Refine Layout provider wrapper
+│   │   ├── Sider.tsx         # Sidebar nav with Refine integration
+│   │   ├── Header.tsx        # Top bar (user menu, breadcrumbs)
+│   │   ├── StatCard.tsx      # Metric card (RPS, blocked %, etc.)
+│   │   ├── RuleTable.tsx     # Refine Table + pagination for rules
+│   │   └── ...               # More reusable components
 │   │
-│   ├── stores/               # Pinia state management
-│   │   └── auth.ts           # User, JWT token, TOTP
+│   ├── hooks/                # Custom React hooks
+│   │   ├── useAuth.ts        # Auth state (Zustand store)
+│   │   ├── useNotification.ts # Message/notification helpers
+│   │   └── ...
 │   │
-│   ├── api/                  # API client modules (11 modules)
-│   │   ├── index.ts          # Axios instance + interceptors
-│   │   ├── auth.ts           # Login, logout, refresh
-│   │   ├── hosts.ts          # Host CRUD
+│   ├── stores/               # Zustand state management
+│   │   ├── auth.ts           # User, JWT token, TOTP secret
+│   │   ├── ui.ts             # Collapsed sidebar, theme, etc.
+│   │   └── ...
+│   │
+│   ├── api/                  # API client + data providers
+│   │   ├── client.ts         # Axios instance + interceptors
+│   │   ├── auth.ts           # Login, logout, refresh, verify TOTP
+│   │   ├── hosts.ts          # Host CRUD + queries
 │   │   ├── rules.ts          # Rule enable/disable
-│   │   ├── ipRules.ts        # IP allow/block CRUD
-│   │   ├── urlRules.ts       # URL pattern CRUD
+│   │   ├── ip-rules.ts       # IP list CRUD
+│   │   ├── url-rules.ts      # URL list CRUD
 │   │   ├── certificates.ts   # TLS cert management
 │   │   ├── events.ts         # Security event queries
 │   │   ├── stats.ts          # Metrics + time-series
 │   │   ├── cluster.ts        # Cluster API
-│   │   └── notifications.ts  # Alert channel CRUD
+│   │   ├── panel-config.ts   # Panel config GET/PUT
+│   │   └── ...
 │   │
 │   ├── i18n/                 # Internationalization
-│   │   ├── index.ts          # vue-i18n config
+│   │   ├── config.ts         # i18next setup
 │   │   └── locales/
 │   │       ├── en.ts         # English (base)
 │   │       ├── zh.ts         # Simplified Chinese
@@ -82,17 +83,15 @@ web/admin-ui/
 │   │       ├── ko.ts         # Korean
 │   │       └── et.ts         # Estonian
 │   │
-│   ├── router/               # Vue Router config
-│   │   └── index.ts          # Routes + navigation guards
-│   │
 │   ├── types/                # TypeScript interfaces
 │   │   ├── api.ts            # API response types
 │   │   ├── domain.ts         # Business domain types
 │   │   └── index.ts
 │   │
 │   └── styles/
-│       └── globals.css       # Global Tailwind + custom CSS
+│       └── globals.css       # Global Ant Design + custom CSS
 │
+├── index.html                # HTML entry point
 ├── package.json
 ├── vite.config.ts
 ├── tsconfig.json
@@ -101,493 +100,465 @@ web/admin-ui/
 
 ## Component Patterns
 
-### 1. Layout Shell
+### 1. Layout with Refine
 
-**File: `components/Layout.vue`**
+**File: `components/Layout.tsx`**
 
-```vue
-<template>
-  <div class="flex h-screen bg-gray-900 text-white">
-    <!-- Sidebar -->
-    <aside class="w-64 bg-gray-800 border-r border-gray-700">
-      <nav class="space-y-2 p-4">
-        <NavItem to="/dashboard" icon="Home" label="Dashboard" />
-        <NavItem to="/hosts" icon="Globe" label="Hosts" />
-        <NavItem to="/rules" icon="Zap" label="Rules" />
-        <!-- More items -->
-      </nav>
-    </aside>
+Uses Refine's `<Authenticated>`, `<Layout>`, and `<Sider>` to wrap page content. Ant Design theme config provided via `ConfigProvider`.
 
-    <!-- Main Content -->
-    <main class="flex-1 overflow-auto">
-      <!-- Header -->
-      <header class="bg-gray-800 border-b border-gray-700 p-4">
-        <h1 class="text-2xl font-bold">{{ pageTitle }}</h1>
-      </header>
+```tsx
+import { Authenticated, Refine } from "@refinedev/core";
+import { AntdApp, ConfigProvider, Layout, theme } from "antd";
+import { useTheme } from "./hooks/useTheme";
 
-      <!-- Page Content (slot) -->
-      <div class="p-6">
-        <slot />
-      </div>
-    </main>
-  </div>
-</template>
+export const LayoutComponent: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const { isDark } = useTheme();
+  const { defaultAlgorithm, darkAlgorithm } = theme;
 
-<script setup lang="ts">
-import NavItem from './NavItem.vue'
-const pageTitle = ref('Dashboard')
-</script>
-
-<style scoped>
-/* Tailwind handles styling */
-</style>
+  return (
+    <ConfigProvider theme={{ algorithm: isDark ? darkAlgorithm : defaultAlgorithm }}>
+      <AntdApp>
+        <Layout style={{ minHeight: "100vh" }}>
+          <Layout.Sider collapsible trigger={null} collapsed={false}>
+            {/* Navigation menu */}
+          </Layout.Sider>
+          <Layout>
+            <Layout.Header>
+              {/* Top bar with breadcrumbs + user menu */}
+            </Layout.Header>
+            <Layout.Content style={{ padding: "24px" }}>
+              {children}
+            </Layout.Content>
+          </Layout>
+        </Layout>
+      </AntdApp>
+    </ConfigProvider>
+  );
+};
 ```
 
 ### 2. StatCard Component
 
-**File: `components/StatCard.vue`**
+**File: `components/StatCard.tsx`**
 
-```vue
-<template>
-  <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
-    <div class="flex items-center justify-between">
-      <div>
-        <p class="text-sm text-gray-400">{{ label }}</p>
-        <p class="text-3xl font-bold mt-2">{{ value }}</p>
-        <p v-if="change" :class="changeClass" class="text-sm mt-1">
-          {{ change }}
-        </p>
-      </div>
-      <div class="text-gray-600">
-        <component :is="icon" :size="32" />
-      </div>
-    </div>
-  </div>
-</template>
-
-<script setup lang="ts">
-import { computed } from 'vue'
+```tsx
+import { Card, Space, Statistic } from "antd";
+import { ArrowUpOutlined, ArrowDownOutlined } from "@ant-design/icons";
 
 interface Props {
-  label: string
-  value: string | number
-  change?: string
-  trend?: 'up' | 'down'
-  icon?: any
+  label: string;
+  value: string | number;
+  change?: string;
+  trend?: "up" | "down";
+  icon?: React.ReactNode;
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  trend: 'up',
-})
-
-const changeClass = computed(() =>
-  props.trend === 'up' ? 'text-green-400' : 'text-red-400'
-)
-</script>
+export const StatCard: React.FC<Props> = ({
+  label,
+  value,
+  change,
+  trend = "up",
+  icon,
+}) => {
+  return (
+    <Card hoverable>
+      <Space direction="vertical" style={{ width: "100%" }}>
+        <span style={{ fontSize: "12px", color: "#999" }}>{label}</span>
+        <Statistic
+          value={value}
+          prefix={icon}
+          suffix={
+            change ? (
+              trend === "up" ? (
+                <ArrowUpOutlined style={{ color: "#52c41a" }} />
+              ) : (
+                <ArrowDownOutlined style={{ color: "#ff4d4f" }} />
+              )
+            ) : null
+          }
+        />
+        {change && (
+          <span style={{ color: trend === "up" ? "#52c41a" : "#ff4d4f", fontSize: "12px" }}>
+            {change}
+          </span>
+        )}
+      </Space>
+    </Card>
+  );
+};
 ```
 
-### 3. RuleTable Component
+### 3. RuleTable Component (Using Refine + Ant Design Table)
 
-**File: `components/RuleTable.vue`**
+**File: `components/RuleTable.tsx`**
 
-```vue
-<template>
-  <div class="space-y-4">
-    <!-- Filters -->
-    <div class="flex gap-4">
-      <input
-        v-model="searchQuery"
-        type="text"
-        placeholder="Search rules..."
-        class="flex-1 px-4 py-2 bg-gray-700 rounded text-white"
-      />
-      <select
-        v-model="filterCategory"
-        class="px-4 py-2 bg-gray-700 rounded text-white"
-      >
-        <option value="">All Categories</option>
-        <option value="xss">XSS</option>
-        <option value="sqli">SQL Injection</option>
-      </select>
-    </div>
+Uses Refine's `useTable()` hook + Ant Design Table for automatic pagination, sorting, filtering.
 
-    <!-- Table -->
-    <table class="w-full border-collapse">
-      <thead class="bg-gray-700 border-b border-gray-600">
-        <tr>
-          <th class="px-4 py-2 text-left">ID</th>
-          <th class="px-4 py-2 text-left">Name</th>
-          <th class="px-4 py-2 text-left">Category</th>
-          <th class="px-4 py-2 text-center">Enabled</th>
-          <th class="px-4 py-2 text-right">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="rule in filteredRules"
-          :key="rule.id"
-          class="border-b border-gray-700 hover:bg-gray-700"
-        >
-          <td class="px-4 py-2 font-mono text-sm">{{ rule.id }}</td>
-          <td class="px-4 py-2">{{ rule.name }}</td>
-          <td class="px-4 py-2">
-            <Badge :label="rule.category" :color="categoryColor(rule.category)" />
-          </td>
-          <td class="px-4 py-2 text-center">
-            <input
-              v-model="rule.enabled"
-              type="checkbox"
-              @change="onToggle(rule)"
-            />
-          </td>
-          <td class="px-4 py-2 text-right space-x-2">
-            <button @click="onEdit(rule)" class="text-blue-400 hover:text-blue-300">
-              Edit
-            </button>
-            <button @click="onDelete(rule)" class="text-red-400 hover:text-red-300">
-              Delete
-            </button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <!-- Pagination -->
-    <div class="flex justify-between items-center">
-      <span class="text-sm text-gray-400">
-        Page {{ currentPage }} of {{ totalPages }}
-      </span>
-      <div class="space-x-2">
-        <button
-          @click="currentPage--"
-          :disabled="currentPage === 1"
-          class="px-4 py-2 bg-blue-600 rounded disabled:opacity-50"
-        >
-          Previous
-        </button>
-        <button
-          @click="currentPage++"
-          :disabled="currentPage === totalPages"
-          class="px-4 py-2 bg-blue-600 rounded disabled:opacity-50"
-        >
-          Next
-        </button>
-      </div>
-    </div>
-  </div>
-</template>
-
-<script setup lang="ts">
-import { computed, ref } from 'vue'
-import Badge from './Badge.vue'
+```tsx
+import { useTable } from "@refinedev/antd";
+import { Button, Input, Select, Space, Table, Tag } from "antd";
+import { useState } from "react";
 
 interface Rule {
-  id: string
-  name: string
-  category: string
-  enabled: boolean
+  id: string;
+  name: string;
+  category: string;
+  enabled: boolean;
 }
 
 interface Props {
-  rules: Rule[]
-  onToggle: (rule: Rule) => Promise<void>
-  onEdit: (rule: Rule) => void
-  onDelete: (rule: Rule) => Promise<void>
+  onToggle: (rule: Rule) => Promise<void>;
+  onEdit: (rule: Rule) => void;
+  onDelete: (rule: Rule) => Promise<void>;
 }
 
-defineProps<Props>()
+export const RuleTable: React.FC<Props> = ({ onToggle, onEdit, onDelete }) => {
+  const { tableProps, searchFormProps } = useTable<Rule>({
+    resource: "rules",
+    pagination: { pageSize: 20 },
+    queryOptions: { queryKey: ["rules"] },
+  });
 
-const searchQuery = ref('')
-const filterCategory = ref('')
-const currentPage = ref(1)
-const pageSize = 20
+  const [category, setCategory] = useState<string>("");
 
-const filteredRules = computed(() => {
-  return props.rules
-    .filter(r => r.name.includes(searchQuery.value))
-    .filter(r => !filterCategory.value || r.category === filterCategory.value)
-    .slice((currentPage.value - 1) * pageSize, currentPage.value * pageSize)
-})
-
-const totalPages = computed(() =>
-  Math.ceil(props.rules.length / pageSize)
-)
-
-const categoryColor = (category: string) => {
-  const colors: Record<string, string> = {
-    xss: 'red',
-    sqli: 'orange',
-    rce: 'red',
-    scanner: 'yellow',
-  }
-  return colors[category] || 'gray'
-}
-</script>
-```
-
-### 4. Badge Component
-
-**File: `components/Badge.vue`**
-
-```vue
-<template>
-  <span :class="[baseClass, colorClass]">
-    {{ label }}
-  </span>
-</template>
-
-<script setup lang="ts">
-import { computed } from 'vue'
-
-interface Props {
-  label: string
-  color?: 'red' | 'yellow' | 'green' | 'blue' | 'gray'
-  variant?: 'solid' | 'outline'
-}
-
-const props = withDefaults(defineProps<Props>(), {
-  color: 'gray',
-  variant: 'solid',
-})
-
-const baseClass = 'px-3 py-1 rounded-full text-xs font-semibold'
-
-const colorClass = computed(() => {
-  const colors = {
-    solid: {
-      red: 'bg-red-600 text-white',
-      yellow: 'bg-yellow-600 text-white',
-      green: 'bg-green-600 text-white',
-      blue: 'bg-blue-600 text-white',
-      gray: 'bg-gray-600 text-white',
+  const columns = [
+    { dataIndex: "id", title: "Rule ID", width: 120 },
+    { dataIndex: "name", title: "Name", ellipsis: true },
+    {
+      dataIndex: "category",
+      title: "Category",
+      render: (text: string) => {
+        const colors: Record<string, string> = {
+          xss: "red",
+          sqli: "orange",
+          rce: "red",
+          scanner: "gold",
+        };
+        return <Tag color={colors[text] || "default"}>{text}</Tag>;
+      },
     },
-    outline: {
-      red: 'border border-red-500 text-red-500',
-      yellow: 'border border-yellow-500 text-yellow-500',
-      green: 'border border-green-500 text-green-500',
-      blue: 'border border-blue-500 text-blue-500',
-      gray: 'border border-gray-500 text-gray-500',
+    {
+      dataIndex: "enabled",
+      title: "Enabled",
+      render: (enabled: boolean) => (
+        <span style={{ color: enabled ? "#52c41a" : "#ff4d4f" }}>
+          {enabled ? "Yes" : "No"}
+        </span>
+      ),
     },
-  }
-  return colors[props.variant][props.color]
-})
-</script>
-```
+    {
+      title: "Actions",
+      render: (_: any, rule: Rule) => (
+        <Space size="small">
+          <Button type="link" onClick={() => onEdit(rule)}>
+            Edit
+          </Button>
+          <Button type="link" danger onClick={() => onDelete(rule)}>
+            Delete
+          </Button>
+        </Space>
+      ),
+    },
+  ];
 
-### 5. NavItem Component
-
-**File: `components/NavItem.vue`**
-
-```vue
-<template>
-  <router-link
-    :to="to"
-    :class="[
-      'flex items-center gap-3 px-4 py-2 rounded-lg transition',
-      isActive
-        ? 'bg-blue-600 text-white'
-        : 'text-gray-300 hover:bg-gray-700',
-    ]"
-  >
-    <component :is="icon" :size="20" />
-    <span>{{ label }}</span>
-  </router-link>
-</template>
-
-<script setup lang="ts">
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
-
-interface Props {
-  to: string
-  icon: any
-  label: string
-}
-
-defineProps<Props>()
-
-const route = useRoute()
-
-const isActive = computed(() =>
-  route.path.startsWith(props.to)
-)
-</script>
-```
-
-## View Examples
-
-### Dashboard View
-
-**File: `views/Dashboard.vue`**
-
-```vue
-<template>
-  <Layout>
-    <div class="space-y-6">
-      <!-- Stats Row -->
-      <div class="grid grid-cols-4 gap-6">
-        <StatCard
-          label="Requests/sec"
-          :value="stats.rps"
-          trend="up"
-          :change="`+${stats.rpsChange}% vs last hour`"
-          :icon="TrendingUp"
+  return (
+    <div>
+      <Space style={{ marginBottom: "16px" }}>
+        <Input.Search
+          placeholder="Search rules..."
+          style={{ width: 200 }}
+          {...searchFormProps}
         />
-        <StatCard
-          label="Blocked"
-          :value="stats.blockedCount"
-          :change="`${stats.blockedPercent}% blocked`"
-          :icon="Shield"
+        <Select
+          value={category}
+          onChange={setCategory}
+          style={{ width: 150 }}
+          placeholder="Filter by category"
+          options={[
+            { value: "", label: "All Categories" },
+            { value: "xss", label: "XSS" },
+            { value: "sqli", label: "SQL Injection" },
+          ]}
         />
-        <StatCard
-          label="Active Rules"
-          :value="stats.activeRules"
-          :icon="Zap"
-        />
-        <StatCard
-          label="Cluster Nodes"
-          :value="stats.clusterNodes"
-          :icon="Network"
-        />
-      </div>
-
-      <!-- Charts -->
-      <div class="grid grid-cols-2 gap-6">
-        <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
-          <h3 class="text-lg font-semibold mb-4">Traffic Over Time</h3>
-          <!-- Chart component here -->
-        </div>
-        <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
-          <h3 class="text-lg font-semibold mb-4">Top Rules</h3>
-          <RuleTable :rules="topRules" />
-        </div>
-      </div>
-
-      <!-- Recent Events -->
-      <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
-        <h3 class="text-lg font-semibold mb-4">Recent Attacks</h3>
-        <div class="space-y-2">
-          <div v-for="event in recentEvents" :key="event.id" class="flex items-center justify-between">
-            <span>{{ event.rule }} ({{ event.ip }})</span>
-            <Badge :label="event.severity" :color="severityColor(event.severity)" />
-          </div>
-        </div>
-      </div>
+      </Space>
+      <Table<Rule> columns={columns} {...tableProps} rowKey="id" />
     </div>
-  </Layout>
-</template>
-
-<script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { TrendingUp, Shield, Zap, Network } from 'lucide-vue-next'
-import Layout from '../components/Layout.vue'
-import StatCard from '../components/StatCard.vue'
-import RuleTable from '../components/RuleTable.vue'
-import Badge from '../components/Badge.vue'
-import * as api from '../api'
-
-const stats = ref({
-  rps: 1250,
-  rpsChange: 12,
-  blockedCount: 342,
-  blockedPercent: 5.2,
-  activeRules: 48,
-  clusterNodes: 3,
-})
-
-const topRules = ref([])
-const recentEvents = ref([])
-
-onMounted(async () => {
-  topRules.value = await api.stats.getTopRules()
-  recentEvents.value = await api.events.getRecent(10)
-})
-
-const severityColor = (severity: string) => {
-  const colors = { critical: 'red', high: 'orange', medium: 'yellow', low: 'blue' }
-  return colors[severity] || 'gray'
-}
-</script>
+  );
+};
 ```
 
-## i18n Key Conventions
+### 4. Custom Hook for Data Fetching
 
-All translation keys use dot notation:
+**File: `hooks/useHosts.ts`**
+
+Uses React Query (TanStack Query) for server state management.
+
+```tsx
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { hostApi } from "../api/hosts";
+
+export const useHosts = () => {
+  const query = useQuery({
+    queryKey: ["hosts"],
+    queryFn: hostApi.list,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: hostApi.create,
+    onSuccess: () => {
+      query.refetch();
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => hostApi.update(id, data),
+    onSuccess: () => {
+      query.refetch();
+    },
+  });
+
+  return {
+    hosts: query.data || [],
+    isLoading: query.isLoading,
+    createHost: createMutation.mutate,
+    updateHost: updateMutation.mutate,
+  };
+};
+```
+
+### 5. Auth Hook with Zustand
+
+**File: `hooks/useAuth.ts`**
+
+```tsx
+import { create } from "zustand";
+import { authApi } from "../api/auth";
+
+interface AuthStore {
+  user: { username: string } | null;
+  token: string | null;
+  login: (username: string, password: string, totp?: string) => Promise<void>;
+  logout: () => void;
+  verifyTotp: (secret: string, code: string) => Promise<boolean>;
+}
+
+export const useAuthStore = create<AuthStore>((set) => ({
+  user: null,
+  token: null,
+  login: async (username, password, totp) => {
+    const { token, user } = await authApi.login(username, password, totp);
+    localStorage.setItem("token", token);
+    set({ token, user });
+  },
+  logout: () => {
+    localStorage.removeItem("token");
+    set({ token: null, user: null });
+  },
+  verifyTotp: async (secret, code) => {
+    return await authApi.verifyTotp(secret, code);
+  },
+}));
+
+export const useAuth = () => useAuthStore();
+```
+
+## Page Example: Dashboard
+
+**File: `pages/dashboard/index.tsx`**
+
+```tsx
+import { Row, Col, Card, Space, Tag } from "antd";
+import { useQuery } from "@tanstack/react-query";
+import { statsApi } from "../../api/stats";
+import { StatCard } from "../../components/StatCard";
+import { RuleTable } from "../../components/RuleTable";
+
+export const DashboardPage: React.FC = () => {
+  const statsQuery = useQuery({
+    queryKey: ["stats"],
+    queryFn: statsApi.getSummary,
+    refetchInterval: 5000, // Refresh every 5s
+  });
+
+  const eventsQuery = useQuery({
+    queryKey: ["recent-events"],
+    queryFn: () => statsApi.getRecentEvents(10),
+    refetchInterval: 3000,
+  });
+
+  const stats = statsQuery.data;
+  const recentEvents = eventsQuery.data || [];
+
+  return (
+    <Space direction="vertical" style={{ width: "100%" }}>
+      {/* Stats Row */}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} sm={12} lg={6}>
+          <StatCard
+            label="Requests/sec"
+            value={stats?.rps || 0}
+            change={`+${stats?.rpsChange || 0}% vs last hour`}
+            trend="up"
+          />
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <StatCard
+            label="Blocked"
+            value={stats?.blockedCount || 0}
+            change={`${stats?.blockedPercent || 0}% blocked`}
+          />
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <StatCard label="Active Rules" value={stats?.activeRules || 0} />
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <StatCard label="Cluster Nodes" value={stats?.clusterNodes || 0} />
+        </Col>
+      </Row>
+
+      {/* Charts Row */}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={12}>
+          <Card title="Traffic Over Time">
+            {/* Chart component via @ant-design/plots */}
+          </Card>
+        </Col>
+        <Col xs={24} lg={12}>
+          <Card title="Top Rules">
+            <RuleTable />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Recent Events */}
+      <Card title="Recent Attacks">
+        {recentEvents.map((event) => (
+          <div key={event.id} style={{ padding: "8px 0" }}>
+            <Space>
+              <span>{event.rule}</span>
+              <span>({event.ip})</span>
+              <Tag color={event.severity === "critical" ? "red" : "orange"}>
+                {event.severity}
+              </Tag>
+            </Space>
+          </div>
+        ))}
+      </Card>
+    </Space>
+  );
+};
+```
+
+## i18n Setup (using i18next)
+
+Translation keys use dot notation:
+
+**File: `i18n/locales/en.ts`**
 
 ```typescript
-// locales/en.ts
-export default {
+export const en = {
   common: {
-    save: 'Save',
-    cancel: 'Cancel',
-    delete: 'Delete',
-    edit: 'Edit',
+    save: "Save",
+    cancel: "Cancel",
+    delete: "Delete",
+    edit: "Edit",
+    loading: "Loading...",
   },
   nav: {
-    dashboard: 'Dashboard',
-    hosts: 'Hosts',
-    rules: 'Rules',
+    dashboard: "Dashboard",
+    hosts: "Hosts",
+    rules: "Rules",
+    cluster: "Cluster",
+    settings: "Settings",
   },
   pages: {
     dashboard: {
-      title: 'Dashboard',
+      title: "Dashboard",
       stats: {
-        rps: 'Requests per Second',
-        blocked: 'Blocked Requests',
+        rps: "Requests per Second",
+        blocked: "Blocked Requests",
       },
     },
   },
   errors: {
-    notFound: 'Page not found',
-    unauthorized: 'Unauthorized',
-    serverError: 'Server error',
+    notFound: "Page not found",
+    unauthorized: "Unauthorized",
+    serverError: "Server error",
   },
-}
+};
 ```
 
-**Usage in templates:**
-```vue
-<h1>{{ $t('pages.dashboard.title') }}</h1>
-<button>{{ $t('common.save') }}</button>
+**File: `i18n/config.ts`**
+
+```tsx
+import i18n from "i18next";
+import LanguageDetector from "i18next-browser-languagedetector";
+import { initReactI18next } from "react-i18next";
+import { en } from "./locales/en";
+import { zh } from "./locales/zh";
+
+i18n
+  .use(LanguageDetector)
+  .use(initReactI18next)
+  .init({
+    resources: { en: { translation: en }, zh: { translation: zh } },
+    fallbackLng: "en",
+    interpolation: { escapeValue: false },
+  });
+
+export default i18n;
+```
+
+**Usage in components:**
+
+```tsx
+import { useTranslation } from "react-i18next";
+
+export const LoginPage: React.FC = () => {
+  const { t } = useTranslation();
+  return <h1>{t("pages.dashboard.title")}</h1>;
+};
 ```
 
 ## API Client Patterns
 
 ### Axios Instance with Interceptors
 
-**File: `api/index.ts`**
+**File: `api/client.ts`**
 
 ```typescript
-import axios, { AxiosInstance } from 'axios'
-import { useAuth } from '../stores/auth'
+import axios, { AxiosInstance, AxiosError } from "axios";
+import { useAuthStore } from "../hooks/useAuth";
 
 const api: AxiosInstance = axios.create({
-  baseURL: '/api',
+  baseURL: "/api",
   timeout: 15000,
-})
+});
 
 // Request interceptor: add JWT
 api.interceptors.request.use((config) => {
-  const auth = useAuth()
-  if (auth.token) {
-    config.headers.Authorization = `Bearer ${auth.token}`
+  const authStore = useAuthStore.getState();
+  if (authStore.token) {
+    config.headers.Authorization = `Bearer ${authStore.token}`;
   }
-  return config
-})
+  return config;
+});
 
 // Response interceptor: auto-logout on 401
 api.interceptors.response.use(
-  response => response,
-  (error) => {
+  (response) => response,
+  (error: AxiosError) => {
     if (error.response?.status === 401) {
-      useAuth().logout()
-      location.href = '/#/login'
+      useAuthStore.getState().logout();
+      window.location.href = "/login";
     }
-    return Promise.reject(error)
+    return Promise.reject(error);
   }
-)
+);
 
-export default api
+export default api;
 ```
 
 ### API Module Pattern
@@ -595,90 +566,86 @@ export default api
 **File: `api/hosts.ts`**
 
 ```typescript
-import api from './index'
+import api from "./client";
 
 export interface Host {
-  id: string
-  name: string
-  upstreamUrl: string
-  enabled: boolean
+  id: string;
+  name: string;
+  upstream_url: string;
+  enabled: boolean;
 }
 
-export const hosts = {
+export const hostApi = {
   list: async (): Promise<Host[]> => {
-    const res = await api.get('/hosts')
-    return res.data
+    const res = await api.get("/hosts");
+    return res.data.data; // Adjust based on actual response structure
   },
 
   get: async (id: string): Promise<Host> => {
-    const res = await api.get(`/hosts/${id}`)
-    return res.data
+    const res = await api.get(`/hosts/${id}`);
+    return res.data.data;
   },
 
-  create: async (host: Omit<Host, 'id'>): Promise<Host> => {
-    const res = await api.post('/hosts', host)
-    return res.data
+  create: async (host: Omit<Host, "id">): Promise<Host> => {
+    const res = await api.post("/hosts", host);
+    return res.data.data;
   },
 
   update: async (id: string, host: Partial<Host>): Promise<Host> => {
-    const res = await api.put(`/hosts/${id}`, host)
-    return res.data
+    const res = await api.put(`/hosts/${id}`, host);
+    return res.data.data;
   },
 
   delete: async (id: string): Promise<void> => {
-    await api.delete(`/hosts/${id}`)
+    await api.delete(`/hosts/${id}`);
   },
-}
+};
 ```
 
-## Router Configuration
+## Router Configuration (React Router v7)
 
-**File: `router/index.ts`**
+**File: `main.tsx`**
 
 ```typescript
-import { createRouter, createWebHashHistory } from 'vue-router'
-import { useAuth } from '../stores/auth'
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Refine } from "@refinedev/core";
+import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
+import routerBindings from "@refinedev/react-router-v7";
+import { LoginPage } from "./pages/login";
+import { DashboardPage } from "./pages/dashboard";
+import { HostsPage } from "./pages/hosts";
+import { LayoutComponent } from "./components/Layout";
+import { useAuthStore } from "./hooks/useAuth";
 
-const routes = [
-  {
-    path: '/',
-    redirect: '/dashboard',
-  },
-  {
-    path: '/login',
-    component: () => import('../views/Login.vue'),
-    meta: { requiresAuth: false },
-  },
-  {
-    path: '/dashboard',
-    component: () => import('../views/Dashboard.vue'),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: '/hosts',
-    component: () => import('../views/Hosts.vue'),
-    meta: { requiresAuth: true },
-  },
-  // More routes...
-]
+export const App: React.FC = () => {
+  const { token } = useAuthStore();
 
-const router = createRouter({
-  history: createWebHashHistory(),
-  routes,
-})
-
-// Navigation guard
-router.beforeEach((to, from, next) => {
-  const auth = useAuth()
-  
-  if (to.meta.requiresAuth && !auth.isLoggedIn) {
-    next('/login')
-  } else {
-    next()
-  }
-})
-
-export default router
+  return (
+    <RefineKbarProvider>
+      <BrowserRouter>
+        <Refine
+          routerProvider={routerBindings}
+          dataProvider={dataProvider} // Your data provider
+        >
+          <Routes>
+            <Route
+              path="/login"
+              element={<LoginPage />}
+              index
+            />
+            <Route element={<LayoutComponent />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/hosts" element={<HostsPage />} />
+              {/* More routes */}
+              <Route path="*" element={<Navigate to="/dashboard" />} />
+            </Route>
+          </Routes>
+          <RefineKbar />
+        </Refine>
+      </BrowserRouter>
+    </RefineKbarProvider>
+  );
+};
 ```
 
 ## Vite Configuration
@@ -686,39 +653,53 @@ export default router
 **File: `vite.config.ts`**
 
 ```typescript
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [react()],
   server: {
+    port: 5174,
     proxy: {
-      '/api': {
-        target: 'http://localhost:9527',
+      "/api": {
+        target: "http://localhost:9527",
         changeOrigin: true,
       },
-      '/ws': {
-        target: 'ws://localhost:9527',
+      "/ws": {
+        target: "ws://localhost:9527",
         ws: true,
       },
     },
   },
   build: {
-    outDir: '../../../target/admin-ui-dist',
+    outDir: "../../target/admin-ui-dist",
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom"],
+          antd: ["antd"],
+          charts: ["@ant-design/plots"],
+          refine: ["@refinedev/core", "@refinedev/antd"],
+        },
+      },
+    },
   },
-})
+});
 ```
 
 ## Development Workflow
 
 ```bash
 # Install dependencies
-cd web/admin-ui
+cd web/admin-panel
 npm install
 
-# Development server (http://localhost:5173)
+# Development server (http://localhost:5174)
 npm run dev
+
+# Type check
+npm run type-check
 
 # Build for production
 npm run build
@@ -731,22 +712,22 @@ cargo build --release
 
 ## Performance Optimization
 
-- **Code splitting**: Routes lazy-loaded via `() => import()`
-- **Asset optimization**: Tailwind CSS purges unused styles
-- **Caching**: Vue components cached by Vite
-- **Bundle size**: ~200KB gzipped (uncompressed: ~600KB)
+- **Code splitting**: Smart Vite/Rollup chunking (React, Ant Design, charts, Refine vendor chunks)
+- **Lazy loading**: Routes via React.lazy() or Refine's code-split integration
+- **Caching**: Browser caching for static assets, React Query for server state
+- **Bundle size**: ~250KB gzipped (uncompressed: ~750KB with Ant Design)
 
-## Accessibility
+## Accessibility (Ant Design Native)
 
-- ARIA labels on form inputs
-- Keyboard navigation (Tab, Enter, Escape)
-- Color not the only indicator (icons + text)
-- Sufficient contrast (Tailwind colors meet WCAG AA)
+- ARIA labels built-in via Ant Design components
+- Keyboard navigation (Tab, Enter, Escape) handled by Ant Design
+- Color not sole indicator: icons + text labels
+- High contrast: Ant Design theme respects WCAG AA
 
 ## Browser Support
 
 - Chrome 90+
 - Firefox 88+
-- Safari 15+
+- Safari 14+
 - Edge 90+
 - ES2020+ (no IE11 support)

@@ -257,18 +257,20 @@ prx-waf/
 │                        #   *.yaml carrying `kind: custom_rule_v1`; auto-loaded
 │                        #   at startup with hot-reload — see custom-rules-syntax.md)
 │
-├── web/admin-ui/        # Vue 3 SPA
+├── web/admin-panel/     # React 18.3 SPA (admin framework with Refine + Ant Design)
 │   ├── src/
-│   │   ├── views/       # 21 Vue pages (Dashboard, Hosts, Rules, Cluster, etc.)
-│   │   ├── components/  # 5 reusable components (Layout, StatCard, Badge, etc.)
-│   │   ├── stores/      # Pinia stores (auth.ts)
-│   │   ├── api/         # 11 API modules (auth, hosts, rules, cluster, etc.)
-│   │   ├── i18n/        # 11 locales (en, zh, ru, ka, ar, de, es, fr, ja, ko, et)
-│   │   ├── router/      # Vue Router config (hash mode)
-│   │   └── App.vue      # Root component
+│   │   ├── pages/       # Route-level pages (Dashboard, Login, Hosts, Rules, Cluster, Settings)
+│   │   ├── components/  # Reusable components (Layout, Sider, Header, StatCard, RuleTable, etc.)
+│   │   ├── hooks/       # Custom React hooks (useAuth, useHosts, useNotification, etc.)
+│   │   ├── stores/      # Zustand stores (auth.ts, ui.ts)
+│   │   ├── api/         # API client + data providers (client.ts, auth.ts, hosts.ts, rules.ts, etc.)
+│   │   ├── i18n/        # i18next config + 11 locales (en, zh, ru, ka, ar, de, es, fr, ja, ko, et)
+│   │   ├── types/       # TypeScript interfaces (api.ts, domain.ts)
+│   │   └── main.tsx     # React root entry
 │   │
-│   ├── package.json     # Vue 3.3.13 + Vite 5.1 + Tailwind 3.4 + axios + vue-i18n
-│   └── vite.config.ts   # Vite dev server proxy
+│   ├── package.json     # React 18.3.1 + Refine 5.0.12 + Ant Design 5.22.5 + Vite 8.0.9 + React Router 7 + React Query 5.62.7 + Zustand 5.0.2
+│   ├── index.html       # HTML entry point
+│   └── vite.config.ts   # Vite dev server proxy + smart code splitting
 │
 ├── tests/               # Integration + E2E test suite (1,812 LOC)
 │   ├── e2e-cluster.sh   # Main orchestrator (5 shell runners, multi-artifact output)

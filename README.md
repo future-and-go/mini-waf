@@ -7,7 +7,7 @@
 ![Rust](https://img.shields.io/badge/rust-2024--edition-orange)
 ![PostgreSQL](https://img.shields.io/badge/postgresql-16%2B-blue)
 
-PRX-WAF is a production-ready reverse proxy WAF built on [Pingora](https://github.com/cloudflare/pingora) (Cloudflare's Rust HTTP proxy). It provides multi-phase attack detection, rule-based automation, WASM plugins, CrowdSec integration, and a Vue 3 admin UI — all in a single deployable binary.
+PRX-WAF is a production-ready reverse proxy WAF built on [Pingora](https://github.com/cloudflare/pingora) (Cloudflare's Rust HTTP proxy). It provides multi-phase attack detection, rule-based automation, WASM plugins, CrowdSec integration, and a React 18.3 + Refine admin UI — all in a single deployable binary.
 
 ---
 
@@ -57,7 +57,7 @@ PRX-WAF is a production-ready reverse proxy WAF built on [Pingora](https://githu
 - Response caching: moka LRU with TTL and size limits
 - PostgreSQL 16+ storage: all config, rules, logs, stats persisted
 - AES-256-GCM encryption at rest for sensitive values
-- Vue 3 Admin UI with JWT + TOTP authentication, real-time WebSocket monitoring
+- React 18.3 + Refine admin UI with Ant Design 5, JWT + TOTP authentication, real-time WebSocket monitoring
 
 ---
 
