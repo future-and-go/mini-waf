@@ -85,7 +85,7 @@ See **[planned signal-predicate docs (FR-025/026)]** for risk-scorer integration
 
 ## Phase-0: Access Gate (FR-008)
 
-Phase-0 gate runs **before** the 16-phase rule pipeline: three stages in order: **(1)** Host gate (per-tier FQDN whitelist, deny-by-default if non-empty) → **(2)** IP blacklist (Patricia trie, longest-prefix v4/v6) → **(3)** IP whitelist (Patricia trie, per-tier `full_bypass` vs `blacklist_only` dispatch).
+Phase-0 gate runs **before** the pipeline: **(1)** IP whitelist (Patricia trie, per-tier `full_bypass` vs `blacklist_only` dispatch) → **(2)** IP blacklist (Patricia trie, longest-prefix v4/v6) → **(3)** URL whitelist (regex + literal) → **(4)** URL blacklist (regex + literal).
 
 **Rationale**: Blacklist before whitelist prevents leaked whitelist IPs from bypassing explicit blocks.
 
@@ -97,55 +97,38 @@ See [Access Lists Operator Guide](./access-lists.md) for full schema, worked exa
 
 ---
 
-## Phases 1-4: IP & URL Filtering
+## Phases 1-4: IP & URL Filtering (Fast-Path Access Control)
 
 ```
-Phase 1: IP Allowlist (CIDR)
-├─ Check if client IP in allow_ips table
+Phase 1: IP Whitelist (CIDR)
+├─ Check if client IP in whitelist CIDR table
 ├─ If match → allow this phase, continue to Phase 2
-└─ If no match → continue (allowlist is permissive)
+└─ If no match → continue (whitelist is permissive)
 
-Phase 2: IP Blocklist (CIDR)
-├─ Check if client IP in block_ips table
-├─ If match → BLOCK (decision made)
+Phase 2: IP Blacklist (CIDR)
+├─ Check if client IP in blacklist CIDR table
+├─ If match → BLOCK with 403 Forbidden (decision made)
 └─ If no match → continue to Phase 3
 
-Phase 3: URL Allowlist (regex + literal)
+Phase 3: URL Whitelist (regex + literal)
 ├─ Check if request path in allow_urls table
-├─ If match → bypass all downstream phases, allow
+├─ If match → ALLOW (bypass all downstream phases)
 └─ If no match → continue to Phase 4
 
 Phase 4: URL Blocklist (regex + literal)
 ├─ Check if request path in block_urls table
-├─ If match → BLOCK
-└─ If no match → continue to Phase 5
+├─ If match → BLOCK with 403 Forbidden
+└─ If no match → continue to Phase 19
 ```
 
-## Phases 5-7: Rate Limiting & Behavior Analysis
+**Note**: URL whitelists take precedence over the entire rule pipeline — matching URLs skip all downstream checks.
 
-### Phase 5: Rate Limiting (FR-004)
-
-```
-FR-004 Rate Limiting: Tiered token-bucket + sliding-window
-├─ Key 1: ip:<host>:<client_ip> (checked first, IP-based limit)
-│  ├─ Algorithm: token-bucket (burst) + sliding-window (sustained)
-│  ├─ Config: per-tier burst_capacity, burst_refill_per_s, window_secs, window_limit
-│  ├─ Store: MemoryStore (100K cap, 10min idle eviction) or RedisStore (Lua roundtrip)
-│  └─ BreakerStore wraps both: circuit-breaker (default 5 failures) → fallback to memory
-├─ If IP key fails → BLOCK with rule ID RL-IP (fail-mode: tier.Close=block, Open=pass)
-├─ Else check Key 2: sess:<host>:<session_id> (session/device-fp, fallback if cookie present)
-│  └─ If session key fails → BLOCK with rule ID RL-SESSION
-├─ If both Allow → continue to Phase 6
-└─ Rule ID RL-ERR on check error (fail-mode honored per tier policy)
-
-Config: configs/rate-limit.yaml (hot-reload via notify, 200ms debounce, ArcSwap)
-```
-
-### Phase 5.1: DDoS Detection (FR-005)
+## Phase 19: DDoS Detection (FR-005)
 
 ```
 FR-005 DDoS Protection: Multi-layer detection with dynamic banning
-├─ Position: AFTER rate-limit (catch token-bucket exhaustion first)
+├─ Position: AFTER fast-path (Phase 1-4), BEFORE rate-limit
+├─ Short-circuit: banned IPs checked first → 403 DDOS-BAN (pre-computed)
 ├─ Three detectors run in parallel:
 │  ├─ PerIpDetector: sliding-window counter per IP
 │  │  └─ threshold: tier.policy.ddos_threshold_rps (requests/sec)
@@ -166,11 +149,32 @@ FR-005 DDoS Protection: Multi-layer detection with dynamic banning
 ├─ BreakerStore circuit-breaker: fallback to memory on >5 Redis failures
 ├─ Metrics: ddos_detector_evaluations_total, ddos_hard_burst_total, ddos_bans_issued_total
 │  └─ Labels: {tier, detector_type, error_kind}
-└─ If no burst → continue to Phase 6
+└─ If no burst detected → continue to Phase 5
 
 Config: configs/default.toml [ddos] section
 Operator guide: docs/ddos-protection.md
 ```
+
+## Phases 5-11: Rate Limiting & Attack Detection Pipeline
+
+### Phase 5: Rate Limiting (FR-004)
+
+```
+FR-004 Rate Limiting: Tiered token-bucket + sliding-window
+├─ Key 1: ip:<host>:<client_ip> (checked first, IP-based limit)
+│  ├─ Algorithm: token-bucket (burst) + sliding-window (sustained)
+│  ├─ Config: per-tier burst_capacity, burst_refill_per_s, window_secs, window_limit
+│  ├─ Store: MemoryStore (100K cap, 10min idle eviction) or RedisStore (Lua roundtrip)
+│  └─ BreakerStore wraps both: circuit-breaker (default 5 failures) → fallback to memory
+├─ If IP key fails → BLOCK with rule ID RL-IP (fail-mode: tier.Close=block, Open=pass)
+├─ Else check Key 2: sess:<host>:<session_id> (session/device-fp, fallback if cookie present)
+│  └─ If session key fails → BLOCK with rule ID RL-SESSION
+├─ If both Allow → continue to Phase 6
+└─ Rule ID RL-ERR on check error (fail-mode honored per tier policy)
+
+Config: configs/rate-limit.yaml (hot-reload via notify, 200ms debounce, ArcSwap)
+```
+
 
 ### Phase 5.5: Transaction Velocity & Sequence (FR-012)
 
@@ -201,94 +205,174 @@ Config: configs/tx-velocity.yaml (hot-reload via notify, ArcSwap, schema v1)
 Operator guide: docs/transaction-velocity.md
 ```
 
-### Phase 6: Scanner Detection (and beyond)
+### Phases 6-11: Attack Detection Checkers (Ordered)
+
+Runs in pipeline order; first match blocks the request.
 
 ```
 Phase 6: Scanner Detection
-├─ Check User-Agent against scanner fingerprints (Nmap, Nikto, etc.)
-├─ Check request patterns (unusual paths, SQL comments in URI, etc.)
-├─ If scanner detected → log & continue (or block, configurable)
-└─ else → continue to Phase 7
+├─ Fingerprint User-Agent against scanner signatures (Nmap, Nikto, etc.)
+├─ Pattern matching on request anomalies
+├─ Emits scanner signals for risk scoring
+└─ If signature match → BLOCK or log (configurable)
 
 Phase 7: Bot Detection
-├─ Check User-Agent against known bot list (headless browsers, etc.)
-├─ Check for browser fingerprinting anomalies
-├─ If malicious bot → BLOCK (or challenge)
+├─ User-Agent against known bot list (headless browsers, etc.)
+├─ Browser fingerprinting anomalies (FR-010 integration)
+├─ If malicious bot pattern → BLOCK
 └─ else → continue to Phase 8
-```
 
-## Phases 8-11: Payload Attack Detection
-
-```
-Phase 8: SQL Injection (SQLi)
-├─ Parse request body + query string (up to 256KB JSON)
-├─ Run libinjectionrs detect_sqli fingerprint engine
-├─ Check 19 modular regex patterns (SQLI-001..019: classic, blind, error-based)
-├─ Apply SqliScanConfig (header/JSON toggles, denylist/allowlist, 4KB header cap)
-├─ If SQL injection payload detected → BLOCK
+Phase 8: XSS Detection
+├─ libinjectionrs detect_xss fingerprint engine
+├─ Regex patterns for script tags, event handlers
+├─ If XSS injection payload detected → BLOCK
 └─ else → continue to Phase 9
 
-Phase 9: Cross-Site Scripting (XSS)
-├─ Parse request body + headers
-├─ Run libinjectionrs detect_xss fingerprint engine
-├─ Check compiled XSS regex patterns (script tags, event handlers, etc.)
-├─ If JavaScript/HTML injection detected → BLOCK
+Phase 9: RCE Detection
+├─ Shell metacharacter injection patterns
+├─ Expression language injection (${}, #{}, etc.)
+├─ Template injection (Jinja2, Freemarker, etc.)
+├─ If RCE pattern detected → BLOCK
 └─ else → continue to Phase 10
 
-Phase 10: Remote Code Execution (RCE)
-├─ Check for command injection patterns (shell metacharacters, etc.)
-├─ Check for expression language injection (${}, #{}, etc.)
-├─ Check for template injection (Jinja2, Freemarker, etc.)
-├─ If RCE pattern detected → BLOCK
+Phase 10: Directory Traversal
+├─ Normalize path (decode, resolve ../)
+├─ Check for escapes, Windows alternate data streams (::$DATA)
+├─ If traversal detected → BLOCK
 └─ else → continue to Phase 11
 
-Phase 11: Directory Traversal
-├─ Normalize path (decode, resolve ../)
-├─ Check for attempts to escape web root
-├─ Check for Windows alternate data streams (::$DATA)
-├─ If traversal detected → BLOCK
-└─ else → continue to Phase 12
+Phase 11: SSRF Detection (FR-016)
+├─ Extract all http(s):// URLs from body/query/cookies/headers
+├─ Detect cloud-metadata IPs, RFC1918, loopback, link-local
+├─ Obfuscation handling: dword/hex/octal/IPv6-mapped forms
+├─ Outbound allowlist bypass check
+├─ v1 limitation: no DNS resolution (DNS-rebinding mitigation deferred)
+└─ If private IP destination detected → BLOCK
+
+Phase 12: Header Injection Detection (FR-017)
+├─ CRLF injection detection in header name/value (response splitting)
+├─ Host header validation against per-host inbound whitelist
+├─ X-Forwarded-For sanity check (leftmost-private, excessive hop-count)
+├─ v1 limitation: no SNI-vs-Host comparison (Red Team Finding #12)
+└─ If injection pattern detected → BLOCK
+
+Phase 13: Brute Force Protection (FR-018)
+├─ Per-user login route failure tracking (user_hash, ip)
+├─ Request phase: block if failure count >= bf_max_per_user
+├─ Spray detection: block if password sprayed to >= bf_spray_threshold users from one IP
+├─ Response phase: on_response() records 401/403 as login failures (status-code-only)
+├─ v1 limitation: no body regex failure detection (security concerns)
+└─ If threshold breach → BLOCK with BF-001 or BF-002
+
+Phase 14: Request Body Abuse Detection (FR-020)
+├─ Oversized body check (declared Content-Length > max_body_size)
+├─ Content-Type magic-byte sniff validation
+├─ JSON depth pre-check (bails before parse if exceeds max_json_depth)
+├─ JSON parse validation (failure → block)
+├─ JSON key explosion check (cumulative key count vs max_json_keys)
+└─ If abuse detected → BLOCK
 ```
 
-## Phases 12-16: Advanced & Custom Rules
+## SQL Injection Detection (Separate from Pipeline)
 
 ```
-Phase 12: Custom Rules (User-Defined)
+SQL Injection Check (Hot-reloadable):
+├─ Position: After Phase 14, before Phase 16b CrowdSec AppSec
+├─ Scope: request body + query string (up to 256KB JSON)
+├─ Fingerprint: libinjectionrs detect_sqli engine
+├─ Patterns: 19 modular regex rules (SQLI-001..019: classic, blind, error-based)
+├─ Config: SqliScanConfig (header/JSON toggles, denylist/allowlist, 4KB header cap)
+├─ Hot-reload: separate from main checker pipeline for fine-grained control
+└─ If SQL injection payload detected → BLOCK
+```
+
+**Note**: SQLi check runs after the main Phase 5-14 pipeline but before CrowdSec AppSec and custom rules. This separation allows independent hot-reload tuning.
+
+## Phase 16a: CrowdSec Bouncer (Fast Cache Lookup, Early-Path)
+
+```
+CrowdSec Bouncer (Phase 16a):
+├─ Position: EARLY-PATH, runs after Phase 4 URL filters, before Phase 19 DDoS
+├─ Query CrowdSec bouncer for active decisions on client IP
+├─ Local cache hit → apply decision immediately (no network latency)
+├─ If IP has active decision (ban, captcha, etc.) → apply action
+├─ Fallback: no cache entry → proceed to Phase 19 DDoS
+└─ If blocked → 403 Forbidden with CrowdSec decision
+
+Note: This is an "early phase" — runs in the fast-path before DDoS detection
+to reject known-bad IPs before rate-limit and detection overhead.
+```
+
+## Phase 17: GeoIP Access Control (Early-Path)
+
+```
+GeoIP Check (Phase 17):
+├─ Position: EARLY-PATH, runs after Phase 16a CrowdSec, before Phase 19 DDoS
+├─ Enrichment: GeoIP lookup populates ctx.geo early (after Phase-0)
+├─ Per-tier geo rules: allow/deny countries based on tier policy
+├─ IP2region + MaxMind lookups with background DB updater
+├─ Cache: fast O(1) geo lookup before rate-limit overhead
+└─ If geo rule blocks → 403 Forbidden
+
+Note: Early geo block avoids wasting rate-limit tokens on blocked countries.
+```
+
+## Phase 18: Community Blocklist (Early-Path)
+
+```
+Community Blocklist (Phase 18):
+├─ Position: EARLY-PATH, runs after Phase 17 GeoIP, before Phase 19 DDoS
+├─ O(1) DashMap IP lookup against community-enrolled blocklist
+├─ Rule ID emission: community:<source> (e.g., community:abuseipdb)
+├─ CommunityReporter: batch signals + async push to community API
+├─ Confidence mapping per detection phase (adjust score by phase)
+└─ If IP in blocklist → 403 Forbidden
+
+Note: Community blocklist provides cross-organization threat intel.
+```
+
+## Post-Detection Pipeline: Custom Rules & Integrations
+
+Final checks after the main attack detection pipeline:
+
+```
+Phase 16b: CrowdSec AppSec (Async HTTP Check)
+├─ Position: After SQL injection check, before Custom Rules
+├─ Async per-request HTTP check to CrowdSec AppSec API
+├─ Fallback: unavailable → log and continue
+└─ If blocked by AppSec → 403 Forbidden
+
+Custom Rules Engine (FR-003, User-Defined Logic)
 ├─ Load from custom_rules table (Rhai scripts + JSON DSL)
 ├─ Execute Rhai scripts in sandboxed environment
 ├─ Evaluate JSON DSL conditions
 ├─ If rule matches → action (block/log/challenge)
-└─ else → continue to Phase 13
+└─ else → continue to OWASP CRS
 
-Phase 13: OWASP CRS (Core Rule Set)
+OWASP CRS (Core Rule Set, Pre-compiled Patterns)
 ├─ 24 pre-compiled rule patterns
 ├─ Categories: XSS, SQLi, RCE, RFI, LFI, protocol violations, etc.
 ├─ If CRS rule matches → action (block/log)
-└─ else → continue to Phase 14
+└─ else → continue to Sensitive Data
 
-Phase 14: Sensitive Data Leakage
+Sensitive Data Leakage Detection
 ├─ Aho-Corasick multi-pattern matching
 ├─ Patterns: credit card numbers, SSN, API keys, passwords, etc.
 ├─ If sensitive data in request → log & continue (or block)
-└─ else → continue to Phase 15
+└─ else → continue to Anti-Hotlink
 
-Phase 15: Anti-Hotlink Protection
+Anti-Hotlink Protection
 ├─ Check Referer header
 ├─ If Referer not in allowed list → BLOCK (return 403)
-└─ else → continue to Phase 16
-
-Phase 16: CrowdSec Integration
-├─ Query CrowdSec bouncer for active decisions on client IP
-├─ If IP has active decision (ban, captcha, etc.) → apply action
-├─ If IP is in local cache → use cached decision
-├─ Push attack logs to CrowdSec Log Pusher
-└─ FINAL DECISION: Allow / Block / Challenge
+└─ else → ALLOW (all phases passed)
 ```
 
-## Post-Decision
+**FINAL DECISION**: Allow / Block / Challenge
+
+## Post-Decision (Final Response Handling)
 
 ```
-After Phase 16:
+After all checks complete:
 ├─ Decision = Allow
 │  ├─ Route to backend (vhost → load balancer → upstream)
 │  ├─ Receive response from backend
@@ -298,10 +382,11 @@ After Phase 16:
 │  └─ Return response to client
 │
 ├─ Decision = Block
-│  ├─ Return HTTP 403 Forbidden
-│  ├─ Log to security_events + attack_logs
-│  ├─ Send notifications (email, webhook, etc.)
-│  └─ Increment blocked_requests counter
+│  ├─ Return HTTP 403 Forbidden with rendered block page
+│  ├─ Log to security_events table
+│  ├─ Report to community blocklist (if enrolled)
+│  ├─ Send audit event to configured sink
+│  └─ Increment security metrics (blocked_requests_total)
 │
 └─ Decision = Challenge (FR-004 rate limit)
    ├─ Return HTTP 429 Too Many Requests (or CAPTCHA page)
@@ -316,6 +401,11 @@ After Phase 16:
 - [system-architecture.md](./system-architecture.md) — Topology, components, storage, cluster.
 - [tiered-protection.md](./tiered-protection.md) — Tier classifier consumer guide.
 - [access-lists.md](./access-lists.md) — Phase-0 access gate operator guide.
-- [custom-rules-syntax.md](./custom-rules-syntax.md) — Phase-12 custom rule schema.
-- [transaction-velocity.md](./transaction-velocity.md) — FR-012 Phase-5.5 cross-endpoint fraud detection.
-- [device-fingerprinting.md](./device-fingerprinting.md) — FR-010 device identity (SessionKey fallback for FR-012).
+- [ddos-protection.md](./ddos-protection.md) — Phase 19 DDoS burst detection and banning.
+- [transaction-velocity.md](./transaction-velocity.md) — Phase 5.5 (FR-012) cross-endpoint fraud detection.
+- [custom-rules-syntax.md](./custom-rules-syntax.md) — Phase 15 custom rule schema (Rhai + JSON DSL).
+- [device-fingerprinting.md](./device-fingerprinting.md) — FR-010 device identity (SessionKey fallback for Phase 5.5).
+- **FR-016 SSRF Detection** — Phase 11 server-side request forgery detection with private IP obfuscation handling.
+- **FR-017 Header Injection** — Phase 12 CRLF injection + Host header validation.
+- **FR-018 Brute Force** — Phase 13 per-user failure tracking with spray detection.
+- **FR-020 Body Abuse** — Phase 14 oversized/malformed request body detection.

@@ -82,7 +82,7 @@
 
 ---
 
-## Unreleased (In Progress — 2026-04-29)
+## Unreleased (In Progress — 2026-05-15)
 
 ### FR-004 — Rate Limiting (Complete ✓)
 
@@ -268,6 +268,50 @@ Cross-endpoint behavioral fraud detection: rapid login→OTP→deposit sequences
 **Node-local state (open question):** Same per-node limitation as FR-011. Cluster session affinity assumed at the LB; Redis-backed `TxStore` deferred to post-v0.2.
 
 **`ok=true` always (deferred):** Phase 3 records on request entry only. Failed-login detection requires a response-side hook — captured as follow-up work.
+
+### FR-006 — Challenge Engine (Complete ✓)
+
+Proof-of-Work (PoW) / CAPTCHA challenge gate for risk-scoring phase. User-solves-challenge → challenge token issued (HMAC-signed, single-use nonce-tracked) → validator applied in Phase 8 risk scorer. Flow: client makes challenge request → PoW puzzle generated + frontend solves → token returned → token verified during rule eval for risk credit (-25 point delta). Three challenge types: `pow` (CPU-bound, configurable difficulty), `captcha_html` (embedded form), `redirect_url` (3rd-party gateway). Token lifetimes configurable (default 600s). Integrates with Panel Config for enable/difficulty controls. Module: `crates/waf-engine/src/risk/challenge_credit/`.
+
+- [x] PoW engine (Blake3-based, configurable bits)
+- [x] Token generation + HMAC-SHA256 signing (32-byte secret, mode 0600, shared across cluster)
+- [x] Nonce store (LRU, 100K default, replay detection)
+- [x] Challenge credit delta system (Phase 8 integration)
+- [x] YAML config + hot-reload (`configs/device-fp.yaml` challenge block)
+- [x] Plan: plans/260505-FR006-challenge-engine/
+
+**Deliverables**
+- Module: `crates/waf-engine/src/risk/challenge_credit/`
+- Config: Challenge section in `waf-panel.toml`
+- Metrics: challenge_issued_total, challenge_verified_total, token_replay_total
+
+---
+
+### FR-033 — Response Body Content Filtering (Complete ✓)
+
+Outbound content filtering for sensitive data leakage. `ResponseBodyFilter` scans decompressed response body post-cache via Pingora `response_filter` hook. Built-in catalog of PII patterns (email, credit card, SSN, phone, RFC-1918 IP, database error messages). Matches regex mask and replace. Disabled by default; opt in via `[outbound] content_filter.enabled = true`. Operator can supply custom patterns via YAML. CWE-200 mitigation.
+
+---
+
+### FR-034 — Sensitive Field Redaction (Complete ✓)
+
+Selective redaction of sensitive response headers and body fields. JSON path selectors (e.g., `response.body.password`, `response.headers.Authorization`) configured in Panel Config. Replaces sensitive values with `***REDACTED***`. Per-tier policy (CRITICAL tier never redacts, CATCHALL always redacts). Hot-reload via `ArcSwap` on panel config change.
+
+---
+
+### FR-035 — Response Header Leak Prevention (Complete ✓)
+
+Strips server-fingerprint (Server, X-Powered-By, X-AspNet-*, X-Runtime, etc.), debug (X-Debug-*, X-Internal-*, X-Backend-*), and error-detail headers (X-Error-*, X-Exception-*, X-Stack-*). Optional PII regex on values (email, credit card, etc.). Disabled by default via `[outbound] enabled = true`. Standards: OWASP ASVS V14.4, CWE-200, CWE-209.
+
+---
+
+### FR-018 + FR-039 — Response Dispatch + Circuit Breaker (Complete ✓)
+
+**FR-018 Response Dispatch:** Action executor routes challenge/redirect responses via Pingora's response-override mechanism. Challenge actions emit HTTP 200 + PoW puzzle body (client-side solve → token → retry). Redirect actions emit 302 with target URL.
+
+**FR-039 Circuit Breaker:** Stateless transport-layer circuit via `HostConfig` upstream timeout knobs. `apply_fr039_timeouts()` copies connection/read/write/idle timeouts to Pingora HttpPeer options. Maps `ConnectTimedout`, `ConnectRefused`, `ReadTimedout`, `WriteTimedout` to HTTP 503 (was 502). `ErrorPageFactory::render` emits `Retry-After: 5`. Per-host timeout overrides supported in TOML `[[hosts]]`.
+
+---
 
 ### Panel-Config API (Complete ✓)
 

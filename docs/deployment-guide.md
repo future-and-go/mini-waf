@@ -1,5 +1,7 @@
 # Deployment Guide
 
+Single-node deployment with Docker Compose, Systemd, and configuration. For multi-node cluster setups, see [Cluster Guide](./cluster-guide.md).
+
 ## Single-Node Docker Compose
 
 ### Prerequisites
@@ -93,138 +95,6 @@ EOF
 
 # Increase WAF worker threads
 docker compose exec prx-waf prx-waf --config ... run --worker-threads 8
-```
-
----
-
-## 3-Node Cluster (High Availability)
-
-### Prerequisites
-
-- Docker Compose v1.3+
-- 12GB RAM (4GB per node), 6 CPU cores
-- Ports 80, 443 (public); 16851 (cluster, internal only)
-
-### Certificate Generation
-
-```bash
-docker compose -f docker-compose.cluster.yml run --rm cluster-init
-```
-
-Output:
-```
-Generated cluster certificates:
-  CA:     /certs/cluster-ca.pem (keep secure)
-  Node A: /certs/node-a.pem + node-a.key
-  Node B: /certs/node-b.pem + node-b.key
-  Node C: /certs/node-c.pem + node-c.key
-```
-
-Certificates stored in Docker volume `cluster_certs` (persisted).
-
-### Start Cluster
-
-```bash
-docker compose -f docker-compose.cluster.yml up -d
-
-# Wait for node-a to become main
-sleep 10
-
-# Verify all nodes healthy
-curl http://localhost:16827/health  # node-a
-curl http://localhost:16828/health  # node-b
-curl http://localhost:16829/health  # node-c
-
-# Check cluster topology
-curl http://localhost:16827/api/cluster/status | jq .
-```
-
-### Configuration Files
-
-**node-a.toml** (main)
-```toml
-[cluster]
-enabled = true
-node_id = "node-a"
-role = "main"
-listen_addr = "0.0.0.0:16851"
-seeds = []  # First node has no seeds
-
-[storage]
-database_url = "postgresql://prx_waf:changeme123@postgres:5432/prx_waf"
-```
-
-**node-b.toml** (worker)
-```toml
-[cluster]
-enabled = true
-node_id = "node-b"
-role = "worker"
-listen_addr = "0.0.0.0:16851"
-seeds = ["node-a:16851"]  # Point to main
-
-[storage]
-database_url = ""  # Empty: forward-only mode (writes go to main)
-```
-
-**node-c.toml** (worker) — same as node-b, different node_id
-
-### Cluster Operations
-
-**Check topology:**
-```bash
-curl -s http://localhost:16827/api/cluster/status | jq .
-
-# Output:
-# {
-#   "main_node_id": "node-a",
-#   "nodes": [
-#     { "id": "node-a", "role": "main", "status": "healthy" },
-#     { "id": "node-b", "role": "worker", "status": "healthy" },
-#     { "id": "node-c", "role": "worker", "status": "healthy" }
-#   ],
-#   "term": 1,
-#   "rules_version": 42
-# }
-```
-
-**Add a rule on main:**
-```bash
-curl -X POST http://localhost:16827/api/custom-rules \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Block /admin",
-    "pattern": "^/admin",
-    "action": "block"
-  }'
-
-# Workers sync within 10s
-sleep 10
-
-# Verify worker has rule
-curl http://localhost:16828/api/custom-rules
-```
-
-**Kill main, verify failover:**
-```bash
-docker compose -f docker-compose.cluster.yml stop node-a
-
-# Wait <500ms for election
-sleep 1
-
-# Check new main
-curl http://localhost:16827/api/cluster/status
-
-# Output shows node-b or node-c as main
-```
-
-**Rejoin killed node:**
-```bash
-docker compose -f docker-compose.cluster.yml start node-a
-
-# node-a rejoins as worker (won't try to be main again)
-# Full rule sync happens
 ```
 
 ---
@@ -363,13 +233,10 @@ curl http://localhost:16827/health
 
 ## Configuration Reference
 
-### Risk Scorer Backend: Memory vs Redis (FR-025 Phase 7)
-
-**FR-025 Phase 7 feature:** Cumulative risk scoring with pluggable storage backends.
+### Risk Scorer Backend: Memory vs Redis
 
 **Memory Backend (single-node default)**
-```yaml
-# configs/risk.yaml
+```toml
 [risk]
 enabled = true
 store:
@@ -381,92 +248,65 @@ store:
 - Suitable for <100 RPS
 
 **Redis Backend (cluster / high-volume)**
-```yaml
-# configs/risk.yaml
+```toml
 [risk]
 enabled = true
 store:
   backend = "redis"
   redis:
-    url = "redis://localhost:6379"            # Single node or cluster endpoint
-    key_prefix = "waf:risk:"                  # Namespace prefix (customizable)
-    op_timeout_ms = 100                       # Per-operation timeout
-    breaker_threshold = 5                     # Circuit breaker trips after N failures
-    cache_capacity = 10000                    # LRU cache for fail-open fallback
+    url = "redis://localhost:6379"
+    key_prefix = "waf:risk:"
+    op_timeout_ms = 100
+    breaker_threshold = 5
+    cache_capacity = 10000
 ```
-
-**Key Layout (Redis)**
-- `waf:risk:state:{owner_id}` → JSON-encoded RiskState (TTL via EXPIRE)
-- `waf:risk:idx:ip:{ip}` → owner_id (collision index)
-- `waf:risk:idx:fp:{fp_hash}` → owner_id (fingerprint index)
-- `waf:risk:idx:sid:{session_id}` → owner_id (session index)
 
 **Requirements**
-- Redis 6.0+ (supports Lua scripting + EXPIRE)
-- Single-node Redis or Redis Cluster (both supported)
-- Network connectivity: WAF → Redis on configured URL port
-- Recommended: Redis Persistence (RDB/AOF) to survive restarts
-
-**Atomic Lua Scripts**
-All Redis operations use atomic Lua scripts for single round-trip consistency:
-- `apply_script` — Decay + fold deltas + threshold check (single RTT)
-- `mint_or_get_owner_script` — Idempotent owner UUID creation
-- `force_max_script` — Merge colliding keys (max score wins)
+- Redis 6.0+ (Lua scripting + EXPIRE)
+- Network connectivity: WAF → Redis
+- Recommended: Redis Persistence (RDB/AOF)
 
 **Circuit Breaker & Fail-Open**
-- After `breaker_threshold` (default: 5) consecutive Redis failures, circuit opens
-- Opened circuit falls back to in-memory LRU cache (`cache_capacity`, default: 10k entries)
-- Risk state still updated locally; next Redis success resyncs
-- No request blocking during Redis outage (graceful degrade)
-
-**Tuning**
-```yaml
-store:
-  redis:
-    op_timeout_ms = 50          # Faster: fail quicker if Redis slow
-    breaker_threshold = 3       # Stricter: open circuit sooner
-    cache_capacity = 50000      # Larger: more fallback capacity
-```
+- After `breaker_threshold` (default: 5) consecutive failures, circuit opens
+- Fallback to in-memory LRU cache (`cache_capacity`, default: 10k entries)
+- No request blocking during Redis outage
 
 **Monitoring**
 - Log entries for circuit breaker open/close events
 - Metrics: `redis_ops_total`, `redis_failures_total`, `redis_cache_hits_total`
-- Check Redis connectivity: `redis-cli -h <host> -p <port> PING`
+- Check Redis: `redis-cli -h <host> -p <port> PING`
 
 ---
 
-## Challenge Credit HMAC Secret (FR-006 / FR-025 Phase 8)
+### Challenge Credit HMAC Secret
 
-Challenge credit tokens protect against challenge sharing and replay attacks. Each token is HMAC-signed and bound to the requesting actor (IP, device fingerprint, or session). Token verification outcomes map to configurable risk score deltas.
+Challenge credit tokens protect against replay and sharing attacks. Each token is HMAC-signed and bound to the requesting actor.
 
-### Configuration
+**Configuration**
 
 ```toml
 [risk.challenge]
 enabled = true
 ttl_secs = 300                  # Token validity (5 minutes)
 hmac_secret_path = "/var/lib/waf/challenge-hmac.key"
-lru_size = 100000               # In-process nonce cache (consumed tokens)
-header_name = "X-WAF-Cred"      # Request header for token
-valid_delta = -25               # Risk delta: token valid (credit)
-invalid_delta = +20             # Risk delta: bad signature / binding mismatch
-replay_delta = +30              # Risk delta: token already consumed
-expired_delta = +10             # Risk delta: token past TTL
+lru_size = 100000               # In-process nonce cache
+header_name = "X-WAF-Cred"      # Request header
+valid_delta = -25               # Risk delta: token valid
+invalid_delta = +20             # Risk delta: bad signature
+replay_delta = +30              # Risk delta: token consumed
+expired_delta = +10             # Risk delta: past TTL
 ```
 
-### Secret Management
+**Secret Management**
 
-**Auto-generation**: On first boot, if `hmac_secret_path` doesn't exist, a cryptographically secure 32-byte random secret is generated and persisted to disk.
+- **Auto-generation**: On first boot, if `hmac_secret_path` doesn't exist, a 32-byte random secret is generated
+- **Permissions**: Created with `0600` mode (owner read/write only)
+- **Persistence**: Never auto-rotates; persists across restarts
+- **Cluster**: All nodes MUST share identical secret for token verification
 
-**Permissions**: Secret file is created with `0600` mode (owner read/write only) on Unix systems. Windows has no file-mode enforcement.
+**Rotation Procedure**
 
-**Persistence**: Secret NEVER auto-rotates. Persists across restarts and container deployments. All nodes in a cluster MUST share the identical secret file to verify tokens issued by any peer.
-
-**Binding**: Each token encodes the actor identity (IP, fingerprint, or session ID from the request context). Verification fails if a different actor presents the token — preventing cross-actor sharing.
-
-### Rotation Procedure
-
-Schedule rotation during low-traffic windows to minimize impact:
+Schedule during low-traffic windows:
 
 1. **Generate new secret**:
    ```bash
@@ -475,29 +315,27 @@ Schedule rotation during low-traffic windows to minimize impact:
    ```
 
 2. **Drain in-flight tokens**:
-   - Wait 5 minutes (token TTL) for all outstanding tokens to expire naturally
+   - Wait 5 minutes (token TTL) for expiry
    - Or restart with brief downtime (30s)
 
-3. **Stop all WAF nodes** (coordinated):
+3. **Stop WAF**:
    ```bash
-   # Cluster-wide stop
-   docker compose -f docker-compose.cluster.yml down
+   docker compose down  # or systemctl stop prx-waf
    ```
 
-4. **Replace secret on all nodes**:
+4. **Replace secret**:
    ```bash
-   # Each node:
    mv /var/lib/waf/challenge-hmac.key.new /var/lib/waf/challenge-hmac.key
    ```
 
-5. **Restart all nodes**:
+5. **Restart**:
    ```bash
-   docker compose -f docker-compose.cluster.yml up -d
+   docker compose up -d  # or systemctl start prx-waf
    ```
 
-**Impact**: All in-flight challenge credit tokens become invalid and will fail verification. Clients must re-complete the challenge to obtain new tokens. Risk scores bump by `invalid_delta` (+20) for replayed old tokens.
+**Impact**: All in-flight tokens become invalid. Clients must re-complete challenges to obtain new tokens.
 
-### Token Lifecycle
+**Token Lifecycle**
 
 ```
 [Client] → Challenge page → JS-PoW completion → /api/challenge/mint (POST)
@@ -507,7 +345,7 @@ Schedule rotation during low-traffic windows to minimize impact:
                                                        ↓
 [Client] → Subsequent request with X-WAF-Cred header
                                                        ↓
-           [WafEngine verifies signature + binding + TTL + nonce uniqueness]
+           [WafEngine verifies signature + binding + TTL + nonce]
                                                        ↓
                   Valid: -25 delta (credit)
                   Invalid: +20 delta (bad sig/binding)
@@ -515,65 +353,48 @@ Schedule rotation during low-traffic windows to minimize impact:
                   Expired: +10 delta (past TTL)
 ```
 
-### Nonce Cache
+**Nonce Cache**
 
-The nonce cache is an in-memory LRU tracking consumed tokens (nonce uniqueness check). Size is configurable via `lru_size` (default: 100,000 entries).
-
-- **Capacity**: ~50 bytes per entry → ~5 MB for 100K entries
+- **Size**: ~50 bytes per entry → ~5 MB for 100K entries
 - **Eviction**: When full, LRU evicts oldest nonce
-- **TTL**: Entries auto-expire after `ttl_secs + grace_period` (default ~6 minutes)
+- **TTL**: Auto-expire after `ttl_secs + grace_period`
 - **Per-node**: Cache is node-local; clustering does NOT synchronize nonces
 
-**Cluster caveat**: In a multi-node cluster, a token issued by node-a can be replayed on node-b (if node-b's nonce cache hasn't seen it yet). Mitigation: Redis-backed nonce store (feature flag `redis-store`; Phase 9).
-
-### Risk Deltas (Configurable)
+**Risk Deltas (Configurable)**
 
 | Outcome | Default | Description |
 |---------|---------|-------------|
 | Valid | -25 | Challenge passed; actor earns credit |
-| Invalid | +20 | Malformed token, bad HMAC, or actor binding mismatch |
+| Invalid | +20 | Malformed token, bad HMAC, or binding mismatch |
 | Replay | +30 | Token already consumed (nonce in cache) |
-| Expired | +10 | Token past TTL; mild penalty to encourage fresh challenges |
+| Expired | +10 | Token past TTL |
 
-Adjust deltas in config to tune sensitivity. Example: increase `replay_delta` to +50 to penalize aggressive replay attempts.
+**Troubleshooting**
 
-### Troubleshooting
-
-**Tokens failing verification consistently**:
-- Check HMAC secret is identical on all nodes
-- Verify `hmac_secret_path` is readable by WAF process (check permissions)
-- Monitor logs: `RUST_LOG=debug prx-waf run` shows token decode errors
-
-**"Nonce already consumed" on fresh tokens**:
-- LRU cache may have collisions (rare). Increase `lru_size` in config
-- Or check token TTL hasn't expired (default 5 min)
-
-**File permission errors**:
-```bash
-# Verify ownership/perms on secret file
-ls -la /var/lib/waf/challenge-hmac.key
-
-# Must be readable by WAF process user (e.g., prx-waf)
-sudo chown prx-waf:prx-waf /var/lib/waf/challenge-hmac.key
-sudo chmod 600 /var/lib/waf/challenge-hmac.key
-```
+- **Tokens failing verification**: Verify HMAC secret identical on all nodes; check file permissions
+- **"Nonce already consumed"**: LRU collisions (rare); increase `lru_size` or check token TTL
+- **File permission errors**:
+  ```bash
+  ls -la /var/lib/waf/challenge-hmac.key
+  sudo chown prx-waf:prx-waf /var/lib/waf/challenge-hmac.key
+  sudo chmod 600 /var/lib/waf/challenge-hmac.key
+  ```
 
 ---
 
-### Cache Rules Operator File (rules/cache.yaml)
+### Cache Rules (rules/cache.yaml)
 
-**FR-009 Phase 3 feature:** Per-route TTL configuration with hot-reload.
+Per-route TTL configuration with hot-reload.
 
-**Location:** `rules/cache.yaml` (relative to working directory or absolute path in `[cache] rules_path`)
+**Location**: `rules/cache.yaml` (relative to working directory)
 
-**How it works:**
+**How it works**:
 1. Create `rules/cache.yaml` with route patterns and TTL values
-2. Save the file → file watcher detects change (≤500ms)
+2. Save file → file watcher detects change (≤500ms)
 3. New ruleset compiled and hot-swapped (lock-free ArcSwap)
-4. Subsequent requests use new per-route TTLs
-5. No downtime, no deployment required
+4. No downtime, no deployment required
 
-**Example schema:**
+**Example schema**:
 ```yaml
 version: 1
 defaults:
@@ -592,35 +413,37 @@ rules:
   - id: "never-cache"
     match:
       path_pattern: "^/(admin|login)"
-    ttl_seconds: 0  # Explicit deny
+    ttl_seconds: 0
     tags: ["sensitive"]
 ```
 
-**Verdict pipeline:**
-- Tier default TTL → Method filter (GET/HEAD/OPTIONS only) → Auth check (cookies/Authorization bypass) → Per-route rule match → Upstream Cache-Control → Fallback to tier default
+**Verdict pipeline**:
+- Tier default TTL → Method filter (GET/HEAD/OPTIONS only) → Auth check → Per-route rule match → Upstream Cache-Control → Fallback to tier default
 
-**Stats tracked:**
-- `bypassed_authenticated` — Requests bypassed by auth header/cookies
+**Stats tracked**:
+- `bypassed_authenticated` — Requests bypassed by auth
 - `bypassed_explicit_deny` — Requests hitting `ttl_seconds: 0` rules
-- `purges_tag` — Total entries purged via tag-based purge API (FR-009 Phase 4)
-- `purges_route` — Total entries purged via route-id purge API (FR-009 Phase 4)
-- `tag_index_size` — Current tag→key mappings (FR-009 Phase 4)
+- `purges_tag` — Entries purged via tag-based API
+- `purges_route` — Entries purged via route-id API
+- `tag_index_size` — Current tag→key mappings
 - Standard cache hit/miss/eviction counters
 
-**Validation:**
+**Validation**:
 ```bash
 prx-waf rules validate rules/cache.yaml
 ```
 
-### Seed Layer Data Files (FR-025 Phase 1)
+---
 
-**IP reputation baseline evaluation (L0 risk assessment)** — Evaluates Tor exits, datacenter ASN classes, and whitelist before other risk layers.
+### Seed Layer Data Files
 
-**File locations:**
-- Dev: `configs/seed/` (project directory)
-- Prod: `/etc/prx-waf/seed/` (systemd deployment)
+IP reputation baseline evaluation — Evaluates Tor exits, datacenter ASN classes, and whitelist.
 
-**File formats:**
+**File locations**:
+- Dev: `configs/seed/`
+- Prod: `/etc/prx-waf/seed/`
+
+**File formats**:
 
 | File | Format | Refresh | Purpose |
 |------|--------|---------|---------|
@@ -628,7 +451,7 @@ prx-waf rules validate rules/cache.yaml
 | `asn-classes.csv` | CSV: `cidr,asn,classification` | Manual (operator updates) | IP blocks tagged datacenter/badlist/normal |
 | `risk-whitelist.txt` | Newline-delimited CIDRs | Manual (operator updates) | Bypasses all risk scoring (full Allow) |
 
-**Example schemas:**
+**Example schemas**:
 ```
 # tor-exits.txt
 198.51.100.45
@@ -645,34 +468,29 @@ prx-waf rules validate rules/cache.yaml
 2001:db8::/32
 ```
 
-**Hot-reload:** Files watched automatically; changes take effect within 500ms via ArcSwap (lock-free). Syntax errors logged, previous version retained.
+**Hot-reload**: Files watched automatically; changes take effect within 500ms via ArcSwap (lock-free). Syntax errors logged; previous version retained.
 
 ---
 
-### Cache Admin API Endpoints (FR-009 Phase 4)
+### Cache Admin API Endpoints
 
-**Tag-based purge** — Invalidate logical groups of cached entries without flushing the entire cache.
+Tag-based purge — Invalidate logical groups of cached entries without flushing entire cache.
 
 All endpoints require admin JWT token + IP allowlist. Request body validated: tag/route_id ≤64 chars, ASCII alnum + `_-:` only.
 
 | Method | Path | Body | Response | Purpose |
 |--------|------|------|----------|---------|
-| POST | `/api/cache/purge/tag` | `{"tag":"catalog"}` | `{"ok":true,"purged":142,"duration_ms":7}` | Purge all entries with this tag |
-| POST | `/api/cache/purge/route` | `{"route_id":"static-assets"}` | `{"ok":true,"purged":89,"duration_ms":3}` | Purge all entries cached by this rule |
-| GET | `/api/cache/stats` | — | `{...,"purges_tag":500,"purges_route":120,"tag_index_size":312}` | Cache metrics (includes Phase 4 counters) |
+| POST | `/api/cache/purge/tag` | `{"tag":"catalog"}` | `{"ok":true,"purged":142,"duration_ms":7}` | Purge entries with this tag |
+| POST | `/api/cache/purge/route` | `{"route_id":"static-assets"}` | `{"ok":true,"purged":89,"duration_ms":3}` | Purge entries by rule |
+| GET | `/api/cache/stats` | — | `{...,"purges_tag":500,...}` | Cache metrics |
 
-**Example:**
+**Example**:
 ```bash
 curl -X POST http://localhost:16827/api/cache/purge/tag \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"tag":"api"}'
-  
-# Response:
-# {"ok":true,"purged":142,"duration_ms":7}
 ```
-
-**Automatic tagging:** Every cached entry is automatically tagged with its source rule ID (RouteRuleGate prepends this), so `purge_by_route` is equivalent to `purge_by_tag(rule_id)`.
 
 ---
 
@@ -680,38 +498,37 @@ curl -X POST http://localhost:16827/api/cache/purge/tag \
 
 ```toml
 [proxy]
-listen_addr     = "0.0.0.0:80"        # HTTP
-listen_addr_tls = "0.0.0.0:443"       # HTTPS
-worker_threads  = 4                    # CPU-bound threads (default: CPU count)
+listen_addr     = "0.0.0.0:80"
+listen_addr_tls = "0.0.0.0:443"
+worker_threads  = 4
 
 [api]
-listen_addr = "127.0.0.1:9527"        # Management API
-admin_ip_allowlist = []                # Empty = allow all (set in prod)
+listen_addr = "127.0.0.1:9527"
+admin_ip_allowlist = []
 
 [storage]
 database_url    = "postgresql://prx_waf:prx_waf@127.0.0.1:5432/prx_waf"
-max_connections = 20                   # Connection pool size
+max_connections = 20
 
 [cache]
 enabled          = true
 max_size_mb      = 256
 default_ttl_secs = 60
 max_ttl_secs     = 3600
-rules_path       = "rules/cache.yaml"  # FR-009 Phase 3: per-route TTL config (hot-reloaded, 500ms debounce)
+rules_path       = "rules/cache.yaml"
 
 [http3]
-enabled     = false                    # HTTP/3 (QUIC)
+enabled     = false
 listen_addr = "0.0.0.0:443"
 cert_pem    = "/etc/ssl/certs/server.pem"
 key_pem     = "/etc/ssl/private/server.key"
 
 [security]
-max_request_body_bytes  = 10485760     # 10 MB
-api_rate_limit_rps      = 100          # Per IP
+max_request_body_bytes  = 10485760
+api_rate_limit_rps      = 100
 cors_origins            = []
 
 [tiered_protection]
-# See docs/tiered-protection.md for per-tier policies and classifier rules
 default_tier = "catch_all"
 
 [[tiered_protection.classifier_rules]]
@@ -727,26 +544,16 @@ enable_builtin_owasp = true
 enable_builtin_bot = true
 enable_builtin_scanner = true
 
-# See docs/access-lists.md for Phase-0 access gate (IP/Host whitelist/blacklist)
-# File: rules/access-lists.yaml (hot-reloaded, 250ms debounce)
-
 [[rules.sources]]
 name   = "custom"
 path   = "rules/custom/"
 format = "yaml"
 
-# File-based custom rules: rules/custom/*.yaml auto-loaded (FR-003)
-# See docs/custom-rules-syntax.md for schema
-
 [[rules.sources]]
 name            = "owasp-crs"
 url             = "https://rules.openprx.dev/owasp-crs.yaml"
 format          = "yaml"
-update_interval = 86400  # 24h
-
-# Panel Config: GET/PUT /api/panel-config (operational policy)
-# File: waf-panel.toml (atomic read/write via API)
-# See system-architecture.md → Admin Control Plane
+update_interval = 86400
 
 [cluster]
 enabled     = false
@@ -759,16 +566,6 @@ seeds       = []
 auto_generate = true
 ca_validity_days = 3650
 node_validity_days = 365
-
-[cluster.sync]
-rules_interval_secs = 10
-config_interval_secs = 30
-events_batch_size = 100
-
-[cluster.election]
-timeout_min_ms = 150
-timeout_max_ms = 300
-heartbeat_interval_ms = 50
 
 [crowdsec]
 enabled = false
@@ -793,9 +590,6 @@ PRX_WAF_PROXY__LISTEN_ADDR=0.0.0.0:80
 PRX_WAF_STORAGE__DATABASE_URL=postgresql://...
 PRX_WAF_STORAGE__MAX_CONNECTIONS=20
 PRX_WAF_API__ADMIN_IP_ALLOWLIST=10.0.0.0/8,192.168.0.0/16
-PRX_WAF_CLUSTER__ENABLED=true
-PRX_WAF_CLUSTER__NODE_ID=node-a
-PRX_WAF_CLUSTER__ROLE=main
 ```
 
 ---
@@ -805,16 +599,14 @@ PRX_WAF_CLUSTER__ROLE=main
 ### Let's Encrypt (Automatic)
 
 ```toml
-# In host config:
 [[hosts]]
 host = "example.com"
 ssl = true
 acme_enabled = true
 acme_email = "admin@example.com"
-# Certificate auto-renewed 30 days before expiry
 ```
 
-Certificates stored in PostgreSQL `certificates` table.
+Certificates auto-renewed 30 days before expiry. Stored in PostgreSQL `certificates` table.
 
 ### Manual Certificate
 
@@ -822,7 +614,7 @@ Certificates stored in PostgreSQL `certificates` table.
 # Generate self-signed (for testing)
 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365
 
-# Upload via Admin UI or API
+# Upload via API
 curl -X POST http://localhost:16827/api/certificates \
   -H "Authorization: Bearer $TOKEN" \
   -F "certificate=@cert.pem" \
@@ -840,7 +632,7 @@ curl -X POST http://localhost:16827/api/certificates \
 curl -f http://localhost:16827/health || exit 1
 ```
 
-**Response:** `200 OK` (alive) or `503 Service Unavailable` (dead)
+**Response**: `200 OK` (alive) or `503 Service Unavailable` (dead)
 
 ### Kubernetes Probes
 
@@ -864,7 +656,7 @@ readinessProbe:
 
 ## Monitoring & Logging
 
-### Structured Logs (stdout/stderr)
+### Structured Logs
 
 ```json
 {
@@ -880,12 +672,12 @@ readinessProbe:
 ### Log Levels
 
 ```bash
-# Control verbosity via RUST_LOG
+# Control verbosity
 RUST_LOG=debug prx-waf run
 RUST_LOG=prx_waf=info,gateway=debug prx-waf run
 ```
 
-### Metrics Export (Future)
+### Metrics Export
 
 Coming in v0.3.0: Prometheus metrics endpoint (`/metrics`).
 
@@ -919,25 +711,13 @@ psql prx_waf < backup.sql
 gunzip -c backup.sql.gz | psql prx_waf
 ```
 
-### Cluster CA Key Backup
-
-```bash
-# Export encrypted CA key from database
-curl -s http://localhost:16827/api/cluster/ca-backup \
-  -H "Authorization: Bearer $TOKEN" \
-  > cluster-ca-backup.enc
-
-# Store securely (S3, vault, etc.)
-# Passphrase stored in secure location (not in backup)
-```
-
 ---
 
 ## Upgrade Procedure
 
 ### Minor Version (0.2.x → 0.2.y)
 
-No database migrations needed. Just restart:
+No database migrations needed:
 
 ```bash
 # Docker
@@ -952,7 +732,7 @@ sudo systemctl start prx-waf
 
 ### Major Version (0.2.x → 0.3.0)
 
-Check [CHANGELOG](../CHANGELOG.md) for breaking changes.
+Check [CHANGELOG](../CHANGELOG.md) for breaking changes:
 
 ```bash
 # Backup database
@@ -965,174 +745,42 @@ prx-waf -c config.toml migrate
 prx-waf -c config.toml run
 ```
 
-### Rolling Update (Cluster)
-
-For zero-downtime upgrades:
-
-1. Stop worker node-b
-2. Deploy new binary to node-b
-3. Start node-b (syncs from node-a)
-4. Repeat for node-c
-5. Finally: stop node-a, upgrade, restart
-
-Clients load-balance across nodes; no traffic loss.
-
 ---
 
 ## Troubleshooting
 
-### Port Already in Use
+| Issue | Solution |
+|-------|----------|
+| Port in use | `lsof -i :16880` → `kill -9 <PID>` or change `listen_addr` |
+| DB connection failed | Check `DATABASE_URL` env var, verify PostgreSQL running |
+| High memory | Check `curl localhost:16827/api/cache/stats`, reduce `max_size_mb` |
+| Rules not reloading | `prx-waf rules validate <file>`, check `hot_reload = true` |
+| Cache rules stuck | `touch rules/cache.yaml` to trigger watcher |
 
-```bash
-# Check what's using port 16880
-lsof -i :16880
-
-# Kill if needed
-kill -9 <PID>
-
-# Or change port in config
-[proxy]
-listen_addr = "0.0.0.0:8080"
-```
-
-### Database Connection Failed
-
-```bash
-# Verify database is running
-psql postgresql://prx_waf:prx_waf@localhost:5432/prx_waf
-
-# Check DATABASE_URL env var
-echo $DATABASE_URL
-
-# Connection string format:
-# postgresql://user:password@host:port/database
-```
-
-### Cluster Node Not Joining
-
-```bash
-# Check logs
-journalctl -u prx-waf -n 100 | grep cluster
-
-# Verify network connectivity
-nc -zv node-a.example.com 16851
-
-# Check QUIC port is open
-netstat -tlnp | grep 16851
-```
-
-### High Memory Usage
-
-```bash
-# Check cache size
-curl http://localhost:16827/api/cache/stats | jq .
-
-# Reduce cache size in config
-[cache]
-max_size_mb = 128  # Reduce from 256
-
-# Restart
-systemctl restart prx-waf
-```
-
-### Cache Rules Not Reloading
-
-```bash
-# Check if cache rules file exists
-ls -la rules/cache.yaml
-
-# Verify YAML syntax
-prx-waf rules validate rules/cache.yaml
-
-# Monitor file watcher (500ms debounce)
-RUST_LOG=debug prx-waf run
-
-# Manually reload by touching file (triggers watcher)
-touch rules/cache.yaml
-
-# Check cache statistics
-curl http://localhost:16827/api/cache/stats | jq .
-```
-
-### Rules Not Reloading
-
-```bash
-# Check if hot-reload is enabled
-grep hot_reload config.toml
-
-# Manually reload
-curl -X POST http://localhost:16827/api/reload \
-  -H "Authorization: Bearer $TOKEN"
-
-# Check rule validation
-prx-waf rules validate rules/custom.yaml
-```
+**Manual reload**: `curl -X POST localhost:16827/api/reload -H "Authorization: Bearer $TOKEN"`
 
 ---
 
 ## Performance Tuning
 
-### Database Connection Pool
-
 ```toml
 [storage]
 max_connections = 50  # Increase for high concurrency
-```
 
-### Worker Threads
-
-```toml
 [proxy]
-worker_threads = 8  # Match CPU core count
-```
+worker_threads = 8    # Match CPU core count
 
-### Cache Size
-
-```toml
 [cache]
-max_size_mb = 512   # Increase for static-heavy workloads
-default_ttl_secs = 300  # Longer TTL
-```
-
-### Cluster Sync Intervals
-
-```toml
-[cluster.sync]
-rules_interval_secs = 5  # More frequent
-events_batch_size = 500  # Larger batches
+max_size_mb = 512
+default_ttl_secs = 300
 ```
 
 See [System Architecture](./system-architecture.md) for performance baselines.
 
 ---
 
-## End-to-End Testing
+## See Also
 
-### Local Test Execution
-
-```bash
-# Run full E2E suite (rules-engine, gateway, api, cluster, report-renderer)
-./tests/e2e-cluster.sh
-
-# Outputs to tests/artifacts/:
-#   - test-results.junit.xml (CI integration)
-#   - test-results.json (programmatic parsing)
-#   - test-results.md (human-readable)
-#   - test-results.html (visual dashboard)
-```
-
-### Nightly CI Workflow
-
-GitHub Actions workflow (`.github/workflows/e2e-tests.yml`):
-- Runs on main branch nightly
-- Executes all 5 test runners in parallel
-- Artifacts published (JUnit, JSON, Markdown, HTML)
-- Failures block deployment approval
-
-### Test Coverage
-
-- **63+ SQLi acceptance tests** (pattern validation, encoding bypasses, false positives)
-- **Cluster failover scenarios** (main node death, peer recovery, split-brain prevention)
-- **Rule sync tests** (incremental updates, full snapshots, version tracking)
-- **API endpoint coverage** (CRUD, auth, rate limiting, WebSocket)
-- **Gateway protocol tests** (HTTP/1.1, HTTP/2, HTTP/3 QUIC, load balancing)
+- [Cluster Guide](./cluster-guide.md) — Multi-node setup, certificate generation, cluster operations
+- [System Architecture](./system-architecture.md) — Performance baselines
+- [Custom Rules](./custom-rules-syntax.md) — Rule syntax

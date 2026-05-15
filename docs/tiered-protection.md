@@ -1,6 +1,6 @@
 # Tiered Protection (FR-002) — Consumer Guide
 
-Single reference for FR-005 / FR-006 / FR-009 / FR-027 implementers.
+Single reference for FR-005 / FR-006 / FR-009 / FR-011 / FR-027 implementers.
 
 ---
 
@@ -217,3 +217,59 @@ Note: `cache_policy` is not a `Copy` type — clone or match by reference.
 ## 10. Per-Tier Whitelist Mode (FR-008)
 
 The Phase-0 access-list gate (FR-008) consumes `ctx.tier` to dispatch on a per-tier `whitelist_mode` flag (`full_bypass` vs `blacklist_only`) when an IP whitelist hit occurs. Configuration lives in `rules/access-lists.yaml`, separate from the tier TOML — see [`access-lists.md`](./access-lists.md#4-per-tier-whitelist-mode-strategy).
+
+---
+
+## 11. For FR-011 (Behavioral Anomaly Detection) Implementers
+
+The behavioral anomaly detector (FR-011) uses device fingerprinting to identify bot-like patterns in per-actor request streams. The `ZeroDepthProvider` (FR-RS-049) specifically reads the `tier` field from each request to detect single-endpoint hammering against **Critical-tier paths**.
+
+### How Tier is Consumed
+
+The behavioral recorder (`device_fp/behavior/recorder.rs`) captures and stores the tier of each request:
+
+```rust
+pub fn record(&self, key: &FpKey, path: &str, had_referer: bool, had_prefetch_hint: bool, tier: Tier) {
+    // Stores tier in the Sample for this request
+}
+```
+
+During evaluation, the `ZeroDepthProvider` counts only the Critical-tier requests:
+
+```rust
+let critical_hits = snap.samples.iter()
+    .filter(|s| matches!(s.tier, Tier::Critical))
+    .count();
+
+if critical_hits < usize::from(z.critical_hits_required) {
+    return Vec::new();  // Not enough Critical hits — allow
+}
+```
+
+### Pattern Definition
+
+A **zero-depth anomaly** fires when all of these are true:
+
+1. Actor has requested the **same single path** (distinct paths = 1)
+2. None of the requests carried a `Referer` header (no navigation chain)
+3. At least `critical_hits_required` of those requests hit a **Critical-tier endpoint**
+4. The path is **not** an entry page (`/`, `/login`, `/index`)
+
+The intuition: a real user navigating the app generates path variation and at least one referrer-bearing transition. A script targeting one endpoint does neither — especially when it's a sensitive (Critical-tier) endpoint.
+
+### Configuration
+
+Control the sensitivity via `DeviceFpConfig::behavior::zero_depth`:
+
+```toml
+[device_fp.behavior.zero_depth]
+enabled                 = true
+min_samples             = 3              # Require at least 3 requests in the window
+critical_hits_required  = 2              # Fire if 2+ hit Critical tier
+```
+
+Adjust `critical_hits_required` to balance precision (fewer false positives) against recall (catch more bots). Critical tiers typically include `/login`, payment endpoints, auth flows, and internal APIs — the most valuable attack targets.
+
+### Integration Point
+
+The tier is set early in request handling (before Phase 1) via the classifier (FR-002), so by the time `record()` is called during device fingerprinting evaluation, `ctx.tier` is stable and reflects the tier classification of that request's path.
