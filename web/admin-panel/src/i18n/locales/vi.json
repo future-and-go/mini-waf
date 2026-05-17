@@ -24,7 +24,9 @@
     "ruleSources": "Nguồn luật",
     "botDetection": "Phát hiện bot",
     "cache": "Cache",
-    "cacheDashboard": "Bảng điều khiển Cache"
+    "cacheDashboard": "Bảng điều khiển Cache",
+    "fraud": "Phát hiện gian lận",
+    "txVelocity": "Vận tốc TX"
   },
   "common": {
     "save": "Lưu",
@@ -512,5 +514,24 @@
     "purged": "Đã xoá {{n}} bản ghi",
     "flushed": "Đã xoá toàn bộ cache",
     "purgeError": "Thao tác thất bại"
+  },
+  "txVelocity": {
+    "title": "Vận tốc & Chuỗi TX",
+    "subtitle": "FR-012 phát hiện hành vi đa endpoint theo session (chỉ tín hiệu)",
+    "seqCount": "Vi phạm chuỗi",
+    "withdrawCount": "Rút tiền dồn dập",
+    "limitCount": "Thay đổi hạn mức liên tục",
+    "totalCount": "Tổng sự kiện TX",
+    "distribution": "Phân bổ tín hiệu",
+    "signalType": "Loại tín hiệu",
+    "recentEvents": "Sự kiện TX gần đây",
+    "noEvents": "Chưa phát hiện sự kiện vận tốc TX",
+    "configTitle": "Module chỉ tín hiệu — không có giao diện chỉnh cấu hình",
+    "configNote": "Ngưỡng FR-012 được quản lý trong configs/tx-velocity.yaml trên máy chủ. Chỉnh sửa file trực tiếp và hot-reload (SIGHUP hoặc Cài đặt → Tải lại luật).",
+    "configInfo": "Ngưỡng phát hiện",
+    "configEditHint": "Để thay đổi ngưỡng: chỉnh sửa configs/tx-velocity.yaml rồi tải lại luật.",
+    "seqThreshold": "Chuỗi Đăng nhập → OTP → Nạp tiền hoàn tất trong < 1500 ms",
+    "withdrawThreshold": "≥ 5 lần rút tiền trong vòng 60 giây",
+    "limitThreshold": "≥ 3 yêu cầu thay đổi hạn mức trong 5 phút"
   }
 }
