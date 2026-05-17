@@ -34,7 +34,9 @@ import { TopList } from "../../components/top-list";
 import { CategoryBars, categoryColors, actionColors } from "../../components/category-bars";
 import { TrafficChart } from "../../components/traffic-chart";
 import { EngineBadge } from "../../components/engine-badge";
-import type { RecentEvent, StatsOverview, TrafficPoint } from "../../types/api";
+import { EndpointHeatmap } from "../../components/endpoint-heatmap";
+import { DashboardFilters } from "../../components/dashboard-filters";
+import type { RecentEvent, StatsOverview, TrafficPoint, EndpointHeatmap as EndpointHeatmapData } from "../../types/api";
 import { fmtNum, fmtPct, fmtTime } from "../../utils/format";
 
 const ENGINES = [
@@ -64,12 +66,27 @@ export const DashboardPage: React.FC = () => {
   const { t } = useTranslation();
   const { token } = theme.useToken();
 
+  const [filterHostCode, setFilterHostCode] = useState("");
+  const [filterAction, setFilterAction] = useState("");
+  const [filterHours, setFilterHours] = useState(24);
+
   // Hot data: stats refresh every 5s; traffic timeseries every 30s; rule
   // registry once on mount (changes rarely). Each query has its own cache key.
   const overview = useCustom<StatsOverview>({
     url: "/api/stats/overview",
     method: "get",
-    queryOptions: { staleTime: 5_000, refetchInterval: 5_000 },
+    config: {
+      query: {
+        host_code: filterHostCode || undefined,
+        action: filterAction || undefined,
+        hours: filterHours !== 24 ? filterHours : undefined,
+      },
+    },
+    queryOptions: {
+      staleTime: 5_000,
+      refetchInterval: 5_000,
+      queryKey: ["stats-overview", filterHostCode, filterAction, filterHours],
+    },
   });
 
   const timeseries = useCustom<TrafficPoint[]>({
@@ -83,6 +100,29 @@ export const DashboardPage: React.FC = () => {
     url: "/api/rules/registry",
     method: "get",
     queryOptions: { staleTime: 5 * 60_000 },
+  });
+
+  const hostsQuery = useCustom<{ data: Array<{ host_code: string; host: string }> }>({
+    url: "/api/hosts",
+    method: "get",
+    queryOptions: { staleTime: 5 * 60_000 },
+  });
+
+  const heatmap = useCustom<EndpointHeatmapData>({
+    url: "/api/stats/endpoints",
+    method: "get",
+    config: {
+      query: {
+        hours: filterHours,
+        host_code: filterHostCode || undefined,
+        action: filterAction || undefined,
+      },
+    },
+    queryOptions: {
+      staleTime: 10_000,
+      refetchInterval: 30_000,
+      queryKey: ["stats-endpoints", filterHostCode, filterAction, filterHours],
+    },
   });
 
   const stats = overview.result?.data;
@@ -129,6 +169,7 @@ export const DashboardPage: React.FC = () => {
     overview.query.refetch();
     timeseries.query.refetch();
     registry.query.refetch();
+    heatmap.query.refetch();
   };
 
   const recentColumns: ColumnsType<RecentEvent> = [
@@ -209,6 +250,19 @@ export const DashboardPage: React.FC = () => {
         </Col>
       </Row>
 
+      <DashboardFilters
+        hostCode={filterHostCode}
+        action={filterAction}
+        hours={filterHours}
+        hosts={hostsQuery.result?.data?.data ?? []}
+        onChange={({ hostCode, action, hours }) => {
+          setFilterHostCode(hostCode);
+          setFilterAction(action);
+          setFilterHours(hours);
+        }}
+        loading={hostsQuery.query.isLoading}
+      />
+
       <Row gutter={[12, 12]}>
         <Col xs={12} lg={6}>
           <KpiCard label={t("dashboard.totalRequests")} value={fmtNum(stats?.total_requests)} icon={ThunderboltOutlined} color="blue" loading={overview.query.isLoading} />
@@ -270,6 +324,13 @@ export const DashboardPage: React.FC = () => {
           </Card>
         </Col>
       </Row>
+
+      <Card size="small" title={t("dashboard.endpointHeatmap")}>
+        <EndpointHeatmap
+          data={heatmap.result?.data}
+          loading={heatmap.query.isLoading}
+        />
+      </Card>
 
       <Row gutter={[12, 12]}>
         <Col xs={24} lg={12}>

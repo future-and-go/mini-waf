@@ -117,7 +117,18 @@
     "country": "Country",
     "legitTraffic": "Legitimate",
     "blockedTraffic": "Blocked",
-    "noRecentEvents": "No security events yet — your WAF is quiet."
+    "noRecentEvents": "No security events yet — your WAF is quiet.",
+    "endpointHeatmap": "Endpoint Attack Heatmap",
+    "filterHost": "Host",
+    "filterAction": "Action",
+    "filterWindow": "Time window",
+    "filterReset": "Reset",
+    "allHosts": "All hosts",
+    "allActions": "All actions",
+    "heatmapTotalEvents": "Total events",
+    "heatmapPathsSampled": "Paths sampled",
+    "heatmapCategoriesTotal": "Categories",
+    "heatmapWindow": "Window"
   },
   "hosts": {
     "title": "Hosts",

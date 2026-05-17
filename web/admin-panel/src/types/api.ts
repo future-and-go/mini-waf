@@ -220,3 +220,22 @@ export interface TrafficPoint {
   total: number;
   blocked: number;
 }
+
+export interface HeatmapCell {
+  path: string;
+  category: string;
+  count: number;
+}
+
+export interface HeatmapMetadata {
+  total_events: number;
+  paths_sampled: number;
+  categories_total: number;
+  window_hours: number;
+  timestamp: string;
+}
+
+export interface EndpointHeatmap {
+  cells: HeatmapCell[];
+  metadata: HeatmapMetadata;
+}
