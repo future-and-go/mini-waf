@@ -115,7 +115,18 @@
     "country": "Quốc gia",
     "legitTraffic": "Hợp lệ",
     "blockedTraffic": "Bị chặn",
-    "noRecentEvents": "Chưa có sự kiện — WAF đang im ắng."
+    "noRecentEvents": "Chưa có sự kiện — WAF đang im ắng.",
+    "endpointHeatmap": "Bản đồ nhiệt tấn công endpoint",
+    "filterHost": "Host",
+    "filterAction": "Hành động",
+    "filterWindow": "Khoảng thời gian",
+    "filterReset": "Đặt lại",
+    "allHosts": "Tất cả hosts",
+    "allActions": "Tất cả hành động",
+    "heatmapTotalEvents": "Tổng sự kiện",
+    "heatmapPathsSampled": "Paths mẫu",
+    "heatmapCategoriesTotal": "Hạng mục",
+    "heatmapWindow": "Cửa sổ"
   },
   "hosts": {
     "title": "Hosts",
