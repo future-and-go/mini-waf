@@ -24,7 +24,9 @@
     "ruleSources": "Rule Sources",
     "botDetection": "Bot Detection",
     "cache": "Cache",
-    "cacheDashboard": "Cache Dashboard"
+    "cacheDashboard": "Cache Dashboard",
+    "fraud": "Fraud Detection",
+    "txVelocity": "TX Velocity"
   },
   "common": {
     "save": "Save",
@@ -482,6 +484,25 @@
     "syncInSync": "In sync",
     "syncDriftAlert": "Rules version drift detected",
     "syncNoCluster": "Cluster not enabled"
+  },
+  "txVelocity": {
+    "title": "TX Velocity & Sequence",
+    "subtitle": "FR-012 cross-endpoint behavioral pattern detection (signal-only)",
+    "seqCount": "Sequence Violations",
+    "withdrawCount": "Withdrawal Bursts",
+    "limitCount": "Limit-Change Storms",
+    "totalCount": "Total TX Events",
+    "distribution": "Signal Distribution",
+    "signalType": "Signal Type",
+    "recentEvents": "Recent TX Events",
+    "noEvents": "No TX velocity events detected",
+    "configTitle": "Signal-only module — no in-panel config editor",
+    "configNote": "FR-012 thresholds are managed in configs/tx-velocity.yaml on the server. Edit the file directly and hot-reload (SIGHUP or Admin UI → Settings → Reload Rules).",
+    "configInfo": "Detection Thresholds",
+    "configEditHint": "To change thresholds: edit configs/tx-velocity.yaml and reload rules.",
+    "seqThreshold": "Login → OTP → Deposit sequence completed in < 1500 ms",
+    "withdrawThreshold": "≥ 5 withdrawals within a 60-second window",
+    "limitThreshold": "≥ 3 limit-change requests within 5 minutes"
   },
   "cache": {
     "title": "Cache Dashboard",

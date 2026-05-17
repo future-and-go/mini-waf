@@ -43,6 +43,7 @@ import { ClusterNodeDetailPage } from "./pages/cluster/node-detail";
 import { ClusterTokensPage } from "./pages/cluster/tokens";
 import { ClusterSyncPage } from "./pages/cluster/sync";
 import { CacheDashboardPage } from "./pages/cache";
+import { TxVelocityPage } from "./pages/tx-velocity";
 
 // Each Refine `resource` is what binds list/create/edit/delete pages,
 // the data provider, and the navigation system. Path on resource is what
@@ -69,6 +70,7 @@ const resources = [
   { name: "cluster-tokens", list: "/cluster/tokens" },
   { name: "cluster-sync", list: "/cluster/sync" },
   { name: "cache", list: "/cache" },
+  { name: "tx-velocity", list: "/tx-velocity" },
 ];
 
 export const App: React.FC = () => {
@@ -133,6 +135,7 @@ export const App: React.FC = () => {
                   <Route path="/cluster/tokens" element={<ClusterTokensPage />} />
                   <Route path="/cluster/sync" element={<ClusterSyncPage />} />
                   <Route path="/cache" element={<CacheDashboardPage />} />
+                  <Route path="/tx-velocity" element={<TxVelocityPage />} />
                   <Route path="*" element={<ErrorComponent />} />
                 </Route>
 
