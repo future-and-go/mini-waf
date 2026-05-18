@@ -216,8 +216,12 @@ fn parse_pattern_field_to_condition(field: &str) -> ConditionField {
         "content_type" => ConditionField::ContentType,
         "content_length" => ConditionField::ContentLength,
         "ip" => ConditionField::Ip,
-        // "all", "body", and unknown → Body (best single-field approximation)
-        _ => ConditionField::Body,
+        "response_body" => ConditionField::ResponseBody,
+        "all" | "body" | "headers" => ConditionField::Body,
+        other => {
+            tracing::warn!(field = other, "unknown pattern_field; falling back to Body");
+            ConditionField::Body
+        }
     }
 }
 
@@ -447,5 +451,39 @@ match_tree:
         let err = parse(yaml).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("custom_rule_v1") || msg.contains("not"), "msg={msg}");
+    }
+
+    #[test]
+    fn parse_response_body_field_maps_correctly() {
+        let yaml = r"
+kind: custom_rule_v1
+id: rb-yaml-001
+name: Detect web shell in response
+pattern: 'r57shell|c99shell'
+pattern_field: response_body
+category: web-shell
+severity: critical
+paranoia: 1
+";
+        let rules = parse(yaml).unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].pattern_field, "response_body");
+        assert!(rules[0].pattern.is_some());
+    }
+
+    #[test]
+    fn parse_response_body_operator_shorthand() {
+        let yaml = r"
+kind: custom_rule_v1
+id: rb-yaml-002
+name: Response body contains error
+pattern_field: response_body
+operator: contains
+value: 'SQL syntax error'
+";
+        let rules = parse(yaml).unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].conditions.len(), 1);
+        assert!(matches!(rules[0].conditions[0].field, ConditionField::ResponseBody));
     }
 }

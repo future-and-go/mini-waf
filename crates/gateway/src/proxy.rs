@@ -233,6 +233,21 @@ impl WafProxy {
         self.body_redact_cache.insert(key, Arc::clone(&compiled));
         compiled
     }
+
+    /// Evaluate response-body YAML rules against a response body chunk.
+    fn eval_response_body_rules(engine: &Arc<WafEngine>, host_code: &str, host: &str, body: &mut Option<Bytes>) {
+        if let Some(chunk) = body.as_ref().filter(|c| !c.is_empty()) {
+            let text = String::from_utf8_lossy(chunk);
+            if let Some(detection) = engine.custom_rules.check_response_body(host_code, &text) {
+                tracing::warn!(
+                    rule_id = ?detection.rule_id,
+                    rule_name = %detection.rule_name,
+                    host = %host,
+                    "response body rule matched"
+                );
+            }
+        }
+    }
 }
 
 /// Map a Pingora error to the HTTP status used by [`ErrorPageFactory`].
@@ -864,6 +879,9 @@ impl ProxyHttp for WafProxy {
                 apply_body_scan_chunk(&mut ctx.body_scan, &scanner, body, end_of_stream, host_label);
             }
 
+            // Response-body YAML rules on (post-decompression) plaintext.
+            Self::eval_response_body_rules(&self.engine, &hc.code, &hc.host, body);
+
             // FR-034: buffers JSON, sets *body = None until EOS or cap; emits
             // redacted full body. AC-17 then runs over it as a single chunk.
             if ctx.body_redact.enabled {
@@ -877,6 +895,12 @@ impl ProxyHttp for WafProxy {
                 apply_body_mask_chunk(&mut ctx.body_mask, &compiled, body, end_of_stream);
             }
             return Ok(None);
+        }
+
+        // Response-body YAML rules: fire independently when body_scan/redact/mask
+        // are all disabled, so hosts with response_body rules still get coverage.
+        if let Some(hc) = ctx.host_config.as_ref() {
+            Self::eval_response_body_rules(&self.engine, &hc.code, &hc.host, body);
         }
 
         if let Some(cache) = &self.response_cache {
