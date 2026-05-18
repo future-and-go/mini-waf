@@ -69,6 +69,14 @@ fn make_rules() -> Vec<CustomRule> {
             match_tree: None,
             risk_delta: None,
             risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
         });
     }
     rules

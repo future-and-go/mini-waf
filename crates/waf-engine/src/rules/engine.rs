@@ -6,6 +6,7 @@
 //!   - An action (Block / Allow / Log / Challenge)
 //!   - An optional Rhai script for complex evaluation logic
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -247,6 +248,23 @@ pub struct CustomRule {
     pub risk_delta: Option<i16>,
     /// FR-025: Override action for risk scoring ("block" forces immediate block).
     pub risk_action: Option<String>,
+    // ── Registry/OWASP compatibility fields ──
+    /// Pre-compiled regex pattern evaluated against `pattern_field`.
+    pub pattern: Option<Regex>,
+    /// Which request field the pattern targets (e.g. "all", "path", "query").
+    pub pattern_field: String,
+    /// Rule category (sqli, xss, ssti, etc.).
+    pub category: Option<String>,
+    /// Severity level (critical, high, medium, low).
+    pub severity: Option<String>,
+    /// OWASP CRS paranoia level (1-4).
+    pub paranoia: Option<u8>,
+    /// Tags for filtering/grouping.
+    pub tags: Vec<String>,
+    /// Arbitrary metadata key-value pairs.
+    pub metadata: HashMap<String, String>,
+    /// External reference URL.
+    pub reference: Option<String>,
 }
 
 // ── FR-025 Rule Verdict ───────────────────────────────────────────────────────
@@ -586,6 +604,14 @@ pub fn from_db_rule(row: &DbCustomRule) -> anyhow::Result<CustomRule> {
         match_tree,
         risk_delta: row.risk_delta,
         risk_action: row.risk_action.clone(),
+        pattern: None,
+        pattern_field: "all".to_string(),
+        category: None,
+        severity: None,
+        paranoia: None,
+        tags: Vec::new(),
+        metadata: HashMap::new(),
+        reference: None,
     })
 }
 
@@ -913,6 +939,14 @@ mod tests {
             match_tree: None,
             risk_delta: None,
             risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
         };
         engine.add_rule(rule);
 
@@ -945,6 +979,14 @@ mod tests {
             match_tree: None,
             risk_delta: None,
             risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
         };
         engine.add_rule(rule);
 
@@ -973,6 +1015,14 @@ mod tests {
             match_tree: None,
             risk_delta: None,
             risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
         };
         engine.add_rule(rule);
 
@@ -1001,6 +1051,14 @@ mod tests {
             match_tree: None,
             risk_delta: None,
             risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
         }
     }
 
@@ -1138,6 +1196,14 @@ mod tests {
             match_tree: None,
             risk_delta: None,
             risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
         });
 
         assert!(engine.check(&make_ctx("/api/v1/admin", "GET", "1.2.3.4")).is_some());
@@ -1269,6 +1335,14 @@ mod tests {
             match_tree: None,
             risk_delta: None,
             risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
         });
 
         assert!(engine.check(&make_ctx("/admin/x", "POST", "1.2.3.4")).is_some());
@@ -1309,6 +1383,14 @@ mod tests {
             match_tree: None,
             risk_delta: None,
             risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
         });
 
         assert!(engine.check(&make_ctx_with_cookies("session=abc; other=x")).is_some());
@@ -1339,6 +1421,14 @@ mod tests {
             match_tree: None,
             risk_delta: None,
             risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
         });
 
         assert!(engine.check(&make_ctx_with_cookies("a=b; track=1")).is_some());
@@ -1399,6 +1489,14 @@ mod tests {
             match_tree: Some(tree),
             risk_delta: None,
             risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
         }
     }
 
