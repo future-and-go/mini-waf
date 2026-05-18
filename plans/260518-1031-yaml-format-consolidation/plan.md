@@ -48,7 +48,7 @@ This creates: silent data loss (fields ignored), duplicate compilation logic, th
 | 2 | [Pattern Evaluation Engine](./phase-02-pattern-evaluation-engine.md) | Done | P1 | 6h | Phase 1 |
 | 3 | [Migration Script](./phase-03-migration-script.md) | Done | P1 | 4h | Phase 1 |
 | 4 | [OWASPCheck Unification](./phase-04-owaspcheck-unification.md) | Done | P1 | 8h | Phases 2, 3 |
-| 5 | [Cleanup and Deprecation](./phase-05-cleanup-and-deprecation.md) | Pending | P2 | 3h | Phase 4 |
+| 5 | [Cleanup and Deprecation](./phase-05-cleanup-and-deprecation.md) | Done | P2 | 3h | Phase 4 |
 | 6 | [Integration Tests and Validation](./phase-06-integration-tests-and-validation.md) | Pending | P1 | 4h | Phase 4 |
 
 ## Architecture Change

@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Cleanup and Deprecation"
-status: pending
+status: done
 priority: P2
 effort: "3h"
 dependencies: [4]
@@ -120,12 +120,12 @@ Add validation that custom_rule_v1 rules have matching logic:
 
 ## Success Criteria
 
-- [ ] `yaml.rs::parse()` logs deprecation warning when called
-- [ ] `json.rs::parse()` logs deprecation warning when called
-- [ ] `RuleManager::import_from_url` tries custom_rule_v1 first
-- [ ] No dead code warnings from new changes
-- [ ] `is_routing_header()` exists in one location only
-- [ ] `cargo check` passes with zero warnings on changed files
+- [x] `yaml.rs::parse()` logs deprecation warning when called
+- [x] `json.rs::parse()` logs deprecation warning when called
+- [x] `RuleManager::import_from_url` tries custom_rule_v1 first
+- [x] No dead code warnings from new changes
+- [x] `is_routing_header()` exists in one location only
+- [x] `cargo check` passes with zero warnings on changed files
 
 ## Risk Assessment
 

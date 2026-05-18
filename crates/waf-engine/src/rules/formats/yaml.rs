@@ -52,7 +52,10 @@ fn default_action() -> String {
 }
 
 /// Parse YAML content into a list of `Rule`s.
+///
+/// **Deprecated:** Migrate to `custom_rule_v1` format via `custom_rule_yaml::parse`.
 pub fn parse(content: &str) -> Result<Vec<Rule>> {
+    tracing::warn!("yaml::parse() is deprecated; migrate to custom_rule_v1 format");
     let raw: Vec<YamlRule> = serde_yaml::from_str(content)?;
     Ok(raw
         .into_iter()
