@@ -1,31 +1,34 @@
-version: '1.0'
-description: OWASP CRS rules converted from RESPONSE-956-DATA-LEAKAGES-RUBY.conf
-source: OWASP Core Rule Set v4.x (https://github.com/coreruleset/coreruleset)
-license: Apache-2.0
-rules:
-- id: CRS-RESP-956100
-  name: RUBY Information Leakage
-  category: data-leakage
-  severity: high
-  paranoia: 1
-  field: body
-  operator: pm_from_file
-  value: ruby-errors.data
-  action: block
-  tags:
-  - owasp-crs
-  - disclosure
-  crs_id: 956100
-- id: CRS-RESP-956110
-  name: Ruby source code leakage
-  category: data-leakage
-  severity: high
-  paranoia: 2
-  field: body
-  operator: regex
-  value: (?i)(?:<%[=#\s]|#\{[^}]+\})
-  action: block
-  tags:
-  - owasp-crs
-  - disclosure
-  crs_id: 956110
+kind: custom_rule_v1
+id: CRS-RESP-956100
+name: RUBY Information Leakage
+enabled: true
+action: block
+pattern_field: body
+operator: pm_from_file
+value: ruby-errors.data
+category: data-leakage
+severity: high
+paranoia: 1
+tags:
+- owasp-crs
+- disclosure
+metadata:
+  crs_id: '956100'
+  source: OWASP Core Rule Set v4.x (https://github.com/coreruleset/coreruleset)
+---
+kind: custom_rule_v1
+id: CRS-RESP-956110
+name: Ruby source code leakage
+enabled: true
+action: block
+pattern: (?i)(?:<%[=#\s]|#\{[^}]+\})
+pattern_field: body
+category: data-leakage
+severity: high
+paranoia: 2
+tags:
+- owasp-crs
+- disclosure
+metadata:
+  source: OWASP Core Rule Set v4.x (https://github.com/coreruleset/coreruleset)
+  crs_id: '956110'

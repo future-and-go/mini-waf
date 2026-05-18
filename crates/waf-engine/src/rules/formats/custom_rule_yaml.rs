@@ -157,13 +157,18 @@ fn to_custom_rule(dto: YamlCustomRule) -> Result<CustomRule> {
 
     // Auto-convert Registry-style operator+value shorthand to a condition
     // when no conditions, match_tree, or pattern are present.
+    // Operators handled by specialised modules (pm_from_file, detect_sqli,
+    // detect_xss, contains_any) are stored but NOT converted — they are
+    // evaluated outside the condition engine.
     let mut conditions = dto.conditions;
     if conditions.is_empty() && dto.match_tree.is_none() && pattern.is_none() {
         if let (Some(op_str), Some(val)) = (&dto.operator, &dto.value) {
-            let field = parse_pattern_field_to_condition(&dto.pattern_field);
             let operator = parse_operator_str(op_str)?;
-            let value = yaml_value_to_condition_value(val)?;
-            conditions.push(Condition { field, operator, value });
+            if !is_specialised_operator(&operator) {
+                let field = parse_pattern_field_to_condition(&dto.pattern_field);
+                let value = yaml_value_to_condition_value(val)?;
+                conditions.push(Condition { field, operator, value });
+            }
         }
     }
 
@@ -230,8 +235,21 @@ fn parse_operator_str(s: &str) -> Result<Operator> {
         "lt" => Operator::Lt,
         "gte" => Operator::Gte,
         "lte" => Operator::Lte,
+        "pm_from_file" => Operator::PmFromFile,
+        "detect_sqli" => Operator::DetectSqli,
+        "detect_xss" => Operator::DetectXss,
+        "contains_any" => Operator::ContainsAny,
+        "equals" => Operator::Eq,
         other => bail!("unknown operator: {other}"),
     })
+}
+
+/// Operators evaluated by specialised modules, not the generic condition matcher.
+fn is_specialised_operator(op: &Operator) -> bool {
+    matches!(
+        op,
+        Operator::PmFromFile | Operator::DetectSqli | Operator::DetectXss | Operator::ContainsAny
+    )
 }
 
 /// Convert a `serde_yaml::Value` to `ConditionValue`.

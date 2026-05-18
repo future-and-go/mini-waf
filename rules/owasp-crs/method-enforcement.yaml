@@ -1,27 +1,26 @@
-version: '1.0'
-description: Method Enforcement (OWASP CRS 911)
-source: OWASP Core Rule Set v4.x
-license: Apache-2.0
-rules:
-  - id: CRS-911100
-    name: Method is not allowed by policy
-    category: protocol
-    severity: critical
-    paranoia: 1
-    field: method
-    operator: not_in
-    value:
-      - GET
-      - POST
-      - PUT
-      - DELETE
-      - PATCH
-      - HEAD
-      - OPTIONS
-      - CONNECT
-      - TRACE
-    action: block
-    tags:
-      - owasp-crs
-      - method-enforcement
-    crs_id: 911100
+kind: custom_rule_v1
+id: CRS-911100
+name: Method is not allowed by policy
+enabled: true
+action: block
+pattern_field: method
+operator: not_in
+value:
+- GET
+- POST
+- PUT
+- DELETE
+- PATCH
+- HEAD
+- OPTIONS
+- CONNECT
+- TRACE
+category: protocol
+severity: critical
+paranoia: 1
+tags:
+- owasp-crs
+- method-enforcement
+metadata:
+  crs_id: '911100'
+  source: OWASP Core Rule Set v4.x
