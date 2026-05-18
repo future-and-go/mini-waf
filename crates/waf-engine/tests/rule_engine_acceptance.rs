@@ -135,6 +135,7 @@ fn rule_flat(id: &str, op: ConditionOp, conditions: Vec<Condition>) -> CustomRul
         tags: Vec::new(),
         metadata: HashMap::new(),
         reference: None,
+        specialised_op: None,
     }
 }
 
@@ -162,6 +163,7 @@ fn rule_tree(id: &str, tree: ConditionNode) -> CustomRule {
         tags: Vec::new(),
         metadata: HashMap::new(),
         reference: None,
+        specialised_op: None,
     }
 }
 
