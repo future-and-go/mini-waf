@@ -271,6 +271,9 @@ pub struct CustomRule {
     pub metadata: HashMap<String, String>,
     /// External reference URL.
     pub reference: Option<String>,
+    /// Operator that can't be compiled into a condition tree (e.g. detect_sqli).
+    /// Stored so the rule engine can dispatch to specialised evaluation paths.
+    pub specialised_op: Option<Operator>,
 }
 
 // ── FR-025 Rule Verdict ───────────────────────────────────────────────────────
@@ -450,6 +453,35 @@ impl CustomRulesEngine {
         verdict
     }
 
+    /// Evaluate only rules with `paranoia <= max_paranoia`, returning results
+    /// tagged with `Phase::Owasp` instead of `Phase::CustomRule`.
+    ///
+    /// Used by `OWASPCheck` to run OWASP CRS rules through the unified engine
+    /// while preserving paranoia-level filtering and the OWASP phase tag.
+    pub fn check_owasp(&self, ctx: &RequestCtx, max_paranoia: u8) -> Option<DetectionResult> {
+        let rules = self.rules.get("*")?;
+        for entry in rules.iter() {
+            let rule = &entry.raw;
+            if !rule.enabled {
+                continue;
+            }
+            if rule.paranoia.unwrap_or(1) > max_paranoia {
+                continue;
+            }
+
+            let matched = self.eval_single_rule(ctx, entry);
+            if matched {
+                return Some(DetectionResult {
+                    rule_id: Some(rule.id.clone()),
+                    rule_name: rule.name.clone(),
+                    phase: Phase::Owasp,
+                    detail: format!("OWASP rule {} triggered ({})", rule.id, rule.name),
+                });
+            }
+        }
+        None
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /// Evaluate a list of rules, accumulating risk deltas into the verdict.
@@ -466,23 +498,7 @@ impl CustomRulesEngine {
                 continue;
             }
 
-            let matched = rule.script.as_ref().map_or_else(
-                || {
-                    entry.compiled.as_ref().map_or_else(
-                        || {
-                            if !rule.conditions.is_empty() {
-                                self.eval_conditions(ctx, &rule.conditions, &rule.condition_op)
-                            } else if let Some(ref pattern) = rule.pattern {
-                                pattern_matches_request(pattern, &rule.pattern_field, ctx)
-                            } else {
-                                false
-                            }
-                        },
-                        |compiled| eval_compiled_node(ctx, &compiled.root),
-                    )
-                },
-                |script| self.eval_script(ctx, script),
-            );
+            let matched = self.eval_single_rule(ctx, entry);
 
             if matched {
                 // Collect risk delta if present
@@ -509,6 +525,35 @@ impl CustomRulesEngine {
                 }
             }
         }
+    }
+
+    /// Evaluate a single rule entry against the request context.
+    fn eval_single_rule(&self, ctx: &RequestCtx, entry: &RuleEntry) -> bool {
+        let rule = &entry.raw;
+
+        // Specialised operators (detect_sqli, detect_xss) bypass the condition
+        // engine and run their own multi-field scan with URL-decode protection.
+        if let Some(ref op) = rule.specialised_op {
+            return eval_specialised(op, &rule.pattern_field, ctx);
+        }
+
+        rule.script.as_ref().map_or_else(
+            || {
+                entry.compiled.as_ref().map_or_else(
+                    || {
+                        if !rule.conditions.is_empty() {
+                            self.eval_conditions(ctx, &rule.conditions, &rule.condition_op)
+                        } else if let Some(ref pattern) = rule.pattern {
+                            pattern_matches_request(pattern, &rule.pattern_field, ctx)
+                        } else {
+                            false
+                        }
+                    },
+                    |compiled| eval_compiled_node(ctx, &compiled.root),
+                )
+            },
+            |script| self.eval_script(ctx, script),
+        )
     }
 
     fn eval_script(&self, ctx: &RequestCtx, script: &str) -> bool {
@@ -628,6 +673,7 @@ pub fn from_db_rule(row: &DbCustomRule) -> anyhow::Result<CustomRule> {
         tags: Vec::new(),
         metadata: HashMap::new(),
         reference: None,
+        specialised_op: None,
     })
 }
 
@@ -742,6 +788,9 @@ pub enum Matcher {
     Lt(i64),
     Gte(i64),
     Lte(i64),
+    // libinjection-based detectors (ported from OWASPCheck)
+    DetectSqli,
+    DetectXss,
 }
 
 /// Compile a raw rule into its eval-ready form.
@@ -836,8 +885,11 @@ fn compile_condition(cond: &Condition) -> anyhow::Result<CompiledCondition> {
         (Operator::Lt, V::Number(n)) => Matcher::Lt(*n),
         (Operator::Gte, V::Number(n)) => Matcher::Gte(*n),
         (Operator::Lte, V::Number(n)) => Matcher::Lte(*n),
+        // libinjection detectors — value is ignored (detection is on the field)
+        (Operator::DetectSqli, _) => Matcher::DetectSqli,
+        (Operator::DetectXss, _) => Matcher::DetectXss,
         // Operators handled by specialised modules — not evaluable as conditions.
-        (op @ (Operator::PmFromFile | Operator::DetectSqli | Operator::DetectXss | Operator::ContainsAny), _) => {
+        (op @ (Operator::PmFromFile | Operator::ContainsAny), _) => {
             anyhow::bail!("operator {op:?} is handled by a specialised check module, not the condition evaluator");
         }
         (op, val) => {
@@ -871,8 +923,26 @@ impl Matcher {
             Self::Lt(n) => fstr.parse::<i64>().is_ok_and(|v| v < *n),
             Self::Gte(n) => fstr.parse::<i64>().is_ok_and(|v| v >= *n),
             Self::Lte(n) => fstr.parse::<i64>().is_ok_and(|v| v <= *n),
+            Self::DetectSqli => detect_with_decode(fstr, |b| libinjectionrs::detect_sqli(b).is_injection()),
+            Self::DetectXss => detect_with_decode(fstr, |b| libinjectionrs::detect_xss(b).is_injection()),
         }
     }
+}
+
+/// Run a libinjection detector on raw + URL-decoded forms to catch encoding
+/// bypass attempts (e.g. `%27OR%201%3D1` evading SQLi detection).
+fn detect_with_decode(raw: &str, detector: impl Fn(&[u8]) -> bool) -> bool {
+    use crate::checks::{url_decode, url_decode_recursive};
+
+    if detector(raw.as_bytes()) {
+        return true;
+    }
+    let decoded = url_decode(raw);
+    if decoded != raw && detector(decoded.as_bytes()) {
+        return true;
+    }
+    let recursive = url_decode_recursive(raw);
+    recursive != decoded && detector(recursive.as_bytes())
 }
 
 // ── Pattern evaluation (Phase 2: YAML format consolidation) ─────────────────
@@ -981,6 +1051,44 @@ fn field_value(ctx: &RequestCtx, field: &ConditionField) -> Option<String> {
     }
 }
 
+// ── Specialised operator evaluation (detect_sqli, detect_xss) ────────────────
+
+/// Evaluate a specialised operator (libinjection) against request fields.
+///
+/// When `pattern_field` is `"all"`, scans path → query → body → headers
+/// (skipping routing headers). For a specific field, only that field is tested.
+/// All values are tested in raw + URL-decoded forms to catch encoding bypasses.
+fn eval_specialised(op: &Operator, pattern_field: &str, ctx: &RequestCtx) -> bool {
+    let detector: fn(&[u8]) -> bool = match op {
+        Operator::DetectSqli => |b| libinjectionrs::detect_sqli(b).is_injection(),
+        Operator::DetectXss => |b| libinjectionrs::detect_xss(b).is_injection(),
+        _ => return false,
+    };
+
+    let detect = |raw: &str| -> bool { detect_with_decode(raw, detector) };
+
+    match pattern_field {
+        "all" | "" => {
+            detect(&ctx.path)
+                || detect(&ctx.query)
+                || detect(&String::from_utf8_lossy(&ctx.body_preview))
+                || ctx
+                    .headers
+                    .iter()
+                    .filter(|(k, _)| !is_routing_header(k))
+                    .any(|(_, v)| detect(v))
+        }
+        "path" => detect(&ctx.path),
+        "query" => detect(&ctx.query),
+        "body" => detect(&String::from_utf8_lossy(&ctx.body_preview)),
+        "method" => detect(&ctx.method),
+        _ => {
+            // Named field — try headers
+            ctx.headers.get(pattern_field).is_some_and(|v| detect(v))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1046,6 +1154,7 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
+            specialised_op: None,
         };
         engine.add_rule(rule);
 
@@ -1086,6 +1195,7 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
+            specialised_op: None,
         };
         engine.add_rule(rule);
 
@@ -1122,6 +1232,7 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
+            specialised_op: None,
         };
         engine.add_rule(rule);
 
@@ -1158,6 +1269,7 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
+            specialised_op: None,
         }
     }
 
@@ -1303,6 +1415,7 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
+            specialised_op: None,
         });
 
         assert!(engine.check(&make_ctx("/api/v1/admin", "GET", "1.2.3.4")).is_some());
@@ -1442,6 +1555,7 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
+            specialised_op: None,
         });
 
         assert!(engine.check(&make_ctx("/admin/x", "POST", "1.2.3.4")).is_some());
@@ -1490,6 +1604,7 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
+            specialised_op: None,
         });
 
         assert!(engine.check(&make_ctx_with_cookies("session=abc; other=x")).is_some());
@@ -1528,6 +1643,7 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
+            specialised_op: None,
         });
 
         assert!(engine.check(&make_ctx_with_cookies("a=b; track=1")).is_some());
@@ -1596,6 +1712,7 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
+            specialised_op: None,
         }
     }
 

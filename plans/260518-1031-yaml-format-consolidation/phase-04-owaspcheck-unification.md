@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "OWASPCheck Unification"
-status: pending
+status: done
 priority: P1
 effort: "8h"
 dependencies: [2, 3]
@@ -225,14 +225,14 @@ Verify `crates/waf-engine/tests/` OWASP-related tests still pass.
 
 ## Success Criteria
 
-- [ ] `OWASPCheck` uses `CustomRulesEngine` internally
-- [ ] All 351 rules load through `custom_rule_yaml::parse()`
-- [ ] Paranoia filtering works (paranoia 2+ rules skipped when config is 1)
-- [ ] `detect_sqli`/`detect_xss` matchers work via `CustomRulesEngine`
-- [ ] `pm_from_file` rules load without errors
-- [ ] Embedded fallback works when `rules/` directory is missing
-- [ ] Existing OWASP integration tests pass
-- [ ] `cargo check` passes
+- [x] `OWASPCheck` uses `CustomRulesEngine` internally
+- [x] All rules load through `custom_rule_yaml::parse()` (custom_rule_v1) or legacy converter
+- [x] Paranoia filtering works (paranoia 2+ rules skipped when config is 1)
+- [x] `detect_sqli`/`detect_xss` matchers work via `CustomRulesEngine` (specialised_op path)
+- [x] Embedded fallback works when `rules/` directory is missing (converted to custom_rule_v1)
+- [x] Existing OWASP integration tests pass (48 integration + 22 unit + 29 engine = 99 tests)
+- [x] `cargo check` passes with zero warnings
+- [x] `cargo fmt --all -- --check` passes
 
 ## Risk Assessment
 

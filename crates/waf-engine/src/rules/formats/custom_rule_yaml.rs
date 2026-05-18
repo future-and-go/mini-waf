@@ -157,14 +157,16 @@ fn to_custom_rule(dto: YamlCustomRule) -> Result<CustomRule> {
 
     // Auto-convert Registry-style operator+value shorthand to a condition
     // when no conditions, match_tree, or pattern are present.
-    // Operators handled by specialised modules (pm_from_file, detect_sqli,
-    // detect_xss, contains_any) are stored but NOT converted — they are
-    // evaluated outside the condition engine.
+    // Specialised operators (pm_from_file, detect_sqli, detect_xss,
+    // contains_any) are stored in `specialised_op` for dispatch by the engine.
     let mut conditions = dto.conditions;
+    let mut specialised_op = None;
     if conditions.is_empty() && dto.match_tree.is_none() && pattern.is_none() {
         if let (Some(op_str), Some(val)) = (&dto.operator, &dto.value) {
             let operator = parse_operator_str(op_str)?;
-            if !is_specialised_operator(&operator) {
+            if is_specialised_operator(&operator) {
+                specialised_op = Some(operator);
+            } else {
                 let field = parse_pattern_field_to_condition(&dto.pattern_field);
                 let value = yaml_value_to_condition_value(val)?;
                 conditions.push(Condition { field, operator, value });
@@ -195,6 +197,7 @@ fn to_custom_rule(dto: YamlCustomRule) -> Result<CustomRule> {
         tags: dto.tags,
         metadata: dto.metadata,
         reference: dto.reference,
+        specialised_op,
     })
 }
 

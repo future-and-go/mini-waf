@@ -77,6 +77,7 @@ fn make_rules() -> Vec<CustomRule> {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
+            specialised_op: None,
         });
     }
     rules

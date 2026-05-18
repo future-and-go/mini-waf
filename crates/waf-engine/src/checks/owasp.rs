@@ -1,335 +1,86 @@
-//! OWASP Core Rule Set (CRS) — native Rust implementation.
+//! OWASP Core Rule Set (CRS) — unified engine implementation.
 //!
-//! Rules are loaded at runtime from the `rules/owasp-crs/` directory (YAML
-//! files).  If the directory cannot be found, a minimal embedded rule set is
-//! used as a fallback.
+//! Rules are loaded at runtime from the `rules/` directory (YAML files in
+//! `custom_rule_v1` format).  If the directory cannot be found, a minimal
+//! embedded rule set is used as a fallback.
 //!
 //! Each rule has a `paranoia` level (1–4).  Only rules with
 //! `paranoia <= defense_config.owasp_paranoia` are evaluated.
 //! Default paranoia level is 1 (most permissive).
+//!
+//! Internally delegates to `CustomRulesEngine` for rule storage and evaluation,
+//! unifying the OWASP and custom rule pipelines (Phase 4 consolidation).
 
 use std::path::Path;
 
-use regex::Regex;
 use serde::Deserialize;
 use tracing::{debug, warn};
 
-use waf_common::{DetectionResult, Phase, RequestCtx};
+use waf_common::{DetectionResult, RequestCtx};
 
-use super::{Check, url_decode, url_decode_recursive};
+use crate::rules::engine::{CustomRulesEngine, Operator};
+use crate::rules::formats::custom_rule_yaml;
 
-// ── Minimal embedded fallback rules ──────────────────────────────────────────
-// Used when the rules/owasp-crs/ directory cannot be found at runtime.
+use super::Check;
+
+// ── Minimal embedded fallback rules (custom_rule_v1 format) ─────────────────
 
 const EMBEDDED_RULES_YAML: &str = r#"
-version: "1.0"
-paranoia_level: 1
-rules:
-  - id: BUILTIN-911100
-    name: Method is not allowed by policy
-    category: protocol
-    severity: critical
-    paranoia: 1
-    field: method
-    operator: not_in
-    value:
-      - GET
-      - POST
-      - PUT
-      - DELETE
-      - PATCH
-      - HEAD
-      - OPTIONS
-      - CONNECT
-      - TRACE
-    action: block
-
-  - id: BUILTIN-920160
-    name: Request body too large (>10 MB)
-    category: protocol
-    severity: critical
-    paranoia: 1
-    field: content_length
-    operator: gt
-    value: 10485760
-    action: block
-
-  - id: BUILTIN-944150
-    name: 'Potential RCE: Log4j / Log4shell JNDI injection'
-    category: java-injection
-    severity: critical
-    paranoia: 1
-    field: all
-    operator: regex
-    value: '(?i)(?:\$|&dollar;?)(?:\{|&l(?:brace|cub);?)(?:[^\}]{0,15}(?:\$|&dollar;?)(?:\{|&l(?:brace|cub);?)|jndi|ctx)'
-    action: block
+kind: custom_rule_v1
+id: BUILTIN-911100
+name: Method is not allowed by policy
+pattern_field: method
+operator: not_in
+value:
+  - GET
+  - POST
+  - PUT
+  - DELETE
+  - PATCH
+  - HEAD
+  - OPTIONS
+  - CONNECT
+  - TRACE
+category: protocol
+severity: critical
+paranoia: 1
+---
+kind: custom_rule_v1
+id: BUILTIN-920160
+name: Request body too large (>10 MB)
+pattern_field: content_length
+operator: gt
+value: 10485760
+category: protocol
+severity: critical
+paranoia: 1
+---
+kind: custom_rule_v1
+id: BUILTIN-944150
+name: 'Potential RCE: Log4j / Log4shell JNDI injection'
+pattern: '(?i)(?:\$|&dollar;?)(?:\{|&l(?:brace|cub);?)(?:[^\}]{0,15}(?:\$|&dollar;?)(?:\{|&l(?:brace|cub);?)|jndi|ctx)'
+pattern_field: all
+category: java-injection
+severity: critical
+paranoia: 1
 "#;
 
-// ── YAML schema ───────────────────────────────────────────────────────────────
+// ── OWASPCheck ──────────────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
-struct RuleSet {
-    #[allow(dead_code)]
-    #[serde(default)]
-    version: String,
-    #[allow(dead_code)]
-    #[serde(default = "default_paranoia_level")]
-    paranoia_level: u8,
-    rules: Vec<YamlRule>,
-}
-
-const fn default_paranoia_level() -> u8 {
-    1
-}
-
-#[derive(Debug, Deserialize)]
-struct YamlRule {
-    id: String,
-    name: String,
-    #[allow(dead_code)]
-    #[serde(default)]
-    category: String,
-    #[allow(dead_code)]
-    #[serde(default)]
-    severity: String,
-    paranoia: u8,
-    field: String,
-    operator: String,
-    value: YamlValue,
-    action: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum YamlValue {
-    Str(String),
-    List(Vec<String>),
-    Int(i64),
-}
-
-// ── Compiled rule ─────────────────────────────────────────────────────────────
-
-/// Headers that identify the *destination* of the request, not user-controlled
-/// payload data — `field: "all"` rules must skip these or they FP on legit
-/// requests (e.g. SSRF rules tripping on `Host: localhost:8080`).
+/// WAF checker implementing a subset of the OWASP CRS.
 ///
-/// Also skip `accept` (content negotiation, value `*/*` triggers some weird
-/// regexes) and connection-management headers that aren't attacker-controlled.
-fn is_routing_header(name: &str) -> bool {
-    matches!(
-        name,
-        "host"
-            | ":authority"
-            | ":method"
-            | ":path"
-            | ":scheme"
-            | "accept"
-            | "accept-encoding"
-            | "accept-language"
-            | "connection"
-            | "content-length"
-            | "x-forwarded-host"
-            | "x-real-ip"
-    )
-}
-
-enum CompiledMatcher {
-    Regex(Regex),
-    Contains(String),
-    NotIn(Vec<String>),
-    Gt(i64),
-    Lt(i64),
-    /// libinjection SQL injection detection (CRS-942100 etc.)
-    DetectSqli,
-    /// libinjection XSS detection (CRS-941100 etc.)
-    DetectXss,
-}
-
-struct CompiledRule {
-    id: String,
-    name: String,
-    paranoia: u8,
-    field: String,
-    matcher: CompiledMatcher,
-    #[allow(dead_code)]
-    action: String,
-}
-
-impl CompiledRule {
-    fn matches(&self, ctx: &RequestCtx) -> bool {
-        let field_val = self.get_field(ctx);
-
-        match &self.matcher {
-            CompiledMatcher::Regex(re) => {
-                match self.field.as_str() {
-                    "all" => {
-                        // Check path, query, body, headers — but EXCLUDE the
-                        // Host header (and HTTP/2 :authority pseudo-header).
-                        // Host is the destination of the request, not user-
-                        // controlled input that could carry an attack payload.
-                        // Including it fires e.g. SSRF rules on every request
-                        // to "localhost:8080" or any internal hostname, making
-                        // the WAF unusable on private deployments. ModSecurity
-                        // / OWASP CRS recommend `!REQUEST_HEADERS:Host` for
-                        // exactly this reason.
-                        //
-                        // Also try the URL-decoded variant of every value: a
-                        // `--data-urlencode q={{7*7}}` request lands here as
-                        // `q=%7B%7B7%2A7%7D%7D`, and rules like ADV-SSTI-001
-                        // match the literal `{{...}}` after decoding.
-                        // libinjection's `detect_injection` already does this
-                        // for the DetectSqli/DetectXss matchers; the regex
-                        // path needs the same treatment to avoid trivial
-                        // URL-encoding bypasses.
-                        let body = String::from_utf8_lossy(&ctx.body_preview);
-                        let test_with_decoded = |label: &str, raw: &str| -> bool {
-                            if re.is_match(raw) {
-                                tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on {}: {}", label, raw);
-                                return true;
-                            }
-                            let decoded = url_decode(raw);
-                            if decoded != raw && re.is_match(&decoded) {
-                                tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on {}(decoded): {}", label, decoded);
-                                return true;
-                            }
-                            let recursive = url_decode_recursive(raw);
-                            if recursive != decoded && re.is_match(&recursive) {
-                                tracing::info!(rule = %self.id, name = %self.name, "WAF rule fired on {}(decoded-recursive): {}", label, recursive);
-                                return true;
-                            }
-                            false
-                        };
-                        if test_with_decoded("path", &ctx.path) {
-                            return true;
-                        }
-                        if test_with_decoded("query", &ctx.query) {
-                            return true;
-                        }
-                        if test_with_decoded("body", &body) {
-                            return true;
-                        }
-                        for (k, v) in &ctx.headers {
-                            if is_routing_header(k) {
-                                continue;
-                            }
-                            if test_with_decoded(&format!("header.{k}"), v) {
-                                return true;
-                            }
-                        }
-                        false
-                    }
-                    // Single-field regex — also try URL-decoded so attackers
-                    // can't trivially evade with `%`-encoding.
-                    _ => match field_val.as_ref() {
-                        Some(v) => {
-                            if re.is_match(v) {
-                                return true;
-                            }
-                            let decoded = url_decode(v);
-                            if decoded != *v && re.is_match(&decoded) {
-                                return true;
-                            }
-                            let recursive = url_decode_recursive(v);
-                            recursive != decoded && re.is_match(&recursive)
-                        }
-                        None => false,
-                    },
-                }
-            }
-            CompiledMatcher::Contains(s) => field_val.as_ref().is_some_and(|v| v.contains(s.as_str())),
-            CompiledMatcher::NotIn(list) => field_val
-                .as_ref()
-                .is_some_and(|v| !list.iter().any(|allowed| allowed.eq_ignore_ascii_case(v))),
-            CompiledMatcher::Gt(n) => field_val
-                .as_ref()
-                .and_then(|v| v.parse::<i64>().ok())
-                .is_some_and(|v| v > *n),
-            CompiledMatcher::Lt(n) => field_val
-                .as_ref()
-                .and_then(|v| v.parse::<i64>().ok())
-                .is_some_and(|v| v < *n),
-            CompiledMatcher::DetectSqli => {
-                self.detect_injection(ctx, |input| libinjectionrs::detect_sqli(input).is_injection())
-            }
-            CompiledMatcher::DetectXss => {
-                self.detect_injection(ctx, |input| libinjectionrs::detect_xss(input).is_injection())
-            }
-        }
-    }
-
-    /// Run a libinjection detector against the appropriate request fields.
-    ///
-    /// For the `"all"` field, scans path, query, body, and header values
-    /// (matching CRS behavior for libinjection rules).  Each value is tested
-    /// in raw form, single-decoded form, and recursively-decoded form (up to
-    /// 3 passes) to catch `%`-encoded and double/triple-encoded evasion attempts.
-    /// For a specific field, only that field is tested in all three forms.
-    fn detect_injection(&self, ctx: &RequestCtx, detector: impl Fn(&[u8]) -> bool) -> bool {
-        // Helper: test raw, single-decoded, and recursively-decoded forms.
-        let detect_with_decode = |raw: &str| -> bool {
-            if detector(raw.as_bytes()) {
-                return true;
-            }
-            let decoded = url_decode(raw);
-            if decoded != raw && detector(decoded.as_bytes()) {
-                return true;
-            }
-            let recursive = url_decode_recursive(raw);
-            recursive != decoded && detector(recursive.as_bytes())
-        };
-
-        match self.field.as_str() {
-            "all" => {
-                detect_with_decode(&ctx.path)
-                    || detect_with_decode(&ctx.query)
-                    || detector(&ctx.body_preview)
-                    || {
-                        let body_str = String::from_utf8_lossy(&ctx.body_preview);
-                        detect_with_decode(&body_str)
-                    }
-                    || ctx
-                        .headers
-                        .iter()
-                        .filter(|(k, _)| !is_routing_header(k))
-                        .any(|(_, v)| detect_with_decode(v))
-            }
-            _ => self.get_field(ctx).as_ref().is_some_and(|v| detect_with_decode(v)),
-        }
-    }
-
-    fn get_field(&self, ctx: &RequestCtx) -> Option<String> {
-        match self.field.as_str() {
-            "method" => Some(ctx.method.clone()),
-            "path" => Some(ctx.path.clone()),
-            "query" => Some(ctx.query.clone()),
-            "content_length" => Some(ctx.content_length.to_string()),
-            "content_type" | "header_content_type" => ctx.headers.get("content-type").cloned(),
-            "user_agent" | "header_user_agent" => ctx.headers.get("user-agent").cloned(),
-            "body" => Some(String::from_utf8_lossy(&ctx.body_preview).into_owned()),
-            "path_length" => Some(ctx.path.len().to_string()),
-            "query_arg_count" => {
-                let count = ctx.query.split('&').filter(|s| !s.is_empty()).count();
-                Some(count.to_string())
-            }
-            _ => None,
-        }
-    }
-}
-
-// ── OWASPCheck ────────────────────────────────────────────────────────────────
-
-/// WAF checker implementing a subset of the `OWASP` CRS.
+/// Thin wrapper around `CustomRulesEngine` — loads rules via the unified
+/// `custom_rule_v1` YAML parser and evaluates them through the shared engine
+/// with paranoia-level filtering.
 pub struct OWASPCheck {
-    rules: Vec<CompiledRule>,
+    engine: CustomRulesEngine,
+    rule_count: usize,
 }
 
 impl OWASPCheck {
-    /// Create by loading rules from `rules/` relative to the current working
-    /// directory. Walks the directory tree so all rule families ship out of
-    /// the box: `owasp-crs/`, `advanced/`, `cve-patches/`, `custom/`,
-    /// `bot-detection/`, `modsecurity/`, `geoip/`, `owasp-api/`. Falls back
-    /// to the minimal embedded rule set if `rules/` is absent or yields
-    /// zero compiled rules.
+    /// Create by loading rules from `rules/` relative to the CWD.
+    /// Falls back to the minimal embedded rule set if `rules/` is absent
+    /// or yields zero rules.
     pub fn new() -> Self {
         let dir = Path::new("rules");
         if dir.is_dir() {
@@ -345,15 +96,22 @@ impl OWASPCheck {
         Self::from_yaml(EMBEDDED_RULES_YAML)
     }
 
-    /// Load all `.yaml` files from `dir` recursively, merging their rule lists.
+    /// Load all `.yaml` files from `dir` recursively.
+    ///
+    /// Tries `custom_rule_v1` format first (multi-doc YAML). Falls back to
+    /// legacy `RuleSet` format for old files. Skips `custom/` subdirectory
+    /// (loaded separately by `custom_file_loader`).
     pub fn from_directory(dir: &Path) -> Self {
-        let mut rules = Vec::new();
-        Self::walk_directory(dir, &mut rules);
-        Self { rules }
+        let engine = CustomRulesEngine::new();
+        let mut count = 0;
+        Self::walk_directory(dir, &engine, &mut count);
+        Self {
+            engine,
+            rule_count: count,
+        }
     }
 
-    /// Recursive helper: walk `dir`, loading every `.yaml` file's rules.
-    fn walk_directory(dir: &Path, rules: &mut Vec<CompiledRule>) {
+    fn walk_directory(dir: &Path, engine: &CustomRulesEngine, count: &mut usize) {
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(err) => {
@@ -365,7 +123,11 @@ impl OWASPCheck {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                Self::walk_directory(&path, rules);
+                // Skip custom/ — loaded separately by custom_file_loader
+                if path.file_name().and_then(|n| n.to_str()) == Some("custom") {
+                    continue;
+                }
+                Self::walk_directory(&path, engine, count);
                 continue;
             }
             if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
@@ -378,38 +140,67 @@ impl OWASPCheck {
                     continue;
                 }
             };
-            // Skip files that aren't rule sets — `sync-config.yaml`, indexes,
-            // etc. share the directory but don't follow the `RuleSet` shape.
-            let ruleset: RuleSet = match serde_yaml::from_str(&content) {
-                Ok(r) => r,
-                Err(e) => {
-                    debug!("Skipping {} (not a rule set): {e}", path.display());
+            // Try custom_rule_v1 format first
+            match custom_rule_yaml::parse(&content) {
+                Ok(rules) if !rules.is_empty() => {
+                    let n = rules.len();
+                    for rule in rules {
+                        engine.add_file_rule(rule);
+                    }
+                    *count += n;
+                    debug!("Loaded {n} rules from {}", path.display());
                     continue;
                 }
-            };
-            let count_before = rules.len();
-            for r in ruleset.rules {
-                if let Some(cr) = compile_rule(r) {
-                    rules.push(cr);
+                Ok(_) => {} // empty result — try legacy format below
+                Err(e) => {
+                    debug!("custom_rule_v1 parse failed for {}: {e}", path.display());
                 }
             }
-            debug!("Loaded {} rules from {}", rules.len() - count_before, path.display());
+            // Try legacy RuleSet format
+            if let Some(rules) = legacy_parse_ruleset(&content) {
+                let n = rules.len();
+                for rule in rules {
+                    engine.add_file_rule(rule);
+                }
+                *count += n;
+                debug!("Loaded {n} legacy rules from {}", path.display());
+            }
         }
     }
 
-    /// Create from a YAML string (single-document, `RuleSet` format).
+    /// Create from a YAML string. Supports both `custom_rule_v1` (multi-doc)
+    /// and legacy `RuleSet` format (single-doc with `version` + `rules` array).
     pub fn from_yaml(yaml: &str) -> Self {
-        let ruleset: RuleSet = match serde_yaml::from_str(yaml) {
-            Ok(r) => r,
-            Err(e) => {
-                warn!("Failed to parse OWASP rules YAML: {e}");
-                return Self { rules: vec![] };
+        let engine = CustomRulesEngine::new();
+
+        // Try custom_rule_v1 first
+        if let Ok(rules) = custom_rule_yaml::parse(yaml) {
+            if !rules.is_empty() {
+                let count = rules.len();
+                for rule in rules {
+                    engine.add_file_rule(rule);
+                }
+                return Self {
+                    engine,
+                    rule_count: count,
+                };
             }
-        };
+        }
 
-        let rules = ruleset.rules.into_iter().filter_map(compile_rule).collect();
+        // Fall back to legacy RuleSet format
+        if let Some(rules) = legacy_parse_ruleset(yaml) {
+            let count = rules.len();
+            for rule in rules {
+                engine.add_file_rule(rule);
+            }
+            return Self {
+                engine,
+                rule_count: count,
+            };
+        }
 
-        Self { rules }
+        warn!("Failed to parse OWASP rules YAML in any format");
+        Self { engine, rule_count: 0 }
     }
 
     /// Try to load from a single YAML file, falling back to defaults on error.
@@ -426,70 +217,9 @@ impl OWASPCheck {
         )
     }
 
-    pub const fn rule_count(&self) -> usize {
-        self.rules.len()
+    pub fn rule_count(&self) -> usize {
+        self.rule_count
     }
-}
-
-fn compile_rule(r: YamlRule) -> Option<CompiledRule> {
-    let matcher = match r.operator.as_str() {
-        "regex" => {
-            let pattern = match &r.value {
-                YamlValue::Str(s) => s.clone(),
-                _ => return None,
-            };
-            match Regex::new(&pattern) {
-                Ok(re) => CompiledMatcher::Regex(re),
-                Err(e) => {
-                    warn!("Invalid regex in OWASP rule {}: {e}", r.id);
-                    return None;
-                }
-            }
-        }
-        "contains" => {
-            let s = match &r.value {
-                YamlValue::Str(s) => s.clone(),
-                _ => return None,
-            };
-            CompiledMatcher::Contains(s)
-        }
-        "not_in" => {
-            let list = match &r.value {
-                YamlValue::List(l) => l.clone(),
-                _ => return None,
-            };
-            CompiledMatcher::NotIn(list)
-        }
-        "gt" => {
-            let n = match &r.value {
-                YamlValue::Int(n) => *n,
-                _ => return None,
-            };
-            CompiledMatcher::Gt(n)
-        }
-        "lt" => {
-            let n = match &r.value {
-                YamlValue::Int(n) => *n,
-                _ => return None,
-            };
-            CompiledMatcher::Lt(n)
-        }
-        "detect_sqli" | "@detectSQLi" => CompiledMatcher::DetectSqli,
-        "detect_xss" | "@detectXSS" => CompiledMatcher::DetectXss,
-        op => {
-            debug!("Skipping OWASP rule {} with unsupported operator '{op}'", r.id);
-            return None;
-        }
-    };
-
-    Some(CompiledRule {
-        id: r.id,
-        name: r.name,
-        paranoia: r.paranoia,
-        field: r.field,
-        matcher,
-        action: r.action,
-    })
 }
 
 impl Default for OWASPCheck {
@@ -503,25 +233,235 @@ impl Check for OWASPCheck {
         if !ctx.host_config.defense_config.owasp_set {
             return None;
         }
-
-        // Use paranoia level from defense config (default 1)
         let paranoia = ctx.host_config.defense_config.owasp_paranoia;
+        self.engine.check_owasp(ctx, paranoia)
+    }
+}
 
-        for rule in &self.rules {
-            if rule.paranoia > paranoia {
-                continue;
-            }
-            if rule.matches(ctx) {
-                return Some(DetectionResult {
-                    rule_id: Some(rule.id.clone()),
-                    rule_name: rule.name.clone(),
-                    phase: Phase::Owasp,
-                    detail: format!("OWASP rule {} triggered ({})", rule.id, rule.name),
-                });
-            }
+// ── Legacy RuleSet parser ───────────────────────────────────────────────────
+// Converts old-format OWASP YAML (version + rules array) into CustomRule
+// objects that the unified engine can evaluate. Kept for backward compat
+// with existing rule files and test fixtures.
+
+use crate::rules::engine::{Condition, ConditionField, ConditionOp, ConditionValue, CustomRule, RuleAction};
+use std::collections::HashMap;
+
+#[derive(Debug, Deserialize)]
+struct LegacyRuleSet {
+    #[allow(dead_code)]
+    #[serde(default)]
+    version: String,
+    #[allow(dead_code)]
+    #[serde(default = "default_paranoia_level")]
+    paranoia_level: u8,
+    rules: Vec<LegacyYamlRule>,
+}
+
+const fn default_paranoia_level() -> u8 {
+    1
+}
+
+#[derive(Debug, Deserialize)]
+struct LegacyYamlRule {
+    id: String,
+    name: String,
+    #[allow(dead_code)]
+    #[serde(default)]
+    category: String,
+    #[allow(dead_code)]
+    #[serde(default)]
+    severity: String,
+    paranoia: u8,
+    field: String,
+    operator: String,
+    value: LegacyYamlValue,
+    #[allow(dead_code)]
+    action: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum LegacyYamlValue {
+    Str(String),
+    List(Vec<String>),
+    Int(i64),
+}
+
+/// Parse legacy RuleSet YAML, converting each rule to a `CustomRule`.
+fn legacy_parse_ruleset(yaml: &str) -> Option<Vec<CustomRule>> {
+    let ruleset: LegacyRuleSet = serde_yaml::from_str(yaml).ok()?;
+    let rules: Vec<CustomRule> = ruleset.rules.into_iter().filter_map(legacy_convert_rule).collect();
+    if rules.is_empty() { None } else { Some(rules) }
+}
+
+fn legacy_convert_rule(r: LegacyYamlRule) -> Option<CustomRule> {
+    // Virtual fields that need Rhai scripts (no ConditionField equivalent)
+    if let Some(script) = legacy_virtual_field_script(&r.field, &r.operator, &r.value) {
+        return Some(legacy_rule_shell(&r, Some(script), Vec::new(), None, None));
+    }
+
+    let (conditions, specialised_op, pattern) = match r.operator.as_str() {
+        "regex" => {
+            let pattern_str = match &r.value {
+                LegacyYamlValue::Str(s) => s.clone(),
+                _ => return None,
+            };
+            let re = regex::RegexBuilder::new(&pattern_str)
+                .size_limit(1 << 20)
+                .build()
+                .map_err(|e| warn!("Invalid regex in OWASP rule {}: {e}", r.id))
+                .ok()?;
+            (Vec::new(), None, Some(re))
         }
+        "contains" => {
+            let s = match &r.value {
+                LegacyYamlValue::Str(s) => s.clone(),
+                _ => return None,
+            };
+            let field = legacy_map_field(&r.field);
+            (
+                vec![Condition {
+                    field,
+                    operator: Operator::Contains,
+                    value: ConditionValue::Str(s),
+                }],
+                None,
+                None,
+            )
+        }
+        "not_in" => {
+            let list = match &r.value {
+                LegacyYamlValue::List(l) => l.clone(),
+                _ => return None,
+            };
+            let field = legacy_map_field(&r.field);
+            (
+                vec![Condition {
+                    field,
+                    operator: Operator::NotInList,
+                    value: ConditionValue::List(list),
+                }],
+                None,
+                None,
+            )
+        }
+        "gt" => {
+            let n = match &r.value {
+                LegacyYamlValue::Int(n) => *n,
+                _ => return None,
+            };
+            let field = legacy_map_field(&r.field);
+            (
+                vec![Condition {
+                    field,
+                    operator: Operator::Gt,
+                    value: ConditionValue::Number(n),
+                }],
+                None,
+                None,
+            )
+        }
+        "lt" => {
+            let n = match &r.value {
+                LegacyYamlValue::Int(n) => *n,
+                _ => return None,
+            };
+            let field = legacy_map_field(&r.field);
+            (
+                vec![Condition {
+                    field,
+                    operator: Operator::Lt,
+                    value: ConditionValue::Number(n),
+                }],
+                None,
+                None,
+            )
+        }
+        "detect_sqli" | "@detectSQLi" => (Vec::new(), Some(Operator::DetectSqli), None),
+        "detect_xss" | "@detectXSS" => (Vec::new(), Some(Operator::DetectXss), None),
+        op => {
+            debug!("Skipping OWASP rule {} with unsupported operator '{op}'", r.id);
+            return None;
+        }
+    };
 
-        None
+    Some(legacy_rule_shell(&r, None, conditions, pattern, specialised_op))
+}
+
+/// Build a `CustomRule` from a legacy YAML rule, filling in shared defaults.
+fn legacy_rule_shell(
+    r: &LegacyYamlRule,
+    script: Option<String>,
+    conditions: Vec<Condition>,
+    pattern: Option<regex::Regex>,
+    specialised_op: Option<Operator>,
+) -> CustomRule {
+    CustomRule {
+        id: r.id.clone(),
+        host_code: "*".to_string(),
+        name: r.name.clone(),
+        priority: 0,
+        enabled: true,
+        condition_op: ConditionOp::And,
+        conditions,
+        action: RuleAction::Block,
+        action_status: 403,
+        action_msg: None,
+        script,
+        match_tree: None,
+        risk_delta: None,
+        risk_action: None,
+        pattern,
+        pattern_field: r.field.clone(),
+        category: Some(r.category.clone()),
+        severity: Some(r.severity.clone()),
+        paranoia: Some(r.paranoia),
+        tags: Vec::new(),
+        metadata: HashMap::new(),
+        reference: None,
+        specialised_op,
+    }
+}
+
+/// Convert virtual computed fields (`path_length`, `query_arg_count`) to
+/// Rhai scripts, since `ConditionField` has no equivalent.
+fn legacy_virtual_field_script(field: &str, operator: &str, value: &LegacyYamlValue) -> Option<String> {
+    let n = match value {
+        LegacyYamlValue::Int(n) => *n,
+        _ => return None,
+    };
+    let cmp = match operator {
+        "gt" => ">",
+        "lt" => "<",
+        "gte" | "ge" => ">=",
+        "lte" | "le" => "<=",
+        "eq" => "==",
+        _ => return None,
+    };
+    match field {
+        "path_length" => Some(format!("path.len() {cmp} {n}")),
+        "query_arg_count" => {
+            // Filter empty segments to match legacy behavior (e.g. "a=1&&b=2" → 2, not 3)
+            Some(format!(r#"query.split("&").filter(|s| s.len() > 0).len() {cmp} {n}"#))
+        }
+        _ => None,
+    }
+}
+
+fn legacy_map_field(field: &str) -> ConditionField {
+    match field {
+        "path" => ConditionField::Path,
+        "query" => ConditionField::Query,
+        "method" => ConditionField::Method,
+        "body" => ConditionField::Body,
+        "content_length" => ConditionField::ContentLength,
+        "content_type" | "header_content_type" => ConditionField::ContentType,
+        "user_agent" | "header_user_agent" => ConditionField::UserAgent,
+        "host" => ConditionField::Host,
+        "cookies" | "cookie" => ConditionField::Cookie(None),
+        "ip" => ConditionField::Ip,
+        // "all" and others → Body (best single-field approximation)
+        _ => ConditionField::Body,
     }
 }
 
@@ -843,7 +783,6 @@ rules:
     fn detect_sqli_non_utf8_body() {
         let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
         let mut ctx = make_ctx("POST", "/", 0);
-        // Binary payload with some valid SQL-like bytes mixed in
         ctx.body_preview = Bytes::from(vec![0xFF, 0xFE, 0x00, 0x80]);
         assert!(
             checker.check(&ctx).is_none(),
