@@ -228,13 +228,15 @@ impl RuleManager {
 
     /// Import rules from a remote URL (async; requires a tokio runtime).
     ///
-    /// Tries YAML then JSON parsers in order.  Use `import_from_url_with_format`
-    /// when the remote content format is known ahead of time.
+    /// Tries `custom_rule_v1` first (preferred), then falls back to legacy
+    /// YAML and JSON parsers.  Use `import_from_url_with_format` when the
+    /// remote content format is known ahead of time.
     pub async fn import_from_url(&mut self, url: &str) -> Result<usize> {
         let content = fetch_remote_content(url).await?;
 
-        // Try YAML first, then JSON
-        let rules = super::formats::yaml::parse(&content)
+        // Try custom_rule_v1 first, then legacy yaml, then json
+        let rules = try_custom_rule_v1_as_registry(&content)
+            .or_else(|_| super::formats::yaml::parse(&content))
             .or_else(|_| super::formats::json::parse(&content))
             .with_context(|| format!("Failed to parse rules from {url}"))?;
 
@@ -393,6 +395,45 @@ impl RuleManager {
         }
 
         Ok(report)
+    }
+}
+
+/// Try parsing content as `custom_rule_v1` and convert to `Rule`s for the registry.
+///
+/// Returns `Err` when the content isn't valid `custom_rule_v1` (no `kind`
+/// discriminator, parse failure, etc.), allowing callers to fall through to
+/// legacy parsers.
+fn try_custom_rule_v1_as_registry(content: &str) -> Result<Vec<Rule>> {
+    let custom_rules = super::formats::custom_rule_yaml::parse(content)?;
+    if custom_rules.is_empty() {
+        anyhow::bail!("no custom_rule_v1 documents found");
+    }
+    Ok(custom_rules.into_iter().map(custom_rule_to_registry).collect())
+}
+
+/// Convert a `CustomRule` (engine type) to a `Rule` (registry type).
+fn custom_rule_to_registry(cr: super::engine::CustomRule) -> Rule {
+    use super::engine::RuleAction;
+    let action = match cr.action {
+        RuleAction::Block => "block",
+        RuleAction::Allow => "allow",
+        RuleAction::Log => "log",
+        RuleAction::Challenge => "challenge",
+    };
+    Rule {
+        id: cr.id,
+        name: cr.name,
+        description: cr.reference,
+        category: cr.category.unwrap_or_else(|| "custom".to_string()),
+        source: "file".to_string(),
+        enabled: cr.enabled,
+        action: action.to_string(),
+        severity: cr.severity,
+        pattern: cr.pattern.map(|r| r.to_string()),
+        tags: cr.tags,
+        metadata: cr.metadata,
+        risk_delta: cr.risk_delta,
+        risk_action: cr.risk_action,
     }
 }
 

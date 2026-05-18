@@ -49,6 +49,10 @@ impl std::fmt::Display for RuleFormat {
 }
 
 /// Parse rule content from a string given a known format.
+///
+/// **Note:** `Yaml` and `Json` variants use the legacy Registry parsers.
+/// Those parsers log a deprecation warning internally.
+/// Prefer `custom_rule_yaml::parse` for new code.
 pub fn parse_rules(content: &str, format: RuleFormat) -> Result<Vec<Rule>> {
     match format {
         RuleFormat::Yaml => yaml::parse(content),
