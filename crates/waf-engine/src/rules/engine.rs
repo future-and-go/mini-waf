@@ -328,7 +328,7 @@ impl RuleEntry {
 
     fn from_rule_with_source(rule: CustomRule, source: RuleSource) -> Self {
         let compiled = match compile_rule(&rule) {
-            Ok(c) => Some(c),
+            Ok(c) => c,
             Err(e) => {
                 warn!(rule_id = %rule.id, error = %e, "Failed to compile rule; skipping");
                 None
@@ -447,6 +447,12 @@ impl CustomRulesEngine {
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /// Evaluate a list of rules, accumulating risk deltas into the verdict.
+    ///
+    /// Eval order (updated for pattern support):
+    /// 1. Rhai script (legacy escape hatch)
+    /// 2. Compiled match_tree (preferred)
+    /// 3. Legacy flat conditions
+    /// 4. Pattern + field (fallback when no conditions/match_tree)
     fn eval_list_with_verdict(&self, ctx: &RequestCtx, rules: &[RuleEntry], verdict: &mut RuleVerdict) {
         for entry in rules {
             let rule = &entry.raw;
@@ -454,14 +460,18 @@ impl CustomRulesEngine {
                 continue;
             }
 
-            // Eval order:
-            // 1. Rhai script overrides everything (legacy escape hatch).
-            // 2. Compiled tree path (preferred) — built once at insert time.
-            // 3. Legacy flat eval — only when compile failed and no script set.
             let matched = rule.script.as_ref().map_or_else(
                 || {
                     entry.compiled.as_ref().map_or_else(
-                        || self.eval_conditions(ctx, &rule.conditions, &rule.condition_op),
+                        || {
+                            if !rule.conditions.is_empty() {
+                                self.eval_conditions(ctx, &rule.conditions, &rule.condition_op)
+                            } else if let Some(ref pattern) = rule.pattern {
+                                pattern_matches_request(pattern, &rule.pattern_field, ctx)
+                            } else {
+                                false
+                            }
+                        },
                         |compiled| eval_compiled_node(ctx, &compiled.root),
                     )
                 },
@@ -733,7 +743,14 @@ pub enum Matcher {
 /// Selects the compile path based on rule shape:
 /// 1. `match_tree` present → recursively compile the nested tree (preferred).
 /// 2. Otherwise → wrap legacy flat `conditions` as `And`/`Or` per `condition_op`.
-pub fn compile_rule(rule: &CustomRule) -> anyhow::Result<CompiledRule> {
+pub fn compile_rule(rule: &CustomRule) -> anyhow::Result<Option<CompiledRule>> {
+    // Pattern-only rules are evaluated via `pattern_matches_request` at
+    // runtime — they don't need (and must not have) a compiled tree,
+    // otherwise the vacuous `And(vec![])` would match everything.
+    if rule.match_tree.is_none() && rule.conditions.is_empty() {
+        return Ok(None);
+    }
+
     let root = if let Some(tree) = rule.match_tree.as_ref() {
         validate_tree(tree)?;
         compile_tree(tree)?
@@ -749,10 +766,10 @@ pub fn compile_rule(rule: &CustomRule) -> anyhow::Result<CompiledRule> {
         }
     };
 
-    Ok(CompiledRule {
+    Ok(Some(CompiledRule {
         meta: rule.clone(),
         root,
-    })
+    }))
 }
 
 /// Recursively compile a `ConditionNode` tree into a `CompiledNode` tree.
@@ -778,7 +795,10 @@ fn compile_condition(cond: &Condition) -> anyhow::Result<CompiledCondition> {
         (Operator::StartsWith, V::Str(s)) => Matcher::StartsWith(s.clone()),
         (Operator::EndsWith, V::Str(s)) => Matcher::EndsWith(s.clone()),
         (Operator::Regex, V::Str(s)) => {
-            let re = Regex::new(s).with_context(|| format!("invalid regex: {s}"))?;
+            let re = regex::RegexBuilder::new(s)
+                .size_limit(1 << 20)
+                .build()
+                .with_context(|| format!("invalid regex: {s}"))?;
             Matcher::Regex(re)
         }
         (Operator::Wildcard, V::Str(s)) => {
@@ -841,6 +861,75 @@ impl Matcher {
             Self::Lt(n) => fstr.parse::<i64>().is_ok_and(|v| v < *n),
             Self::Gte(n) => fstr.parse::<i64>().is_ok_and(|v| v >= *n),
             Self::Lte(n) => fstr.parse::<i64>().is_ok_and(|v| v <= *n),
+        }
+    }
+}
+
+// ── Pattern evaluation (Phase 2: YAML format consolidation) ─────────────────
+
+/// Headers that carry routing/connection metadata, not attacker-controlled
+/// payload. Must be skipped when `pattern_field` is `"all"` to avoid false
+/// positives (e.g. SSRF rules tripping on `Host: localhost`).
+fn is_routing_header(name: &str) -> bool {
+    matches!(
+        name,
+        "host"
+            | ":authority"
+            | ":method"
+            | ":path"
+            | ":scheme"
+            | "accept"
+            | "accept-encoding"
+            | "accept-language"
+            | "connection"
+            | "content-length"
+            | "x-forwarded-host"
+            | "x-real-ip"
+    )
+}
+
+/// Test a value against a regex, trying URL-decoded variants to prevent
+/// encoding bypass attacks (e.g. `%7B%7B7%2A7%7D%7D` evading SSTI rules).
+fn test_with_decode(pattern: &Regex, raw: &str) -> bool {
+    use crate::checks::{url_decode, url_decode_recursive};
+
+    if pattern.is_match(raw) {
+        return true;
+    }
+    let decoded = url_decode(raw);
+    if decoded != raw && pattern.is_match(&decoded) {
+        return true;
+    }
+    let recursive = url_decode_recursive(raw);
+    recursive != decoded && pattern.is_match(&recursive)
+}
+
+/// Check if a compiled regex pattern matches the specified request field(s).
+///
+/// When field is `"all"`, checks path → query → headers (minus routing) → body
+/// with URL-decode bypass protection (same logic as `OWASPCheck`).
+fn pattern_matches_request(pattern: &Regex, field: &str, ctx: &RequestCtx) -> bool {
+    match field {
+        "path" => test_with_decode(pattern, &ctx.path),
+        "query" => test_with_decode(pattern, &ctx.query),
+        "body" => test_with_decode(pattern, &String::from_utf8_lossy(&ctx.body_preview)),
+        "method" => pattern.is_match(&ctx.method),
+        "cookies" => ctx.cookies.iter().any(|(_, v)| test_with_decode(pattern, v)),
+        "headers" => ctx
+            .headers
+            .iter()
+            .filter(|(k, _)| !is_routing_header(k))
+            .any(|(_, v)| test_with_decode(pattern, v)),
+        // "all" or unknown field — check everything, smallest first
+        _ => {
+            test_with_decode(pattern, &ctx.path)
+                || test_with_decode(pattern, &ctx.query)
+                || ctx
+                    .headers
+                    .iter()
+                    .filter(|(k, _)| !is_routing_header(k))
+                    .any(|(_, v)| test_with_decode(pattern, v))
+                || test_with_decode(pattern, &String::from_utf8_lossy(&ctx.body_preview))
         }
     }
 }
@@ -1080,7 +1169,7 @@ mod tests {
             ],
         );
 
-        let compiled = compile_rule(&rule).expect("compile ok");
+        let compiled = compile_rule(&rule).expect("compile ok").expect("has tree");
         match compiled.root {
             CompiledNode::And(ref leaves) => {
                 assert_eq!(leaves.len(), 2);
@@ -1101,7 +1190,7 @@ mod tests {
             }],
         );
 
-        let compiled = compile_rule(&rule).expect("compile ok");
+        let compiled = compile_rule(&rule).expect("compile ok").expect("has tree");
         assert!(matches!(compiled.root, CompiledNode::Or(ref l) if l.len() == 1));
     }
 
@@ -1155,7 +1244,7 @@ mod tests {
                 value: ConditionValue::List(vec!["GET".into(), "POST".into(), "GET".into()]),
             }],
         );
-        let compiled = compile_rule(&rule).expect("compile ok");
+        let compiled = compile_rule(&rule).expect("compile ok").expect("has tree");
         match &compiled.root {
             CompiledNode::And(leaves) => match leaves.first() {
                 Some(CompiledNode::Leaf(c)) => match &c.matcher {
@@ -1221,7 +1310,7 @@ mod tests {
                 value: ConditionValue::Str("/api/*/admin".into()),
             }],
         );
-        let compiled = compile_rule(&rule).expect("compile ok");
+        let compiled = compile_rule(&rule).expect("compile ok").expect("has tree");
         let CompiledNode::And(leaves) = &compiled.root else {
             panic!("expected And");
         };
@@ -1548,7 +1637,7 @@ mod tests {
                 value: ConditionValue::Str("10.0.0.0/8".into()),
             }],
         );
-        let compiled = compile_rule(&rule).expect("compile ok");
+        let compiled = compile_rule(&rule).expect("compile ok").expect("has tree");
         assert!(matches!(compiled.root, CompiledNode::Or(ref l) if l.len() == 1));
     }
 

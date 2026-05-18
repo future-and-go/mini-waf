@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Pattern Evaluation Engine"
-status: pending
+status: done
 priority: P1
 effort: "6h"
 dependencies: [1]
@@ -185,12 +185,12 @@ pub fn compile_rule(rule: &CustomRule) -> anyhow::Result<CompiledRule> {
 
 ## Success Criteria
 
-- [ ] Rules with `pattern: "..."` and `pattern_field: "body"` match body content
-- [ ] Rules with `pattern_field: "all"` check path, query, headers (excluding routing), body
-- [ ] URL-decode bypass protection works (encoded payloads still match)
-- [ ] Rules with operator+value shorthand auto-convert to conditions
-- [ ] Existing custom rules (conditions/match_tree) unaffected
-- [ ] `cargo check` passes
+- [x] Rules with `pattern: "..."` and `pattern_field: "body"` match body content
+- [x] Rules with `pattern_field: "all"` check path, query, headers (excluding routing), body
+- [x] URL-decode bypass protection works (encoded payloads still match)
+- [x] Rules with operator+value shorthand auto-convert to conditions
+- [x] Existing custom rules (conditions/match_tree) unaffected
+- [x] `cargo check` passes
 
 ## Risk Assessment
 

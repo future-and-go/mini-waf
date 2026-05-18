@@ -45,7 +45,7 @@ This creates: silent data loss (fields ignored), duplicate compilation logic, th
 | Phase | Name | Status | Priority | Effort | Depends |
 |-------|------|--------|----------|--------|---------|
 | 1 | [Extend CustomRule Struct](./phase-01-extend-customrule-struct.md) | Done | P1 | 4h | — |
-| 2 | [Pattern Evaluation Engine](./phase-02-pattern-evaluation-engine.md) | Pending | P1 | 6h | Phase 1 |
+| 2 | [Pattern Evaluation Engine](./phase-02-pattern-evaluation-engine.md) | Done | P1 | 6h | Phase 1 |
 | 3 | [Migration Script](./phase-03-migration-script.md) | Pending | P1 | 4h | Phase 1 |
 | 4 | [OWASPCheck Unification](./phase-04-owaspcheck-unification.md) | Pending | P1 | 8h | Phases 2, 3 |
 | 5 | [Cleanup and Deprecation](./phase-05-cleanup-and-deprecation.md) | Pending | P2 | 3h | Phase 4 |

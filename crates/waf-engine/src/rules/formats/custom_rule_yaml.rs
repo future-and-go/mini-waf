@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
 
-use super::super::engine::{Condition, ConditionNode, ConditionOp, CustomRule, RuleAction};
+use super::super::engine::{
+    Condition, ConditionField, ConditionNode, ConditionOp, ConditionValue, CustomRule, Operator, RuleAction,
+};
 
 /// Wire DTO — mirrors `CustomRule` plus the `kind` discriminator.
 ///
@@ -54,13 +56,11 @@ struct YamlCustomRule {
     /// Which request field to check: "all", "path", "query", "body", "method", "headers", "cookies".
     #[serde(default = "default_field")]
     pattern_field: String,
-    /// Operator shorthand for Registry format — consumed by Phase 2 pattern eval.
+    /// Operator shorthand for Registry format — auto-converted to Condition.
     #[serde(default)]
-    #[allow(dead_code)]
     operator: Option<String>,
-    /// Value for operator shorthand — consumed by Phase 2 pattern eval.
+    /// Value for operator shorthand — auto-converted to ConditionValue.
     #[serde(default)]
-    #[allow(dead_code)]
     value: Option<serde_yaml::Value>,
     /// Rule category: sqli, xss, rce, ssti, ssrf, etc.
     #[serde(default)]
@@ -154,6 +154,19 @@ fn to_custom_rule(dto: YamlCustomRule) -> Result<CustomRule> {
         ),
         None => None,
     };
+
+    // Auto-convert Registry-style operator+value shorthand to a condition
+    // when no conditions, match_tree, or pattern are present.
+    let mut conditions = dto.conditions;
+    if conditions.is_empty() && dto.match_tree.is_none() && pattern.is_none() {
+        if let (Some(op_str), Some(val)) = (&dto.operator, &dto.value) {
+            let field = parse_pattern_field_to_condition(&dto.pattern_field);
+            let operator = parse_operator_str(op_str)?;
+            let value = yaml_value_to_condition_value(val)?;
+            conditions.push(Condition { field, operator, value });
+        }
+    }
+
     Ok(CustomRule {
         id: dto.id,
         host_code: dto.host_code,
@@ -161,7 +174,7 @@ fn to_custom_rule(dto: YamlCustomRule) -> Result<CustomRule> {
         priority: dto.priority,
         enabled: dto.enabled,
         condition_op: dto.condition_op,
-        conditions: dto.conditions,
+        conditions,
         action: dto.action,
         action_status: dto.action_status,
         action_msg: dto.action_msg,
@@ -178,6 +191,70 @@ fn to_custom_rule(dto: YamlCustomRule) -> Result<CustomRule> {
         metadata: dto.metadata,
         reference: dto.reference,
     })
+}
+
+/// Map a `pattern_field` string to a `ConditionField` for auto-conversion.
+/// Falls back to `Body` for unknown fields (most Registry rules target body).
+fn parse_pattern_field_to_condition(field: &str) -> ConditionField {
+    match field {
+        "path" => ConditionField::Path,
+        "query" => ConditionField::Query,
+        "method" => ConditionField::Method,
+        "body" => ConditionField::Body,
+        "cookies" | "cookie" => ConditionField::Cookie(None),
+        "host" => ConditionField::Host,
+        "user_agent" => ConditionField::UserAgent,
+        "content_type" => ConditionField::ContentType,
+        "content_length" => ConditionField::ContentLength,
+        "ip" => ConditionField::Ip,
+        // "all" and unknown → Body (best single-field approximation)
+        _ => ConditionField::Body,
+    }
+}
+
+/// Parse an operator string from OWASP/Registry format to `Operator`.
+fn parse_operator_str(s: &str) -> Result<Operator> {
+    Ok(match s {
+        "eq" => Operator::Eq,
+        "ne" => Operator::Ne,
+        "contains" => Operator::Contains,
+        "not_contains" => Operator::NotContains,
+        "starts_with" => Operator::StartsWith,
+        "ends_with" => Operator::EndsWith,
+        "regex" => Operator::Regex,
+        "wildcard" => Operator::Wildcard,
+        "in" | "in_list" => Operator::InList,
+        "not_in" | "not_in_list" => Operator::NotInList,
+        "cidr_match" => Operator::CidrMatch,
+        "gt" => Operator::Gt,
+        "lt" => Operator::Lt,
+        "gte" => Operator::Gte,
+        "lte" => Operator::Lte,
+        other => bail!("unknown operator: {other}"),
+    })
+}
+
+/// Convert a `serde_yaml::Value` to `ConditionValue`.
+fn yaml_value_to_condition_value(val: &serde_yaml::Value) -> Result<ConditionValue> {
+    if let Some(s) = val.as_str() {
+        return Ok(ConditionValue::Str(s.to_owned()));
+    }
+    if let Some(n) = val.as_i64() {
+        return Ok(ConditionValue::Number(n));
+    }
+    if let Some(seq) = val.as_sequence() {
+        let list: Vec<String> = seq
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .map(String::from)
+                    .or_else(|| v.as_i64().map(|n| n.to_string()))
+                    .ok_or_else(|| anyhow::anyhow!("unsupported list element type"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        return Ok(ConditionValue::List(list));
+    }
+    bail!("unsupported condition value type")
 }
 
 #[cfg(test)]
