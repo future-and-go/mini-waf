@@ -1,3 +1,4 @@
+#![allow(clippy::print_stderr)]
 //! Migrate Registry-format YAML rules to `custom_rule_v1` multi-document YAML.
 //!
 //! Reads each `.yaml` file under the specified directories, parses the
@@ -112,14 +113,15 @@ struct OutputRule {
     metadata: HashMap<String, String>,
 }
 
-fn is_wildcard(s: &str) -> bool {
-    s == "*"
+const fn is_wildcard(s: &str) -> bool {
+    matches!(s.as_bytes(), b"*")
 }
-fn is_zero(n: &i32) -> bool {
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_zero(n: &i32) -> bool {
     *n == 0
 }
-fn is_default_field(s: &str) -> bool {
-    s == "all"
+const fn is_default_field(s: &str) -> bool {
+    matches!(s.as_bytes(), b"all")
 }
 
 // ── Conversion ────────────────────────────────────────────────────────
@@ -138,19 +140,19 @@ fn convert_rule(r: RegistryRule, wrapper_source: &str) -> OutputRule {
             .or_else(|| r.value.as_ref().and_then(|v| v.as_str().map(String::from)));
         // Fix Rust-incompatible regex: bare \0 (PCRE null) → \x00.
         // Only replace \0 NOT already followed by a hex digit (avoid clobbering \0a etc).
+        #[allow(clippy::indexing_slicing)]
         let pat = pat.map(|p| {
             let mut result = String::with_capacity(p.len());
             let chars: Vec<char> = p.chars().collect();
             let mut i = 0;
             while i < chars.len() {
-                if chars[i] == '\\'
-                    && chars.get(i + 1) == Some(&'0')
-                    && chars.get(i + 2).map_or(true, |c| !c.is_ascii_digit())
+                let ch = chars[i];
+                if ch == '\\' && chars.get(i + 1) == Some(&'0') && chars.get(i + 2).is_none_or(|c| !c.is_ascii_digit())
                 {
                     result.push_str("\\x00");
                     i += 2;
                 } else {
-                    result.push(chars[i]);
+                    result.push(ch);
                     i += 1;
                 }
             }
@@ -175,10 +177,10 @@ fn convert_rule(r: RegistryRule, wrapper_source: &str) -> OutputRule {
             .entry("source".to_string())
             .or_insert_with(|| wrapper_source.to_string());
     }
-    if let Some(desc) = r.description {
-        if !desc.is_empty() {
-            metadata.entry("description".to_string()).or_insert(desc);
-        }
+    if let Some(desc) = r.description
+        && !desc.is_empty()
+    {
+        metadata.entry("description".to_string()).or_insert(desc);
     }
 
     OutputRule {
@@ -349,14 +351,12 @@ fn validate_migrated_files(rules_root: &Path) -> ValidationResult {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let rules_root = match args.get(1) {
-        Some(p) => PathBuf::from(p),
-        None => {
-            eprintln!("Usage: migrate-yaml-rules <rules-directory>");
-            eprintln!("Example: cargo run --bin migrate-yaml-rules -- rules/");
-            process::exit(1);
-        }
+    let Some(p) = args.get(1) else {
+        eprintln!("Usage: migrate-yaml-rules <rules-directory>");
+        eprintln!("Example: cargo run --bin migrate-yaml-rules -- rules/");
+        process::exit(1);
     };
+    let rules_root = PathBuf::from(p);
 
     if !rules_root.is_dir() {
         eprintln!("ERROR: not a directory: {}", rules_root.display());

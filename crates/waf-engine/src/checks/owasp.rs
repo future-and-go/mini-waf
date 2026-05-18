@@ -25,7 +25,7 @@ use super::Check;
 
 // ── Minimal embedded fallback rules (custom_rule_v1 format) ─────────────────
 
-const EMBEDDED_RULES_YAML: &str = r#"
+const EMBEDDED_RULES_YAML: &str = r"
 kind: custom_rule_v1
 id: BUILTIN-911100
 name: Method is not allowed by policy
@@ -63,7 +63,7 @@ pattern_field: all
 category: java-injection
 severity: critical
 paranoia: 1
-"#;
+";
 
 // ── OWASPCheck ──────────────────────────────────────────────────────────────
 
@@ -174,17 +174,17 @@ impl OWASPCheck {
         let engine = CustomRulesEngine::new();
 
         // Try custom_rule_v1 first
-        if let Ok(rules) = custom_rule_yaml::parse(yaml) {
-            if !rules.is_empty() {
-                let count = rules.len();
-                for rule in rules {
-                    engine.add_file_rule(rule);
-                }
-                return Self {
-                    engine,
-                    rule_count: count,
-                };
+        if let Ok(rules) = custom_rule_yaml::parse(yaml)
+            && !rules.is_empty()
+        {
+            let count = rules.len();
+            for rule in rules {
+                engine.add_file_rule(rule);
             }
+            return Self {
+                engine,
+                rule_count: count,
+            };
         }
 
         // Fall back to legacy RuleSet format
@@ -217,7 +217,7 @@ impl OWASPCheck {
         )
     }
 
-    pub fn rule_count(&self) -> usize {
+    pub const fn rule_count(&self) -> usize {
         self.rule_count
     }
 }
@@ -287,17 +287,17 @@ enum LegacyYamlValue {
     Int(i64),
 }
 
-/// Parse legacy RuleSet YAML, converting each rule to a `CustomRule`.
+/// Parse legacy `RuleSet` YAML, converting each rule to a `CustomRule`.
 fn legacy_parse_ruleset(yaml: &str) -> Option<Vec<CustomRule>> {
     let ruleset: LegacyRuleSet = serde_yaml::from_str(yaml).ok()?;
-    let rules: Vec<CustomRule> = ruleset.rules.into_iter().filter_map(legacy_convert_rule).collect();
+    let rules: Vec<CustomRule> = ruleset.rules.iter().filter_map(legacy_convert_rule).collect();
     if rules.is_empty() { None } else { Some(rules) }
 }
 
-fn legacy_convert_rule(r: LegacyYamlRule) -> Option<CustomRule> {
+fn legacy_convert_rule(r: &LegacyYamlRule) -> Option<CustomRule> {
     // Virtual fields that need Rhai scripts (no ConditionField equivalent)
     if let Some(script) = legacy_virtual_field_script(&r.field, &r.operator, &r.value) {
-        return Some(legacy_rule_shell(&r, Some(script), Vec::new(), None, None));
+        return Some(legacy_rule_shell(r, Some(script), Vec::new(), None, None));
     }
 
     let (conditions, specialised_op, pattern) = match r.operator.as_str() {
@@ -385,7 +385,7 @@ fn legacy_convert_rule(r: LegacyYamlRule) -> Option<CustomRule> {
         }
     };
 
-    Some(legacy_rule_shell(&r, None, conditions, pattern, specialised_op))
+    Some(legacy_rule_shell(r, None, conditions, pattern, specialised_op))
 }
 
 /// Build a `CustomRule` from a legacy YAML rule, filling in shared defaults.
@@ -453,7 +453,6 @@ fn legacy_map_field(field: &str) -> ConditionField {
         "path" => ConditionField::Path,
         "query" => ConditionField::Query,
         "method" => ConditionField::Method,
-        "body" => ConditionField::Body,
         "content_length" => ConditionField::ContentLength,
         "content_type" | "header_content_type" => ConditionField::ContentType,
         "user_agent" | "header_user_agent" => ConditionField::UserAgent,
