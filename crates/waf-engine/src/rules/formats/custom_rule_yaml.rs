@@ -486,4 +486,82 @@ value: 'SQL syntax error'
         assert_eq!(rules[0].conditions.len(), 1);
         assert!(matches!(rules[0].conditions[0].field, ConditionField::ResponseBody));
     }
+
+    #[test]
+    fn parse_geoip_country_blocklist_yaml() {
+        let yaml = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/geoip/country-blocklist.yaml"),
+        )
+        .unwrap();
+        let rules = parse(&yaml).unwrap();
+        assert_eq!(rules.len(), 2, "expected 2 GeoIP rules");
+
+        assert_eq!(rules[0].id, "GEO-COUNTRY-001");
+        assert_eq!(rules[0].conditions.len(), 1);
+        assert!(matches!(rules[0].conditions[0].field, ConditionField::GeoIso));
+        assert!(matches!(rules[0].conditions[0].operator, Operator::InList));
+        assert!(matches!(rules[0].action, RuleAction::Block));
+
+        assert_eq!(rules[1].id, "GEO-COUNTRY-002");
+        assert!(matches!(rules[1].conditions[0].field, ConditionField::GeoIsp));
+        assert!(matches!(rules[1].conditions[0].operator, Operator::Contains));
+        assert!(matches!(rules[1].action, RuleAction::Log));
+    }
+
+    #[test]
+    fn parse_dos_protection_yaml() {
+        let yaml = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/modsecurity/dos-protection.yaml"),
+        )
+        .unwrap();
+        let rules = parse(&yaml).unwrap();
+        assert_eq!(rules.len(), 12, "expected 12 DoS rules");
+
+        // DOS-001: content_length gt (conditions)
+        assert_eq!(rules[0].id, "MODSEC-DOS-001");
+        assert_eq!(rules[0].conditions.len(), 1);
+        assert!(matches!(rules[0].conditions[0].field, ConditionField::ContentLength));
+        assert!(matches!(rules[0].conditions[0].operator, Operator::Gt));
+
+        // DOS-002: script-based (path.len() > 1024)
+        assert_eq!(rules[1].id, "MODSEC-DOS-002");
+        assert!(rules[1].script.is_some());
+
+        // DOS-003: script-based (query arg count)
+        assert_eq!(rules[2].id, "MODSEC-DOS-003");
+        assert!(rules[2].script.is_some());
+
+        // DOS-004: headers regex pattern
+        assert_eq!(rules[3].id, "MODSEC-DOS-004");
+        assert!(rules[3].pattern.is_some());
+        assert_eq!(rules[3].pattern_field, "headers");
+
+        // DOS-005: method regex pattern
+        assert_eq!(rules[4].id, "MODSEC-DOS-005");
+        assert!(rules[4].pattern.is_some());
+        assert_eq!(rules[4].pattern_field, "method");
+
+        // DOS-008: content_length gt (conditions)
+        assert_eq!(rules[7].id, "MODSEC-DOS-008");
+        assert!(matches!(rules[7].conditions[0].operator, Operator::Gt));
+
+        // DOS-009: body regex pattern
+        assert_eq!(rules[8].id, "MODSEC-DOS-009");
+        assert!(rules[8].pattern.is_some());
+        assert_eq!(rules[8].pattern_field, "body");
+
+        // DOS-010: all field regex pattern (default)
+        assert_eq!(rules[9].id, "MODSEC-DOS-010");
+        assert!(rules[9].pattern.is_some());
+        assert_eq!(rules[9].pattern_field, "all");
+
+        // DOS-011: cookie length via script
+        assert_eq!(rules[10].id, "MODSEC-DOS-011");
+        assert!(rules[10].script.is_some());
+
+        // DOS-012: content_type regex (conditions)
+        assert_eq!(rules[11].id, "MODSEC-DOS-012");
+        assert!(matches!(rules[11].conditions[0].field, ConditionField::ContentType));
+        assert!(matches!(rules[11].conditions[0].operator, Operator::Regex));
+    }
 }

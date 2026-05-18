@@ -632,6 +632,7 @@ impl CustomRulesEngine {
         );
         #[allow(clippy::cast_possible_wrap)]
         scope.push("content_length", ctx.content_length as i64);
+        scope.push("cookie", ctx.headers.get("cookie").cloned().unwrap_or_default());
 
         self.rhai
             .eval_expression_with_scope::<bool>(&mut scope, script)
