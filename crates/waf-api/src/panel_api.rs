@@ -87,6 +87,10 @@ pub async fn put_panel_config(
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("write panel config: {e}")))?;
 
+    // Refresh the in-memory snapshot so read paths (e.g. risk-distribution
+    // thresholds) see the new values immediately without re-reading disk.
+    state.panel_config.store(std::sync::Arc::new(cfg.clone()));
+
     let revision = panel_revision_secs(path).await?;
     Ok(Json(panel_json_response(
         &cfg,

@@ -4,6 +4,7 @@
 //! `RelayDetector` facade stub returning a minimal `ClientIdentity`.
 //! Phases 02-04 register concrete `SignalProvider`s; phase-05 adds reload.
 
+pub mod audit_map;
 pub mod config;
 pub mod intel;
 pub mod providers;

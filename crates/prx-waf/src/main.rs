@@ -1352,6 +1352,12 @@ fn run_server(config: &AppConfig, config_file_path: &str, vlogs_layer_slot: Laye
 
     proxy.response_cache = Some(Arc::clone(&api_state.cache));
 
+    // Issue #60 — relay-signal audit emission piggybacks on the same shared
+    // emitter as the engine + tx_velocity path.
+    if let Some(emitter) = proxy.engine.audit_emitter() {
+        proxy.with_audit_emitter(emitter);
+    }
+
     let cache_for_timeseries = Arc::clone(&api_state.cache);
     rt.spawn(async move {
         use tokio::time::MissedTickBehavior;
@@ -1507,6 +1513,31 @@ async fn init_async(
     engine.set_rules_dir(std::path::PathBuf::from(&config.rules.dir));
     engine.reload_rules().await?;
     engine.start_file_watcher();
+
+    // Issue #60 — shared audit emitter. Defaults to disabled per validation
+    // V1 (no hardcoded `enabled = true`). Operator opts in via env var
+    // `WAF_AUDIT_EMITTER_ENABLED=1` so prod ships safe while staging /
+    // CI / Attack Battle environments can flip the switch without TOML
+    // schema churn.
+    {
+        let cfg = waf_engine::audit_emitter::AuditEmitterConfig {
+            enabled: std::env::var("WAF_AUDIT_EMITTER_ENABLED")
+                .is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "TRUE")),
+            ..waf_engine::audit_emitter::AuditEmitterConfig::default()
+        };
+        let sink: Arc<dyn waf_engine::audit_emitter::BroadcastSink> =
+            Arc::new(waf_engine::audit_emitter::DbBroadcastSink::new(Arc::clone(&db)));
+        let emitter = Arc::new(waf_engine::audit_emitter::AuditEmitter::new(
+            Arc::clone(&db),
+            sink,
+            cfg.clone(),
+        ));
+        engine.set_audit_emitter(Arc::clone(&emitter));
+        info!(
+            audit_emitter_enabled = cfg.enabled,
+            "issue #60: audit emitter wired (enable with WAF_AUDIT_EMITTER_ENABLED=1)"
+        );
+    }
 
     // FR-004 rate-limit subsystem: load YAML and start hot-reload watcher.
     // Absent path leaves the subsystem inert (default empty config).
@@ -1695,8 +1726,30 @@ async fn init_async(
     // Login rate limiter: always enabled with a strict 10 req/s burst
     // to mitigate brute-force credential attacks on /api/auth/login
     api_state.login_rate_limiter = Some(waf_api::security::ApiRateLimiter::new(10));
-    api_state.panel_config_path = panel_config_path;
+    api_state.panel_config_path = panel_config_path.clone();
     api_state.main_config_file = Some(config_file_path.to_string());
+
+    // Load the panel config into the in-memory snapshot exactly once at
+    // bootstrap. Read-heavy handlers (e.g. risk-distribution) consult this
+    // snapshot instead of touching disk per request. PUT /api/panel-config
+    // refreshes the snapshot inline; out-of-band filesystem edits require
+    // an operator restart by design.
+    if let Some(ref path) = panel_config_path {
+        match tokio::fs::read_to_string(path).await {
+            Ok(raw) => match waf_common::panel_config::WafPanelConfig::from_toml_str(&raw) {
+                Ok(cfg) => {
+                    api_state.panel_config.store(Arc::new(cfg));
+                    info!(file = %path.display(), "panel config snapshot loaded");
+                }
+                Err(e) => {
+                    tracing::warn!(file = %path.display(), error = %e, "panel config parse failed; using defaults");
+                }
+            },
+            Err(e) => {
+                tracing::warn!(file = %path.display(), error = %e, "panel config read failed; using defaults");
+            }
+        }
+    }
 
     // Phase 03: expose the VictoriaLogs base URL to the API layer so the
     // logs proxy endpoints know where to forward.  Stays `None` when the

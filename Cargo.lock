@@ -6203,6 +6203,7 @@ name = "waf-api"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "argon2",
  "async-trait",
  "axum",
@@ -6340,6 +6341,7 @@ dependencies = [
  "testcontainers-modules",
  "thiserror 2.0.18",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "tracing-test",

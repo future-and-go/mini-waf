@@ -26,6 +26,22 @@ use crate::risk::store::RiskStore;
 use crate::risk::threshold::decide;
 use crate::risk::velocity::{TxEndpoint, VelocityLayer};
 
+/// UTF-8-safe slice up to `max_bytes` bytes — never splits a multi-byte
+/// character. Falls back to the previous char boundary if `max_bytes` lands
+/// mid-sequence. Used by the issue-#60 honeypot emit branch where audit
+/// detail must stay within DB column width but `path` may contain non-ASCII.
+#[must_use]
+fn truncate_path_safe(path: &str, max_bytes: usize) -> &str {
+    if path.len() <= max_bytes {
+        return path;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !path.is_char_boundary(end) {
+        end -= 1;
+    }
+    &path[..end]
+}
+
 /// Result of scoring a request.
 #[derive(Clone, Debug)]
 pub struct ScorerResult {
@@ -55,6 +71,9 @@ pub struct Scorer<S: RiskStore> {
     anomaly: AnomalyLayer,
     /// L2 velocity detection layer (sliding window, sequence FSM).
     velocity: VelocityLayer,
+    /// Issue #60 — emits a `security_events` row per honeypot hit so the
+    /// admin panel can filter `?rule_id=HONEY-001`.
+    audit_emitter: Option<Arc<crate::audit_emitter::AuditEmitter>>,
 }
 
 impl<S: RiskStore> Scorer<S> {
@@ -69,6 +88,7 @@ impl<S: RiskStore> Scorer<S> {
             challenge_verifier: None,
             anomaly: AnomalyLayer::new(),
             velocity: VelocityLayer::with_defaults(),
+            audit_emitter: None,
         }
     }
 
@@ -83,6 +103,7 @@ impl<S: RiskStore> Scorer<S> {
             challenge_verifier: None,
             anomaly: AnomalyLayer::new(),
             velocity: VelocityLayer::with_defaults(),
+            audit_emitter: None,
         }
     }
 
@@ -97,6 +118,7 @@ impl<S: RiskStore> Scorer<S> {
             challenge_verifier: None,
             anomaly: AnomalyLayer::new(),
             velocity: VelocityLayer::new(threshold),
+            audit_emitter: None,
         }
     }
 
@@ -108,6 +130,12 @@ impl<S: RiskStore> Scorer<S> {
     /// Set the canary layer.
     pub fn set_canary(&mut self, canary: Arc<CanaryLayer>) {
         self.canary = Some(canary);
+    }
+
+    /// Set the issue-60 audit emitter. Wired post-construction so existing
+    /// callers stay back-compatible.
+    pub fn set_audit_emitter(&mut self, emitter: Arc<crate::audit_emitter::AuditEmitter>) {
+        self.audit_emitter = Some(emitter);
     }
 
     /// Set the challenge credit verifier.
@@ -188,6 +216,41 @@ impl<S: RiskStore> Scorer<S> {
                 client_ip = %ctx.client_ip,
                 "canary honeypot: blocking scanner"
             );
+
+            // Issue #60 — surface the honeypot hit as a row the panel can
+            // query via `?rule_id=HONEY-001`. Emission is rate-limited per
+            // (client_ip, rule_id) by the audit emitter itself.
+            //
+            // DORMANT IN CURRENT PRODUCTION: FR-025 Scorer is not yet wired
+            // into the gateway request pipeline, AND `engine::set_audit_emitter`
+            // only propagates the emitter into `tx_velocity_store`, not into
+            // any Scorer instance. This branch therefore never fires from
+            // the production binary today; it activates the day a follow-up
+            // PR wires Scorer + calls `Scorer::set_audit_emitter` here.
+            //
+            // The regression test `score_honeypot_emits_when_audit_wired`
+            // below exercises this branch directly so a refactor cannot
+            // silently break the eventual integration.
+            if let Some(emitter) = self.audit_emitter.as_ref()
+                && emitter.is_enabled()
+            {
+                let truncated_path = truncate_path_safe(ctx.path.as_str(), 256);
+                let detail = serde_json::json!({ "path": truncated_path }).to_string();
+                let client_ip_str = ctx.client_ip.to_string();
+                let audit_ctx = crate::audit_emitter::AuditCtx {
+                    host_code: ctx.host.as_str(),
+                    client_ip: client_ip_str.as_str(),
+                    method: ctx.method.as_str(),
+                    path: ctx.path.as_str(),
+                };
+                let _ = emitter.emit(
+                    &audit_ctx,
+                    crate::risk::canary::HONEYPOT_RULE_ID,
+                    crate::risk::canary::HONEYPOT_RULE_NAME,
+                    "block",
+                    Some(detail),
+                );
+            }
 
             return Ok(ScorerResult {
                 action: WafAction::Block {
@@ -501,5 +564,154 @@ mod tests {
     async fn header_name_from_config() {
         let scorer = make_scorer();
         assert_eq!(scorer.header_name(), "X-WAF-Risk-Score");
+    }
+
+    #[test]
+    fn truncate_path_safe_passes_through_when_short() {
+        assert_eq!(truncate_path_safe("/short", 256), "/short");
+    }
+
+    #[test]
+    fn truncate_path_safe_truncates_ascii_at_exact_boundary() {
+        let long = "/".repeat(300);
+        let out = truncate_path_safe(&long, 256);
+        assert_eq!(out.len(), 256);
+        assert_eq!(out, "/".repeat(256));
+    }
+
+    #[test]
+    fn truncate_path_safe_never_splits_multibyte_utf8() {
+        // "é" is U+00E9 = 2 bytes (0xC3 0xA9). Construct path where byte
+        // boundary 256 lands inside the 2-byte sequence — naive slicing
+        // would panic. The helper must back off to a char boundary.
+        let mut path = String::with_capacity(258);
+        for _ in 0..255 {
+            path.push('a');
+        }
+        path.push('é'); // byte 255 = 0xC3, byte 256 = 0xA9
+        path.push('z');
+        assert!(path.len() > 256);
+        let out = truncate_path_safe(&path, 256);
+        // Must end at a valid char boundary (i.e., byte 255, before 'é').
+        assert!(path.is_char_boundary(out.len()), "out.len() = {}", out.len());
+        assert!(out.len() <= 256);
+    }
+
+    #[test]
+    fn truncate_path_safe_handles_three_byte_utf8() {
+        // "中" = 3 bytes. Place it crossing the boundary.
+        let prefix = "a".repeat(254);
+        let path = format!("{prefix}中z");
+        let out = truncate_path_safe(&path, 256);
+        assert!(path.is_char_boundary(out.len()));
+    }
+
+    // ── Issue #60 regression: honeypot emit branch (currently dormant in prod) ──
+    //
+    // `engine::set_audit_emitter` does NOT propagate into `Scorer` today, so
+    // the canary-hit branch in `score()` never fires from the production
+    // binary. The test below exercises the branch directly via
+    // `Scorer::set_audit_emitter` so a future refactor cannot silently break
+    // the wiring that a follow-up PR will rely on.
+
+    use std::sync::atomic::{AtomicU64, Ordering as AOrdering};
+
+    use crate::audit_emitter::{AuditEmitter, AuditEmitterConfig, BroadcastSink, LiveEvent};
+    use crate::risk::canary::CanaryLayer;
+    use waf_storage::Database;
+
+    #[derive(Default)]
+    struct CountingSink {
+        count: AtomicU64,
+        last_rule_id: parking_lot::Mutex<Option<&'static str>>,
+    }
+
+    impl BroadcastSink for CountingSink {
+        fn try_broadcast(&self, evt: &LiveEvent) {
+            self.count.fetch_add(1, AOrdering::Relaxed);
+            *self.last_rule_id.lock() = Some(evt.rule_id);
+        }
+    }
+
+    fn stub_db_for_scorer() -> Arc<Database> {
+        Arc::new(
+            Database::connect_lazy("postgres://stub:stub@127.0.0.1:1/stub?sslmode=disable", 1)
+                .expect("connect_lazy is offline-safe by design"),
+        )
+    }
+
+    #[tokio::test]
+    async fn score_honeypot_emits_when_audit_wired() {
+        let canary_path = "/admin-secret-trap";
+
+        let store = Arc::new(crate::risk::store::MemoryRiskStore::new());
+        let mut risk_cfg = RiskConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        risk_cfg.canary.enabled = true;
+        risk_cfg.canary.paths = vec![canary_path.to_string()];
+        let cfg_swap = Arc::new(ArcSwap::from(Arc::new(risk_cfg)));
+
+        let mut scorer = Scorer::new(Arc::clone(&store), Arc::clone(&cfg_swap));
+        scorer.set_canary(Arc::new(CanaryLayer::with_paths(vec![canary_path.to_string()])));
+
+        let sink = Arc::new(CountingSink::default());
+        let sink_dyn: Arc<dyn BroadcastSink> = Arc::clone(&sink) as Arc<dyn BroadcastSink>;
+        let emitter = Arc::new(AuditEmitter::new(
+            stub_db_for_scorer(),
+            sink_dyn,
+            AuditEmitterConfig {
+                enabled: true,
+                ..AuditEmitterConfig::default()
+            },
+        ));
+        scorer.set_audit_emitter(Arc::clone(&emitter));
+
+        let mut ctx = make_ctx();
+        ctx.path = canary_path.to_string();
+
+        let result = scorer.score(&ctx, None, &[], None, 1_000).await.expect("score");
+        assert!(matches!(result.action, WafAction::Block { .. }));
+        assert_eq!(result.score, 100, "honeypot pins score at max");
+
+        assert_eq!(
+            sink.count.load(AOrdering::Relaxed),
+            1,
+            "audit emitter must broadcast exactly one LiveEvent on canary hit",
+        );
+        assert_eq!(
+            *sink.last_rule_id.lock(),
+            Some(crate::risk::canary::HONEYPOT_RULE_ID),
+            "broadcast rule_id must match HONEYPOT_RULE_ID constant",
+        );
+    }
+
+    #[tokio::test]
+    async fn score_honeypot_no_emit_when_audit_unwired() {
+        // Mirrors the current production reality: no Scorer::set_audit_emitter
+        // → no row, but the block decision must still flow normally.
+        let canary_path = "/admin-trap";
+
+        let store = Arc::new(crate::risk::store::MemoryRiskStore::new());
+        let mut risk_cfg = RiskConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        risk_cfg.canary.enabled = true;
+        risk_cfg.canary.paths = vec![canary_path.to_string()];
+        let cfg_swap = Arc::new(ArcSwap::from(Arc::new(risk_cfg)));
+
+        let mut scorer = Scorer::new(Arc::clone(&store), Arc::clone(&cfg_swap));
+        scorer.set_canary(Arc::new(CanaryLayer::with_paths(vec![canary_path.to_string()])));
+
+        let mut ctx = make_ctx();
+        ctx.path = canary_path.to_string();
+
+        let result = scorer.score(&ctx, None, &[], None, 2_000).await.expect("score");
+        assert!(matches!(result.action, WafAction::Block { .. }));
+        assert_eq!(result.score, 100);
+        // Implicit assertion: no panic / no audit access — the emit branch is
+        // gated behind `Some(emitter)` so absence is safe.
     }
 }
