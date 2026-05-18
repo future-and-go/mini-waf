@@ -351,26 +351,43 @@ prx-waf/
 - `geoip.yaml` — Geo-blocking template (example)
 - `custom.yaml` — Custom rule template (example)
 
-### Rule Schema
+### Rule Schema (custom_rule_v1)
 
+All 98 built-in rules (OWASP CRS, CVE patches, advanced, API, ModSecurity, bot detection) now use the unified `custom_rule_v1` multi-document YAML format.
+
+**Single-rule example:**
 ```yaml
-- id: "OWASP-CRS-941100"
-  name: "XSS Attack"
-  category: "xss"
-  source: "owasp-crs"
-  severity: "high"
-  paranoia: 2  # 1-4 (higher = more aggressive)
-  enabled: true
-  action: "block"  # block, log, challenge
-  field: "all"  # headers, body, uri, all
-  operator: "detect_xss"  # regex, detect_xss, detect_sqli, contains, rx, etc.
-  pattern: "javascript:"
-  tags:
-    - "crs"
-    - "xss"
-  cve: ["CVE-2023-12345"]
-  description: "Blocks inline JavaScript XSS vectors"
+kind: custom_rule_v1
+id: "OWASP-CRS-941100"
+name: "XSS Attack"
+category: "xss"
+severity: "high"          # critical, high, medium, low
+paranoia: 2               # 1-4 (higher = more aggressive)
+enabled: true
+action: "block"           # block, log, challenge
+pattern_field: "all"      # all, headers, body, uri, query, cookies, content_type, etc.
+operator: "detect_xss"    # detect_xss, detect_sqli, contains, regex, not_in, matches, etc.
+pattern: "javascript:"
+tags:
+  - "crs"
+  - "xss"
+cve: ["CVE-2023-12345"]
+description: "Blocks inline JavaScript XSS vectors"
 ```
+
+**Multi-document YAML (typical file structure):**
+```yaml
+---
+kind: custom_rule_v1
+id: "RULE-001"
+...
+---
+kind: custom_rule_v1
+id: "RULE-002"
+...
+```
+
+**Parser path:** All rules load via `custom_rule_yaml::parse()` (single unified parser). Legacy parsers (`legacy_parse_ruleset()` in `owasp.rs`) deprecated as of Phase 5; only available for backward-compatibility with remote rule sources (e.g., `import_from_url`).
 
 ---
 
