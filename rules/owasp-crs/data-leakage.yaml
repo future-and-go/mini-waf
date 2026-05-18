@@ -6,7 +6,7 @@ action: block
 pattern: (?:<(?:TITLE>Index of.*?<H|title>Index of.*?<h)1>Index of|>\[To Parent Directory\]</[Aa]><br>)
 pattern_field: response_body
 category: data-leakage
-severity: error
+severity: critical
 paranoia: 1
 tags:
 - owasp-crs
@@ -23,7 +23,7 @@ action: block
 pattern: ^#\!\s?/
 pattern_field: response_body
 category: data-leakage
-severity: error
+severity: critical
 paranoia: 1
 tags:
 - owasp-crs
@@ -41,7 +41,7 @@ pattern_field: response_body
 operator: pm_from_file
 value: asp-dotnet-errors.data
 category: data-leakage
-severity: error
+severity: critical
 paranoia: 1
 tags:
 - owasp-crs
@@ -57,7 +57,7 @@ enabled: true
 action: block
 pattern: ^5\d{2}$
 category: data-leakage
-severity: error
+severity: critical
 paranoia: 2
 tags:
 - owasp-crs

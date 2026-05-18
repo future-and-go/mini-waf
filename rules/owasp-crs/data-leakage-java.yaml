@@ -6,7 +6,7 @@ action: block
 pattern: (?i)\b(?:java[\.a-z]+E(?:xception|rror)|(?:org|com)\.[\.a-z]+Exception|Exception in thread \"[^\"]*\"|at[\s\x0b]+(?:ja(?:vax?|karta)|org|com))\b
 pattern_field: response_body
 category: data-leakage
-severity: error
+severity: critical
 paranoia: 1
 tags:
 - owasp-crs

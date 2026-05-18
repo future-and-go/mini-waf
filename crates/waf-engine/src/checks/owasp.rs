@@ -462,7 +462,7 @@ fn legacy_map_field(field: &str) -> ConditionField {
         "response_body" => ConditionField::ResponseBody,
         "all" | "body" | "headers" => ConditionField::Body,
         other => {
-            debug!("unknown legacy field '{}'; falling back to Body", other);
+            warn!("unknown legacy field '{}'; falling back to Body", other);
             ConditionField::Body
         }
     }
