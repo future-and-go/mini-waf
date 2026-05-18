@@ -28,6 +28,22 @@ impl Database {
         Ok(Self { pool, event_tx })
     }
 
+    /// Build a `Database` whose pool defers connection until first query.
+    ///
+    /// Used by downstream tests that need a real `Database` value to thread
+    /// through APIs without bringing up `PostgreSQL`. Queries against the
+    /// returned pool will fail with a connection error — callers are
+    /// expected to either avoid hitting the pool or handle that error.
+    pub fn connect_lazy(database_url: &str, max_connections: u32) -> Result<Self, StorageError> {
+        let pool = PgPoolOptions::new()
+            .max_connections(max_connections)
+            .connect_lazy(database_url)?;
+
+        let (event_tx, _) = broadcast::channel(1024);
+
+        Ok(Self { pool, event_tx })
+    }
+
     /// Run embedded migrations
     pub async fn migrate(&self) -> Result<(), StorageError> {
         info!("Running database migrations");
@@ -46,9 +62,22 @@ impl Database {
         self.event_tx.subscribe()
     }
 
-    /// Broadcast a security event to all WebSocket subscribers
-    pub(crate) fn broadcast_event(&self, event: serde_json::Value) {
+    /// Broadcast a security event to all WebSocket subscribers.
+    ///
+    /// Public so engine-side emitters (issue #60 `AuditEmitter`) can push
+    /// out-of-band events without going through the DB-backed
+    /// `create_security_event` write path.
+    pub fn broadcast_event(&self, event: serde_json::Value) {
         let _ = self.event_tx.send(event);
+    }
+
+    /// Current WebSocket subscriber count. Used by audit emitters to
+    /// short-circuit live-event construction when nobody is listening —
+    /// admin dashboards are open for seconds, the WAF runs for months, so
+    /// the no-subscriber path is the steady state. Cheap O(1) read.
+    #[must_use]
+    pub fn event_subscriber_count(&self) -> usize {
+        self.event_tx.receiver_count()
     }
 }
 

@@ -82,6 +82,10 @@ pub struct WafProxy {
     /// FR-007 phase-06: relay/proxy detector. Optional — `None` = pipeline
     /// behaves exactly as pre-FR-007 (back-compat fast path).
     pub relay_detector: Option<Arc<RelayDetector>>,
+    /// Issue #60 — shared audit emitter that maps relay signals to
+    /// `security_events.rule_id` rows. Optional — `None` = no emission, gateway
+    /// behaves identically to pre-issue-60 builds.
+    pub audit_emitter: Option<Arc<waf_engine::audit_emitter::AuditEmitter>>,
     /// FR-010 phase-07: device fingerprint detector. Optional — `None` =
     /// no fingerprinting, no signal emission, no aggregator submit.
     pub device_fp_detector: Option<Arc<DeviceFpDetector>>,
@@ -128,6 +132,7 @@ impl WafProxy {
             tier_registry: None,
             access_lists: None,
             relay_detector: None,
+            audit_emitter: None,
             device_fp_detector: None,
             behavior_recorder: None,
             response_cache: None,
@@ -170,6 +175,12 @@ impl WafProxy {
     /// entirely (no overhead, identical to pre-FR-007 behaviour).
     pub fn with_relay_detector(&mut self, detector: Arc<RelayDetector>) {
         self.relay_detector = Some(detector);
+    }
+
+    /// Inject the issue-60 audit emitter so detected relay signals materialise
+    /// as `security_events` rows the admin panel can filter.
+    pub fn with_audit_emitter(&mut self, emitter: Arc<waf_engine::audit_emitter::AuditEmitter>) {
+        self.audit_emitter = Some(emitter);
     }
 
     /// Inject the tier policy registry (FR-002 phase-05). When set, every
@@ -444,7 +455,50 @@ impl ProxyHttp for WafProxy {
                 || std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
                 std::net::SocketAddr::ip,
             );
-            ctx.client_identity = Some(detector.evaluate(peer_ip, &session.req_header().headers));
+            let identity = detector.evaluate(peer_ip, &session.req_header().headers);
+
+            // Issue #60: emit one `security_events` row per relay signal.
+            // Gates (M3): skip the whole block when emitter is unset,
+            // disabled by config, or the detector produced zero signals —
+            // avoids per-request String allocations on the no-signal fast
+            // path that dominates traffic.
+            if let Some(emitter) = self.audit_emitter.as_ref()
+                && emitter.is_enabled()
+                && !identity.signals.is_empty()
+            {
+                let host_header = session
+                    .get_header("host")
+                    .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+                    .unwrap_or("");
+                // I7 fix: resolve raw Host header to the stable
+                // `HostConfig::code` used by `log_security_event` so audit
+                // rows from relay and rule-engine paths share the same
+                // `host_code` and the panel filter `?host_code=...` matches
+                // both. Falls back to the raw header when the router has
+                // no entry (catch-all host scenario).
+                let host_code = self
+                    .router
+                    .resolve(host_header)
+                    .map_or_else(|| host_header.to_string(), |cfg| cfg.code.clone());
+                let real_ip_string = identity.real_ip.to_string();
+                let method = session.req_header().method.as_str();
+                let path = session.req_header().uri.path();
+                let audit_ctx = waf_engine::audit_emitter::AuditCtx {
+                    host_code: host_code.as_str(),
+                    client_ip: real_ip_string.as_str(),
+                    method,
+                    path,
+                };
+                for sig in &identity.signals {
+                    // I1 fix: single call returning (rule_id, rule_name,
+                    // Option<String>) — previously the gateway built the
+                    // detail `Value` twice per signal.
+                    let (rule_id, rule_name, detail) = waf_engine::relay::audit_map::signal_to_audit(sig);
+                    let _ = emitter.emit(&audit_ctx, rule_id, rule_name, "log_only", detail);
+                }
+            }
+
+            ctx.client_identity = Some(identity);
         }
 
         // FR-010 phase-07: device fingerprint pipeline. Runs after relay

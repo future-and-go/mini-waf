@@ -1,4 +1,5 @@
 pub mod access;
+pub mod audit_emitter;
 pub mod block_page;
 pub mod challenge;
 pub mod checker;

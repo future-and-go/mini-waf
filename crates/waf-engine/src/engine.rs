@@ -123,6 +123,10 @@ pub struct WafEngine {
     /// called by the binary boot path.  When set, every non-Allow decision
     /// from `inspect()` is mirrored into `VictoriaLogs` as an audit record.
     audit_sender: OnceLock<Arc<AuditSender>>,
+    /// Issue #60 — shared audit emitter. Wired post-construction by the
+    /// binary boot path so every detection module (`relay`, `tx_velocity`,
+    /// `canary`) materialises rows in `security_events` for the admin panel.
+    audit_emitter: OnceLock<Arc<crate::audit_emitter::AuditEmitter>>,
 }
 
 impl WafEngine {
@@ -227,7 +231,25 @@ impl WafEngine {
             ddos_check,
             ddos_reloader: OnceLock::new(),
             audit_sender: OnceLock::new(),
+            audit_emitter: OnceLock::new(),
         }
+    }
+
+    /// Wire the issue-#60 audit emitter. Idempotent. Propagates the same
+    /// `Arc` into the `tx_velocity` store so detection signals from that
+    /// pipeline surface in `security_events` too.
+    pub fn set_audit_emitter(&self, emitter: Arc<crate::audit_emitter::AuditEmitter>) {
+        if self.audit_emitter.set(Arc::clone(&emitter)).is_err() {
+            return;
+        }
+        self.tx_velocity_store.set_audit_emitter(emitter);
+    }
+
+    /// Read the wired audit emitter so peripheral components (gateway proxy,
+    /// risk scorer, etc.) can clone the shared `Arc`.
+    #[must_use]
+    pub fn audit_emitter(&self) -> Option<Arc<crate::audit_emitter::AuditEmitter>> {
+        self.audit_emitter.get().cloned()
     }
 
     /// Load `configs/rate-limit.yaml` once and start the hot-reload watcher.

@@ -20,6 +20,14 @@ use crate::checks::ddos::DynamicBanTable;
 /// Default canary ban TTL in seconds (1 hour).
 pub const DEFAULT_CANARY_BAN_TTL_SECS: u32 = 3600;
 
+/// Issue #60 — stable `rule_id` written to `security_events` on a honeypot
+/// hit. Single source of truth so the panel filter and any historical
+/// queries stay consistent across releases.
+pub const HONEYPOT_RULE_ID: &str = "HONEY-001";
+
+/// Issue #60 — human-readable rule name paired with `HONEYPOT_RULE_ID`.
+pub const HONEYPOT_RULE_NAME: &str = "canary_honeypot";
+
 /// Canary honeypot layer for scanner detection.
 ///
 /// Maintains a hot-reloadable set of exact-match paths. Any request hitting

@@ -2,7 +2,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
+use arc_swap::ArcSwap;
 use gateway::{HostRouter, ResponseCache, TunnelRegistry};
+use waf_common::panel_config::WafPanelConfig;
+use waf_engine::relay::intel::status::FeedStatusRegistry;
 use waf_engine::{CommunityReporter, CrowdSecClient, DecisionCache, PluginManager, WafEngine};
 use waf_storage::Database;
 
@@ -55,6 +58,14 @@ pub struct AppState {
     pub login_rate_limiter: Option<Arc<crate::security::ApiRateLimiter>>,
     /// Resolved absolute path to `waf-panel.toml` when `[panel]` is configured.
     pub panel_config_path: Option<PathBuf>,
+    /// In-memory snapshot of the panel config. Read-heavy paths (e.g. the
+    /// stats handlers that need risk thresholds on every request) must read
+    /// from this `ArcSwap` instead of touching disk per-request.
+    ///
+    /// Bootstrap loads from `panel_config_path` once; the panel PUT endpoint
+    /// updates this snapshot on successful write. External filesystem edits
+    /// do not auto-reload — operators must use the PUT endpoint or restart.
+    pub panel_config: Arc<ArcSwap<WafPanelConfig>>,
     /// Path to the main WAF config file the server was started with (e.g. `configs/default.toml`).
     pub main_config_file: Option<String>,
     /// `VictoriaLogs` HTTP base URL (e.g. `http://127.0.0.1:9428`, no path
@@ -65,6 +76,11 @@ pub struct AppState {
     /// distinct-value enumeration is expensive on `VictoriaLogs` and the FE
     /// only needs it to populate filter dropdowns.
     pub logs_streams_cache: Arc<crate::logs::StreamsCache>,
+    /// FR-042 — observable status registry for relay intel feeds.
+    /// Empty when no providers have been registered (current production
+    /// state); the API surface is in place for when operators wire feeds
+    /// via main.rs bootstrap.
+    pub feed_status_registry: FeedStatusRegistry,
 }
 
 impl AppState {
@@ -110,9 +126,11 @@ impl AppState {
             rate_limiter: None,
             login_rate_limiter: None,
             panel_config_path: None,
+            panel_config: Arc::new(ArcSwap::from_pointee(WafPanelConfig::default())),
             main_config_file: None,
             victoria_logs_base_url: None,
             logs_streams_cache: crate::logs::new_streams_cache(),
+            feed_status_registry: FeedStatusRegistry::new(),
         })
     }
 
