@@ -1,25 +1,31 @@
-version: "1.0"
-description: "GeoIP-based access control rules — customize to fit your threat model"
-
-rules:
-  - id: "GEO-COUNTRY-001"
-    name: "Block requests from high-risk countries (example)"
-    category: "geo"
-    severity: "high"
-    paranoia: 1
-    field: "geo_iso"
-    operator: "in"
-    value: ["KP", "IR", "SY"]   # North Korea, Iran, Syria — adjust as needed
-    action: "block"
-    tags: ["geoip", "country-block"]
-
-  - id: "GEO-COUNTRY-002"
-    name: "Log requests from Tor exit nodes (geo example)"
-    category: "geo"
-    severity: "medium"
-    paranoia: 2
-    field: "geo_isp"
-    operator: "contains"
+kind: custom_rule_v1
+id: GEO-COUNTRY-001
+name: Block requests from high-risk countries (example)
+enabled: true
+action: block
+conditions:
+  - field: geo_iso
+    operator: in_list
+    value: ["KP", "IR", "SY"]
+category: geo
+severity: high
+paranoia: 1
+tags: [geoip, country-block]
+metadata:
+  source: prx-waf community rules
+---
+kind: custom_rule_v1
+id: GEO-COUNTRY-002
+name: Log requests from Tor exit nodes (geo example)
+enabled: true
+action: log
+conditions:
+  - field: geo_isp
+    operator: contains
     value: "Tor"
-    action: "log"
-    tags: ["geoip", "tor"]
+category: geo
+severity: medium
+paranoia: 2
+tags: [geoip, tor]
+metadata:
+  source: prx-waf community rules
