@@ -1,7 +1,7 @@
 ---
 title: "Rules YAML & DB Schema Alignment"
 description: "Fix critical silent failures in rule parsing (response_body, geoip, DoS) and align bot_patterns DB schema with YAML rule format"
-status: in-progress
+status: complete
 priority: P1
 branch: "main"
 tags: [rule-engine, yaml, database, schema, bugfix]
@@ -27,8 +27,8 @@ Code review of 57 YAML rule files against `0007_rule_management.sql` found 3 cri
 | 1 | [Fix response_body Field Mapping](./phase-01-fix-response-body-field-mapping.md) | **Done** | P1 | 3h | — |
 | 2 | [Migrate Legacy GeoIP & DoS Rules](./phase-02-migrate-legacy-geoip-dos-rules.md) | **Done** | P1 | 2h | — |
 | 3 | [Align bot_patterns DB Schema](./phase-03-align-bot-patterns-db-schema.md) | **Done** | P1 | 2h | — |
-| 4 | [Sync API Validation & Parser Cleanup](./phase-04-sync-api-validation-parser-cleanup.md) | Pending | P2 | 3h | 1, 2, 3 |
-| 5 | [Migrate All Legacy Files & Deprecate Parser](./phase-05-migrate-all-legacy-deprecate-parser.md) | Pending | P2 | 4h | 2, 4 |
+| 4 | [Sync API Validation & Parser Cleanup](./phase-04-sync-api-validation-parser-cleanup.md) | **Done** | P2 | 3h | 1, 2, 3 |
+| 5 | [Migrate All Legacy Files & Deprecate Parser](./phase-05-migrate-all-legacy-deprecate-parser.md) | **Done** | P2 | 4h | 2, 4 |
 
 ## Architecture Context
 
