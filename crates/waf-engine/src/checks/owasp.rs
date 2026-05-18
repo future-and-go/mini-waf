@@ -459,8 +459,12 @@ fn legacy_map_field(field: &str) -> ConditionField {
         "host" => ConditionField::Host,
         "cookies" | "cookie" => ConditionField::Cookie(None),
         "ip" => ConditionField::Ip,
-        // "all" and others → Body (best single-field approximation)
-        _ => ConditionField::Body,
+        "response_body" => ConditionField::ResponseBody,
+        "all" | "body" | "headers" => ConditionField::Body,
+        other => {
+            debug!("unknown legacy field '{}'; falling back to Body", other);
+            ConditionField::Body
+        }
     }
 }
 

@@ -51,6 +51,10 @@ pub enum ConditionField {
     GeoCity,
     /// ISP / organization
     GeoIsp,
+    /// HTTP response body — evaluated at response time, not request time.
+    /// Rules targeting this field are partitioned into a separate evaluation
+    /// phase so they don't accidentally match against the request body.
+    ResponseBody,
 }
 
 // Custom Deserialize: accepts both legacy bare strings (`"cookie"`,
@@ -88,6 +92,7 @@ impl<'de> Deserialize<'de> for ConditionField {
                     "geo_province" => Ok(ConditionField::GeoProvince),
                     "geo_city" => Ok(ConditionField::GeoCity),
                     "geo_isp" => Ok(ConditionField::GeoIsp),
+                    "response_body" => Ok(ConditionField::ResponseBody),
                     other => Err(E::unknown_variant(
                         other,
                         &[
@@ -107,6 +112,7 @@ impl<'de> Deserialize<'de> for ConditionField {
                             "geo_province",
                             "geo_city",
                             "geo_isp",
+                            "response_body",
                         ],
                     )),
                 }
@@ -422,6 +428,55 @@ impl CustomRulesEngine {
         self.len() == 0
     }
 
+    /// Check whether any loaded rules target `ConditionField::ResponseBody`.
+    pub fn has_response_rules(&self) -> bool {
+        self.rules
+            .iter()
+            .any(|bucket| bucket.value().iter().any(|e| rule_targets_response_body(&e.raw)))
+    }
+
+    /// Evaluate response-body rules against the given response body text.
+    ///
+    /// Only rules whose `pattern_field` is `"response_body"` and that carry
+    /// a pre-compiled `pattern` regex are tested. Rules using `pm_from_file`,
+    /// `detect_sqli`, or condition trees for response_body are not yet
+    /// supported — those require Phase 2 wiring.
+    ///
+    /// Returns the first match as a `DetectionResult` with `Phase::CustomRule`.
+    pub fn check_response_body(&self, host_code: &str, response_body: &str) -> Option<DetectionResult> {
+        let check_bucket = |entries: &[RuleEntry]| -> Option<DetectionResult> {
+            for entry in entries {
+                let rule = &entry.raw;
+                if !rule.enabled || !rule_targets_response_body(rule) {
+                    continue;
+                }
+                // Response bodies are not URL-encoded, so match directly
+                // (no test_with_decode — that is for request-path evasion).
+                if rule.pattern.as_ref().is_some_and(|p| p.is_match(response_body)) {
+                    return Some(DetectionResult {
+                        rule_id: Some(rule.id.clone()),
+                        rule_name: rule.name.clone(),
+                        phase: Phase::CustomRule,
+                        detail: format!("Response body rule '{}' matched", rule.name),
+                    });
+                }
+            }
+            None
+        };
+
+        if let Some(rules) = self.rules.get(host_code) {
+            if let Some(result) = check_bucket(&rules) {
+                return Some(result);
+            }
+        }
+        if let Some(rules) = self.rules.get("*") {
+            if let Some(result) = check_bucket(&rules) {
+                return Some(result);
+            }
+        }
+        None
+    }
+
     /// Evaluate all rules against the request context.
     ///
     /// Returns the first matching `DetectionResult`, or `None`.
@@ -531,6 +586,11 @@ impl CustomRulesEngine {
     /// Evaluate a single rule entry against the request context.
     fn eval_single_rule(&self, ctx: &RequestCtx, entry: &RuleEntry) -> bool {
         let rule = &entry.raw;
+
+        // Response-body rules are evaluated in the response phase only.
+        if rule_targets_response_body(rule) {
+            return false;
+        }
 
         // Specialised operators (detect_sqli, detect_xss) bypass the condition
         // engine and run their own multi-field scan with URL-decode protection.
@@ -1001,6 +1061,8 @@ fn pattern_matches_request(pattern: &Regex, field: &str, ctx: &RequestCtx) -> bo
             .iter()
             .filter(|(k, _)| !is_routing_header(k))
             .any(|(_, v)| test_with_decode(pattern, v)),
+        // Response body rules are evaluated via check_response_body(), not here.
+        "response_body" => false,
         // "all" or unknown field — check everything, smallest first
         _ => {
             test_with_decode(pattern, &ctx.path)
@@ -1028,6 +1090,11 @@ fn eval_compiled_node(ctx: &RequestCtx, node: &CompiledNode) -> bool {
     }
 }
 
+/// Returns `true` when a rule's `pattern_field` targets response body content.
+fn rule_targets_response_body(rule: &CustomRule) -> bool {
+    rule.pattern_field == "response_body"
+}
+
 /// Standalone field resolver — mirrors `CustomRulesEngine::field_value`.
 /// Free function so `eval_compiled_node` need not borrow the engine.
 fn field_value(ctx: &RequestCtx, field: &ConditionField) -> Option<String> {
@@ -1049,6 +1116,9 @@ fn field_value(ctx: &RequestCtx, field: &ConditionField) -> Option<String> {
         ConditionField::GeoProvince => ctx.geo.as_ref().map(|g| g.province.clone()),
         ConditionField::GeoCity => ctx.geo.as_ref().map(|g| g.city.clone()),
         ConditionField::GeoIsp => ctx.geo.as_ref().map(|g| g.isp.clone()),
+        // ResponseBody is evaluated at response time, not request time.
+        // Return None here so request-phase rules never match accidentally.
+        ConditionField::ResponseBody => None,
     }
 }
 
@@ -1908,5 +1978,170 @@ mod tests {
         let rule = from_db_rule(&row).expect("parse legacy row");
         assert!(rule.match_tree.is_none());
         assert_eq!(rule.conditions.len(), 1);
+    }
+
+    // ── Phase 1: ResponseBody field mapping ─────────────────────────────
+
+    #[test]
+    fn response_body_deserializes_from_string() {
+        let json = r#"{"field":"response_body","operator":"contains","value":"shell"}"#;
+        let cond: Condition = serde_json::from_str(json).expect("deser");
+        assert!(matches!(cond.field, ConditionField::ResponseBody));
+    }
+
+    #[test]
+    fn response_body_field_value_returns_none() {
+        let ctx = make_ctx("/", "GET", "1.2.3.4");
+        let val = field_value(&ctx, &ConditionField::ResponseBody);
+        assert!(val.is_none(), "ResponseBody should be None at request time");
+    }
+
+    #[test]
+    fn response_body_rule_skipped_at_request_time() {
+        let engine = CustomRulesEngine::new();
+        let rule = CustomRule {
+            id: "rb-001".into(),
+            host_code: "test".into(),
+            name: "detect shell in response".into(),
+            priority: 1,
+            enabled: true,
+            condition_op: ConditionOp::And,
+            conditions: vec![],
+            action: RuleAction::Block,
+            action_status: 403,
+            action_msg: None,
+            script: None,
+            match_tree: None,
+            risk_delta: None,
+            risk_action: None,
+            pattern: Some(Regex::new("r57shell").unwrap()),
+            pattern_field: "response_body".into(),
+            category: Some("web-shell".into()),
+            severity: Some("critical".into()),
+            paranoia: Some(1),
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
+            specialised_op: None,
+        };
+        engine.add_rule(rule);
+
+        // Should NOT match at request time even if body contains pattern
+        let mut ctx = make_ctx("/", "GET", "1.2.3.4");
+        ctx.body_preview = bytes::Bytes::from("r57shell detected");
+        assert!(
+            engine.check(&ctx).is_none(),
+            "response_body rule must not fire at request time"
+        );
+    }
+
+    #[test]
+    fn check_response_body_matches_pattern() {
+        let engine = CustomRulesEngine::new();
+        engine.add_rule(CustomRule {
+            id: "rb-002".into(),
+            host_code: "*".into(),
+            name: "detect stack trace".into(),
+            priority: 1,
+            enabled: true,
+            condition_op: ConditionOp::And,
+            conditions: vec![],
+            action: RuleAction::Block,
+            action_status: 403,
+            action_msg: None,
+            script: None,
+            match_tree: None,
+            risk_delta: None,
+            risk_action: None,
+            pattern: Some(Regex::new(r"(?i)java\.lang\.NullPointerException").unwrap()),
+            pattern_field: "response_body".into(),
+            category: Some("data-leakage".into()),
+            severity: Some("high".into()),
+            paranoia: Some(1),
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
+            specialised_op: None,
+        });
+
+        assert!(engine.has_response_rules());
+
+        let result = engine.check_response_body(
+            "test",
+            "Error: java.lang.NullPointerException at com.example.Main.run(Main.java:42)",
+        );
+        assert!(result.is_some(), "should detect stack trace in response body");
+
+        let result = engine.check_response_body("test", "Hello, world!");
+        assert!(result.is_none(), "clean response should not match");
+    }
+
+    #[test]
+    fn check_response_body_host_specific() {
+        let engine = CustomRulesEngine::new();
+        engine.add_rule(CustomRule {
+            id: "rb-003".into(),
+            host_code: "api-host".into(),
+            name: "api-specific response rule".into(),
+            priority: 1,
+            enabled: true,
+            condition_op: ConditionOp::And,
+            conditions: vec![],
+            action: RuleAction::Block,
+            action_status: 403,
+            action_msg: None,
+            script: None,
+            match_tree: None,
+            risk_delta: None,
+            risk_action: None,
+            pattern: Some(Regex::new("SENSITIVE_DATA").unwrap()),
+            pattern_field: "response_body".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
+            specialised_op: None,
+        });
+
+        // Matches for the correct host
+        assert!(
+            engine
+                .check_response_body("api-host", "contains SENSITIVE_DATA here")
+                .is_some()
+        );
+        // Does NOT match for a different host (no global rules loaded)
+        assert!(
+            engine
+                .check_response_body("other-host", "contains SENSITIVE_DATA here")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn has_response_rules_false_when_none() {
+        let engine = CustomRulesEngine::new();
+        assert!(!engine.has_response_rules());
+
+        // Add a request-time rule — should still be false
+        engine.add_rule(mk_rule(
+            ConditionOp::And,
+            vec![Condition {
+                field: ConditionField::Path,
+                operator: Operator::Eq,
+                value: ConditionValue::Str("/admin".into()),
+            }],
+        ));
+        assert!(!engine.has_response_rules());
+    }
+
+    #[test]
+    fn pattern_matches_request_returns_false_for_response_body() {
+        let pattern = Regex::new("secret").unwrap();
+        let mut ctx = make_ctx("/", "GET", "1.2.3.4");
+        ctx.body_preview = bytes::Bytes::from("secret data");
+        // Even though body contains "secret", field="response_body" must not match
+        assert!(!pattern_matches_request(&pattern, "response_body", &ctx));
     }
 }
