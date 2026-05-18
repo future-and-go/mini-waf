@@ -6,6 +6,8 @@
 //! side. Documents whose `kind` starts with `custom_rule_` but is not `v1`
 //! are rejected as a forward-compatibility safeguard.
 
+use std::collections::HashMap;
+
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
 
@@ -45,10 +47,46 @@ struct YamlCustomRule {
     /// FR-025: Override action for risk scoring.
     #[serde(default)]
     risk_action: Option<String>,
+    // ── Registry/OWASP compatibility fields ──
+    /// Regex pattern string evaluated against `pattern_field`.
+    #[serde(default)]
+    pattern: Option<String>,
+    /// Which request field to check: "all", "path", "query", "body", "method", "headers", "cookies".
+    #[serde(default = "default_field")]
+    pattern_field: String,
+    /// Operator shorthand for Registry format — consumed by Phase 2 pattern eval.
+    #[serde(default)]
+    #[allow(dead_code)]
+    operator: Option<String>,
+    /// Value for operator shorthand — consumed by Phase 2 pattern eval.
+    #[serde(default)]
+    #[allow(dead_code)]
+    value: Option<serde_yaml::Value>,
+    /// Rule category: sqli, xss, rce, ssti, ssrf, etc.
+    #[serde(default)]
+    category: Option<String>,
+    /// Severity: critical, high, medium, low.
+    #[serde(default)]
+    severity: Option<String>,
+    /// OWASP CRS paranoia level (1-4).
+    #[serde(default)]
+    paranoia: Option<u8>,
+    /// Tags for rule filtering and grouping.
+    #[serde(default)]
+    tags: Vec<String>,
+    /// Arbitrary key-value metadata.
+    #[serde(default)]
+    metadata: HashMap<String, String>,
+    /// External reference URL (CVE, documentation).
+    #[serde(default)]
+    reference: Option<String>,
 }
 
 fn default_host() -> String {
     "*".to_string()
+}
+fn default_field() -> String {
+    "all".to_string()
 }
 const fn default_true() -> bool {
     true
@@ -99,13 +137,24 @@ pub fn parse(content: &str) -> Result<Vec<CustomRule>> {
 
         let dto: YamlCustomRule = serde_yaml::from_value(value.clone())
             .with_context(|| format!("document #{}: failed to parse custom_rule_v1", idx + 1))?;
-        out.push(to_custom_rule(dto));
+        let rule =
+            to_custom_rule(dto).with_context(|| format!("document #{}: failed to convert custom_rule_v1", idx + 1))?;
+        out.push(rule);
     }
     Ok(out)
 }
 
-fn to_custom_rule(dto: YamlCustomRule) -> CustomRule {
-    CustomRule {
+fn to_custom_rule(dto: YamlCustomRule) -> Result<CustomRule> {
+    let pattern = match &dto.pattern {
+        Some(p) => Some(
+            regex::RegexBuilder::new(p)
+                .size_limit(1 << 20) // 1 MB compiled DFA limit — guards against regex DoS
+                .build()
+                .with_context(|| format!("invalid pattern regex: {p}"))?,
+        ),
+        None => None,
+    };
+    Ok(CustomRule {
         id: dto.id,
         host_code: dto.host_code,
         name: dto.name,
@@ -120,7 +169,15 @@ fn to_custom_rule(dto: YamlCustomRule) -> CustomRule {
         match_tree: dto.match_tree,
         risk_delta: dto.risk_delta,
         risk_action: dto.risk_action,
-    }
+        pattern,
+        pattern_field: dto.pattern_field,
+        category: dto.category,
+        severity: dto.severity,
+        paranoia: dto.paranoia,
+        tags: dto.tags,
+        metadata: dto.metadata,
+        reference: dto.reference,
+    })
 }
 
 #[cfg(test)]

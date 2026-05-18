@@ -127,6 +127,14 @@ fn rule_flat(id: &str, op: ConditionOp, conditions: Vec<Condition>) -> CustomRul
         match_tree: None,
         risk_delta: None,
         risk_action: None,
+        pattern: None,
+        pattern_field: "all".into(),
+        category: None,
+        severity: None,
+        paranoia: None,
+        tags: Vec::new(),
+        metadata: HashMap::new(),
+        reference: None,
     }
 }
 
@@ -146,6 +154,14 @@ fn rule_tree(id: &str, tree: ConditionNode) -> CustomRule {
         match_tree: Some(tree),
         risk_delta: None,
         risk_action: None,
+        pattern: None,
+        pattern_field: "all".into(),
+        category: None,
+        severity: None,
+        paranoia: None,
+        tags: Vec::new(),
+        metadata: HashMap::new(),
+        reference: None,
     }
 }
 
