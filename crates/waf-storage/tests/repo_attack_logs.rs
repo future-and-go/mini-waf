@@ -161,7 +161,11 @@ async fn stats_overview_aggregates_attack_logs_and_security_events() {
         .await
         .unwrap();
 
-    let stats = fx.db.get_stats_overview().await.unwrap();
+    let stats = fx
+        .db
+        .get_stats_overview(&waf_storage::StatsFilter::default())
+        .await
+        .unwrap();
     assert_eq!(stats.hosts_count, 0);
     assert_eq!(stats.total_blocked, 2);
     assert_eq!(stats.total_allowed, 1);

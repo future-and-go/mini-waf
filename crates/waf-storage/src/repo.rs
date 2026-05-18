@@ -8,10 +8,10 @@ use crate::models::{
     CategoryTimeSeriesPoint, Certificate, CreateAdminUser, CreateCertificate, CreateCrowdSecEvent, CreateCustomRule,
     CreateHost, CreateIpRule, CreateLbBackend, CreateNotificationConfig, CreateSecurityEvent, CreateSensitivePattern,
     CreateTunnel, CreateUrlRule, CreateWasmPlugin, CrowdSecConfigRow, CrowdSecEventQuery, CrowdSecEventRow, CustomRule,
-    GeoDistEntry, GeoStats, Host, HotlinkConfig, LbBackend, NotificationConfig, NotificationLog, RecentEvent,
-    RefreshToken, SecurityEvent, SecurityEventQuery, SensitivePattern, StatsOverview, TimeSeriesPoint, TopEntry,
-    TunnelRow, UpdateCertificatePem, UpdateCustomRule, UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig,
-    WasmPluginRow,
+    EndpointHeatmap, GeoDistEntry, GeoStats, HeatmapCell, HeatmapFilter, Host, HotlinkConfig, LbBackend,
+    NotificationConfig, NotificationLog, RecentEvent, RefreshToken, SecurityEvent, SecurityEventQuery,
+    SensitivePattern, StatsFilter, StatsOverview, TimeSeriesPoint, TopEntry, TunnelRow, UpdateCertificatePem,
+    UpdateCustomRule, UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
 };
 
 impl Database {
@@ -950,34 +950,104 @@ impl Database {
 
     // ─── Phase 4: Statistics ──────────────────────────────────────────────────
 
-    pub async fn get_stats_overview(&self) -> Result<StatsOverview, StorageError> {
-        let total_blocked_logs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attack_logs WHERE action = 'block'")
-            .fetch_one(&self.pool)
-            .await?;
-        let total_blocked_events: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM security_events WHERE action = 'block'")
-                .fetch_one(&self.pool)
-                .await?;
+    /// Returns aggregated WAF statistics for the dashboard.
+    ///
+    /// `filter` is fully optional: `StatsFilter::default()` (all `None`) produces
+    /// byte-equivalent output to the pre-filter implementation — guaranteed
+    /// backward compatibility.
+    ///
+    /// Per-subquery filter matrix (see phase-02 spec §Step 4):
+    /// - Subqueries #1,#2 (`total_blocked_*`): hours + `host_code`. Row action
+    ///   is always `'block'`; the optional action filter only acts as a gate —
+    ///   when user passes `action=X` and `X != 'block'`, the count returns 0
+    ///   (asking for non-block traffic ⇒ 0 blocked by definition).
+    /// - Subquery  #3 (`total_allowed`):      hours + `host_code`. Same gate
+    ///   semantics: row action is always `'allow'`; non-allow filter ⇒ 0.
+    /// - Subquery  #4 (`hosts_count`):         NO filters (`hosts` has neither
+    ///   `created_at` nor `host_code` nor `action` columns applicable here).
+    /// - Subqueries #5-#9:                     hours + `host_code` + action.
+    /// - Subquery  #10 (`category_breakdown`): hours + `host_code` + action;
+    ///   inline CASE replaced by `category_of(rule_id)`.
+    /// - Subquery  #11 (`action_breakdown`):   hours + `host_code` ONLY (applying
+    ///   action filter here would always return 1 row, defeating the chart).
+    /// - Subquery  #12 (`recent_events`):      hours + `host_code` + action;
+    ///   inline CASE replaced by `category_of(rule_id)`.
+    pub async fn get_stats_overview(&self, filter: &StatsFilter) -> Result<StatsOverview, StorageError> {
+        // Bind helpers — computed once, reused across subqueries.
+        // hours_bind: Option<i32> so $N::int IS NULL check is a no-op when None.
+        let hours_bind = filter.hours.map(|h| i32::try_from(h).unwrap_or(i32::MAX));
+        let host_bind = filter.host_code.as_deref();
+        let action_bind = filter.action.as_deref();
+
+        // ── Subquery #1: total blocked via attack_logs ────────────────────────
+        // Row action is hardcoded 'block'. The optional $3 acts as a GATE: when
+        // user filters by an action that isn't 'block', return 0 (preserves
+        // the semantic meaning of `total_blocked`).
+        let total_blocked_logs: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::bigint FROM attack_logs \
+             WHERE action = 'block' \
+               AND ($3::text IS NULL OR $3 = 'block') \
+               AND ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
+               AND ($2::text IS NULL OR host_code = $2)",
+        )
+        .bind(hours_bind)
+        .bind(host_bind)
+        .bind(action_bind)
+        .fetch_one(&self.pool)
+        .await?;
+
+        // ── Subquery #2: total blocked via security_events ────────────────────
+        let total_blocked_events: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::bigint FROM security_events \
+             WHERE action = 'block' \
+               AND ($3::text IS NULL OR $3 = 'block') \
+               AND ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
+               AND ($2::text IS NULL OR host_code = $2)",
+        )
+        .bind(hours_bind)
+        .bind(host_bind)
+        .bind(action_bind)
+        .fetch_one(&self.pool)
+        .await?;
+
         let total_blocked = total_blocked_logs + total_blocked_events;
 
-        let total_allowed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attack_logs WHERE action = 'allow'")
-            .fetch_one(&self.pool)
-            .await?;
+        // ── Subquery #3: total allowed via attack_logs ────────────────────────
+        // Same gate semantics as #1/#2: row action is 'allow', non-allow filter ⇒ 0.
+        let total_allowed: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::bigint FROM attack_logs \
+             WHERE action = 'allow' \
+               AND ($3::text IS NULL OR $3 = 'allow') \
+               AND ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
+               AND ($2::text IS NULL OR host_code = $2)",
+        )
+        .bind(hours_bind)
+        .bind(host_bind)
+        .bind(action_bind)
+        .fetch_one(&self.pool)
+        .await?;
 
         let total_requests = total_blocked + total_allowed;
 
+        // ── Subquery #4: hosts count — no filters apply ───────────────────────
         let hosts_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM hosts")
             .fetch_one(&self.pool)
             .await?;
 
-        // Top attacking IPs
+        // ── Subquery #5: top attacking IPs ────────────────────────────────────
         let top_ips: Vec<TopEntry> = sqlx::query(
             "SELECT client_ip AS entry_key, COUNT(*)::bigint AS cnt \
              FROM security_events \
+             WHERE ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
+               AND ($2::text IS NULL OR host_code = $2) \
+               AND ($3::text IS NULL OR action    = $3) \
              GROUP BY client_ip \
              ORDER BY cnt DESC \
              LIMIT 10",
         )
+        .bind(hours_bind)
+        .bind(host_bind)
+        .bind(action_bind)
         .map(|row: sqlx::postgres::PgRow| {
             use sqlx::Row;
             TopEntry {
@@ -988,14 +1058,20 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
 
-        // Top triggered rules
+        // ── Subquery #6: top triggered rules ─────────────────────────────────
         let top_rules: Vec<TopEntry> = sqlx::query(
             "SELECT rule_name AS entry_key, COUNT(*)::bigint AS cnt \
              FROM security_events \
+             WHERE ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
+               AND ($2::text IS NULL OR host_code = $2) \
+               AND ($3::text IS NULL OR action    = $3) \
              GROUP BY rule_name \
              ORDER BY cnt DESC \
              LIMIT 10",
         )
+        .bind(hours_bind)
+        .bind(host_bind)
+        .bind(action_bind)
         .map(|row: sqlx::postgres::PgRow| {
             use sqlx::Row;
             TopEntry {
@@ -1006,15 +1082,21 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
 
-        // Top attacking countries (from security_events.geo_info)
+        // ── Subquery #7: top attacking countries ──────────────────────────────
         let top_countries: Vec<TopEntry> = sqlx::query(
             "SELECT geo_info->>'country' AS entry_key, COUNT(*)::bigint AS cnt \
              FROM security_events \
              WHERE geo_info->>'country' IS NOT NULL AND geo_info->>'country' != '' \
+               AND ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
+               AND ($2::text IS NULL OR host_code = $2) \
+               AND ($3::text IS NULL OR action    = $3) \
              GROUP BY entry_key \
              ORDER BY cnt DESC \
              LIMIT 10",
         )
+        .bind(hours_bind)
+        .bind(host_bind)
+        .bind(action_bind)
         .map(|row: sqlx::postgres::PgRow| {
             use sqlx::Row;
             TopEntry {
@@ -1025,15 +1107,21 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
 
-        // Top ISPs
+        // ── Subquery #8: top ISPs ─────────────────────────────────────────────
         let top_isp_list: Vec<TopEntry> = sqlx::query(
             "SELECT geo_info->>'isp' AS entry_key, COUNT(*)::bigint AS cnt \
              FROM security_events \
              WHERE geo_info->>'isp' IS NOT NULL AND geo_info->>'isp' != '' \
+               AND ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
+               AND ($2::text IS NULL OR host_code = $2) \
+               AND ($3::text IS NULL OR action    = $3) \
              GROUP BY entry_key \
              ORDER BY cnt DESC \
              LIMIT 10",
         )
+        .bind(hours_bind)
+        .bind(host_bind)
+        .bind(action_bind)
         .map(|row: sqlx::postgres::PgRow| {
             use sqlx::Row;
             TopEntry {
@@ -1044,60 +1132,39 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
 
-        // Distinct attackers (unique client IPs that have triggered any event)
-        let unique_attackers: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT client_ip)::bigint FROM security_events")
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or(0);
+        // ── Subquery #9: distinct attackers ───────────────────────────────────
+        let unique_attackers: i64 = sqlx::query_scalar(
+            "SELECT COUNT(DISTINCT client_ip)::bigint FROM security_events \
+             WHERE ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
+               AND ($2::text IS NULL OR host_code = $2) \
+               AND ($3::text IS NULL OR action    = $3)",
+        )
+        .bind(hours_bind)
+        .bind(host_bind)
+        .bind(action_bind)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
 
-        // Attack category breakdown — derived from `rule_id` prefix with a
-        // deterministic CASE expression so the dashboard can render a pie chart
-        // without needing a new column.  Covers both built-in checker prefixes
-        // (SQLI-, XSS-, RCE-, TRAV-, SCAN-, BOT-, CC-) and YAML rule prefixes
-        // (CRS-, ADV-, API-, MODSEC-, CVE-, GEO-, CUSTOM-).
+        // ── Subquery #10: category breakdown ─────────────────────────────────
+        // Inline CASE replaced by category_of(rule_id) (DRY refactor).
+        // Covers built-in checker prefixes (SQLI-, XSS-, …) and YAML rule
+        // prefixes (CRS-, ADV-, API-, MODSEC-, CVE-, GEO-, CUSTOM-) via the
+        // category_of() Postgres function defined in 0011_category_function.sql.
         let category_breakdown: Vec<TopEntry> = sqlx::query(
-            "SELECT category AS entry_key, COUNT(*)::bigint AS cnt FROM ( \
-                SELECT CASE \
-                    WHEN rule_id LIKE 'SQLI-%'        THEN 'sqli' \
-                    WHEN rule_id LIKE 'XSS-%'         THEN 'xss' \
-                    WHEN rule_id LIKE 'RCE-%'         THEN 'rce' \
-                    WHEN rule_id LIKE 'TRAV-%'        THEN 'path-traversal' \
-                    WHEN rule_id LIKE 'SCAN-%'        THEN 'scanner' \
-                    WHEN rule_id LIKE 'BOT-%'         THEN 'bot' \
-                    WHEN rule_id LIKE 'CC-%'          THEN 'cc-ddos' \
-                    WHEN rule_id LIKE 'SSRF-%'        THEN 'ssrf' \
-                    WHEN rule_id LIKE 'ADV-SSRF%'     THEN 'ssrf' \
-                    WHEN rule_id LIKE 'ADV-SSTI%'     THEN 'ssti' \
-                    WHEN rule_id LIKE 'ADV-%'         THEN 'advanced' \
-                    WHEN rule_id LIKE 'CRS-RESP%'     THEN 'data-leakage' \
-                    WHEN rule_id LIKE 'CRS-%'         THEN 'owasp-crs' \
-                    WHEN rule_id LIKE 'API-MASS%'     THEN 'mass-assignment' \
-                    WHEN rule_id LIKE 'API-%'         THEN 'api-security' \
-                    WHEN rule_id LIKE 'MODSEC-RESP%'  THEN 'web-shell' \
-                    WHEN rule_id LIKE 'MODSEC-%'      THEN 'modsecurity' \
-                    WHEN rule_id LIKE 'CVE-%'         THEN 'cve' \
-                    WHEN rule_id LIKE 'GEO-%'         THEN 'geo-blocking' \
-                    WHEN rule_id LIKE 'CUSTOM-%'      THEN 'custom' \
-                    WHEN rule_id LIKE 'IP-%'          THEN 'ip-rule' \
-                    WHEN rule_id LIKE 'URL-%'         THEN 'url-rule' \
-                    WHEN rule_id LIKE 'SENS-%'        THEN 'sensitive-data' \
-                    WHEN rule_id LIKE 'HOTLINK-%'     THEN 'anti-hotlink' \
-                    WHEN rule_id LIKE 'OWASP-942%'    THEN 'sqli' \
-                    WHEN rule_id LIKE 'OWASP-941%'    THEN 'xss' \
-                    WHEN rule_id LIKE 'OWASP-930%'    THEN 'lfi' \
-                    WHEN rule_id LIKE 'OWASP-931%'    THEN 'rfi' \
-                    WHEN rule_id LIKE 'OWASP-932%'    THEN 'rce' \
-                    WHEN rule_id LIKE 'OWASP-933%'    THEN 'php-injection' \
-                    WHEN rule_id LIKE 'OWASP-913%'    THEN 'scanner' \
-                    ELSE 'other' \
-                END AS category \
-                FROM security_events \
-                WHERE rule_id IS NOT NULL \
-             ) s \
-             GROUP BY category \
+            "SELECT category_of(rule_id) AS entry_key, COUNT(*)::bigint AS cnt \
+             FROM security_events \
+             WHERE rule_id IS NOT NULL \
+               AND ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
+               AND ($2::text IS NULL OR host_code = $2) \
+               AND ($3::text IS NULL OR action    = $3) \
+             GROUP BY category_of(rule_id) \
              ORDER BY cnt DESC \
              LIMIT 20",
         )
+        .bind(hours_bind)
+        .bind(host_bind)
+        .bind(action_bind)
         .map(|row: sqlx::postgres::PgRow| {
             use sqlx::Row;
             TopEntry {
@@ -1109,14 +1176,20 @@ impl Database {
         .await
         .unwrap_or_default();
 
-        // Action breakdown (block / log / allow / challenge ...) for a quick
-        // enforcement-mix pie chart.
+        // ── Subquery #11: action breakdown ────────────────────────────────────
+        // action filter intentionally NOT applied here: the purpose of this
+        // subquery IS to show the mix of all actions. Applying action=$3 would
+        // collapse the chart to a single bar. hours + host_code filters apply.
         let action_breakdown: Vec<TopEntry> = sqlx::query(
             "SELECT action AS entry_key, COUNT(*)::bigint AS cnt \
              FROM security_events \
+             WHERE ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
+               AND ($2::text IS NULL OR host_code = $2) \
              GROUP BY action \
              ORDER BY cnt DESC",
         )
+        .bind(hours_bind)
+        .bind(host_bind)
         .map(|row: sqlx::postgres::PgRow| {
             use sqlx::Row;
             TopEntry {
@@ -1128,9 +1201,8 @@ impl Database {
         .await
         .unwrap_or_default();
 
-        // Last 20 security events for the activity feed. Category is derived
-        // inline by the same CASE expression so the API consumer does not have
-        // to duplicate the mapping.
+        // ── Subquery #12: recent events activity feed ─────────────────────────
+        // Inline CASE replaced by category_of(rule_id) (DRY refactor).
         let recent_events: Vec<RecentEvent> = sqlx::query(
             "SELECT \
                 created_at AS ts, \
@@ -1142,44 +1214,17 @@ impl Database {
                 rule_name, \
                 action, \
                 COALESCE(geo_info->>'country', '') AS country, \
-                CASE \
-                    WHEN rule_id LIKE 'SQLI-%'        THEN 'sqli' \
-                    WHEN rule_id LIKE 'XSS-%'         THEN 'xss' \
-                    WHEN rule_id LIKE 'RCE-%'         THEN 'rce' \
-                    WHEN rule_id LIKE 'TRAV-%'        THEN 'path-traversal' \
-                    WHEN rule_id LIKE 'SCAN-%'        THEN 'scanner' \
-                    WHEN rule_id LIKE 'BOT-%'         THEN 'bot' \
-                    WHEN rule_id LIKE 'CC-%'          THEN 'cc-ddos' \
-                    WHEN rule_id LIKE 'SSRF-%'        THEN 'ssrf' \
-                    WHEN rule_id LIKE 'ADV-SSRF%'     THEN 'ssrf' \
-                    WHEN rule_id LIKE 'ADV-SSTI%'     THEN 'ssti' \
-                    WHEN rule_id LIKE 'ADV-%'         THEN 'advanced' \
-                    WHEN rule_id LIKE 'CRS-RESP%'     THEN 'data-leakage' \
-                    WHEN rule_id LIKE 'CRS-%'         THEN 'owasp-crs' \
-                    WHEN rule_id LIKE 'API-MASS%'     THEN 'mass-assignment' \
-                    WHEN rule_id LIKE 'API-%'         THEN 'api-security' \
-                    WHEN rule_id LIKE 'MODSEC-RESP%'  THEN 'web-shell' \
-                    WHEN rule_id LIKE 'MODSEC-%'      THEN 'modsecurity' \
-                    WHEN rule_id LIKE 'CVE-%'         THEN 'cve' \
-                    WHEN rule_id LIKE 'GEO-%'         THEN 'geo-blocking' \
-                    WHEN rule_id LIKE 'CUSTOM-%'      THEN 'custom' \
-                    WHEN rule_id LIKE 'IP-%'          THEN 'ip-rule' \
-                    WHEN rule_id LIKE 'URL-%'         THEN 'url-rule' \
-                    WHEN rule_id LIKE 'SENS-%'        THEN 'sensitive-data' \
-                    WHEN rule_id LIKE 'HOTLINK-%'     THEN 'anti-hotlink' \
-                    WHEN rule_id LIKE 'OWASP-942%'    THEN 'sqli' \
-                    WHEN rule_id LIKE 'OWASP-941%'    THEN 'xss' \
-                    WHEN rule_id LIKE 'OWASP-930%'    THEN 'lfi' \
-                    WHEN rule_id LIKE 'OWASP-931%'    THEN 'rfi' \
-                    WHEN rule_id LIKE 'OWASP-932%'    THEN 'rce' \
-                    WHEN rule_id LIKE 'OWASP-933%'    THEN 'php-injection' \
-                    WHEN rule_id LIKE 'OWASP-913%'    THEN 'scanner' \
-                    ELSE 'other' \
-                END AS category \
+                category_of(rule_id) AS category \
              FROM security_events \
+             WHERE ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
+               AND ($2::text IS NULL OR host_code = $2) \
+               AND ($3::text IS NULL OR action    = $3) \
              ORDER BY created_at DESC \
              LIMIT 20",
         )
+        .bind(hours_bind)
+        .bind(host_bind)
+        .bind(action_bind)
         .map(|row: sqlx::postgres::PgRow| {
             use sqlx::Row;
             let country_str: String = row.get("country");
@@ -1408,6 +1453,123 @@ impl Database {
             top_cities,
             top_isps,
             country_distribution,
+        })
+    }
+
+    /// Returns a sparse path × category heatmap for the endpoint attack view.
+    ///
+    /// Three-stage CTE:
+    ///   `path_ranks`   — top 20 paths by event count in the window.
+    ///   `category_top` — top 12 categories in the window.
+    ///   final SELECT   — pivot restricted to top paths; categories outside the
+    ///                    top-12 list are rolled into `'other'` (F3 compliance).
+    ///
+    /// `total_events` in the returned struct equals `cells.iter().map(|c| c.count).sum()`
+    /// (computed client-side from the returned cells — no extra COUNT(*) query).
+    pub async fn get_endpoint_heatmap(&self, filter: &HeatmapFilter) -> Result<EndpointHeatmap, StorageError> {
+        use sqlx::Row;
+
+        // Clamp hours to i32 for make_interval; caller already enforces 1..=720
+        // but we defend in depth.
+        let hours_i32 = i32::try_from(filter.hours).unwrap_or(i32::MAX);
+        let host = filter.host_code.as_deref();
+        let action = filter.action.as_deref();
+
+        // Filter rows FIRST in a derived table, THEN compute category_of in
+        // its projection. WHERE evaluates before SELECT, so category_of runs
+        // only on rows that survive the predicates (rule_id IS NOT NULL,
+        // window, host/action filters, top-paths set). Avoids the wasted
+        // per-row compute of the previous CROSS JOIN LATERAL form, which
+        // evaluated the function before the WHERE clause excluded null rows.
+        //
+        // GROUP BY / ORDER BY use SELECT positions (1, 2, 3) — fully
+        // unambiguous between column aliases and underlying table columns.
+        let rows = sqlx::query(
+            r"
+            WITH path_ranks AS (
+              SELECT LEFT(path, 256) AS path, COUNT(*)::bigint AS total_events
+              FROM security_events
+              WHERE created_at >= NOW() - make_interval(hours => $1::int)
+                AND ($2::text IS NULL OR host_code = $2)
+                AND ($3::text IS NULL OR action    = $3)
+              GROUP BY LEFT(path, 256)
+              ORDER BY total_events DESC
+              LIMIT 20
+            ),
+            category_top AS (
+              SELECT category_of(rule_id) AS category, COUNT(*)::bigint AS total
+              FROM security_events
+              WHERE created_at >= NOW() - make_interval(hours => $1::int)
+                AND ($2::text IS NULL OR host_code = $2)
+                AND ($3::text IS NULL OR action    = $3)
+                AND rule_id IS NOT NULL
+              GROUP BY category_of(rule_id)
+              ORDER BY total DESC
+              LIMIT 12
+            ),
+            scoped AS (
+              SELECT LEFT(path, 256) AS path, category_of(rule_id) AS cat
+              FROM security_events
+              WHERE created_at >= NOW() - make_interval(hours => $1::int)
+                AND ($2::text IS NULL OR host_code = $2)
+                AND ($3::text IS NULL OR action    = $3)
+                AND rule_id IS NOT NULL
+                AND LEFT(path, 256) IN (SELECT path FROM path_ranks)
+            )
+            SELECT
+              s.path AS path,
+              CASE
+                WHEN s.cat IN (SELECT category FROM category_top) THEN s.cat
+                ELSE 'other'
+              END AS category,
+              COUNT(*)::bigint AS count
+            FROM scoped s
+            GROUP BY 1, 2
+            ORDER BY 1, 3 DESC
+            ",
+        )
+        .bind(hours_i32)
+        .bind(host)
+        .bind(action)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut cells: Vec<HeatmapCell> = Vec::with_capacity(rows.len());
+        let mut total: i64 = 0;
+
+        for r in rows {
+            let path: String = r.try_get("path")?;
+            let category: String = r.try_get("category")?;
+            let count: i64 = r.try_get("count")?;
+            total = total.saturating_add(count);
+            cells.push(HeatmapCell { path, category, count });
+        }
+
+        // SQL already GROUP BY (path, category) so each pair appears exactly
+        // once. Distinct counts derive cheaply from the materialized cells
+        // using borrowed string slices — no per-row clone needed.
+        let paths_sampled: i64 = cells
+            .iter()
+            .map(|c| c.path.as_str())
+            .collect::<std::collections::HashSet<&str>>()
+            .len()
+            .try_into()
+            .unwrap_or(i64::MAX);
+        let categories_total: i64 = cells
+            .iter()
+            .map(|c| c.category.as_str())
+            .collect::<std::collections::HashSet<&str>>()
+            .len()
+            .try_into()
+            .unwrap_or(i64::MAX);
+
+        Ok(EndpointHeatmap {
+            cells,
+            total_events: total,
+            paths_sampled,
+            categories_total,
+            window_hours: filter.hours,
+            generated_at: chrono::Utc::now(),
         })
     }
 

@@ -743,3 +743,44 @@ pub struct CrowdSecEventQuery {
     pub page: Option<i64>,
     pub page_size: Option<i64>,
 }
+
+// ─── FR-030: Dashboard heatmap + stats filter ─────────────────────────────────
+
+/// Single cell in the endpoint attack-heatmap (path × category).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeatmapCell {
+    pub path: String,
+    pub category: String,
+    pub count: i64,
+}
+
+/// Full heatmap response: sparse cells + window metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EndpointHeatmap {
+    pub cells: Vec<HeatmapCell>,
+    pub total_events: i64,
+    pub paths_sampled: i64,
+    pub categories_total: i64,
+    pub window_hours: i64,
+    pub generated_at: DateTime<Utc>,
+}
+
+/// Query parameters for `get_endpoint_heatmap`.
+/// `hours` is clamped 1..=720 by the caller before passing in.
+#[derive(Debug, Clone, Default)]
+pub struct HeatmapFilter {
+    pub hours: i64,
+    pub host_code: Option<String>,
+    pub action: Option<String>,
+}
+
+/// Optional filter for `get_stats_overview`.
+/// All fields `None` ⇒ identical output to the pre-filter implementation
+/// (full backward-compat guarantee).
+#[derive(Debug, Clone, Default)]
+pub struct StatsFilter {
+    /// Restrict to events within the last N hours. `None` = all-time.
+    pub hours: Option<i64>,
+    pub host_code: Option<String>,
+    pub action: Option<String>,
+}
