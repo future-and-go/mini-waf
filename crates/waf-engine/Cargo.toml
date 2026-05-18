@@ -129,5 +129,9 @@ redis-store = ["dep:redis"]
 # tests / external backends. Implicitly enabled under `cfg(test)`.
 test-conformance = []
 
+[[bin]]
+name = "migrate-yaml-rules"
+path = "src/bin/migrate-yaml-rules.rs"
+
 [lints]
 workspace = true

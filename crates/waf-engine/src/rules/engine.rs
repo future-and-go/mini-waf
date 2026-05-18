@@ -162,6 +162,12 @@ pub enum Operator {
     Lt,
     Gte,
     Lte,
+    // Operators evaluated by specialised check modules, not the condition matcher.
+    // Stored so YAML round-trips losslessly.
+    PmFromFile,
+    DetectSqli,
+    DetectXss,
+    ContainsAny,
 }
 
 // ── Condition value ───────────────────────────────────────────────────────────
@@ -830,6 +836,10 @@ fn compile_condition(cond: &Condition) -> anyhow::Result<CompiledCondition> {
         (Operator::Lt, V::Number(n)) => Matcher::Lt(*n),
         (Operator::Gte, V::Number(n)) => Matcher::Gte(*n),
         (Operator::Lte, V::Number(n)) => Matcher::Lte(*n),
+        // Operators handled by specialised modules — not evaluable as conditions.
+        (op @ (Operator::PmFromFile | Operator::DetectSqli | Operator::DetectXss | Operator::ContainsAny), _) => {
+            anyhow::bail!("operator {op:?} is handled by a specialised check module, not the condition evaluator");
+        }
         (op, val) => {
             anyhow::bail!("unsupported operator/value combination: {op:?} / {val:?}");
         }

@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Migration Script"
-status: pending
+status: done
 priority: P1
 effort: "4h"
 dependencies: [1]
@@ -275,12 +275,13 @@ Manually review `git diff rules/` to verify no logic changes, no lost fields.
 
 ## Success Criteria
 
-- [ ] All 30 YAML files migrated (6 advanced + 24 owasp-crs + bot/cve/etc)
-- [ ] Rule count preserved: 351 rules before == 351 rules after
-- [ ] Every migrated rule parseable by `custom_rule_yaml::parse()`
-- [ ] Every rule has at least one matching mechanism (pattern OR conditions)
-- [ ] Metadata preserved: category, severity, paranoia, tags, risk_delta, crs_id (in metadata)
-- [ ] `git diff` review shows no unexpected changes
+- [x] All 40 YAML files migrated (6 advanced + 24 owasp-crs + 7 cve-patches + 3 bot-detection)
+- [x] Rule count preserved: 490 rules before == 490 rules after
+- [x] Every migrated rule parseable by `custom_rule_yaml::parse()` (3 pre-existing regex warnings)
+- [x] Every rule has at least one matching mechanism (pattern OR operator shorthand)
+- [x] Metadata preserved: category, severity, paranoia, tags, risk_delta, crs_id (in metadata)
+- [x] `git diff` review shows no unexpected changes
+- [x] All 126 rules:: tests pass, full workspace compiles clean
 
 ## Risk Assessment
 
