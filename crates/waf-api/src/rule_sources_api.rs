@@ -124,6 +124,7 @@ const MAX_URL_LEN: usize = 1000;
 const MAX_PATH_LEN: usize = 500;
 const MAX_FORMAT_LEN: usize = 20;
 
+// "builtin" intentionally excluded — builtin sources are config-managed, not API-created.
 const ALLOWED_SOURCE_TYPES: &[&str] = &["local_file", "local_dir", "remote_url"];
 const ALLOWED_FORMATS: &[&str] = &["yaml", "json", "modsec"];
 

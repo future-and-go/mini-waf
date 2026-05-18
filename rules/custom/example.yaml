@@ -1,88 +1,87 @@
-version: "1.0"
-description: "Example custom rules - copy and adapt for your use case"
-source: "custom"
-license: "Apache-2.0"
-
-# Custom rules for a hypothetical e-commerce application.
-# Rule IDs in the CUSTOM-* namespace are reserved for user-defined rules.
-# See README.md for full schema documentation.
-
-rules:
-  - id: "CUSTOM-API-001"
-    name: "Block access to internal admin API paths"
-    category: "access-control"
-    severity: "high"
-    paranoia: 1
-    field: "path"
-    operator: "regex"
-    value: "(?i)^/(?:api/internal|_internal|admin/api|management/)"
-    action: "block"
-    tags: ["custom", "access-control", "admin"]
-
-  - id: "CUSTOM-API-002"
-    name: "Detect GraphQL introspection queries (information disclosure)"
-    category: "generic"
-    severity: "medium"
-    paranoia: 2
-    field: "body"
-    operator: "regex"
-    value: "(?i)__(?:schema|type|typename|field|inputField|enumValue|directive)\\s*(?:\\{|\\()"
-    action: "log"
-    tags: ["custom", "graphql", "introspection"]
-    reference: "https://owasp.org/www-project-top-ten/"
-
-  - id: "CUSTOM-API-003"
-    name: "Detect mass assignment patterns in JSON body"
-    category: "injection"
-    severity: "high"
-    paranoia: 2
-    field: "body"
-    operator: "regex"
-    value: "(?i)\"(?:isAdmin|role|admin|privilege|permission|is_superuser)\"\\s*:\\s*(?:true|1|\"admin\")"
-    action: "log"
-    tags: ["custom", "mass-assignment", "privilege-escalation"]
-    reference: "https://owasp.org/API-Security/editions/2023/en/0xa3-broken-object-property-level-authorization/"
-
-  - id: "CUSTOM-APP-001"
-    name: "Block access to backup and source files"
-    category: "lfi"
-    severity: "high"
-    paranoia: 1
-    field: "path"
-    operator: "regex"
-    value: "(?i)\\.(?:bak|sql|dump|tar\\.gz|zip|rar|7z|backup|old|orig|tmp|swp|git|svn|hg)(?:\\?|$|#)"
-    action: "block"
-    tags: ["custom", "backup-files", "information-disclosure"]
-
-  - id: "CUSTOM-APP-002"
-    name: "Block direct PHP file execution in upload directories"
-    category: "web-shell"
-    severity: "critical"
-    paranoia: 1
-    field: "path"
-    operator: "regex"
-    value: "(?i)/(?:uploads?|files?|media|static|assets)/[^/]+\\.(?:php[0-9]?|phtml|phar|asp|aspx|jsp|sh|cgi|pl)"
-    action: "block"
-    tags: ["custom", "web-shell", "upload"]
-
-  - id: "CUSTOM-APP-003"
-    name: "Log access to sensitive configuration endpoints"
-    category: "access-control"
-    severity: "medium"
-    paranoia: 1
-    field: "path"
-    operator: "regex"
-    value: "(?i)(?:/\\.env|/config\\.(?:php|yml|yaml|ini|json)|/settings\\.(?:py|rb|php)|/database\\.yml)"
-    action: "block"
-    tags: ["custom", "configuration", "information-disclosure"]
-
-  - id: "CUSTOM-BOT-001"
-    name: "Detect credential stuffing patterns (many login attempts)"
-    category: "authentication"
-    severity: "high"
-    paranoia: 2
-    field: "path"
-    operator: "regex"
-    value: "(?i)^/(?:login|signin|auth|oauth/token|api/auth)$"
-    action: "log"
-    tags: ["custom", "credential-stuffing", "brute-force"]
+kind: custom_rule_v1
+id: CUSTOM-API-001
+name: Block access to internal admin API paths
+enabled: false
+action: block
+pattern: "(?i)^/(?:api/internal|_internal|admin/api|management/)"
+pattern_field: path
+category: access-control
+severity: high
+paranoia: 1
+tags: [custom, access-control, admin]
+metadata:
+  note: "Rename and customize this file to create your own rules"
+---
+kind: custom_rule_v1
+id: CUSTOM-API-002
+name: Detect GraphQL introspection queries (information disclosure)
+enabled: false
+action: log
+pattern: "(?i)__(?:schema|type|typename|field|inputField|enumValue|directive)\\s*(?:\\{|\\()"
+pattern_field: body
+category: generic
+severity: medium
+paranoia: 2
+tags: [custom, graphql, introspection]
+reference: "https://owasp.org/www-project-top-ten/"
+---
+kind: custom_rule_v1
+id: CUSTOM-API-003
+name: Detect mass assignment patterns in JSON body
+enabled: false
+action: log
+pattern: "(?i)\"(?:isAdmin|role|admin|privilege|permission|is_superuser)\"\\s*:\\s*(?:true|1|\"admin\")"
+pattern_field: body
+category: injection
+severity: high
+paranoia: 2
+tags: [custom, mass-assignment, privilege-escalation]
+reference: "https://owasp.org/API-Security/editions/2023/en/0xa3-broken-object-property-level-authorization/"
+---
+kind: custom_rule_v1
+id: CUSTOM-APP-001
+name: Block access to backup and source files
+enabled: false
+action: block
+pattern: "(?i)\\.(?:bak|sql|dump|tar\\.gz|zip|rar|7z|backup|old|orig|tmp|swp|git|svn|hg)(?:\\?|$|#)"
+pattern_field: path
+category: lfi
+severity: high
+paranoia: 1
+tags: [custom, backup-files, information-disclosure]
+---
+kind: custom_rule_v1
+id: CUSTOM-APP-002
+name: Block direct PHP file execution in upload directories
+enabled: false
+action: block
+pattern: "(?i)/(?:uploads?|files?|media|static|assets)/[^/]+\\.(?:php[0-9]?|phtml|phar|asp|aspx|jsp|sh|cgi|pl)"
+pattern_field: path
+category: web-shell
+severity: critical
+paranoia: 1
+tags: [custom, web-shell, upload]
+---
+kind: custom_rule_v1
+id: CUSTOM-APP-003
+name: Log access to sensitive configuration endpoints
+enabled: false
+action: block
+pattern: "(?i)(?:/\\.env|/config\\.(?:php|yml|yaml|ini|json)|/settings\\.(?:py|rb|php)|/database\\.yml)"
+pattern_field: path
+category: access-control
+severity: medium
+paranoia: 1
+tags: [custom, configuration, information-disclosure]
+---
+kind: custom_rule_v1
+id: CUSTOM-BOT-001
+name: Detect credential stuffing patterns (many login attempts)
+enabled: false
+action: log
+pattern: "(?i)^/(?:login|signin|auth|oauth/token|api/auth)$"
+pattern_field: path
+category: authentication
+severity: high
+paranoia: 2
+tags: [custom, credential-stuffing, brute-force]
