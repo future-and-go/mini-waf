@@ -110,6 +110,7 @@ RequestStats (parking_lot::Mutex) ──┐
 - `sensitive_patterns` — PII/credential keywords
 - `load_balance_backends` — Backend servers
 - `hotlink_config` — Anti-hotlink rules per host
+- `bot_patterns` — Bot detection rules (pattern, pattern_type, action, enabled)
 
 **Security Tables**
 - `security_events` — Rule match events (10K+ rows/day in production)
@@ -132,6 +133,23 @@ RequestStats (parking_lot::Mutex) ──┐
 - `crowdsec_cache` — Bouncer decision cache (IP, action, ttl)
 - `notifications` — Alert channels (email, webhook, telegram)
 
+### Bot Pattern Detection Schema
+
+`bot_patterns` table extends the built-in bot detection check with custom patterns:
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | SERIAL PRIMARY KEY | Auto-increment |
+| `pattern` | TEXT | Regex or string pattern (widened from VARCHAR(500) in 0009) |
+| `pattern_type` | VARCHAR(20) | One of: `user_agent`, `headers`, `body`, `path` (legacy: `ua`, `ip`, `behavior`) |
+| `action` | VARCHAR(20) | One of: `block`, `log`, `challenge`, `allow` |
+| `description` | TEXT | Human-readable rule description |
+| `enabled` | BOOLEAN | Whether rule is active (default true) |
+| `created_at` | TIMESTAMPTZ | Rule creation timestamp |
+| `updated_at` | TIMESTAMPTZ | Last modification timestamp |
+
+**Migration 0009** (Phase 3 schema alignment): Widened `pattern` column from VARCHAR(500) to TEXT to support arbitrarily long regex patterns. Updated SQL comments to document expanded `pattern_type` and `action` vocabularies.
+
 ### Indexes for Performance
 
 ```sql
@@ -139,6 +157,7 @@ CREATE INDEX idx_security_events_timestamp ON security_events(timestamp DESC);
 CREATE INDEX idx_security_events_rule_id ON security_events(rule_id);
 CREATE INDEX idx_attack_logs_client_ip ON attack_logs(client_ip);
 CREATE INDEX idx_request_stats_timestamp ON request_stats(timestamp DESC);
+CREATE INDEX idx_bot_patterns_enabled ON bot_patterns(enabled);
 ```
 
 ---
