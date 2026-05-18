@@ -235,8 +235,8 @@ impl WafProxy {
     }
 
     /// Evaluate response-body YAML rules against a response body chunk.
-    fn eval_response_body_rules(engine: &Arc<WafEngine>, host_code: &str, host: &str, body: &mut Option<Bytes>) {
-        if let Some(chunk) = body.as_ref().filter(|c| !c.is_empty()) {
+    fn eval_response_body_rules(engine: &Arc<WafEngine>, host_code: &str, host: &str, body: Option<&Bytes>) {
+        if let Some(chunk) = body.filter(|c| !c.is_empty()) {
             let text = String::from_utf8_lossy(chunk);
             if let Some(detection) = engine.custom_rules.check_response_body(host_code, &text) {
                 tracing::warn!(
@@ -880,7 +880,7 @@ impl ProxyHttp for WafProxy {
             }
 
             // Response-body YAML rules on (post-decompression) plaintext.
-            Self::eval_response_body_rules(&self.engine, &hc.code, &hc.host, body);
+            Self::eval_response_body_rules(&self.engine, &hc.code, &hc.host, body.as_ref());
 
             // FR-034: buffers JSON, sets *body = None until EOS or cap; emits
             // redacted full body. AC-17 then runs over it as a single chunk.
@@ -900,7 +900,7 @@ impl ProxyHttp for WafProxy {
         // Response-body YAML rules: fire independently when body_scan/redact/mask
         // are all disabled, so hosts with response_body rules still get coverage.
         if let Some(hc) = ctx.host_config.as_ref() {
-            Self::eval_response_body_rules(&self.engine, &hc.code, &hc.host, body);
+            Self::eval_response_body_rules(&self.engine, &hc.code, &hc.host, body.as_ref());
         }
 
         if let Some(cache) = &self.response_cache {

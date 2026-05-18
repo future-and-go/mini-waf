@@ -439,7 +439,7 @@ impl CustomRulesEngine {
     ///
     /// Only rules whose `pattern_field` is `"response_body"` and that carry
     /// a pre-compiled `pattern` regex are tested. Rules using `pm_from_file`,
-    /// `detect_sqli`, or condition trees for response_body are not yet
+    /// `detect_sqli`, or condition trees for `response_body` are not yet
     /// supported — those require Phase 2 wiring.
     ///
     /// Returns the first match as a `DetectionResult` with `Phase::CustomRule`.
@@ -464,15 +464,15 @@ impl CustomRulesEngine {
             None
         };
 
-        if let Some(rules) = self.rules.get(host_code) {
-            if let Some(result) = check_bucket(&rules) {
-                return Some(result);
-            }
+        if let Some(rules) = self.rules.get(host_code)
+            && let Some(result) = check_bucket(&rules)
+        {
+            return Some(result);
         }
-        if let Some(rules) = self.rules.get("*") {
-            if let Some(result) = check_bucket(&rules) {
-                return Some(result);
-            }
+        if let Some(rules) = self.rules.get("*")
+            && let Some(result) = check_bucket(&rules)
+        {
+            return Some(result);
         }
         None
     }
@@ -1162,6 +1162,7 @@ fn eval_specialised(op: &Operator, pattern_field: &str, ctx: &RequestCtx) -> boo
 }
 
 #[cfg(test)]
+#[allow(clippy::trivial_regex)]
 mod tests {
     use super::*;
     use bytes::Bytes;
