@@ -93,7 +93,7 @@ id: API-INJ-007
 name: LDAP Injection in API Parameters
 enabled: true
 action: block
-pattern: "(?i)(?:\\*\\)\\s*(?:cn|uid|mail|dc|ou|objectClass)|\\(\\|\\s*\\(|\\(\\&\\s*\\(|\\)\\s*\\(|\\*\\)(?:%00|\\0))"
+pattern: "(?i)(?:\\*\\)\\s*(?:cn|uid|mail|dc|ou|objectClass)|\\(\\|\\s*\\(|\\(\\&\\s*\\(|\\)\\s*\\(|\\*\\)(?:%00|\\x00))"
 pattern_field: all
 category: injection
 severity: high
