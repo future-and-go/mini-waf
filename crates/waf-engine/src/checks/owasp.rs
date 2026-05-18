@@ -156,7 +156,8 @@ impl OWASPCheck {
                     debug!("custom_rule_v1 parse failed for {}: {e}", path.display());
                 }
             }
-            // Try legacy RuleSet format
+            // Try legacy RuleSet format (kept for backward compat with remote rule sources)
+            #[allow(deprecated)]
             if let Some(rules) = legacy_parse_ruleset(&content) {
                 let n = rules.len();
                 for rule in rules {
@@ -187,7 +188,8 @@ impl OWASPCheck {
             };
         }
 
-        // Fall back to legacy RuleSet format
+        // Fall back to legacy RuleSet format (kept for backward compat with remote rule sources)
+        #[allow(deprecated)]
         if let Some(rules) = legacy_parse_ruleset(yaml) {
             let count = rules.len();
             for rule in rules {
@@ -246,6 +248,11 @@ impl Check for OWASPCheck {
 use crate::rules::engine::{Condition, ConditionField, ConditionOp, ConditionValue, CustomRule, RuleAction};
 use std::collections::HashMap;
 
+#[deprecated(
+    since = "0.1.0",
+    note = "Use custom_rule_yaml::parse() — all YAML rules now use custom_rule_v1 format"
+)]
+#[allow(deprecated)]
 #[derive(Debug, Deserialize)]
 struct LegacyRuleSet {
     #[allow(dead_code)]
@@ -261,6 +268,11 @@ const fn default_paranoia_level() -> u8 {
     1
 }
 
+#[deprecated(
+    since = "0.1.0",
+    note = "Use custom_rule_yaml::parse() — all YAML rules now use custom_rule_v1 format"
+)]
+#[allow(deprecated)]
 #[derive(Debug, Deserialize)]
 struct LegacyYamlRule {
     id: String,
@@ -279,6 +291,10 @@ struct LegacyYamlRule {
     action: String,
 }
 
+#[deprecated(
+    since = "0.1.0",
+    note = "Use custom_rule_yaml::parse() — all YAML rules now use custom_rule_v1 format"
+)]
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum LegacyYamlValue {
@@ -287,13 +303,22 @@ enum LegacyYamlValue {
     Int(i64),
 }
 
-/// Parse legacy `RuleSet` YAML, converting each rule to a `CustomRule`.
+#[deprecated(
+    since = "0.1.0",
+    note = "Use custom_rule_yaml::parse() — all YAML rules now use custom_rule_v1 format"
+)]
+#[allow(deprecated)]
 fn legacy_parse_ruleset(yaml: &str) -> Option<Vec<CustomRule>> {
     let ruleset: LegacyRuleSet = serde_yaml::from_str(yaml).ok()?;
     let rules: Vec<CustomRule> = ruleset.rules.iter().filter_map(legacy_convert_rule).collect();
     if rules.is_empty() { None } else { Some(rules) }
 }
 
+#[deprecated(
+    since = "0.1.0",
+    note = "Use custom_rule_yaml::parse() — all YAML rules now use custom_rule_v1 format"
+)]
+#[allow(deprecated)]
 fn legacy_convert_rule(r: &LegacyYamlRule) -> Option<CustomRule> {
     // Virtual fields that need Rhai scripts (no ConditionField equivalent)
     if let Some(script) = legacy_virtual_field_script(&r.field, &r.operator, &r.value) {
@@ -388,7 +413,11 @@ fn legacy_convert_rule(r: &LegacyYamlRule) -> Option<CustomRule> {
     Some(legacy_rule_shell(r, None, conditions, pattern, specialised_op))
 }
 
-/// Build a `CustomRule` from a legacy YAML rule, filling in shared defaults.
+#[deprecated(
+    since = "0.1.0",
+    note = "Use custom_rule_yaml::parse() — all YAML rules now use custom_rule_v1 format"
+)]
+#[allow(deprecated)]
 fn legacy_rule_shell(
     r: &LegacyYamlRule,
     script: Option<String>,
@@ -423,8 +452,11 @@ fn legacy_rule_shell(
     }
 }
 
-/// Convert virtual computed fields (`path_length`, `query_arg_count`) to
-/// Rhai scripts, since `ConditionField` has no equivalent.
+#[deprecated(
+    since = "0.1.0",
+    note = "Use custom_rule_yaml::parse() — all YAML rules now use custom_rule_v1 format"
+)]
+#[allow(deprecated)]
 fn legacy_virtual_field_script(field: &str, operator: &str, value: &LegacyYamlValue) -> Option<String> {
     let n = match value {
         LegacyYamlValue::Int(n) => *n,
@@ -448,6 +480,10 @@ fn legacy_virtual_field_script(field: &str, operator: &str, value: &LegacyYamlVa
     }
 }
 
+#[deprecated(
+    since = "0.1.0",
+    note = "Use custom_rule_yaml::parse() — all YAML rules now use custom_rule_v1 format"
+)]
 fn legacy_map_field(field: &str) -> ConditionField {
     match field {
         "path" => ConditionField::Path,
