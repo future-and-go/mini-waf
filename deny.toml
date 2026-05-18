@@ -20,27 +20,9 @@ ignore = [
     # OPTIONAL feature we never enable (default-features=false; only the
     # `postgres` feature is on). The vulnerable code is never compiled.
     { id = "RUSTSEC-2023-0071", reason = "rsa via sqlx-mysql: feature not enabled" },
-    # protobuf 2.28.0 DoS — blocked by pingora 0.8.0 pinning prometheus 0.13.
-    { id = "RUSTSEC-2024-0437", reason = "protobuf: blocked by pingora 0.8.0, awaiting pingora 0.9.x" },
     # Unmaintained transitive deps via pingora.
     { id = "RUSTSEC-2025-0069", reason = "daemonize: pingora transitive dep" },
     { id = "RUSTSEC-2024-0388", reason = "derivative: pingora transitive dep" },
-    # ── 2026-04 wasmtime 43.0 family — fixed in 43.0.1+, blocked by pingora
-    # 0.8.0 transitive pin. We do not run untrusted Wasm: plugins are
-    # admin-uploaded via /api/plugins.
-    { id = "RUSTSEC-2026-0085", reason = "wasmtime Winch sandbox-escape: blocked by pingora pin" },
-    { id = "RUSTSEC-2026-0086", reason = "wasmtime Cranelift aarch64 sandbox-escape: blocked by pingora pin" },
-    { id = "RUSTSEC-2026-0087", reason = "wasmtime pooling-allocator data leak: blocked by pingora pin" },
-    { id = "RUSTSEC-2026-0088", reason = "wasmtime Winch table.fill panic: blocked by pingora pin" },
-    { id = "RUSTSEC-2026-0089", reason = "wasmtime Linker UAF: blocked by pingora pin" },
-    { id = "RUSTSEC-2026-0090", reason = "wasmtime Winch table.grow masking: blocked by pingora pin" },
-    { id = "RUSTSEC-2026-0091", reason = "wasmtime component-model OOB write: blocked by pingora pin" },
-    { id = "RUSTSEC-2026-0092", reason = "wasmtime UTF-16/latin1 OOB read: blocked by pingora pin" },
-    { id = "RUSTSEC-2026-0093", reason = "wasmtime f64x2.splat OOB load: blocked by pingora pin" },
-    { id = "RUSTSEC-2026-0094", reason = "wasmtime flags lift panic: blocked by pingora pin" },
-    { id = "RUSTSEC-2026-0095", reason = "wasmtime component-model transcode: blocked by pingora pin" },
-    { id = "RUSTSEC-2026-0096", reason = "wasmtime UTF-16 misalign panic: blocked by pingora pin" },
-    { id = "RUSTSEC-2026-0103", reason = "wasmtime 64-bit table data leak: blocked by pingora pin" },
     # rand 0.8.5 unsoundness — only triggers when a custom log::Logger calls
     # `rand::rng()` reentrantly during `ThreadRng` reseed. We have no custom
     # logger that touches rand. Upgrade to rand 0.9 when all transitive deps
@@ -58,6 +40,7 @@ ignore = [
     # requires hostile script code which would be a separate access-control
     # failure first.
     { id = "RUSTSEC-2026-0099", reason = "thin-vec via rhai: requires hostile script in admin-controlled context" },
+    { id = "RUSTSEC-2026-0103", reason = "thin-vec UAF/double-free: same rhai transitive dep, same mitigation as 0099" },
     # rustls-pemfile 2.x unmaintained, superseded by rustls-pki-types parsers.
     # Transitive via redis 0.27 -> rustls-native-certs 0.7. We do not parse
     # PEM ourselves; redis only uses it for TLS root certs. Drops when redis
