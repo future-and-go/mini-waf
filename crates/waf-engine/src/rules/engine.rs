@@ -271,7 +271,7 @@ pub struct CustomRule {
     pub metadata: HashMap<String, String>,
     /// External reference URL.
     pub reference: Option<String>,
-    /// Operator that can't be compiled into a condition tree (e.g. detect_sqli).
+    /// Operator that can't be compiled into a condition tree (e.g. `detect_sqli`).
     /// Stored so the rule engine can dispatch to specialised evaluation paths.
     pub specialised_op: Option<Operator>,
 }
@@ -458,6 +458,7 @@ impl CustomRulesEngine {
     ///
     /// Used by `OWASPCheck` to run OWASP CRS rules through the unified engine
     /// while preserving paranoia-level filtering and the OWASP phase tag.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn check_owasp(&self, ctx: &RequestCtx, max_paranoia: u8) -> Option<DetectionResult> {
         let rules = self.rules.get("*")?;
         for entry in rules.iter() {
@@ -488,9 +489,9 @@ impl CustomRulesEngine {
     ///
     /// Eval order (updated for pattern support):
     /// 1. Rhai script (legacy escape hatch)
-    /// 2. Compiled match_tree (preferred)
+    /// 2. Compiled `match_tree` (preferred)
     /// 3. Legacy flat conditions
-    /// 4. Pattern + field (fallback when no conditions/match_tree)
+    /// 4. Pattern + field (fallback when no `conditions`/`match_tree`)
     fn eval_list_with_verdict(&self, ctx: &RequestCtx, rules: &[RuleEntry], verdict: &mut RuleVerdict) {
         for entry in rules {
             let rule = &entry.raw;
@@ -930,7 +931,7 @@ impl Matcher {
 }
 
 /// Run a libinjection detector on raw + URL-decoded forms to catch encoding
-/// bypass attempts (e.g. `%27OR%201%3D1` evading SQLi detection).
+/// bypass attempts (e.g. `%27OR%201%3D1` evading `SQLi` detection).
 fn detect_with_decode(raw: &str, detector: impl Fn(&[u8]) -> bool) -> bool {
     use crate::checks::{url_decode, url_decode_recursive};
 

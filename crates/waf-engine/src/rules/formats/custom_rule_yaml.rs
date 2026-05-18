@@ -59,7 +59,7 @@ struct YamlCustomRule {
     /// Operator shorthand for Registry format — auto-converted to Condition.
     #[serde(default)]
     operator: Option<String>,
-    /// Value for operator shorthand — auto-converted to ConditionValue.
+    /// Value for operator shorthand — auto-converted to `ConditionValue`.
     #[serde(default)]
     value: Option<serde_yaml::Value>,
     /// Rule category: sqli, xss, rce, ssti, ssrf, etc.
@@ -161,16 +161,18 @@ fn to_custom_rule(dto: YamlCustomRule) -> Result<CustomRule> {
     // contains_any) are stored in `specialised_op` for dispatch by the engine.
     let mut conditions = dto.conditions;
     let mut specialised_op = None;
-    if conditions.is_empty() && dto.match_tree.is_none() && pattern.is_none() {
-        if let (Some(op_str), Some(val)) = (&dto.operator, &dto.value) {
-            let operator = parse_operator_str(op_str)?;
-            if is_specialised_operator(&operator) {
-                specialised_op = Some(operator);
-            } else {
-                let field = parse_pattern_field_to_condition(&dto.pattern_field);
-                let value = yaml_value_to_condition_value(val)?;
-                conditions.push(Condition { field, operator, value });
-            }
+    if conditions.is_empty()
+        && dto.match_tree.is_none()
+        && pattern.is_none()
+        && let (Some(op_str), Some(val)) = (&dto.operator, &dto.value)
+    {
+        let operator = parse_operator_str(op_str)?;
+        if is_specialised_operator(&operator) {
+            specialised_op = Some(operator);
+        } else {
+            let field = parse_pattern_field_to_condition(&dto.pattern_field);
+            let value = yaml_value_to_condition_value(val)?;
+            conditions.push(Condition { field, operator, value });
         }
     }
 
@@ -208,14 +210,13 @@ fn parse_pattern_field_to_condition(field: &str) -> ConditionField {
         "path" => ConditionField::Path,
         "query" => ConditionField::Query,
         "method" => ConditionField::Method,
-        "body" => ConditionField::Body,
         "cookies" | "cookie" => ConditionField::Cookie(None),
         "host" => ConditionField::Host,
         "user_agent" => ConditionField::UserAgent,
         "content_type" => ConditionField::ContentType,
         "content_length" => ConditionField::ContentLength,
         "ip" => ConditionField::Ip,
-        // "all" and unknown → Body (best single-field approximation)
+        // "all", "body", and unknown → Body (best single-field approximation)
         _ => ConditionField::Body,
     }
 }
@@ -223,7 +224,7 @@ fn parse_pattern_field_to_condition(field: &str) -> ConditionField {
 /// Parse an operator string from OWASP/Registry format to `Operator`.
 fn parse_operator_str(s: &str) -> Result<Operator> {
     Ok(match s {
-        "eq" => Operator::Eq,
+        "eq" | "equals" => Operator::Eq,
         "ne" => Operator::Ne,
         "contains" => Operator::Contains,
         "not_contains" => Operator::NotContains,
@@ -242,13 +243,12 @@ fn parse_operator_str(s: &str) -> Result<Operator> {
         "detect_sqli" => Operator::DetectSqli,
         "detect_xss" => Operator::DetectXss,
         "contains_any" => Operator::ContainsAny,
-        "equals" => Operator::Eq,
         other => bail!("unknown operator: {other}"),
     })
 }
 
 /// Operators evaluated by specialised modules, not the generic condition matcher.
-fn is_specialised_operator(op: &Operator) -> bool {
+const fn is_specialised_operator(op: &Operator) -> bool {
     matches!(
         op,
         Operator::PmFromFile | Operator::DetectSqli | Operator::DetectXss | Operator::ContainsAny
