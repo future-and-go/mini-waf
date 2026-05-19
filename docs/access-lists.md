@@ -126,10 +126,17 @@ Even though the IP would have hit the whitelist, the host gate runs first.
 Set `dry_run: true` to validate a configuration in production traffic without enforcing it.
 
 - Decisions are computed normally.
-- A would-be `Block` becomes `Continue` for the request.
-- A `WARN` log entry is emitted with the same `access_decision` / `access_reason` / `access_match` fields as a real block.
+- A would-be `Block` becomes `Continue` at the gateway, so the request still enters the normal WAF pipeline.
+- The gateway emits a `WARN` event with `access_decision="dry_run_block"`, `access_reason="host_gate"` or `"ip_blacklist"`, `matched=<host-or-ip>`, and the would-be block `status`.
+- Whitelist behavior is unchanged: a `full_bypass` whitelist hit still bypasses downstream WAF phases, even while `dry_run: true` is set.
 
 Use this when introducing a host-gate to an existing service: enable dry-run for one rollout window, sample the WARN logs for false positives, then flip `dry_run: false`.
+
+Example verification:
+
+```bash
+grep 'dry_run_block' /var/log/prx-waf/gateway.log
+```
 
 ---
 
@@ -192,6 +199,10 @@ Every access-list decision is stamped on the request audit record:
 | `access_dry_run` | `true` if the snapshot was loaded with `dry_run: true` |
 
 Filter the log stream on `access_decision != continue` to see every block / bypass.
+
+Gateway enforcement logs use a slightly different event vocabulary: enforced blocks log
+`access_decision="block"`, dry-run blocks log `access_decision="dry_run_block"`,
+and full-bypass logs `access_decision="bypass_all"`.
 
 ---
 

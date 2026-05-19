@@ -85,11 +85,21 @@ See **[planned signal-predicate docs (FR-025/026)]** for risk-scorer integration
 
 ## Phase-0: Access Gate (FR-008)
 
-Phase-0 gate runs **before** the pipeline: **(1)** IP whitelist (Patricia trie, per-tier `full_bypass` vs `blacklist_only` dispatch) → **(2)** IP blacklist (Patricia trie, longest-prefix v4/v6) → **(3)** URL whitelist (regex + literal) → **(4)** URL blacklist (regex + literal).
+Phase-0 gate runs **before** the 16-phase rule pipeline:
+
+```
+Host gate -> IP blacklist -> IP whitelist
+```
+
+- **Host gate**: per-tier FQDN allowlist. If a tier list is non-empty, hosts outside it are blocked with `reason=host_gate`.
+- **IP blacklist**: Patricia-trie CIDR/bare-IP deny list. A match blocks with `reason=ip_blacklist`.
+- **IP whitelist**: Patricia-trie CIDR/bare-IP allow list. A match either continues to rules (`blacklist_only`) or skips downstream WAF phases (`full_bypass`), based on per-tier mode.
 
 **Rationale**: Blacklist before whitelist prevents leaked whitelist IPs from bypassing explicit blocks.
 
 **Configuration**: `rules/access-lists.yaml` (YAML v1). Hot-reload via `notify` (250ms debounce, SIGHUP forces immediate). Atomic `ArcSwap` swaps; on parse error, retains previous snapshot with `tracing::warn!`. Soft-warn ≥50k entries, hard-reject ≥500k.
+
+**Dry run**: `dry_run: true` computes the same block decisions but translates would-be blocks to `Continue` at the gateway. Gateway logs `access_decision="dry_run_block"`, `access_reason`, `matched`, and the would-be status. Whitelist `full_bypass` still bypasses downstream WAF phases.
 
 **Audit Fields**: Every request stamped with `access_decision` (continue|bypass_all|host_gate|ip_blacklist), `access_reason`, `access_match` (host/IP or empty), `access_dry_run` (bool).
 
