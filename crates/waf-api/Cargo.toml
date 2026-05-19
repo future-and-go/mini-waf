@@ -34,6 +34,7 @@ bytes = { workspace = true }
 futures-util = { workspace = true }
 ipnet = { workspace = true }
 parking_lot = { workspace = true }
+arc-swap = "1"
 serde_yaml = { workspace = true }
 sqlx = { workspace = true }
 url = { workspace = true }

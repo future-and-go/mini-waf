@@ -9,17 +9,19 @@
 //! produce negative intervals. The janitor purges actors idle longer than
 //! `session_ttl_secs`.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use tokio::task::JoinHandle;
 
+use super::audit_map::{OwnedAuditCtx, breach_to_audit};
 use super::classifier::Classifier;
 use super::config::TxVelocityConfig;
 use super::session_key::{SessionIdent, SessionKey};
 use super::{EndpointRole, Event};
+use crate::audit_emitter::{AuditCtx, AuditEmitter};
 use crate::device_fp::aggregator::{NoopAggregator, RiskAggregator};
 use crate::device_fp::signal::Signal;
 use crate::device_fp::types::FpKey;
@@ -117,6 +119,9 @@ pub struct TxStore {
     cfg: Arc<ArcSwap<TxVelocityConfig>>,
     classifiers: Vec<Arc<dyn Classifier>>,
     aggregator: Arc<dyn RiskAggregator>,
+    /// Issue #60 — optional audit emitter. Wired post-construction so existing
+    /// `TxStore::new` call sites stay back-compatible.
+    audit_emitter: OnceLock<Arc<AuditEmitter>>,
 }
 
 impl TxStore {
@@ -144,7 +149,26 @@ impl TxStore {
             cfg,
             classifiers,
             aggregator,
+            audit_emitter: OnceLock::new(),
         }
+    }
+
+    /// Plug in the issue-60 audit emitter. Idempotent — subsequent calls are
+    /// no-ops once an emitter has been registered.
+    pub fn set_audit_emitter(&self, emitter: Arc<AuditEmitter>) {
+        let _ = self.audit_emitter.set(emitter);
+    }
+
+    /// Cheap probe for whether audit row emission is currently active.
+    ///
+    /// `record_with_audit` is on the hot path for every authenticated
+    /// session hitting a role-tagged endpoint (login, withdraw, deposit,
+    /// otp). Callers that own per-request strings should use this gate
+    /// to avoid 4 `String` clones into [`OwnedAuditCtx`] when the emitter
+    /// is either unwired (V1 default) or disabled by config.
+    #[must_use]
+    pub fn is_audit_enabled(&self) -> bool {
+        self.audit_emitter.get().is_some_and(|e| e.is_enabled())
     }
 
     /// Saturating-cast monotonic ms since `anchor`. `u128 → u64` saturates
@@ -152,6 +176,13 @@ impl TxStore {
     #[must_use]
     pub fn now_ms(&self) -> u64 {
         u64::try_from(self.anchor.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// Back-compat shim — records without audit context. Existing callers
+    /// (tests, benches) keep using this; production wires
+    /// [`Self::record_with_audit`] from `TxVelocityCheck::check`.
+    pub fn record(&self, key: &SessionKey, role: EndpointRole, ok: bool) {
+        self.record_with_audit(key, role, ok, None);
     }
 
     /// Append an event for `key` and run the classifier pipeline. Skips
@@ -162,7 +193,7 @@ impl TxStore {
     /// (`cfg.signal_cooldown_ms`); within the cooldown window the
     /// recorder still appends the event but skips evaluation entirely.
     /// Submission to the aggregator is fire-and-forget (`tokio::spawn`).
-    pub fn record(&self, key: &SessionKey, role: EndpointRole, ok: bool) {
+    pub fn record_with_audit(&self, key: &SessionKey, role: EndpointRole, ok: bool, audit: Option<&OwnedAuditCtx>) {
         if matches!(role, EndpointRole::None) {
             return;
         }
@@ -207,6 +238,22 @@ impl TxStore {
         // `0` is the sentinel for "never fired" — bump to 1 if record-time
         // happened to hit the anchor instant exactly.
         self.mark_signal(key, now_ms.max(1));
+
+        // Issue #60 — emit one audit row per breach signal. Hot path stays
+        // unblocked: the emitter's `try_send` returns immediately.
+        if let (Some(emitter), Some(audit_ctx)) = (self.audit_emitter.get(), audit) {
+            for sig in &signals {
+                if let Some((rule_id, rule_name, detail)) = breach_to_audit(sig) {
+                    let ctx = AuditCtx {
+                        host_code: audit_ctx.host_code.as_str(),
+                        client_ip: audit_ctx.client_ip.as_str(),
+                        method: audit_ctx.method.as_str(),
+                        path: audit_ctx.path.as_str(),
+                    };
+                    let _ = emitter.emit(&ctx, rule_id, rule_name, "block", detail);
+                }
+            }
+        }
 
         let fp_key = fp_key_for_submission(key);
         let aggregator = Arc::clone(&self.aggregator);

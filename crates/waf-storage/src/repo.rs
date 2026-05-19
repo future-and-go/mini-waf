@@ -13,6 +13,26 @@ use crate::models::{
     UpdateCertificatePem, UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
 };
 
+/// Upper bound for the public `hours` query parameter — matches the documented
+/// 30-day window. Repo functions clamp through this constant rather than
+/// inheriting whatever the caller supplies, so a future call site that forgets
+/// to clamp at the handler layer can never trigger a full-table scan via an
+/// `i32::MAX` hour cast.
+const HOURS_MAX_I32: i32 = 720;
+
+/// Convert a user-supplied hour window into a safe `i32` bind parameter.
+///
+/// Negative or zero input collapses to 1h (the minimum legitimate window).
+/// Anything above the documented public maximum collapses to `HOURS_MAX_I32`.
+/// The fallback in the unreachable `try_from` path matches the upper bound
+/// rather than silently returning `i32::MAX` if a future refactor breaks the
+/// clamp invariant.
+#[inline]
+fn clamp_hours_for_sql(hours: i64) -> i32 {
+    let bounded = hours.clamp(1, i64::from(HOURS_MAX_I32));
+    i32::try_from(bounded).unwrap_or(HOURS_MAX_I32)
+}
+
 impl Database {
     // ─── Hosts ───────────────────────────────────────────────────────────────
 
@@ -1147,6 +1167,38 @@ impl Database {
         })
     }
 
+    /// Action aggregation with optional `host_code` / action filters and a
+    /// look-back window in hours. Powers the FR-025 risk-distribution
+    /// endpoint without joining or scanning unrelated columns.
+    pub async fn get_action_aggregates(
+        &self,
+        host_code: Option<&str>,
+        action: Option<&str>,
+        hours: i64,
+    ) -> Result<Vec<(String, i64)>, StorageError> {
+        let rows = sqlx::query(
+            "SELECT action AS entry_key, COUNT(*)::bigint AS cnt \
+             FROM security_events \
+             WHERE created_at >= NOW() - make_interval(hours => $1::int) \
+               AND ($2::text IS NULL OR host_code = $2) \
+               AND ($3::text IS NULL OR action = $3) \
+             GROUP BY action",
+        )
+        .bind(clamp_hours_for_sql(hours))
+        .bind(host_code)
+        .bind(action)
+        .map(|row: sqlx::postgres::PgRow| {
+            use sqlx::Row;
+            let key: String = row.get("entry_key");
+            let cnt: i64 = row.get("cnt");
+            (key, cnt)
+        })
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
     pub async fn get_stats_timeseries(
         &self,
         host_code: Option<&str>,
@@ -1163,7 +1215,7 @@ impl Database {
              GROUP BY date_trunc('hour', created_at) \
              ORDER BY ts ASC",
         )
-        .bind(i32::try_from(hours).unwrap_or(i32::MAX))
+        .bind(clamp_hours_for_sql(hours))
         .bind(host_code)
         .map(|row: sqlx::postgres::PgRow| {
             use sqlx::Row;

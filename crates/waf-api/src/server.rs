@@ -41,6 +41,7 @@ use crate::notifications::{
 };
 use crate::panel_api::{get_panel_config, put_panel_config};
 use crate::plugins::{delete_plugin, disable_plugin, enable_plugin, list_plugins, upload_plugin};
+use crate::reputation::{reputation_refresh, reputation_status};
 use crate::rule_sources_api::{
     create_rule_source, delete_rule_source, list_rule_sources, sync_all_rule_sources, sync_rule_source,
 };
@@ -50,6 +51,7 @@ use crate::security::{admin_ip_check_middleware, list_audit_log, rate_limit_midd
 use crate::state::AppState;
 use crate::static_files::static_handler;
 use crate::stats::{stats_geo, stats_overview, stats_timeseries};
+use crate::stats_risk_distribution::stats_risk_distribution;
 use crate::tunnels::{create_tunnel, delete_tunnel, list_tunnels, ws_tunnel};
 use crate::websocket::{ws_events, ws_logs};
 
@@ -156,6 +158,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/stats/overview", get(stats_overview))
         .route("/api/stats/timeseries", get(stats_timeseries))
         .route("/api/stats/geo", get(stats_geo))
+        // FR-025 risk distribution band chart
+        .route("/api/stats/risk-distribution", get(stats_risk_distribution))
+        // FR-042 reputation feeds status + manual refresh
+        .route("/api/reputation/status", get(reputation_status))
+        .route("/api/reputation/refresh", post(reputation_refresh))
         // Phase 4: Notifications
         .route(
             "/api/notifications",

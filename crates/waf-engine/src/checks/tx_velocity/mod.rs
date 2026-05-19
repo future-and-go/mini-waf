@@ -7,6 +7,7 @@
 //! Mirrors `device_fp::behavior` (FR-011) and `checks::rate_limit`
 //! (FR-004) — DRY by design.
 
+pub mod audit_map;
 pub mod check;
 pub mod classifier;
 pub mod classifiers;

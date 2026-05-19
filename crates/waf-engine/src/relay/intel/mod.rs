@@ -10,6 +10,7 @@ pub mod atomic_swap;
 pub mod datacenter_set;
 pub mod feed_helpers;
 pub mod http;
+pub mod status;
 pub mod tor_feed;
 
 use std::net::IpAddr;

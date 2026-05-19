@@ -55,10 +55,23 @@ impl Check for TxVelocityCheck {
         // TODO: FR-010 integration — pass actual FpKey when device_fp is wired.
         let key = extract_session_key(ctx, &snapshot.session_cookie, None)?;
 
+        // Issue #60 — thread request context down so the recorder can emit
+        // `security_events` rows tagged with real client_ip + path when a
+        // classifier breach fires. The 4 clones below are wasted work when
+        // the audit subsystem is unwired (V1 default) or disabled by config,
+        // so gate the construction on a cheap probe. Classifiers / hot path
+        // remain alloc-free for the no-audit case.
+        let audit_ctx = self.store.is_audit_enabled().then(|| super::audit_map::OwnedAuditCtx {
+            host_code: ctx.host.clone(),
+            client_ip: ctx.client_ip.to_string(),
+            method: ctx.method.clone(),
+            path: ctx.path.clone(),
+        });
+
         // Record the event. Classifiers run inside the store and emit signals
         // to the aggregator asynchronously. `ok = true` at request-entry;
         // response-side enrichment deferred to a follow-up phase.
-        self.store.record(&key, role, true);
+        self.store.record_with_audit(&key, role, true, audit_ctx.as_ref());
 
         // Signal-only: never block here.
         None

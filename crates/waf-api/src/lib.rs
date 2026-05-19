@@ -11,6 +11,7 @@ pub mod middleware;
 pub mod notifications;
 pub mod panel_api;
 pub mod plugins;
+pub mod reputation;
 pub mod rule_sources_api;
 pub mod rules_api;
 pub mod security;
@@ -18,6 +19,7 @@ pub mod server;
 pub mod state;
 pub mod static_files;
 pub mod stats;
+pub mod stats_risk_distribution;
 pub mod tunnels;
 pub mod websocket;
 
