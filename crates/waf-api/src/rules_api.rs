@@ -156,31 +156,59 @@ fn collect_yaml_files(base: &Path, dir: &Path, out: &mut Vec<(String, String, Ve
             }
         };
 
-        let rulefile: YamlRuleFile = match serde_yaml::from_str(&content) {
-            Ok(r) => r,
-            Err(e) => {
-                warn!("Cannot parse {}: {e}", path.display());
-                continue;
-            }
-        };
-
         // Derive a relative path label like "owasp-crs/sqli.yaml"
         let rel = path
             .strip_prefix(base)
             .map_or_else(|_| path.display().to_string(), |p| p.display().to_string());
 
-        let source = if rulefile.source.is_empty() {
-            // Derive source from directory name
-            path.parent()
-                .and_then(|p| p.file_name())
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-                .to_string()
-        } else {
-            rulefile.source
+        let source_from_dir = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        // ── Try wrapped format: { source: "...", rules: [...] } ─────────────
+        // Used by test fixtures and any externally-imported rule bundles.
+        // NOTE: serde_yaml::from_str may return Err for multi-document files
+        // (files containing `---` document separators); do NOT `continue` on
+        // error — fall through to the flat multi-doc parser below.
+        let wrapped_ok = match serde_yaml::from_str::<YamlRuleFile>(&content) {
+            Ok(rulefile) if !rulefile.rules.is_empty() => {
+                let source = if rulefile.source.is_empty() {
+                    source_from_dir.clone()
+                } else {
+                    rulefile.source
+                };
+                out.push((rel.clone(), source, rulefile.rules));
+                true
+            }
+            _ => false,
         };
 
-        out.push((rel, source, rulefile.rules));
+        if wrapped_ok {
+            continue;
+        }
+
+        // ── Multi-document flat format ─────────────────────────────────────
+        // The built-in rules/*.yaml files use YAML multi-document syntax:
+        // each `---` delimited document is a single YamlRuleEntry.
+        // Example: rules/owasp-crs/sqli.yaml, rules/advanced/ssti.yaml, etc.
+        let mut flat_entries: Vec<YamlRuleEntry> = Vec::new();
+        for doc in serde_yaml::Deserializer::from_str(&content) {
+            match YamlRuleEntry::deserialize(doc) {
+                Ok(e) => flat_entries.push(e),
+                Err(e) => {
+                    warn!("Skipping rule doc in {rel}: {e}");
+                }
+            }
+        }
+
+        if flat_entries.is_empty() {
+            warn!("No rules parsed from {}: check YAML format", path.display());
+        } else {
+            out.push((rel, source_from_dir, flat_entries));
+        }
     }
 }
 

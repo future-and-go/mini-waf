@@ -134,6 +134,7 @@ export const SettingsPage: React.FC = () => {
   const [discarding, setDiscarding] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [panelUnavailable, setPanelUnavailable] = useState<string | null>(null);
+  const [externallyChanged, setExternallyChanged] = useState(false);
 
   const { result, query } = useCustom<SystemStatus>({
     url: "/api/status",
@@ -187,6 +188,7 @@ export const SettingsPage: React.FC = () => {
   const markClean = () => {
     dirtyRef.current = false;
     setIsDirty(false);
+    setExternallyChanged(false);
   };
 
   // Apply server values to the form while suppressing onValuesChange so the
@@ -209,10 +211,15 @@ export const SettingsPage: React.FC = () => {
       lastRevRef.current = envelope.revision;
       return;
     }
-    if (envelope.revision !== lastRevRef.current && !dirtyRef.current) {
-      applyToForm(envelope.config);
-      lastRevRef.current = envelope.revision;
-      message.info(t("settings.panel.syncedFromDisk"));
+    if (envelope.revision !== lastRevRef.current) {
+      if (!dirtyRef.current) {
+        applyToForm(envelope.config);
+        lastRevRef.current = envelope.revision;
+        message.info(t("settings.panel.syncedFromDisk"));
+      } else {
+        // Form is dirty and disk changed — show alert so user can reload
+        setExternallyChanged(true);
+      }
     }
   }, [envelope, applyToForm, message, t]);
 
@@ -236,6 +243,14 @@ export const SettingsPage: React.FC = () => {
   const onSavePanel = async () => {
     try {
       const values = await form.validateFields();
+      // Client-side risk order guard (before any API call)
+      const ra = values.risk_allow as number;
+      const rc = values.risk_challenge as number;
+      const rb = values.risk_block as number;
+      if (!(ra < rc && rc < rb)) {
+        message.error(t("settings.panel.riskOrderError"));
+        return;
+      }
       setSaving(true);
       const resp = await httpClient.put<{ success: boolean; data: PanelConfigEnvelope }>(
         "/api/panel-config",
@@ -395,6 +410,24 @@ export const SettingsPage: React.FC = () => {
                 </Col>
               </Row>
             </Card>
+
+            {/* ── External change alert ─────────────────────────────────── */}
+            {externallyChanged && (
+              <Alert
+                type="warning"
+                showIcon
+                message={t("settings.panel.fileChangedExternal")}
+                action={
+                  <Button
+                    size="small"
+                    onClick={() => void onDiscard()}
+                    loading={discarding}
+                  >
+                    {t("settings.panel.reloadFromDisk")}
+                  </Button>
+                }
+              />
+            )}
 
             {/* ── Shadow Mode ──────────────────────────────────────────── */}
             <SectionCard

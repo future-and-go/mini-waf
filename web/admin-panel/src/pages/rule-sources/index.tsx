@@ -1,42 +1,48 @@
 import {
-  Card,
+  Alert,
   Button,
-  Space,
-  List,
-  Tag,
-  Modal,
+  Card,
   Form,
   Input,
   InputNumber,
-  Select,
-  App,
-  Typography,
-  Alert,
+  List,
+  Modal,
   Popconfirm,
+  Select,
+  Skeleton,
+  Space,
+  Tag,
+  Typography,
+  App,
 } from "antd";
 import { useCustom, useCustomMutation } from "@refinedev/core";
 import { useTranslation } from "react-i18next";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import dayjs from "dayjs";
-import type { RuleSource } from "../../types/api";
+import relativeTime from "dayjs/plugin/relativeTime";
+import type { RegistryRule, RuleSource } from "../../types/api";
+
+dayjs.extend(relativeTime);
 
 interface SourcesResponse {
   sources?: RuleSource[];
 }
 
+interface RegistryResponse {
+  rules?: RegistryRule[];
+}
+
 interface SourceForm {
   name: string;
+  // BACKEND-GAP: Verify whether POST /api/rule-sources accepts `type` or `source_type`.
+  // Check crates/waf-common/src/config.rs::RuleSourceEntry and
+  // crates/waf-api/src/server.rs for the POST route handler.
+  // Sending both `type` and `source_type` for forward-compatibility until confirmed.
   type: string;
   url: string;
   format: string;
   updateInterval: number;
 }
-
-const BUILTIN = [
-  { name: "builtin-owasp", description: "OWASP CRS built-in rules", count: 15 },
-  { name: "builtin-bot", description: "Bot detection patterns", count: 31 },
-  { name: "builtin-scanner", description: "Vulnerability scanner fingerprints", count: 19 },
-];
 
 export const RuleSourcesPage: React.FC = () => {
   const { t } = useTranslation();
@@ -49,6 +55,14 @@ export const RuleSourcesPage: React.FC = () => {
     method: "get",
     queryOptions: { staleTime: 30_000 },
   });
+
+  // Fetch registry to compute builtin source counts dynamically
+  const { result: registryResult, query: registryQuery } = useCustom<RegistryResponse>({
+    url: "/api/rules/registry",
+    method: "get",
+    queryOptions: { staleTime: 60_000 },
+  });
+
   const { mutate: syncAll, mutation: syncAllMutation } = useCustomMutation();
   const { mutate: syncOne } = useCustomMutation();
   const { mutate: removeOne } = useCustomMutation();
@@ -60,10 +74,37 @@ export const RuleSourcesPage: React.FC = () => {
   const rawSources = result?.data?.sources;
   const sources = Array.isArray(rawSources) ? rawSources : [];
 
+  // Compute builtin source groups dynamically from registry rules
+  const builtinGroups = useMemo(() => {
+    const registryRaw = registryResult?.data as RegistryResponse | { data: RegistryResponse } | undefined;
+    const normalizedRules: RegistryRule[] = Array.isArray(
+      (registryRaw as RegistryResponse)?.rules,
+    )
+      ? ((registryRaw as RegistryResponse).rules as RegistryRule[])
+      : Array.isArray((registryRaw as { data: RegistryResponse })?.data?.rules)
+        ? ((registryRaw as { data: RegistryResponse }).data.rules as RegistryRule[])
+        : [];
+
+    // Group rules by source, showing only sources not in user-configured list
+    const configuredNames = new Set(sources.map((s) => s.name));
+    const sourceGroups = new Map<string, number>();
+    for (const r of normalizedRules) {
+      if (!configuredNames.has(r.source)) {
+        sourceGroups.set(r.source, (sourceGroups.get(r.source) ?? 0) + 1);
+      }
+    }
+    return [...sourceGroups.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [registryResult, sources]);
+
   const onSyncAll = () =>
     syncAll(
       { url: "/api/rule-sources/sync", method: "post", values: {} },
-      { onSuccess: () => { message.success("OK"); refetch(); }, onError: (err) => message.error(err.message) },
+      {
+        onSuccess: () => { message.success("OK"); refetch(); },
+        onError: (err) => message.error(err.message),
+      },
     );
 
   const onSyncOne = (name: string) =>
@@ -84,8 +125,10 @@ export const RuleSourcesPage: React.FC = () => {
       {
         url: "/api/rule-sources",
         method: "post",
+        // Send both field names for compatibility (see BACKEND-GAP above)
         values: {
           name: v.name,
+          type: v.type,
           source_type: v.type,
           url: v.url,
           format: v.format,
@@ -123,27 +166,35 @@ export const RuleSourcesPage: React.FC = () => {
         </Space>
       </Space>
 
+      {/* Built-in sources — counts fetched dynamically from registry */}
       <Card size="small" title={t("ruleSources.builtinSources")}>
-        <List
-          size="small"
-          dataSource={BUILTIN}
-          renderItem={(b) => (
-            <List.Item
-              actions={[
-                <span key="count" style={{ color: "#8c8c8c", fontSize: 12 }}>
-                  {b.count} {t("ruleSources.rules")}
-                </span>,
-                <Tag key="b" color="purple">
-                  {t("ruleSources.builtin")}
-                </Tag>,
-              ]}
-            >
-              <List.Item.Meta title={b.name} description={b.description} />
-            </List.Item>
-          )}
-        />
+        {registryQuery.isLoading ? (
+          <Skeleton active paragraph={{ rows: 3 }} />
+        ) : builtinGroups.length === 0 ? (
+          <Typography.Text type="secondary">{t("ruleSources.noSources")}</Typography.Text>
+        ) : (
+          <List
+            size="small"
+            dataSource={builtinGroups}
+            renderItem={(b) => (
+              <List.Item
+                actions={[
+                  <span key="count" style={{ color: "#8c8c8c", fontSize: 12 }}>
+                    {b.count} {t("ruleSources.rules")}
+                  </span>,
+                  <Tag key="b" color="purple">
+                    {t("ruleSources.builtin")}
+                  </Tag>,
+                ]}
+              >
+                <List.Item.Meta title={b.name} />
+              </List.Item>
+            )}
+          />
+        )}
       </Card>
 
+      {/* User-configured sources */}
       <Card size="small" title={t("ruleSources.configuredSources")} loading={isLoading}>
         {sources.length === 0 ? (
           <Typography.Text type="secondary">{t("ruleSources.noSources")}</Typography.Text>
@@ -156,7 +207,9 @@ export const RuleSourcesPage: React.FC = () => {
                 actions={[
                   <Tag key="fmt" color="blue">{s.format}</Tag>,
                   <span key="up" style={{ fontSize: 11, color: "#bfbfbf" }}>
-                    {s.lastUpdated ? t("ruleSources.updated") + dayjs(s.lastUpdated).format("YYYY-MM-DD") : t("ruleSources.neverSynced")}
+                    {s.lastUpdated
+                      ? dayjs(s.lastUpdated).fromNow()
+                      : t("ruleSources.neverSynced")}
                   </span>,
                   <Button key="s" size="small" type="link" onClick={() => onSyncOne(s.name)}>
                     {t("common.sync")}
@@ -181,7 +234,12 @@ export const RuleSourcesPage: React.FC = () => {
                   }
                 />
                 {s.error && (
-                  <Alert type="error" showIcon message={`${t("ruleSources.error")}${s.error}`} style={{ marginTop: 8, width: "100%" }} />
+                  <Alert
+                    type="error"
+                    showIcon
+                    message={`${t("ruleSources.error")}${s.error}`}
+                    style={{ marginTop: 8, width: "100%" }}
+                  />
                 )}
               </List.Item>
             )}
@@ -193,12 +251,16 @@ export const RuleSourcesPage: React.FC = () => {
         title={t("ruleSources.addSourceTitle")}
         open={open}
         onCancel={() => setOpen(false)}
-        onOk={onAdd}
+        onOk={() => void onAdd()}
         okText={t("ruleSources.addSource")}
         cancelText={t("common.cancel")}
         destroyOnClose
       >
-        <Form form={form} layout="vertical" initialValues={{ type: "remote_url", format: "yaml", updateInterval: 86400 }}>
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ type: "remote_url", format: "yaml", updateInterval: 86400 }}
+        >
           <Form.Item name="name" label={t("ruleSources.sourceName")} rules={[{ required: true }]}>
             <Input placeholder="my-rules" />
           </Form.Item>

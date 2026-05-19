@@ -218,7 +218,35 @@
     "script": "Rhai Script",
     "host": "Host",
     "noCustomRules": "No custom rules",
-    "confirmDelete": "Delete this rule?"
+    "confirmDelete": "Delete this rule?",
+    "saved": "Saved",
+    "treeMode": "Tree",
+    "flatMode": "Flat",
+    "scriptMode": "Rhai",
+    "visualEditor": "Visual",
+    "jsonEditor": "JSON",
+    "addCondition": "Add condition",
+    "addAndGroup": "Add AND group",
+    "addOrGroup": "Add OR group",
+    "wrapNot": "Wrap NOT",
+    "removeNode": "Remove",
+    "treeDepthExceeded": "Tree depth exceeds {{max}}",
+    "treeLeavesExceeded": "Tree exceeds {{max}} leaves",
+    "invalidRegex": "Invalid regex pattern",
+    "invalidCidr": "Invalid CIDR",
+    "invalidJson": "Invalid JSON",
+    "fieldHeader": "Header name",
+    "fieldCookie": "Cookie name (empty = full header)",
+    "testRegex": "Test regex",
+    "regexSample": "Sample string",
+    "regexMatch": "Matched",
+    "regexNoMatch": "No match",
+    "duplicate": "Duplicate",
+    "bulkEnable": "Enable selected",
+    "bulkDisable": "Disable selected",
+    "bulkExport": "Export selected",
+    "actionStatus": "Action status",
+    "actionMessage": "Action message"
   },
   "settings": {
     "title": "System Settings",
@@ -275,7 +303,9 @@
       "honeypotPathsHelp": "Requests matching these paths are flagged as honeypot traps. Add any path you don't expect legitimate users to visit.",
       "zeroOff": "0 = disabled",
       "failOpenHelp": "Allow requests when the rate-limiter backend is unavailable",
-      "discard": "Discard changes"
+      "discard": "Discard changes",
+      "fileChangedExternal": "File changed externally — your unsaved changes may conflict.",
+      "reloadFromDisk": "Reload from disk"
     }
   },
   "certificates": {

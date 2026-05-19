@@ -50,15 +50,80 @@ export interface UrlRule {
   match_type?: string;
 }
 
+// ── Operator catalog (mirrors waf-engine::Operator serde rename_all="snake_case") ──
+export type RuleOperator =
+  | "eq" | "ne" | "contains" | "not_contains"
+  | "starts_with" | "ends_with"
+  | "regex" | "wildcard"
+  | "in_list" | "not_in_list"
+  | "cidr_match"
+  | "gt" | "lt" | "gte" | "lte";
+
+// ── Field catalog (mirrors ConditionField, including newtypes) ──
+export type SimpleField =
+  | "ip" | "path" | "query" | "method" | "body"
+  | "host" | "user_agent" | "content_type" | "content_length"
+  | "geo_country" | "geo_iso" | "geo_province" | "geo_city" | "geo_isp";
+
+// Newtypes: `{header: "x-foo"}` / `{cookie: "session"}` / `{cookie: null}` (legacy)
+export type HeaderField = { header: string };
+export type CookieField = { cookie: string | null };
+export type ConditionField = SimpleField | HeaderField | CookieField;
+
+export type ConditionValue = string | number | string[];
+
+export interface Condition {
+  field: ConditionField;
+  operator: RuleOperator;
+  value: ConditionValue;
+}
+
+// ── ConditionNode tree: untagged discriminated by key presence ──
+export type ConditionNode =
+  | { and: ConditionNode[] }
+  | { or: ConditionNode[] }
+  | { not: ConditionNode }
+  | Condition; // bare leaf
+
+export type ConditionOp = "and" | "or";
+export type RuleAction = "block" | "allow" | "log" | "challenge";
+
 export interface CustomRule {
   id: string;
-  name: string;
   host_code: string;
+  name: string;
+  description?: string | null;
   priority: number;
-  action: string;
   enabled: boolean;
-  script: string;
+  condition_op: ConditionOp;
+  conditions: Condition[];        // legacy flat shape, may be []
+  match_tree?: ConditionNode | null;
+  action: RuleAction;
+  action_status: number;
+  action_msg?: string | null;
+  script?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
+
+export interface CreateCustomRulePayload {
+  host_code: string;
+  name: string;
+  description?: string | null;
+  priority?: number;
+  enabled?: boolean;
+  condition_op?: ConditionOp;
+  conditions?: Condition[];
+  match_tree?: ConditionNode | null;
+  action?: RuleAction;
+  action_status?: number;
+  action_msg?: string | null;
+  script?: string | null;
+}
+
+// Tree bounds — must match engine.rs constants MAX_TREE_DEPTH / MAX_TREE_LEAVES
+export const MAX_TREE_DEPTH = 16;
+export const MAX_TREE_LEAVES = 256;
 
 export interface Certificate {
   id: string;
@@ -121,8 +186,9 @@ export interface RegistryRule {
   enabled: boolean;
   action: string;
   severity?: string;
-  pattern?: string;
+  pattern?: string | null;
   tags?: string[];
+  file?: string;
 }
 
 export interface RuleSource {
