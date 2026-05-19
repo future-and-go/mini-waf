@@ -205,7 +205,35 @@
     "script": "Rhai 脚本",
     "host": "主机",
     "noCustomRules": "暂无自定义规则",
-    "confirmDelete": "删除该规则?"
+    "confirmDelete": "删除该规则?",
+    "saved": "Saved",
+    "treeMode": "Tree",
+    "flatMode": "Flat",
+    "scriptMode": "Rhai",
+    "visualEditor": "Visual",
+    "jsonEditor": "JSON",
+    "addCondition": "Add condition",
+    "addAndGroup": "Add AND group",
+    "addOrGroup": "Add OR group",
+    "wrapNot": "Wrap NOT",
+    "removeNode": "Remove",
+    "treeDepthExceeded": "Tree depth exceeds {{max}}",
+    "treeLeavesExceeded": "Tree exceeds {{max}} leaves",
+    "invalidRegex": "Invalid regex pattern",
+    "invalidCidr": "Invalid CIDR",
+    "invalidJson": "Invalid JSON",
+    "fieldHeader": "Header name",
+    "fieldCookie": "Cookie name (empty = full header)",
+    "testRegex": "Test regex",
+    "regexSample": "Sample string",
+    "regexMatch": "Matched",
+    "regexNoMatch": "No match",
+    "duplicate": "Duplicate",
+    "bulkEnable": "Enable selected",
+    "bulkDisable": "Disable selected",
+    "bulkExport": "Export selected",
+    "actionStatus": "Action status",
+    "actionMessage": "Action message"
   },
   "settings": {
     "title": "系统设置",
@@ -216,7 +244,15 @@
     "rules": "规则",
     "configuration": "配置",
     "rulesReloaded": "规则已重载",
-    "reloadRules": "重载规则"
+    "reloadRules": "重载规则",
+    "panel": {
+      "riskOrderError": "Require allow < challenge < block",
+      "fileChangedExternal": "File changed externally — your unsaved changes may conflict.",
+      "reloadFromDisk": "Reload from disk",
+      "discard": "Discard changes",
+      "saved": "Panel configuration saved",
+      "syncedFromDisk": "Reloaded settings from disk"
+    }
   },
   "certificates": {
     "title": "SSL 证书",

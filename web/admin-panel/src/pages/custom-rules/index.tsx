@@ -4,111 +4,196 @@ import {
   Space,
   Table,
   Tag,
-  Modal,
-  Form,
-  Input,
-  InputNumber,
+  Typography,
+  Popconfirm,
   Select,
   Switch,
   App,
-  Typography,
-  Popconfirm,
+  Tooltip,
 } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
-import { useTable, useCreate, useDelete } from "@refinedev/core";
+import {
+  CopyOutlined,
+  EditOutlined,
+  PlusOutlined,
+} from "@ant-design/icons";
+import { useTable, useDelete, useUpdate } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
-import type { CustomRule } from "../../types/api";
+import type { CustomRule, RuleAction } from "../../types/api";
+import { CustomRuleEditorDrawer } from "./CustomRuleEditorDrawer";
 
-interface CustomRuleForm {
-  name: string;
-  host_code: string;
-  priority: number;
-  action: string;
-  enabled: boolean;
-  script: string;
-}
+// ── Action color helper ───────────────────────────────────────────────────────
+
+const actionColor = (a: string): string =>
+  ({ block: "red", allow: "green", log: "gold", challenge: "blue" })[a] ?? "default";
+
+// ── Condition mode badge ──────────────────────────────────────────────────────
+
+const conditionModeBadge = (r: CustomRule) => {
+  if (r.match_tree) return <Tag color="purple">{<span>tree</span>}</Tag>;
+  if (r.script) return <Tag color="cyan">rhai</Tag>;
+  if (r.conditions?.length) return <Tag>flat</Tag>;
+  return <Tag color="default">—</Tag>;
+};
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+type DrawerState =
+  | { open: false }
+  | { open: true; mode: "create"; initial?: undefined }
+  | { open: true; mode: "edit"; initial: CustomRule }
+  | { open: true; mode: "create"; initial: CustomRule }; // duplicate
 
 export const CustomRulesPage: React.FC = () => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const [form] = Form.useForm<CustomRuleForm>();
-  const [open, setOpen] = useState(false);
+
+  const [filterHostCode, setFilterHostCode] = useState<string | undefined>();
+  const [filterAction, setFilterAction] = useState<RuleAction | undefined>();
+  const [filterEnabled, setFilterEnabled] = useState<string | undefined>();
+  const [drawerState, setDrawerState] = useState<DrawerState>({ open: false });
 
   const { tableQuery, result } = useTable<CustomRule>({
     resource: "custom-rules",
     pagination: { mode: "off" },
     queryOptions: { staleTime: 30_000 },
   });
-  const { mutate: create, mutation: createMutation } = useCreate();
+
   const { mutate: del } = useDelete();
-  const creating = createMutation.isPending;
+  // BACKEND-GAP: PATCH /api/custom-rules/{id} for toggle-enabled.
+  // Verify crates/waf-api/src/rules_api.rs has set_custom_rule_enabled / PATCH handler.
+  // If only PUT is supported, use full-replace: useUpdate with method "put" + current rule data.
+  const { mutate: toggleEnabled } = useUpdate();
 
-  const data = Array.isArray(result?.data) ? result.data : [];
+  const allRules: CustomRule[] = Array.isArray(result?.data) ? (result.data as CustomRule[]) : [];
 
-  const onSubmit = async () => {
-    const values = await form.validateFields();
-    create(
+  // Client-side filtering (no server-side filter params for this resource)
+  const filtered = allRules.filter((r) => {
+    if (filterHostCode && r.host_code !== filterHostCode) return false;
+    if (filterAction && r.action !== filterAction) return false;
+    if (filterEnabled === "enabled" && !r.enabled) return false;
+    if (filterEnabled === "disabled" && r.enabled) return false;
+    return true;
+  });
+
+  const hostCodes = [...new Set(allRules.map((r) => r.host_code))].sort();
+
+  const onToggleEnabled = (rule: CustomRule) => {
+    toggleEnabled(
       {
         resource: "custom-rules",
-        values: { ...values, conditions: [] },
+        id: rule.id,
+        values: { enabled: !rule.enabled },
+        meta: { method: "patch" },
         successNotification: false,
       },
       {
-        onSuccess: () => {
-          message.success("OK");
-          setOpen(false);
-          form.resetFields();
-          tableQuery.refetch();
-        },
+        onSuccess: () => tableQuery.refetch(),
         onError: (err) => message.error(err.message),
       },
     );
   };
 
-  const onDel = (id: string) =>
+  const onDelete = (id: string) =>
     del(
       { resource: "custom-rules", id, successNotification: false },
       {
         onSuccess: () => {
-          message.success("OK");
+          message.success(t("rules.saved"));
           tableQuery.refetch();
         },
         onError: (err) => message.error(err.message),
       },
     );
 
+  const openCreate = () => setDrawerState({ open: true, mode: "create" });
+
+  const openEdit = (rule: CustomRule) =>
+    setDrawerState({ open: true, mode: "edit", initial: rule });
+
+  const openDuplicate = (rule: CustomRule) => {
+    // Strip id so it creates a new rule
+    setDrawerState({
+      open: true,
+      mode: "create",
+      initial: { ...rule, id: "", name: `${rule.name} (copy)` },
+    });
+  };
+
   const columns: ColumnsType<CustomRule> = [
-    { title: t("common.name"), dataIndex: "name", render: (v) => <strong>{v}</strong> },
+    {
+      title: t("common.name"),
+      dataIndex: "name",
+      render: (v: string) => <strong>{v}</strong>,
+    },
     {
       title: t("rules.host"),
       dataIndex: "host_code",
-      render: (v) => <span style={{ fontFamily: "ui-monospace, monospace", color: "#8c8c8c" }}>{v}</span>,
+      render: (v: string) => (
+        <span style={{ fontFamily: "ui-monospace, monospace", color: "#8c8c8c" }}>{v}</span>
+      ),
     },
-    { title: t("rules.priority"), dataIndex: "priority", width: 100 },
+    {
+      title: t("rules.priority"),
+      dataIndex: "priority",
+      width: 90,
+      sorter: (a, b) => a.priority - b.priority,
+    },
     {
       title: t("security.action"),
       dataIndex: "action",
-      width: 100,
-      render: (v: string) => <Tag color={v === "block" ? "red" : "blue"}>{v}</Tag>,
+      width: 110,
+      render: (v: string) => <Tag color={actionColor(v)}>{v}</Tag>,
+    },
+    {
+      title: "Mode",
+      key: "mode",
+      width: 80,
+      render: (_v, r) => conditionModeBadge(r),
     },
     {
       title: t("common.enabled"),
       dataIndex: "enabled",
       width: 90,
-      render: (v: boolean) => <Tag color={v ? "green" : "default"}>{v ? t("common.yes") : t("common.no")}</Tag>,
+      render: (v: boolean, r) => (
+        <Tooltip title={v ? t("rules.disable") : t("rules.enable")}>
+          <Switch
+            size="small"
+            checked={v}
+            onChange={() => onToggleEnabled(r)}
+          />
+        </Tooltip>
+      ),
     },
     {
-      title: "",
+      title: t("common.actions"),
       key: "ops",
-      width: 80,
+      width: 130,
       render: (_v, r) => (
-        <Popconfirm title={t("rules.confirmDelete")} onConfirm={() => onDel(r.id)}>
-          <Button type="link" danger size="small">
-            {t("common.delete")}
-          </Button>
-        </Popconfirm>
+        <Space size="small">
+          <Tooltip title={t("common.edit")}>
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => openEdit(r)}
+            />
+          </Tooltip>
+          <Tooltip title={t("rules.duplicate")}>
+            <Button
+              type="text"
+              size="small"
+              icon={<CopyOutlined />}
+              onClick={() => openDuplicate(r)}
+            />
+          </Tooltip>
+          <Popconfirm title={t("rules.confirmDelete")} onConfirm={() => onDelete(r.id)}>
+            <Button type="text" danger size="small">
+              {t("common.delete")}
+            </Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
@@ -119,73 +204,67 @@ export const CustomRulesPage: React.FC = () => {
         <Typography.Title level={4} style={{ margin: 0 }}>
           {t("nav.customRules")}
         </Typography.Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
           {t("rules.newRule")}
         </Button>
       </Space>
 
       <Card size="small">
+        <Space wrap style={{ marginBottom: 12 }}>
+          <Select
+            allowClear
+            placeholder={t("rules.host")}
+            value={filterHostCode}
+            onChange={setFilterHostCode}
+            style={{ width: 160 }}
+            options={hostCodes.map((h) => ({ value: h, label: h }))}
+          />
+          <Select
+            allowClear
+            placeholder={t("security.action")}
+            value={filterAction}
+            onChange={setFilterAction}
+            style={{ width: 130 }}
+            options={[
+              { value: "block", label: "block" },
+              { value: "allow", label: "allow" },
+              { value: "log", label: "log" },
+              { value: "challenge", label: "challenge" },
+            ]}
+          />
+          <Select
+            allowClear
+            placeholder={t("rules.allStatus")}
+            value={filterEnabled}
+            onChange={setFilterEnabled}
+            style={{ width: 130 }}
+            options={[
+              { value: "enabled", label: t("common.enabled") },
+              { value: "disabled", label: t("common.disabled") },
+            ]}
+          />
+        </Space>
         <Table
           rowKey="id"
           size="small"
-          dataSource={data}
+          dataSource={filtered}
           columns={columns}
           loading={tableQuery.isLoading}
-          pagination={false}
+          pagination={{ pageSize: 20, showSizeChanger: true }}
           locale={{ emptyText: t("rules.noCustomRules") }}
         />
       </Card>
 
-      <Modal
-        title={t("rules.createRule")}
-        open={open}
-        onCancel={() => setOpen(false)}
-        onOk={onSubmit}
-        confirmLoading={creating}
-        width={640}
-        okText={t("common.create")}
-        cancelText={t("common.cancel")}
-        destroyOnClose
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={{ host_code: "*", priority: 100, action: "block", enabled: true }}
-        >
-          <Space.Compact style={{ width: "100%" }}>
-            <Form.Item name="name" label={t("common.name")} rules={[{ required: true }]} style={{ flex: 2 }}>
-              <Input />
-            </Form.Item>
-            <Form.Item name="host_code" label={t("rules.host")} style={{ flex: 1 }}>
-              <Input />
-            </Form.Item>
-          </Space.Compact>
-          <Space.Compact style={{ width: "100%" }}>
-            <Form.Item name="priority" label={t("rules.priority")} style={{ flex: 1 }}>
-              <InputNumber min={1} max={1000} style={{ width: "100%" }} />
-            </Form.Item>
-            <Form.Item name="action" label={t("security.action")} style={{ flex: 1 }}>
-              <Select
-                options={[
-                  { value: "block", label: t("security.block") },
-                  { value: "allow", label: t("security.allow") },
-                  { value: "log", label: t("botManagement.logOnly") },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item name="enabled" label={t("common.enabled")} valuePropName="checked" style={{ width: 110 }}>
-              <Switch />
-            </Form.Item>
-          </Space.Compact>
-          <Form.Item name="script" label={t("rules.script")}>
-            <Input.TextArea
-              rows={6}
-              placeholder={"// Rhai script\n// request.ip, request.path, request.method, request.headers"}
-              style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+      <CustomRuleEditorDrawer
+        open={drawerState.open}
+        mode={drawerState.open ? drawerState.mode : "create"}
+        initial={drawerState.open ? drawerState.initial : undefined}
+        onClose={() => setDrawerState({ open: false })}
+        onSaved={() => {
+          setDrawerState({ open: false });
+          tableQuery.refetch();
+        }}
+      />
     </Space>
   );
 };
