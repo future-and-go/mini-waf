@@ -505,6 +505,92 @@ fn malformed_regex_rule_is_skipped_not_panic() {
     assert!(e.check(&CtxBuilder::new().path("/anything").build()).is_none());
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// RuleAction propagation — DetectionResult carries rule_action + action_status
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn custom_rule_log_action_populates_detection_result() {
+    let mut rule = rule_flat(
+        "log-rule",
+        ConditionOp::And,
+        vec![cond(
+            ConditionField::Path,
+            Operator::Contains,
+            ConditionValue::Str("/admin".into()),
+        )],
+    );
+    rule.action = RuleAction::Log;
+    rule.action_status = 200;
+
+    let e = engine_with(rule);
+    let result = e.check(&CtxBuilder::new().path("/admin/settings").build());
+    let det = result.expect("should match");
+    assert_eq!(det.rule_action, Some(RuleAction::Log));
+    assert_eq!(det.action_status, Some(200));
+}
+
+#[test]
+fn custom_rule_block_with_custom_status_populates_detection_result() {
+    let mut rule = rule_flat(
+        "rate-limit-rule",
+        ConditionOp::And,
+        vec![cond(
+            ConditionField::Path,
+            Operator::Eq,
+            ConditionValue::Str("/api/expensive".into()),
+        )],
+    );
+    rule.action = RuleAction::Block;
+    rule.action_status = 429;
+
+    let e = engine_with(rule);
+    let result = e.check(&CtxBuilder::new().path("/api/expensive").build());
+    let det = result.expect("should match");
+    assert_eq!(det.rule_action, Some(RuleAction::Block));
+    assert_eq!(det.action_status, Some(429));
+}
+
+#[test]
+fn custom_rule_allow_action_populates_detection_result() {
+    let mut rule = rule_flat(
+        "allow-rule",
+        ConditionOp::And,
+        vec![cond(
+            ConditionField::Ip,
+            Operator::CidrMatch,
+            ConditionValue::Str("10.0.0.0/8".into()),
+        )],
+    );
+    rule.action = RuleAction::Allow;
+
+    let e = engine_with(rule);
+    let result = e.check(&CtxBuilder::new().ip("10.1.2.3").build());
+    let det = result.expect("should match");
+    assert_eq!(det.rule_action, Some(RuleAction::Allow));
+}
+
+#[test]
+fn owasp_check_always_returns_block_action() {
+    use waf_engine::rules::engine::RuleAction;
+    let e = CustomRulesEngine::new();
+    // Load a simple OWASP-style rule with a pattern
+    let mut owasp_rule = rule_flat("owasp-001", ConditionOp::And, Vec::new());
+    owasp_rule.host_code = "*".to_string();
+    owasp_rule.pattern = Some(regex::Regex::new(r"(?i)union\s+select").unwrap());
+    owasp_rule.pattern_field = "all".to_string();
+    owasp_rule.paranoia = Some(1);
+    owasp_rule.action = RuleAction::Log; // Even if set to Log
+    e.add_rule(owasp_rule);
+
+    let ctx = CtxBuilder::new().path("/search?q=union+select+1").build();
+    let result = e.check_owasp(&ctx, 4);
+    let det = result.expect("OWASP rule should match");
+    // check_owasp always hardcodes Block regardless of rule config
+    assert_eq!(det.rule_action, Some(RuleAction::Block));
+    assert_eq!(det.action_status, Some(403));
+}
+
 #[test]
 fn deeply_nested_tree_rejected_by_validator() {
     use waf_engine::rules::engine::{MAX_TREE_DEPTH, validate_tree};

@@ -60,6 +60,8 @@ fn detection_result() -> DetectionResult {
         rule_name: "test-rule".into(),
         phase: Phase::Xss,
         detail: "matched".into(),
+        rule_action: None,
+        action_status: None,
     }
 }
 
