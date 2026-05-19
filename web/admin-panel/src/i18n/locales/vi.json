@@ -218,7 +218,35 @@
     "script": "Rhai Script",
     "host": "Host",
     "noCustomRules": "Chưa có luật tuỳ chỉnh",
-    "confirmDelete": "Xoá luật này?"
+    "confirmDelete": "Xoá luật này?",
+    "saved": "Đã lưu",
+    "treeMode": "Cây",
+    "flatMode": "Phẳng",
+    "scriptMode": "Rhai",
+    "visualEditor": "Trực quan",
+    "jsonEditor": "JSON",
+    "addCondition": "Thêm điều kiện",
+    "addAndGroup": "Thêm nhóm AND",
+    "addOrGroup": "Thêm nhóm OR",
+    "wrapNot": "Bọc NOT",
+    "removeNode": "Xoá",
+    "treeDepthExceeded": "Cây vượt độ sâu {{max}}",
+    "treeLeavesExceeded": "Cây vượt {{max}} lá",
+    "invalidRegex": "Regex không hợp lệ",
+    "invalidCidr": "CIDR không hợp lệ",
+    "invalidJson": "JSON không hợp lệ",
+    "fieldHeader": "Tên header",
+    "fieldCookie": "Tên cookie (trống = cả header)",
+    "testRegex": "Thử regex",
+    "regexSample": "Chuỗi mẫu",
+    "regexMatch": "Khớp",
+    "regexNoMatch": "Không khớp",
+    "duplicate": "Sao chép",
+    "bulkEnable": "Bật đã chọn",
+    "bulkDisable": "Tắt đã chọn",
+    "bulkExport": "Xuất đã chọn",
+    "actionStatus": "Mã trạng thái",
+    "actionMessage": "Thông điệp"
   },
   "settings": {
     "title": "Cài đặt hệ thống",
@@ -275,7 +303,9 @@
       "honeypotPathsHelp": "Request đến các path này bị đánh dấu là honeypot trap. Thêm path nào bạn không kỳ vọng user hợp lệ truy cập.",
       "zeroOff": "0 = tắt",
       "failOpenHelp": "Cho phép request khi backend rate-limiter không khả dụng",
-      "discard": "Huỷ thay đổi"
+      "discard": "Huỷ thay đổi",
+      "fileChangedExternal": "File đã thay đổi bên ngoài — thay đổi chưa lưu có thể xung đột.",
+      "reloadFromDisk": "Tải lại từ đĩa"
     }
   },
   "certificates": {
