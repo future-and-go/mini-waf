@@ -112,6 +112,8 @@ fn detection(rule_seq: usize, desc: String) -> DetectionResult {
         rule_name: "Request Body Abuse".to_string(),
         phase: Phase::RequestBodyAbuse,
         detail: desc,
+        rule_action: None,
+        action_status: None,
     }
 }
 

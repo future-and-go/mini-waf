@@ -157,6 +157,8 @@ impl Check for SensitiveCheck {
                     rule_name: "Sensitive Data Detection".to_string(),
                     phase: Phase::Sensitive,
                     detail: format!("Sensitive pattern '{pattern}' found in {location}"),
+                    rule_action: None,
+                    action_status: None,
                 });
             }
         }
@@ -170,6 +172,8 @@ impl Check for SensitiveCheck {
                     rule_name: "Sensitive Data Detection".to_string(),
                     phase: Phase::Sensitive,
                     detail: format!("Sensitive pattern '{pattern}' found in body"),
+                    rule_action: None,
+                    action_status: None,
                 });
             }
         }

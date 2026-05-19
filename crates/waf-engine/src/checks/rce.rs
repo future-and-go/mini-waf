@@ -104,6 +104,8 @@ impl Check for RceCheck {
                     rule_name: "RCE".to_string(),
                     phase: Phase::Rce,
                     detail: format!("{desc} detected in {location}"),
+                    rule_action: None,
+                    action_status: None,
                 });
             }
         }

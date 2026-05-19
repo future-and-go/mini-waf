@@ -59,6 +59,8 @@ impl Check for SqlInjectionCheck {
                 rule_name: "SQL Injection".to_string(),
                 phase: Phase::SqlInjection,
                 detail: format!("{desc} detected in {location}"),
+                rule_action: None,
+                action_status: None,
             });
         }
 
@@ -77,6 +79,8 @@ impl Check for SqlInjectionCheck {
                 rule_name: "SQL Injection".to_string(),
                 phase: Phase::SqlInjection,
                 detail: format!("{desc} detected in {location}"),
+                rule_action: None,
+                action_status: None,
             });
         }
 
@@ -88,6 +92,8 @@ impl Check for SqlInjectionCheck {
                 rule_name: "SQL Injection".to_string(),
                 phase: Phase::SqlInjection,
                 detail: format!("{desc} detected in {location}"),
+                rule_action: None,
+                action_status: None,
             });
         }
 
@@ -102,6 +108,8 @@ impl Check for SqlInjectionCheck {
                     rule_name: "SQL Injection".to_string(),
                     phase: Phase::SqlInjection,
                     detail: format!("{desc} detected in {location}"),
+                    rule_action: None,
+                    action_status: None,
                 });
             }
         }

@@ -100,6 +100,8 @@ fn detection(rule_seq: usize, desc: &str, location: &str, host: &str) -> Detecti
         rule_name: "SSRF".to_string(),
         phase: Phase::Ssrf,
         detail: format!("{desc} ({host}) referenced from {location}"),
+        rule_action: None,
+        action_status: None,
     }
 }
 

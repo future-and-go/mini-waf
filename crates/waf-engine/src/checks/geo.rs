@@ -102,6 +102,8 @@ impl GeoCheck {
                                 "Blocked by geo rule '{}': country='{}' iso='{}'",
                                 rule.name, geo.country, geo.iso_code
                             ),
+                            rule_action: None,
+                            action_status: None,
                         });
                     }
                 }
@@ -115,6 +117,8 @@ impl GeoCheck {
                                 "Blocked by geo allowlist '{}': country='{}' iso='{}' not in allowed list",
                                 rule.name, geo.country, geo.iso_code
                             ),
+                            rule_action: None,
+                            action_status: None,
                         });
                     }
                 }

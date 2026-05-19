@@ -183,6 +183,8 @@ impl Check for ScannerCheck {
                 rule_name: "Scanner".to_string(),
                 phase: Phase::Scanner,
                 detail: format!("{desc} User-Agent detected"),
+                rule_action: None,
+                action_status: None,
             });
         }
 
@@ -198,6 +200,8 @@ impl Check for ScannerCheck {
                     rule_name: "Scripted Client".to_string(),
                     phase: Phase::Scanner,
                     detail: format!("{desc} User-Agent detected (block_scripted_clients=true)"),
+                    rule_action: None,
+                    action_status: None,
                 });
             }
         }
@@ -219,6 +223,8 @@ impl Check for ScannerCheck {
                         ip = ctx.client_ip,
                         secs = dc.scanner_window_secs,
                     ),
+                    rule_action: None,
+                    action_status: None,
                 });
             }
         }
@@ -235,6 +241,8 @@ impl Check for ScannerCheck {
                     ip = ctx.client_ip,
                     secs = dc.scanner_window_secs,
                 ),
+                rule_action: None,
+                action_status: None,
             });
         }
 

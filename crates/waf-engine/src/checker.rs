@@ -207,6 +207,8 @@ pub fn check_ip_whitelist(ctx: &RequestCtx, store: &RuleStore) -> WafDecision {
                 rule_name: "IP Whitelist".to_string(),
                 phase: Phase::IpWhitelist,
                 detail: format!("IP {} matched whitelist", ctx.client_ip),
+                rule_action: None,
+                action_status: None,
             }),
         };
     }
@@ -228,6 +230,8 @@ pub fn check_ip_blacklist(ctx: &RequestCtx, store: &RuleStore) -> WafDecision {
                 rule_name: "IP Blacklist".to_string(),
                 phase: Phase::IpBlacklist,
                 detail: format!("IP {} matched blacklist", ctx.client_ip),
+                rule_action: None,
+                action_status: None,
             },
         );
     }
@@ -249,6 +253,8 @@ pub fn check_url_whitelist(ctx: &RequestCtx, store: &RuleStore) -> Option<WafDec
                 rule_name: "URL Whitelist".to_string(),
                 phase: Phase::UrlWhitelist,
                 detail: format!("Path {} matched URL whitelist", ctx.path),
+                rule_action: None,
+                action_status: None,
             }),
         });
     }
@@ -270,6 +276,8 @@ pub fn check_url_blacklist(ctx: &RequestCtx, store: &RuleStore) -> WafDecision {
                 rule_name: "URL Blacklist".to_string(),
                 phase: Phase::UrlBlacklist,
                 detail: format!("Path {} matched URL blacklist", ctx.path),
+                rule_action: None,
+                action_status: None,
             },
         );
     }

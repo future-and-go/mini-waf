@@ -124,6 +124,8 @@ impl Check for BotCheck {
                 rule_name: "Bot".to_string(),
                 phase: Phase::Bot,
                 detail: format!("{desc} detected"),
+                rule_action: None,
+                action_status: None,
             });
         }
 

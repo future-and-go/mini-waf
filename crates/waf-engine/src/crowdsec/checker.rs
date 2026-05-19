@@ -46,6 +46,8 @@ impl Check for CrowdSecChecker {
                     "CrowdSec decision: {} for {} (scenario: {}, origin: {})",
                     cached.decision.type_, ctx.client_ip, cached.decision.scenario, cached.decision.origin,
                 ),
+                rule_action: None,
+                action_status: None,
             });
         }
 

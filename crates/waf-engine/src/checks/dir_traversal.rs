@@ -103,6 +103,8 @@ impl Check for DirTraversalCheck {
                     rule_name: "Directory Traversal".to_string(),
                     phase: Phase::DirTraversal,
                     detail: format!("{desc} detected in {location}"),
+                    rule_action: None,
+                    action_status: None,
                 });
             }
         }

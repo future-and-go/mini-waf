@@ -104,6 +104,8 @@ pub fn appsec_to_detection(message: String) -> DetectionResult {
         rule_name: "CrowdSec AppSec".to_string(),
         phase: Phase::CrowdSec,
         detail: message,
+        rule_action: None,
+        action_status: None,
     }
 }
 

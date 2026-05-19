@@ -105,6 +105,8 @@ impl Check for DdosCheck {
                         rule_name: "DDoS Protection (Degraded)".to_string(),
                         phase: Phase::Ddos,
                         detail: format!("system overloaded; retry after {retry_after_s}s; status {status}"),
+                        rule_action: None,
+                        action_status: None,
                     })
                 }
                 DegradeAction::AllowAndWarn => {
@@ -129,6 +131,8 @@ impl Check for DdosCheck {
                 rule_name: "DDoS Protection".to_string(),
                 phase: Phase::Ddos,
                 detail: format!("IP {} is currently banned", ctx.client_ip),
+                rule_action: None,
+                action_status: None,
             });
         }
 
@@ -189,6 +193,8 @@ impl Check for DdosCheck {
                             reason,
                             result.ban_ttl_s.unwrap_or(0)
                         ),
+                        rule_action: None,
+                        action_status: None,
                     });
                 }
             }
