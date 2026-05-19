@@ -5,12 +5,12 @@ use crate::db::Database;
 use crate::error::StorageError;
 use crate::models::{
     AdminUser, AllowIp, AllowUrl, AttackLog, AttackLogQuery, AuditLogEntry, AuditLogQuery, BlockIp, BlockUrl,
-    Certificate, CreateAdminUser, CreateCertificate, CreateCrowdSecEvent, CreateCustomRule, CreateHost, CreateIpRule,
-    CreateLbBackend, CreateNotificationConfig, CreateSecurityEvent, CreateSensitivePattern, CreateTunnel,
-    CreateUrlRule, CreateWasmPlugin, CrowdSecConfigRow, CrowdSecEventQuery, CrowdSecEventRow, CustomRule, GeoDistEntry,
-    GeoStats, Host, HotlinkConfig, LbBackend, NotificationConfig, NotificationLog, RecentEvent, RefreshToken,
-    SecurityEvent, SecurityEventQuery, SensitivePattern, StatsOverview, TimeSeriesPoint, TopEntry, TunnelRow,
-    UpdateCertificatePem, UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
+    CategoryTimeSeriesPoint, Certificate, CreateAdminUser, CreateCertificate, CreateCrowdSecEvent, CreateCustomRule,
+    CreateHost, CreateIpRule, CreateLbBackend, CreateNotificationConfig, CreateSecurityEvent, CreateSensitivePattern,
+    CreateTunnel, CreateUrlRule, CreateWasmPlugin, CrowdSecConfigRow, CrowdSecEventQuery, CrowdSecEventRow, CustomRule,
+    GeoDistEntry, GeoStats, Host, HotlinkConfig, LbBackend, NotificationConfig, NotificationLog, RecentEvent,
+    RefreshToken, SecurityEvent, SecurityEventQuery, SensitivePattern, StatsOverview, TimeSeriesPoint, TopEntry,
+    TunnelRow, UpdateCertificatePem, UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
 };
 
 impl Database {
@@ -994,6 +994,7 @@ impl Database {
                     WHEN rule_id LIKE 'SCAN-%'        THEN 'scanner' \
                     WHEN rule_id LIKE 'BOT-%'         THEN 'bot' \
                     WHEN rule_id LIKE 'CC-%'          THEN 'cc-ddos' \
+                    WHEN rule_id LIKE 'SSRF-%'        THEN 'ssrf' \
                     WHEN rule_id LIKE 'ADV-SSRF%'     THEN 'ssrf' \
                     WHEN rule_id LIKE 'ADV-SSTI%'     THEN 'ssti' \
                     WHEN rule_id LIKE 'ADV-%'         THEN 'advanced' \
@@ -1078,6 +1079,7 @@ impl Database {
                     WHEN rule_id LIKE 'SCAN-%'        THEN 'scanner' \
                     WHEN rule_id LIKE 'BOT-%'         THEN 'bot' \
                     WHEN rule_id LIKE 'CC-%'          THEN 'cc-ddos' \
+                    WHEN rule_id LIKE 'SSRF-%'        THEN 'ssrf' \
                     WHEN rule_id LIKE 'ADV-SSRF%'     THEN 'ssrf' \
                     WHEN rule_id LIKE 'ADV-SSTI%'     THEN 'ssti' \
                     WHEN rule_id LIKE 'ADV-%'         THEN 'advanced' \
@@ -1171,6 +1173,76 @@ impl Database {
                 ts: row.get("ts"),
                 total: row.get("total"),
                 blocked: row.get("blocked"),
+            }
+        })
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    /// Return per-category hourly bucket counts for the last `hours` hours.
+    ///
+    /// The CASE expression mirrors the one in `get_stats_overview` — keep both
+    /// in sync when adding a new `rule_id` prefix.
+    pub async fn get_stats_timeseries_by_category(
+        &self,
+        host_code: Option<&str>,
+        hours: i64,
+    ) -> Result<Vec<CategoryTimeSeriesPoint>, StorageError> {
+        let rows: Vec<CategoryTimeSeriesPoint> = sqlx::query(
+            "SELECT \
+                date_trunc('hour', created_at) AS ts, \
+                CASE \
+                    WHEN rule_id LIKE 'SQLI-%'        THEN 'sqli' \
+                    WHEN rule_id LIKE 'XSS-%'         THEN 'xss' \
+                    WHEN rule_id LIKE 'RCE-%'         THEN 'rce' \
+                    WHEN rule_id LIKE 'TRAV-%'        THEN 'path-traversal' \
+                    WHEN rule_id LIKE 'SCAN-%'        THEN 'scanner' \
+                    WHEN rule_id LIKE 'BOT-%'         THEN 'bot' \
+                    WHEN rule_id LIKE 'CC-%'          THEN 'cc-ddos' \
+                    WHEN rule_id LIKE 'SSRF-%'        THEN 'ssrf' \
+                    WHEN rule_id LIKE 'ADV-SSRF%'     THEN 'ssrf' \
+                    WHEN rule_id LIKE 'ADV-SSTI%'     THEN 'ssti' \
+                    WHEN rule_id LIKE 'ADV-%'         THEN 'advanced' \
+                    WHEN rule_id LIKE 'CRS-RESP%'     THEN 'data-leakage' \
+                    WHEN rule_id LIKE 'CRS-%'         THEN 'owasp-crs' \
+                    WHEN rule_id LIKE 'API-MASS%'     THEN 'mass-assignment' \
+                    WHEN rule_id LIKE 'API-%'         THEN 'api-security' \
+                    WHEN rule_id LIKE 'MODSEC-RESP%'  THEN 'web-shell' \
+                    WHEN rule_id LIKE 'MODSEC-%'      THEN 'modsecurity' \
+                    WHEN rule_id LIKE 'CVE-%'         THEN 'cve' \
+                    WHEN rule_id LIKE 'GEO-%'         THEN 'geo-blocking' \
+                    WHEN rule_id LIKE 'CUSTOM-%'      THEN 'custom' \
+                    WHEN rule_id LIKE 'IP-%'          THEN 'ip-rule' \
+                    WHEN rule_id LIKE 'URL-%'         THEN 'url-rule' \
+                    WHEN rule_id LIKE 'SENS-%'        THEN 'sensitive-data' \
+                    WHEN rule_id LIKE 'HOTLINK-%'     THEN 'anti-hotlink' \
+                    WHEN rule_id LIKE 'OWASP-942%'    THEN 'sqli' \
+                    WHEN rule_id LIKE 'OWASP-941%'    THEN 'xss' \
+                    WHEN rule_id LIKE 'OWASP-930%'    THEN 'lfi' \
+                    WHEN rule_id LIKE 'OWASP-931%'    THEN 'rfi' \
+                    WHEN rule_id LIKE 'OWASP-932%'    THEN 'rce' \
+                    WHEN rule_id LIKE 'OWASP-933%'    THEN 'php-injection' \
+                    WHEN rule_id LIKE 'OWASP-913%'    THEN 'scanner' \
+                    ELSE 'other' \
+                END AS category, \
+                COUNT(*)::bigint AS cnt \
+             FROM security_events \
+             WHERE created_at >= NOW() - make_interval(hours => $1::int) \
+               AND ($2::text IS NULL OR host_code = $2) \
+               AND rule_id IS NOT NULL \
+             GROUP BY date_trunc('hour', created_at), category \
+             ORDER BY ts ASC, category ASC",
+        )
+        .bind(i32::try_from(hours).unwrap_or(i32::MAX))
+        .bind(host_code)
+        .map(|row: sqlx::postgres::PgRow| {
+            use sqlx::Row;
+            CategoryTimeSeriesPoint {
+                ts: row.get("ts"),
+                category: row.get("category"),
+                count: row.get("cnt"),
             }
         })
         .fetch_all(&self.pool)

@@ -7,7 +7,7 @@
 //!
 //! Built-in patterns come from `waf_engine::rules::builtin::bot::rules()` and
 //! are prefixed with their rule id (e.g. "BOT-GOOD-001"). Their enabled state
-//! is stored in the shared `rule_overrides` table (host_id IS NULL).
+//! is stored in the shared `rule_overrides` table (`host_id IS NULL`).
 //!
 //! Custom patterns stored in the `bot_patterns` DB table are exposed with an
 //! id of "custom-{db_id}" and source="custom".
@@ -126,13 +126,12 @@ pub async fn list_bot_patterns(State(state): State<Arc<AppState>>) -> impl IntoR
         .collect();
 
     // ── Custom DB patterns ────────────────────────────────────────────────────
-    let custom_rows: Vec<BotPatternRow> =
-        sqlx::query_as::<_, BotPatternRow>(
-            "SELECT id, name, pattern, action, description, enabled, tags FROM bot_patterns ORDER BY id",
-        )
-        .fetch_all(state.db.pool())
-        .await
-        .unwrap_or_default();
+    let custom_rows: Vec<BotPatternRow> = sqlx::query_as::<_, BotPatternRow>(
+        "SELECT id, name, pattern, action, description, enabled, tags FROM bot_patterns ORDER BY id",
+    )
+    .fetch_all(state.db.pool())
+    .await
+    .unwrap_or_default();
 
     let custom_out: Vec<BotPatternOut> = custom_rows
         .into_iter()
@@ -150,10 +149,7 @@ pub async fn list_bot_patterns(State(state): State<Arc<AppState>>) -> impl IntoR
     let mut patterns: Vec<BotPatternOut> = builtin_out;
     patterns.extend(custom_out);
 
-    (
-        StatusCode::OK,
-        Json(json!({ "patterns": patterns })),
-    )
+    (StatusCode::OK, Json(json!({ "patterns": patterns })))
 }
 
 /// POST /api/bot-patterns — create a custom pattern in DB

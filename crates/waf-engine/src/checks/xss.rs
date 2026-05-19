@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use regex::RegexSet;
 use waf_common::{DetectionResult, Phase, RequestCtx};
 
-use super::xss_scanners::{scan_form_urlencoded, scan_json_body_xss};
+use super::xss_scanners::{scan_form_urlencoded, scan_json_body_xss, scan_query_params_xss_libinjection};
 use super::{Check, request_targets};
 
 pub(crate) static XSS_DESCS: &[&str] = &[
@@ -31,8 +31,8 @@ pub(crate) static XSS_SET: LazyLock<RegexSet> = LazyLock::new(|| {
     match RegexSet::new([
         // <script...>
         r"(?i)<\s*/?\s*script[\s/>]",
-        // Event handlers: on[event]=
-        r"(?i)\bon(abort|blur|change|click|dblclick|drag|drop|error|focus|hashchange|input|keydown|keypress|keyup|load|message|mousedown|mousemove|mouseout|mouseover|mouseup|paste|popstate|reset|resize|scroll|select|submit|touchend|touchmove|touchstart|unload|wheel)\s*=",
+        // Event handlers: any on<word>= attribute (bounded to prevent ReDoS)
+        r"(?i)\bon[a-z]{2,20}\s*=",
         // javascript: (allow whitespace/encoding obfuscation)
         r"(?i)j[\s]*a[\s]*v[\s]*a[\s]*s[\s]*c[\s]*r[\s]*i[\s]*p[\s]*t[\s]*:",
         // vbscript:
@@ -100,6 +100,22 @@ impl Check for XssCheck {
             .map_or("", String::as_str)
             .to_ascii_lowercase();
         let body_cap = ctx.host_config.defense_config.max_body_size;
+
+        // 0. libinjection XSS fingerprint scan on query params — catches obfuscated
+        //    vectors (e.g. uncommon attributes, exotic URI schemes) that evade pattern
+        //    matching, mirroring the analogous step in SqlInjectionCheck.
+        if !ctx.query.is_empty()
+            && let Some(location) = scan_query_params_xss_libinjection(&ctx.query)
+        {
+            return Some(DetectionResult {
+                rule_id: Some("XSS-LIB".to_string()),
+                rule_name: "XSS".to_string(),
+                phase: Phase::Xss,
+                detail: format!("libinjection XSS fingerprint detected in {location}"),
+                rule_action: None,
+                action_status: None,
+            });
+        }
 
         if !ctx.body_preview.is_empty() {
             if content_type.starts_with("application/json")
@@ -322,5 +338,34 @@ mod tests {
         let ctx = make_ctx_with("", &s, "application/json", true);
         // Should NOT panic. May or may not detect (walker bails past depth cap).
         let _ = checker.check(&ctx);
+    }
+
+    #[test]
+    fn libinjection_catches_uncommon_event_attribute_in_query() {
+        // <details open ontoggle=alert(1)> — `ontoggle` is not in the old
+        // explicit event list, but the broadened on[a-z]{2,20}= pattern and
+        // libinjection should both flag it.
+        let checker = XssCheck::new();
+        let ctx = make_ctx("x=<details+open+ontoggle%3Dalert(1)>", "");
+        let det = checker.check(&ctx).expect("hit");
+        assert!(det.rule_id.as_deref().unwrap_or("").starts_with("XSS-"));
+    }
+
+    #[test]
+    fn libinjection_catches_xss_vector_in_query() {
+        // A <script> vector via libinjection path; rule_id may be XSS-LIB or
+        // XSS-001 depending on which detection fires first.
+        let checker = XssCheck::new();
+        let ctx = make_ctx("q=%3Cscript%3Ealert(1)%3C%2Fscript%3E", "");
+        let det = checker.check(&ctx).expect("hit");
+        assert_eq!(det.phase, waf_common::Phase::Xss);
+    }
+
+    #[test]
+    fn broadened_event_handler_catches_onauxclick() {
+        // onauxclick is an HTML5 event handler not in the old explicit list.
+        let checker = XssCheck::new();
+        let ctx = make_ctx("", "<div onauxclick=alert(1)>");
+        assert!(checker.check(&ctx).is_some());
     }
 }

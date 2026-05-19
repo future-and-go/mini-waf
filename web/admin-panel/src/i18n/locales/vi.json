@@ -26,7 +26,8 @@
     "cache": "Cache",
     "cacheDashboard": "Bảng điều khiển Cache",
     "fraud": "Phát hiện gian lận",
-    "txVelocity": "Vận tốc TX"
+    "txVelocity": "Vận tốc TX",
+    "ruleAnalytics": "Phân tích Rule"
   },
   "common": {
     "save": "Lưu",
@@ -525,6 +526,45 @@
     "syncInSync": "Đồng bộ",
     "syncDriftAlert": "Phát hiện lệch version luật",
     "syncNoCluster": "Cluster chưa bật"
+  },
+  "analytics": {
+    "title": "Phân tích Rule",
+    "subtitle": "Phân bố tấn công theo nhóm rule, action, URI",
+    "byRuleGroup": "Tổng request WAF theo nhóm rule",
+    "byAction": "Hành động WAF",
+    "topBlockedUris": "URI bị chặn nhiều nhất",
+    "topUrisHint": "Bấm ô để lọc bảng bên dưới",
+    "rulesDetailsSummary": "Rule kích hoạt nhiều",
+    "timeline24h": "Timeline lưu lượng",
+    "rulesDetails": "Chi tiết Rules",
+    "timeRange": "Khoảng thời gian",
+    "filterByHost": "Lọc host",
+    "exportCsv": "Xuất CSV",
+    "clearFilters": "Xoá bộ lọc",
+    "gapStackedTimeline": "Timeline theo category cần endpoint backend mới",
+    "selectToFilter": "chọn để lọc",
+    "noEvents": "Không có sự kiện",
+    "totalEvents": "Tổng sự kiện"
+  },
+  "eventDetail": {
+    "title": "Sự kiện bảo mật",
+    "back": "Quay lại",
+    "overview": "Tổng quan",
+    "detail": "Chi tiết",
+    "geo": "Thông tin địa lý",
+    "related": "Sự kiện liên quan",
+    "sameIp": "Cùng IP (24h)",
+    "sameRule": "Cùng rule (24h)",
+    "rawJson": "JSON gốc",
+    "copy": "Sao chép",
+    "copied": "Đã sao chép",
+    "viewAllFromIp": "Xem tất cả sự kiện từ IP này",
+    "viewAllForRule": "Xem tất cả sự kiện cho rule này",
+    "addToBlocklist": "Thêm IP vào blocklist",
+    "addedToBlocklist": "Đã thêm IP vào blocklist",
+    "addToBlocklistConfirm": "Chặn mọi truy cập từ {{ip}}?",
+    "notFound": "Không tìm thấy sự kiện",
+    "loading": "Đang tải sự kiện..."
   },
   "cache": {
     "title": "Bảng điều khiển Cache",
