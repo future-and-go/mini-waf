@@ -137,6 +137,8 @@ mod tests {
             rule_name: "T".to_string(),
             phase: Phase::SqlInjection,
             detail: "d".to_string(),
+            rule_action: None,
+            action_status: None,
         }
     }
 

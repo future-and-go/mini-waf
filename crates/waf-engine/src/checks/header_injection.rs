@@ -85,6 +85,8 @@ fn detection(rule_seq: usize, desc: &str, location: &str) -> DetectionResult {
         rule_name: "Header Injection".to_string(),
         phase: Phase::HeaderInjection,
         detail: format!("{desc} in {location}"),
+        rule_action: None,
+        action_status: None,
     }
 }
 

@@ -266,6 +266,8 @@ mod tests {
             rule_name: "Test".to_string(),
             phase,
             detail: "test detail".to_string(),
+            rule_action: None,
+            action_status: None,
         }
     }
 

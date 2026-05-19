@@ -41,6 +41,8 @@ impl RateLimitCheck {
             rule_name: "Rate Limit".to_string(),
             phase: Phase::RateLimit,
             detail,
+            rule_action: None,
+            action_status: None,
         }
     }
 
@@ -54,6 +56,8 @@ impl RateLimitCheck {
                     rule_name: "Rate Limit (store error)".to_string(),
                     phase: Phase::RateLimit,
                     detail: "rate-limit store error; tier fail_mode=close".to_string(),
+                    rule_action: None,
+                    action_status: None,
                 })
             }
             FailMode::Open => {

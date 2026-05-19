@@ -165,6 +165,8 @@ fn detection(rule_seq: usize, desc: String) -> DetectionResult {
         rule_name: "Brute Force".to_string(),
         phase: Phase::BruteForce,
         detail: desc,
+        rule_action: None,
+        action_status: None,
     }
 }
 

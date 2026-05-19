@@ -139,6 +139,8 @@ fn detection_at(idx: usize, location: &str) -> DetectionResult {
         rule_name: "XSS".to_string(),
         phase: Phase::Xss,
         detail: format!("{desc} detected in {location}"),
+        rule_action: None,
+        action_status: None,
     }
 }
 

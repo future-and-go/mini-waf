@@ -132,6 +132,8 @@ impl Check for AntiHotlinkCheck {
                 rule_name: "Anti-Hotlink".to_string(),
                 phase: Phase::AntiHotlink,
                 detail: "Request blocked: missing Referer header".to_string(),
+                rule_action: None,
+                action_status: None,
             });
         }
 
@@ -145,6 +147,8 @@ impl Check for AntiHotlinkCheck {
             rule_name: "Anti-Hotlink".to_string(),
             phase: Phase::AntiHotlink,
             detail: format!("Referer '{referer}' not in allow-list"),
+            rule_action: None,
+            action_status: None,
         })
     }
 }

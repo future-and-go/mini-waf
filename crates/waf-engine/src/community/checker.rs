@@ -32,6 +32,8 @@ impl Check for CommunityChecker {
                 "Community blocklist hit for {} (reason: {}, source: {})",
                 ctx.client_ip, decision.reason, decision.source,
             ),
+            rule_action: None,
+            action_status: None,
         })
     }
 }
