@@ -47,6 +47,8 @@ fn detection() -> DetectionResult {
         rule_name: "SqlInjection".to_string(),
         phase: Phase::SqlInjection,
         detail: "DROP TABLE".to_string(),
+        rule_action: None,
+        action_status: None,
     }
 }
 
