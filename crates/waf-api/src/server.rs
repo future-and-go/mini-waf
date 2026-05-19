@@ -44,6 +44,7 @@ use crate::plugins::{delete_plugin, disable_plugin, enable_plugin, list_plugins,
 use crate::rule_sources_api::{
     create_rule_source, delete_rule_source, list_rule_sources, sync_all_rule_sources, sync_rule_source,
 };
+use crate::bot_api::{create_bot_pattern, list_bot_patterns, toggle_bot_pattern};
 use crate::rules_api::{get_rule_registry, import_rules, reload_rule_registry, toggle_rule};
 use crate::security::{admin_ip_check_middleware, list_audit_log, rate_limit_middleware, security_headers_middleware};
 use crate::state::AppState;
@@ -187,6 +188,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         // Phase 5: Audit log
         .route("/api/audit-log", get(list_audit_log))
         // Rule registry (YAML filesystem scanner)
+        // Bot pattern management
+        .route("/api/bot-patterns", get(list_bot_patterns).post(create_bot_pattern))
+        .route("/api/bot-patterns/{id}", patch(toggle_bot_pattern))
         .route("/api/rules/registry", get(get_rule_registry))
         .route("/api/rules/registry/{id}", patch(toggle_rule))
         .route("/api/rules/reload", post(reload_rule_registry))
