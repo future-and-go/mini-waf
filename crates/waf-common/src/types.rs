@@ -106,6 +106,40 @@ pub enum WafAction {
     Challenge,
 }
 
+/// Rule-level action intent declared by the rule author.
+///
+/// Distinct from [`WafAction`]: this is the *intent* stored on a rule;
+/// the engine translates it to a concrete `WafAction` at decision time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleAction {
+    Block,
+    Allow,
+    Log,
+    Challenge,
+}
+
+impl RuleAction {
+    pub fn parse_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "allow" => Self::Allow,
+            "log" => Self::Log,
+            "challenge" => Self::Challenge,
+            _ => Self::Block,
+        }
+    }
+
+    #[must_use]
+    pub fn to_waf_action(self, status: u16, body: Option<String>) -> WafAction {
+        match self {
+            Self::Block => WafAction::Block { status, body },
+            Self::Allow => WafAction::Allow,
+            Self::Log => WafAction::LogOnly,
+            Self::Challenge => WafAction::Challenge,
+        }
+    }
+}
+
 /// WAF decision with context
 #[derive(Debug, Clone)]
 pub struct WafDecision {
@@ -213,6 +247,8 @@ pub struct DetectionResult {
     pub rule_name: String,
     pub phase: Phase,
     pub detail: String,
+    pub rule_action: Option<RuleAction>,
+    pub action_status: Option<u16>,
 }
 
 /// Host configuration matching `SamWaf` Hosts model
@@ -832,5 +868,59 @@ mod tests {
         // RFC 6265: cookie names are case-sensitive.
         assert_eq!(m.get("Session").map(String::as_str), Some("abc"));
         assert_eq!(m.get("session").map(String::as_str), Some("xyz"));
+    }
+
+    // ── RuleAction unit tests ────────────────────────────────────────────────
+
+    use super::{RuleAction, WafAction};
+
+    #[test]
+    fn rule_action_parse_str() {
+        assert_eq!(RuleAction::parse_str("block"), RuleAction::Block);
+        assert_eq!(RuleAction::parse_str("allow"), RuleAction::Allow);
+        assert_eq!(RuleAction::parse_str("log"), RuleAction::Log);
+        assert_eq!(RuleAction::parse_str("challenge"), RuleAction::Challenge);
+        assert_eq!(RuleAction::parse_str("BLOCK"), RuleAction::Block);
+        assert_eq!(RuleAction::parse_str("Allow"), RuleAction::Allow);
+        assert_eq!(RuleAction::parse_str("unknown"), RuleAction::Block);
+        assert_eq!(RuleAction::parse_str(""), RuleAction::Block);
+    }
+
+    #[test]
+    fn rule_action_to_waf_action_block() {
+        let wa = RuleAction::Block.to_waf_action(429, Some("rate limited".into()));
+        assert!(matches!(wa, WafAction::Block { status: 429, body } if body.as_deref() == Some("rate limited")));
+    }
+
+    #[test]
+    fn rule_action_to_waf_action_allow() {
+        let wa = RuleAction::Allow.to_waf_action(403, None);
+        assert!(matches!(wa, WafAction::Allow));
+    }
+
+    #[test]
+    fn rule_action_to_waf_action_log() {
+        let wa = RuleAction::Log.to_waf_action(403, None);
+        assert!(matches!(wa, WafAction::LogOnly));
+    }
+
+    #[test]
+    fn rule_action_to_waf_action_challenge() {
+        let wa = RuleAction::Challenge.to_waf_action(403, None);
+        assert!(matches!(wa, WafAction::Challenge));
+    }
+
+    #[test]
+    fn rule_action_serde_roundtrip() {
+        for action in [
+            RuleAction::Block,
+            RuleAction::Allow,
+            RuleAction::Log,
+            RuleAction::Challenge,
+        ] {
+            let json = serde_json::to_string(&action).unwrap();
+            let back: RuleAction = serde_json::from_str(&json).unwrap();
+            assert_eq!(action, back);
+        }
     }
 }
