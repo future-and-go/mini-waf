@@ -71,6 +71,21 @@ fn walk_json_iter(root: &Value, set: &RegexSet) -> Option<(String, usize)> {
     None
 }
 
+/// Scan query parameters with libinjection XSS fingerprinting.
+///
+/// Catches XSS vectors that might evade tag/handler regex patterns (e.g.
+/// uncommon event attributes, obfuscated URI schemes). Returns the parameter
+/// name on the first hit.
+pub fn scan_query_params_xss_libinjection(query: &str) -> Option<String> {
+    for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
+        let decoded = url_decode_recursive(&v);
+        if libinjectionrs::detect_xss(decoded.as_bytes()).is_injection() {
+            return Some(format!("query.{k}"));
+        }
+    }
+    None
+}
+
 /// Scan a form-urlencoded body (`application/x-www-form-urlencoded`),
 /// returning (`body.form.<key>`, `pattern_index`) on first hit. Each value is
 /// percent-decoded recursively before regex match.

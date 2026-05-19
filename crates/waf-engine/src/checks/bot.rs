@@ -208,4 +208,20 @@ mod tests {
         let ctx = make_ctx("Go-http-client/1.1");
         assert!(checker.check(&ctx).is_some(), "Should block bare Go HTTP client");
     }
+
+    #[test]
+    fn blocks_empty_user_agent() {
+        // Missing or empty UA is a common scanner/script indicator.
+        let checker = BotCheck::new();
+        let ctx = make_ctx("");
+        let det = checker.check(&ctx).expect("empty UA should be blocked");
+        assert_eq!(det.phase, waf_common::Phase::Bot);
+    }
+
+    #[test]
+    fn blocks_python_urllib() {
+        let checker = BotCheck::new();
+        let ctx = make_ctx("python-urllib/3.11");
+        assert!(checker.check(&ctx).is_some(), "Should block python-urllib");
+    }
 }
