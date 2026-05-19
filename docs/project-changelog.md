@@ -6,6 +6,10 @@ All notable changes to PRX-WAF are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Documentation
+- Clarified FR-008 access-list dry-run behavior, including gateway log fields and the `full_bypass` caveat.
+- Corrected request-pipeline Phase-0 ordering to match implementation: Host gate → IP blacklist → IP whitelist.
+
 ### Changed
 - **Migration 0009**: Widened `bot_patterns.pattern` column from VARCHAR(500) to TEXT to support arbitrarily long regex patterns in bot detection rules.
 - **Migration 0009**: Documented expanded `bot_patterns.pattern_type` vocabulary (user_agent, headers, body, path; legacy: ua, ip, behavior) via SQL COMMENT.
