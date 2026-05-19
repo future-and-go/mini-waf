@@ -44,6 +44,8 @@ import { ClusterTokensPage } from "./pages/cluster/tokens";
 import { ClusterSyncPage } from "./pages/cluster/sync";
 import { CacheDashboardPage } from "./pages/cache";
 import { TxVelocityPage } from "./pages/tx-velocity";
+import { RuleAnalyticsPage } from "./pages/rule-analytics";
+import { SecurityEventDetailPage } from "./pages/security-events/detail";
 
 // Each Refine `resource` is what binds list/create/edit/delete pages,
 // the data provider, and the navigation system. Path on resource is what
@@ -53,7 +55,8 @@ const resources = [
   { name: "hosts", list: "/hosts" },
   { name: "ip-rules", list: "/ip-rules" },
   { name: "url-rules", list: "/url-rules" },
-  { name: "security-events", list: "/security-events" },
+  { name: "security-events", list: "/security-events", show: "/security-events/:id" },
+  { name: "rule-analytics", list: "/rule-analytics" },
   { name: "logs", list: "/logs", meta: { dataProviderName: "vlogs" } },
   {
     name: "custom-rules",
@@ -124,6 +127,8 @@ export const App: React.FC = () => {
                   <Route path="/ip-rules" element={<IpRulesPage />} />
                   <Route path="/url-rules" element={<UrlRulesPage />} />
                   <Route path="/security-events" element={<SecurityEventsPage />} />
+                  <Route path="/security-events/:id" element={<SecurityEventDetailPage />} />
+                  <Route path="/rule-analytics" element={<RuleAnalyticsPage />} />
                   <Route path="/logs" element={<AdminOnly><LogsPage /></AdminOnly>} />
                   <Route path="/custom-rules" element={<CustomRulesPage />} />
                   <Route path="/certificates" element={<CertificatesPage />} />

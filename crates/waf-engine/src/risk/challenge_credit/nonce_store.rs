@@ -125,6 +125,9 @@ impl NonceStore {
     /// 1. Check LRU cache — if present, return Replay immediately
     /// 2. Try Redis SETNX — if fails (key exists), return Replay
     /// 3. Insert into LRU and return Consumed
+    // `async` is required for the `.await` in the `redis-store` code path below;
+    // without that feature, clippy correctly warns there are no awaits.
+    #[cfg_attr(not(feature = "redis-store"), allow(clippy::unused_async))]
     pub async fn try_consume(&self, nonce: &str) -> ConsumeResult {
         // Redis path (if enabled) — Redis SETNX is authoritative for cluster-wide dedup
         #[cfg(feature = "redis-store")]

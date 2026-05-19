@@ -142,13 +142,43 @@ export interface SecurityEvent {
   method: string;
   path: string;
   rule_name: string;
-  rule_id?: string;
+  rule_id: string | null;
   action: string;
-  detail?: string;
-  geo_info?: Record<string, string> | null;
+  detail: string | null;
+  geo_info: {
+    country?: string;
+    province?: string;
+    city?: string;
+    isp?: string;
+    iso_code?: string;
+  } | null;
   category?: string;
   country?: string;
 }
+
+// Derive attack category from rule_id prefix — mirrors waf-storage CASE expression.
+export const deriveCategory = (ruleId?: string | null): string => {
+  if (!ruleId) return "other";
+  const prefixMap: Array<[RegExp, string]> = [
+    [/^SQLI-/, "sqli"], [/^XSS-/, "xss"], [/^RCE-/, "rce"],
+    [/^TRAV-/, "path-traversal"], [/^SCAN-/, "scanner"],
+    [/^BOT-/, "bot"], [/^CC-/, "cc-ddos"],
+    [/^SSRF-/, "ssrf"],
+    [/^ADV-SSRF/, "ssrf"], [/^ADV-SSTI/, "ssti"], [/^ADV-/, "advanced"],
+    [/^CRS-RESP/, "data-leakage"], [/^CRS-/, "owasp-crs"],
+    [/^API-MASS/, "mass-assignment"], [/^API-/, "api-security"],
+    [/^MODSEC-RESP/, "web-shell"], [/^MODSEC-/, "modsecurity"],
+    [/^CVE-/, "cve"], [/^GEO-/, "geo-blocking"], [/^CUSTOM-/, "custom"],
+    [/^IP-/, "ip-rule"], [/^URL-/, "url-rule"],
+    [/^SENS-/, "sensitive-data"], [/^HOTLINK-/, "anti-hotlink"],
+    [/^OWASP-942/, "sqli"], [/^OWASP-941/, "xss"],
+    [/^OWASP-930/, "lfi"], [/^OWASP-931/, "rfi"],
+    [/^OWASP-932/, "rce"], [/^OWASP-933/, "php-injection"],
+    [/^OWASP-913/, "scanner"],
+  ];
+  for (const [re, cat] of prefixMap) if (re.test(ruleId)) return cat;
+  return "other";
+};
 
 export interface NotificationConfig {
   id: string;

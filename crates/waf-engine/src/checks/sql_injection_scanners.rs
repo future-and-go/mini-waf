@@ -101,6 +101,21 @@ pub fn scan_query_params(query: &str, patterns: &RegexSet) -> Option<(String, us
     None
 }
 
+/// Scan query parameters with libinjection fingerprinting.
+///
+/// Catches minimal error-injection probes like `'(` that contain no SQL keywords
+/// and therefore evade keyword/regex-based patterns. Returns the parameter name
+/// on the first hit.
+pub fn scan_query_params_libinjection(query: &str) -> Option<String> {
+    for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
+        let decoded = url_decode_recursive(&v);
+        if libinjectionrs::detect_sqli(decoded.as_bytes()).is_injection() {
+            return Some(format!("query.{k}"));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -5,7 +5,7 @@ use waf_common::config::SqliScanConfig;
 use waf_common::{DetectionResult, Phase, RequestCtx};
 
 use super::sql_injection_patterns::{SQLI_DESCS, SQLI_SET};
-use super::sql_injection_scanners::{scan_headers, scan_json_body, scan_query_params};
+use super::sql_injection_scanners::{scan_headers, scan_json_body, scan_query_params, scan_query_params_libinjection};
 use super::{Check, request_targets};
 
 /// SQL injection detection checker with hot-reloadable config.
@@ -48,6 +48,21 @@ impl Check for SqlInjectionCheck {
         }
 
         let cfg = self.cfg.load();
+
+        // 0. libinjection fingerprint scan on query params — catches minimal error-injection
+        //    probes like `'(` that contain no SQL keywords and evade regex patterns.
+        if !ctx.query.is_empty()
+            && let Some(location) = scan_query_params_libinjection(&ctx.query)
+        {
+            return Some(DetectionResult {
+                rule_id: Some("SQLI-LIB".to_string()),
+                rule_name: "SQL Injection".to_string(),
+                phase: Phase::SqlInjection,
+                detail: format!("libinjection SQLi fingerprint detected in {location}"),
+                rule_action: None,
+                action_status: None,
+            });
+        }
 
         // 1. Per-parameter query string scan for precise attribution
         if !ctx.query.is_empty()
@@ -156,6 +171,27 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: std::collections::HashMap::new(),
         }
+    }
+
+    #[test]
+    fn detects_minimal_quote_paren_probe() {
+        // `'(` is a minimal error-injection probe that triggers SQL syntax errors
+        // in SQLite/MySQL but contains no keywords — caught by SQLI-020 pattern.
+        // Regression for: GET /rest/products/search?q=%27%28 bypassing WAF.
+        let checker = SqlInjectionCheck::new();
+        let ctx = make_ctx("q=%27%28", "");
+        let result = checker.check(&ctx);
+        assert!(result.is_some(), "Should detect minimal '( SQLi probe");
+        let detail = result.unwrap().detail;
+        assert!(detail.contains("query.q"), "Should attribute to query.q: {detail}");
+    }
+
+    #[test]
+    fn detects_quote_wildcard_probe() {
+        // `'%` is another common error probe in LIKE-based search handlers.
+        let checker = SqlInjectionCheck::new();
+        let ctx = make_ctx("search=%27%25", "");
+        assert!(checker.check(&ctx).is_some(), "Should detect '% probe");
     }
 
     #[test]

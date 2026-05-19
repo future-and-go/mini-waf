@@ -191,8 +191,8 @@ prx-waf/
 │   │   │   ├── url_rules.rs   # URL allow/block CRUD
 │   │   │   ├── certificates.rs
 │   │   │   ├── custom_rules.rs
-│   │   │   ├── security_events.rs
-│   │   │   ├── stats.rs
+│   │   │   ├── security_events.rs  # GET /api/security-events (list + /{id} detail)
+│   │   │   ├── stats.rs            # GET /api/stats/overview, /timeseries, /timeseries-by-category, /geo
 │   │   │   ├── notifications.rs
 │   │   │   ├── plugins.rs
 │   │   │   ├── cluster.rs

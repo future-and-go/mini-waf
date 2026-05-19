@@ -24,7 +24,8 @@
     "ruleSources": "规则源",
     "botDetection": "机器人检测",
     "cache": "缓存",
-    "cacheDashboard": "缓存仪表盘"
+    "cacheDashboard": "缓存仪表盘",
+    "ruleAnalytics": "规则分析"
   },
   "common": {
     "save": "保存",
@@ -501,5 +502,44 @@
     "purged": "已清除 {{n}} 条记录",
     "flushed": "缓存已清空",
     "purgeError": "操作失败"
+  },
+  "analytics": {
+    "title": "Rule Analytics",
+    "subtitle": "Attack distribution by rule group, action, and URI",
+    "byRuleGroup": "Total WAF Requests by Rule Group",
+    "byAction": "WAF Actions",
+    "topBlockedUris": "Top Blocked Request URIs",
+    "topUrisHint": "Click a tile to filter the table below",
+    "rulesDetailsSummary": "Top Triggered Rules",
+    "timeline24h": "Traffic timeline",
+    "rulesDetails": "Rules Details",
+    "timeRange": "Time range",
+    "filterByHost": "Host filter",
+    "exportCsv": "Export CSV",
+    "clearFilters": "Clear filters",
+    "gapStackedTimeline": "Per-category timeline requires a new backend endpoint",
+    "selectToFilter": "select to filter",
+    "noEvents": "No events in range",
+    "totalEvents": "Total events"
+  },
+  "eventDetail": {
+    "title": "Security Event",
+    "back": "Back",
+    "overview": "Overview",
+    "detail": "Detail",
+    "geo": "Geo information",
+    "related": "Related events",
+    "sameIp": "From same IP (last 24h)",
+    "sameRule": "Same rule (last 24h)",
+    "rawJson": "Raw JSON",
+    "copy": "Copy",
+    "copied": "copied",
+    "viewAllFromIp": "View all events from this IP",
+    "viewAllForRule": "View all events for this rule",
+    "addToBlocklist": "Add IP to blocklist",
+    "addedToBlocklist": "IP added to blocklist",
+    "addToBlocklistConfirm": "Block all traffic from {{ip}}?",
+    "notFound": "Event not found",
+    "loading": "Loading event..."
   }
 }

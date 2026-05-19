@@ -226,6 +226,9 @@ Health check: `curl http://localhost:9527/health`
 | GET/POST       | `/api/block-ips`      | IP blocklist              |
 | GET/POST       | `/api/block-urls`     | URL blocklist             |
 | GET            | `/api/attack-logs`    | Security events           |
+| GET            | `/api/security-events`              | List security events (paginated, filtered)    |
+| GET            | `/api/security-events/{id}`         | Single security event detail (UUID)           |
+| GET            | `/api/stats/timeseries-by-category` | Per-category hourly bucket counts, last N h   |
 | POST           | `/api/reload`         | Hot-reload rules          |
 | GET            | `/api/cluster/status` | Cluster health            |
 | WS             | `/ws/events`          | Real-time security events |

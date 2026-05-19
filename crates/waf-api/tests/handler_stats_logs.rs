@@ -15,6 +15,7 @@
 mod common;
 
 use common::{client, start_test_server, url_for};
+use waf_storage::models::CreateSecurityEvent;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn stats_overview_ok() {
@@ -99,4 +100,88 @@ async fn audit_log_ok() {
         .expect("send");
     // Endpoint should respond — either 200 with list or 200 even empty.
     assert!(resp.status().is_success() || resp.status() == 500);
+}
+
+// === /api/stats/timeseries-by-category ===
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stats_timeseries_by_category_ok_empty() {
+    let s = start_test_server().await;
+    let resp = client()
+        .get(url_for(s.addr, "/api/stats/timeseries-by-category?hours=24"))
+        .bearer_auth(&s.admin_token)
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.expect("json");
+    assert_eq!(body["success"], serde_json::Value::Bool(true));
+    assert!(body["data"].is_array(), "data must be array, got: {body}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stats_timeseries_by_category_clamps_excessive_hours() {
+    let s = start_test_server().await;
+    // hours=9999 is clamped to 720 in the handler — the endpoint must still
+    // succeed and return a valid payload shape.
+    let resp = client()
+        .get(url_for(s.addr, "/api/stats/timeseries-by-category?hours=9999"))
+        .bearer_auth(&s.admin_token)
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp.status(), 200);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stats_timeseries_by_category_filters_by_host_code() {
+    let s = start_test_server().await;
+    let resp = client()
+        .get(url_for(
+            s.addr,
+            "/api/stats/timeseries-by-category?hours=1&host_code=nonexistent",
+        ))
+        .bearer_auth(&s.admin_token)
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.expect("json");
+    let data = body["data"].as_array().expect("array");
+    assert!(
+        data.is_empty(),
+        "nonexistent host_code must yield empty data, got: {body}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stats_timeseries_by_category_buckets_seeded_event() {
+    let s = start_test_server().await;
+    s.db.create_security_event(CreateSecurityEvent {
+        host_code: "h1".into(),
+        client_ip: "1.2.3.4".into(),
+        method: "GET".into(),
+        path: "/x".into(),
+        rule_id: Some("SQLI-007".into()),
+        rule_name: "x".into(),
+        action: "block".into(),
+        detail: None,
+        geo_info: None,
+    })
+    .await
+    .expect("seed event");
+
+    let resp = client()
+        .get(url_for(s.addr, "/api/stats/timeseries-by-category?hours=1"))
+        .bearer_auth(&s.admin_token)
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.expect("json");
+    let data = body["data"].as_array().expect("array");
+    assert!(!data.is_empty(), "seeded SQLI-007 event must surface, got: {body}");
+    // The CASE expression maps `SQLI-%` rule_id to category `sqli`.
+    assert_eq!(data[0]["category"].as_str().expect("category"), "sqli");
+    assert!(data[0]["count"].as_i64().unwrap_or(0) >= 1);
 }
