@@ -215,27 +215,8 @@ impl ConditionOp {
     }
 }
 
-// ── Rule action ───────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RuleAction {
-    Block,
-    Allow,
-    Log,
-    Challenge,
-}
-
-impl RuleAction {
-    pub fn parse_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "allow" => Self::Allow,
-            "log" => Self::Log,
-            "challenge" => Self::Challenge,
-            _ => Self::Block,
-        }
-    }
-}
+// ── Rule action (defined in waf-common, re-exported for downstream consumers) ─
+pub use waf_common::RuleAction;
 
 // ── A single custom WAF rule ──────────────────────────────────────────────────
 
@@ -458,6 +439,8 @@ impl CustomRulesEngine {
                         rule_name: rule.name.clone(),
                         phase: Phase::CustomRule,
                         detail: format!("Response body rule '{}' matched", rule.name),
+                        rule_action: Some(rule.action),
+                        action_status: Some(rule.action_status),
                     });
                 }
             }
@@ -532,6 +515,8 @@ impl CustomRulesEngine {
                     rule_name: rule.name.clone(),
                     phase: Phase::Owasp,
                     detail: format!("OWASP rule {} triggered ({})", rule.id, rule.name),
+                    rule_action: Some(RuleAction::Block),
+                    action_status: Some(403),
                 });
             }
         }
@@ -577,6 +562,8 @@ impl CustomRulesEngine {
                         rule_name: rule.name.clone(),
                         phase: Phase::CustomRule,
                         detail: format!("Custom rule '{}' matched", rule.name),
+                        rule_action: Some(rule.action),
+                        action_status: Some(rule.action_status),
                     });
                 }
             }
