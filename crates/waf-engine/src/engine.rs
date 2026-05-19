@@ -5,7 +5,7 @@ use arc_swap::ArcSwap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use waf_common::{RequestCtx, WafAction, WafDecision};
+use waf_common::{RequestCtx, RuleAction, WafAction, WafDecision};
 use waf_storage::{
     Database,
     models::{AttackLog, CreateSecurityEvent},
@@ -684,13 +684,26 @@ impl WafEngine {
                     result: Some(result),
                 }
             } else {
-                let body = render_block_page(ctx, &rule_name);
-                WafDecision::block(403, Some(body), result)
+                let action = result.rule_action.unwrap_or(RuleAction::Block);
+                let status = result.action_status.unwrap_or(403);
+                let body = if action == RuleAction::Block {
+                    Some(render_block_page(ctx, &rule_name))
+                } else {
+                    None
+                };
+                WafDecision {
+                    action: action.to_waf_action(status, body),
+                    result: Some(result),
+                }
             };
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             self.send_audit_event(ctx, &decision);
-            return decision;
+            // Allow/Log: log the match but continue pipeline (phases 13-16 still run)
+            // Block/Challenge: return immediately
+            if !decision.is_allowed() {
+                return decision;
+            }
         }
 
         // ── Phase 13: OWASP CRS ────────────────────────────────────────────────
