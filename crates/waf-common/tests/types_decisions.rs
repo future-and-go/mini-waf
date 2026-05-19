@@ -20,6 +20,8 @@ fn waf_decision_block_constructor() {
         rule_name: "test".into(),
         phase: Phase::SqlInjection,
         detail: "found".into(),
+        rule_action: None,
+        action_status: None,
     };
     let d = WafDecision::block(403, Some("denied".into()), r);
     assert!(!d.is_allowed());
