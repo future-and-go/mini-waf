@@ -39,6 +39,7 @@ export const navItems: NavItem[] = [
   { key: "ip-rules", i18nKey: "nav.ipRules", path: "/ip-rules", icon: SafetyOutlined },
   { key: "url-rules", i18nKey: "nav.urlRules", path: "/url-rules", icon: LinkOutlined },
   { key: "security-events", i18nKey: "nav.securityEvents", path: "/security-events", icon: AlertOutlined },
+  { key: "rule-analytics", i18nKey: "nav.ruleAnalytics", path: "/rule-analytics", icon: BarChartOutlined },
   { key: "logs", i18nKey: "nav.logs", path: "/logs", icon: ContainerOutlined },
   { key: "custom-rules", i18nKey: "nav.customRules", path: "/custom-rules", icon: FileTextOutlined },
   { key: "certificates", i18nKey: "nav.certificates", path: "/certificates", icon: LockOutlined },

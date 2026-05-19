@@ -96,6 +96,27 @@ pub async fn stats_timeseries(
     Ok(Json(serde_json::json!({ "success": true, "data": series })))
 }
 
+/// GET `/api/stats/timeseries-by-category`
+///
+/// Same time semantics as `stats_timeseries` (hourly buckets, last `hours`
+/// hours, optionally scoped to a single host) but rows are split by attack
+/// category. Used by the Rule Analytics stacked timeline chart.
+///
+/// Response is `Vec<CategoryTimeSeriesPoint>` in the standard
+/// `{"success": true, "data": […]}` envelope. Rows for an hour bucket where
+/// no category fired are simply absent — the frontend fills gaps when rendering.
+pub async fn stats_timeseries_by_category(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<TimeseriesQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let hours = q.hours.unwrap_or(24).clamp(1, 720);
+    let series = state
+        .db
+        .get_stats_timeseries_by_category(q.host_code.as_deref(), hours)
+        .await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": series })))
+}
+
 /// GET /api/stats/geo — `GeoIP` distribution of blocked requests
 pub async fn stats_geo(State(state): State<Arc<AppState>>) -> ApiResult<Json<serde_json::Value>> {
     let geo = state.db.get_geo_stats().await?;

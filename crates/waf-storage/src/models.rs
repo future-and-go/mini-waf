@@ -499,6 +499,20 @@ pub struct TimeSeriesPoint {
     pub blocked: i64,
 }
 
+/// Per-category time-bucket from `security_events`, used by the Rule Analytics
+/// stacked timeline chart.
+///
+/// `ts` is bucketed to the hour boundary; `category` is derived inline by the
+/// same `CASE rule_id LIKE …` expression already shared with
+/// `get_stats_overview` and `RecentEvent.category` so the dashboard does not
+/// need a second mapping table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CategoryTimeSeriesPoint {
+    pub ts: DateTime<Utc>,
+    pub category: String,
+    pub count: i64,
+}
+
 // ─── Phase 4: Notifications ───────────────────────────────────────────────────
 
 /// Notification configuration entry

@@ -18,7 +18,8 @@ import { ReloadOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import { useTable, useOne } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import type { SecurityEvent } from "../../types/api";
 import { fmtDateTime } from "../../utils/format";
 
@@ -194,13 +195,18 @@ const EventDetailDrawer: React.FC<EventDetailDrawerProps> = ({ eventId, onClose 
 
 export const SecurityEventsPage: React.FC = () => {
   const { t } = useTranslation();
-  const [hostCode, setHostCode] = useState("");
-  const [clientIp, setClientIp] = useState("");
-  const [ruleId, setRuleId] = useState("");
-  const [path, setPath] = useState("");
-  const [action, setAction] = useState<string | undefined>();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const [hostCode, setHostCode] = useState(searchParams.get("host_code") ?? "");
+  const [clientIp, setClientIp] = useState(searchParams.get("client_ip") ?? "");
+  const [ruleId, setRuleId] = useState(searchParams.get("rule_id") ?? "");
+  const [ruleName, setRuleName] = useState(searchParams.get("rule_name") ?? "");
+  const [path, setPath] = useState(searchParams.get("path") ?? "");
+  const [action, setAction] = useState<string | undefined>(searchParams.get("action") ?? undefined);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  // Track last synced URL key to prevent looping when applyFilters also calls setSearchParams.
+  const lastSyncedRef = useRef<string>("");
 
   // Server-side pagination is the only sane default for SecurityEvents:
   // the table can be millions of rows. Filters propagate as `?host_code=...`
@@ -214,18 +220,64 @@ export const SecurityEventsPage: React.FC = () => {
     },
   });
 
+  // Sync URL params → filter state whenever search params change (covers both
+  // initial mount and same-tab navigation where the component is not re-mounted).
+  useEffect(() => {
+    const key = searchParams.toString();
+    if (key === lastSyncedRef.current) return;
+    lastSyncedRef.current = key;
+
+    const urlClientIp = searchParams.get("client_ip");
+    const urlRuleId = searchParams.get("rule_id");
+    const urlRuleName = searchParams.get("rule_name");
+    const urlHostCode = searchParams.get("host_code");
+    const urlAction = searchParams.get("action");
+    const urlPath = searchParams.get("path");
+
+    if (urlClientIp || urlRuleId || urlRuleName || urlHostCode || urlAction || urlPath) {
+      if (urlHostCode !== null) setHostCode(urlHostCode);
+      if (urlClientIp !== null) setClientIp(urlClientIp);
+      if (urlRuleId !== null) setRuleId(urlRuleId);
+      if (urlRuleName !== null) setRuleName(urlRuleName);
+      if (urlPath !== null) setPath(urlPath);
+      if (urlAction !== null) setAction(urlAction || undefined);
+
+      setFilters(
+        [
+          { field: "host_code", operator: "eq", value: urlHostCode || undefined },
+          { field: "client_ip", operator: "eq", value: urlClientIp || undefined },
+          { field: "rule_id", operator: "eq", value: urlRuleId || undefined },
+          { field: "rule_name", operator: "eq", value: urlRuleName || undefined },
+          { field: "path", operator: "contains", value: urlPath || undefined },
+          { field: "action", operator: "eq", value: urlAction || undefined },
+        ],
+        "replace",
+      );
+    }
+  }, [searchParams]);
+
   const applyFilters = () => {
     setFilters(
       [
         { field: "host_code", operator: "eq", value: hostCode || undefined },
         { field: "client_ip", operator: "eq", value: clientIp || undefined },
         { field: "rule_id", operator: "eq", value: ruleId || undefined },
+        { field: "rule_name", operator: "eq", value: ruleName || undefined },
         { field: "path", operator: "contains", value: path || undefined },
         { field: "action", operator: "eq", value: action || undefined },
       ],
       "replace",
     );
     setCurrentPage(1);
+    // Sync filter state to URL for deep-linking
+    const params: Record<string, string> = {};
+    if (hostCode) params.host_code = hostCode;
+    if (clientIp) params.client_ip = clientIp;
+    if (ruleId) params.rule_id = ruleId;
+    if (ruleName) params.rule_name = ruleName;
+    if (path) params.path = path;
+    if (action) params.action = action;
+    setSearchParams(params, { replace: true });
   };
 
   const data = Array.isArray(result?.data) ? result.data : [];
@@ -348,6 +400,13 @@ export const SecurityEventsPage: React.FC = () => {
             value={ruleId}
             onChange={(e) => setRuleId(e.target.value)}
             style={{ width: 130 }}
+            onPressEnter={applyFilters}
+          />
+          <Input
+            placeholder={t("security.ruleName")}
+            value={ruleName}
+            onChange={(e) => setRuleName(e.target.value)}
+            style={{ width: 160 }}
             onPressEnter={applyFilters}
           />
           <Input

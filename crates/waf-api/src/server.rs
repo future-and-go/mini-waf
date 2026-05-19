@@ -15,6 +15,7 @@ use tower_http::trace::TraceLayer;
 use tracing::info;
 
 use crate::auth::{login, logout, refresh_token};
+use crate::bot_api::{create_bot_pattern, list_bot_patterns, toggle_bot_pattern};
 use crate::cache_api::{
     cache_backend_info, cache_flush, cache_flush_host, cache_flush_key, cache_list_tags, cache_purge_route,
     cache_purge_tag, cache_stats, cache_stats_timeseries, cache_top_routes,
@@ -44,12 +45,11 @@ use crate::plugins::{delete_plugin, disable_plugin, enable_plugin, list_plugins,
 use crate::rule_sources_api::{
     create_rule_source, delete_rule_source, list_rule_sources, sync_all_rule_sources, sync_rule_source,
 };
-use crate::bot_api::{create_bot_pattern, list_bot_patterns, toggle_bot_pattern};
 use crate::rules_api::{get_rule_registry, import_rules, reload_rule_registry, toggle_rule};
 use crate::security::{admin_ip_check_middleware, list_audit_log, rate_limit_middleware, security_headers_middleware};
 use crate::state::AppState;
 use crate::static_files::static_handler;
-use crate::stats::{stats_geo, stats_overview, stats_timeseries};
+use crate::stats::{stats_geo, stats_overview, stats_timeseries, stats_timeseries_by_category};
 use crate::tunnels::{create_tunnel, delete_tunnel, list_tunnels, ws_tunnel};
 use crate::websocket::{ws_events, ws_logs};
 
@@ -155,6 +155,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         // Phase 4: Statistics
         .route("/api/stats/overview", get(stats_overview))
         .route("/api/stats/timeseries", get(stats_timeseries))
+        .route("/api/stats/timeseries-by-category", get(stats_timeseries_by_category))
         .route("/api/stats/geo", get(stats_geo))
         // Phase 4: Notifications
         .route(

@@ -35,10 +35,12 @@ pub static SQLI_DESCS: &[&str] = &[
     "error-based CAST injection",
     "error-based CONVERT injection (MySQL)",
     "error-based DOUBLE overflow (MySQL exp(~()))",
+    // Error-probe pattern (020)
+    "error-based injection probe (quote + paren/wildcard)",
 ];
 
 // Compile-time assertion: descriptions must match pattern count
-const _: () = assert!(SQLI_DESCS.len() == 19);
+const _: () = assert!(SQLI_DESCS.len() == 20);
 
 /// Compiled SQL injection pattern set.
 ///
@@ -91,6 +93,17 @@ pub static SQLI_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"(?i)\bconvert\s{0,10}\([^)]{1,64}?using\s+",
         // SQLI-019: Error-based DOUBLE overflow (MySQL, bounded \s{0,10})
         r"(?i)\bexp\s{0,10}\(\s{0,10}~\s{0,10}\(",
+        // SQLI-020: Minimal error-probe — single quote immediately followed by `(` or `%`
+        // with optional whitespace. Catches `'(` (MySQL/SQLite syntax-error injection) and
+        // `'%` (LIKE-based blind injection) probes that contain no SQL keywords and
+        // therefore evade all keyword-anchored patterns above.
+        // Applied to already-extracted URL-decoded values, so the leading
+        // `(?:^|[^a-zA-Z0-9_])` anchor is used to suppress FPs on natural-language
+        // apostrophes embedded in the middle of a word (e.g. "it's(fun)" → `s(` follows
+        // a word char so the quote is part of a contraction, not a probe).
+        // Defense-in-depth: libinjection (SQLI-LIB) catches `'(` in query params; this
+        // pattern extends coverage to body, cookie, and path scan locations.
+        r"(?:^|[^a-zA-Z0-9_])'[\s]*[(%]",
     ])
     .expect("BUG: SQL injection regex patterns must compile - these are compile-time literals")
 });
@@ -150,5 +163,23 @@ mod tests {
     fn detects_double_overflow_sqli_019() {
         assert!(SQLI_SET.is_match("exp(~(select * from users))"));
         assert!(SQLI_SET.is_match("EXP( ~ ( select 1 ))"));
+    }
+
+    // === SQLI-020 anchor regression tests ===
+
+    #[test]
+    fn sqli_020_detects_bare_error_probes() {
+        // Probes at start of a URL-decoded value — should be flagged.
+        assert!(SQLI_SET.is_match("'("), "quote-paren at value start");
+        assert!(SQLI_SET.is_match("'%"), "quote-percent at value start");
+        assert!(SQLI_SET.is_match("=' ("), "probe after equals delimiter");
+    }
+
+    #[test]
+    fn sqli_020_no_false_positive_on_contraction() {
+        // "it's(fun)" — apostrophe follows a word char `s`, so it's a contraction.
+        assert!(!SQLI_SET.is_match("it's(fun)"), "contraction should not match");
+        // "O'Brien" — apostrophe followed by a letter, no paren/percent.
+        assert!(!SQLI_SET.is_match("O'Brien"), "natural apostrophe should not match");
     }
 }
