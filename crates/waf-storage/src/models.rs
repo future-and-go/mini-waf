@@ -323,6 +323,7 @@ pub struct CreateCustomRule {
 //   absent field  → None          (keep existing DB value)
 //   explicit null → Some(None)    (write NULL to DB)
 //   string value  → Some(Some(v)) (write new value to DB)
+#[allow(clippy::option_option)]
 fn deser_opt_null<'de, D, T>(de: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
