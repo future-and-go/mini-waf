@@ -82,8 +82,11 @@ impl Check for RequestBodyAbuseCheck {
             ));
         }
 
-        // ── Rule 3-5: JSON-specific (only when declared JSON) ───────────────
-        if declared == "json" {
+        // ── Rule 3-5: JSON-specific (only when declared JSON and body present) ─
+        // Skip when body_preview is empty: this pass runs before the body has
+        // arrived (request_filter phase). The body_filter phase re-runs with the
+        // actual body bytes and will catch malformed JSON then.
+        if declared == "json" && !ctx.body_preview.is_empty() {
             if let Err(v) = precheck_json_depth(&ctx.body_preview, dc.max_json_depth) {
                 return Some(violation_to_detection(&v, dc.max_json_depth, dc.max_json_keys));
             }
