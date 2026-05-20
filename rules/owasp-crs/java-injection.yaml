@@ -3,7 +3,7 @@ id: CRS-944100
 name: 'Remote Command Execution: Suspicious Java class detected'
 enabled: true
 action: block
-pattern: java\.lang\.(?:runtime|processbuilder)
+pattern: (?i)java\.lang\.(?:runtime|processbuilder)
 category: java-injection
 severity: critical
 paranoia: 1
@@ -20,7 +20,7 @@ id: CRS-944110
 name: 'Remote Command Execution: Java process spawn (CVE-2017-9805)'
 enabled: true
 action: block
-pattern: (?:runtime|processbuilder)
+pattern: (?i)(?:runtime|processbuilder)
 category: java-injection
 severity: critical
 paranoia: 1
@@ -37,7 +37,7 @@ id: CRS-944120
 name: 'Remote Command Execution: Java serialization (CVE-2015-4852)'
 enabled: true
 action: block
-pattern: (?:clonetransform|xmldecod)er|f(?:orclosure|ilewriter)|in(?:stantiate(?:factory|transformer)|vokertransformer)|(?:prototype(?:clone|serialization)factor|getpropert)y|whileclosure
+pattern: (?i)(?:clonetransform|xmldecod)er|f(?:orclosure|ilewriter)|in(?:stantiate(?:factory|transformer)|vokertransformer)|(?:prototype(?:clone|serialization)factor|getpropert)y|whileclosure
 category: java-injection
 severity: critical
 paranoia: 1
@@ -54,8 +54,7 @@ id: CRS-944130
 name: Suspicious Java class detected
 enabled: true
 action: block
-operator: pm_from_file
-value: java-classes.data
+pattern: (?i)(?:class\.forname|java\.lang\.(?:runtime|processbuilder|thread|class)|com\.opensymphony\.xwork2|com\.sun\.org\.apache|freemarker\.(?:core|template)|org\.springframework\.(?:expression|context|web)|evaluationcontext|classloader|declaredclass|java\.io\.(?:file|inputstream|outputstream)|javax\.script|org\.apache\.commons\.collections|org\.beanshell|bsh\.interpreter)
 category: java-injection
 severity: critical
 paranoia: 1

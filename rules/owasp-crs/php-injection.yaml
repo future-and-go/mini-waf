@@ -100,7 +100,7 @@ id: CRS-933200
 name: 'PHP Injection Attack: Wrapper scheme detected'
 enabled: true
 action: block
-pattern: (?:bzip2|expect|glob|ogg|(?:ph|r)ar|ssh2(?:.(?:s(?:hell|(?:ft|c)p)|exec|tunnel))?|z(?:ip|lib))://
+pattern: (?i)(?:php|bzip2|expect|glob|ogg|(?:ph|r)ar|ssh2(?:.(?:s(?:hell|(?:ft|c)p)|exec|tunnel))?|z(?:ip|lib)|data|convert\.base64-(?:en|de)code|string\.(?:to(?:upper|lower)|re(?:place|verse)|rot13))://
 category: php-injection
 severity: critical
 paranoia: 1
