@@ -9,8 +9,7 @@ use uuid::Uuid;
 
 use waf_storage::models::{
     AttackLogQuery, CreateCertificate, CreateCustomRule, CreateHost, CreateIpRule, CreateLbBackend,
-    CreateSensitivePattern, CreateUrlRule, SecurityEventQuery, UpdateCustomRule, UpdateHost,
-    UpsertHotlinkConfig,
+    CreateSensitivePattern, CreateUrlRule, SecurityEventQuery, UpdateCustomRule, UpdateHost, UpsertHotlinkConfig,
 };
 
 use waf_common::HostConfig;
@@ -414,7 +413,9 @@ pub async fn update_custom_rule(
 ) -> ApiResult<Json<Value>> {
     use waf_engine::rules::engine::from_db_rule;
 
-    // Fetch old rule for engine hot-removal (need host_code before update).
+    // Fetch the pre-update rule to obtain host_code for engine removal.
+    // If host_code changes in the update the old value is still correct here
+    // because remove_rule keys on the old host_code bucket.
     let old = state
         .db
         .get_custom_rule(id)
@@ -427,16 +428,20 @@ pub async fn update_custom_rule(
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("Rule {id} not found")))?;
 
-    // Hot-reload: remove stale entry then re-add if still enabled.
-    state
-        .engine
-        .custom_rules
-        .remove_rule(&old.host_code, &id.to_string());
+    // Validate the new engine rule BEFORE touching the live engine state.
+    // If parsing fails we return an error and leave the engine intact — the
+    // old rule (now stale in DB) stays active rather than silently vanishing.
+    let new_engine_rule = if row.enabled {
+        Some(from_db_rule(&row).map_err(|e| ApiError::BadRequest(e.to_string()))?)
+    } else {
+        None
+    };
 
-    if row.enabled {
-        if let Ok(rule) = from_db_rule(&row) {
-            state.engine.custom_rules.add_rule(rule);
-        }
+    // Safe to mutate the engine now that the new rule is validated.
+    state.engine.custom_rules.remove_rule(&old.host_code, &id.to_string());
+
+    if let Some(rule) = new_engine_rule {
+        state.engine.custom_rules.add_rule(rule);
     }
 
     Ok(Json(json!({ "success": true, "data": row })))

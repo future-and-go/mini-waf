@@ -15,6 +15,7 @@ import {
   Segmented,
   Divider,
   Tag,
+  Tooltip,
   App,
 } from "antd";
 import { useCreate, useUpdate, useCustom } from "@refinedev/core";
@@ -25,7 +26,6 @@ import type {
   CreateCustomRulePayload,
   ConditionNode,
   RuleAction,
-  Condition,
 } from "../../types/api";
 import { ConditionTreeEditor } from "../custom-rules/ConditionTreeEditor";
 import { isConditionNodeShape, validateTree } from "../../utils/conditionTree";
@@ -81,31 +81,53 @@ function generateRhaiScript(event: SecurityEvent): string {
 }
 
 function generateInitialTree(event: SecurityEvent): ConditionNode {
-  const conditions: Condition[] = [
+  // Use ConditionNode[] so we can mix leaf conditions and nested OR groups.
+  const children: ConditionNode[] = [
     { field: "ip", operator: "eq", value: event.client_ip },
   ];
 
   if (event.method && event.method !== "*") {
-    conditions.push({ field: "method", operator: "eq", value: event.method });
+    children.push({ field: "method", operator: "eq", value: event.method });
   }
 
   if (event.path && event.path !== "/") {
-    conditions.push({
+    children.push({
       field: "path",
       operator: event.path.includes(".") ? "eq" : "starts_with",
       value: event.path,
     });
   }
 
-  return { and: conditions } as ConditionNode;
+  // Keep tree in sync with the generated Rhai script for SSRF.
+  if (event.rule_name === "SSRF") {
+    children.push({
+      or: [
+        { field: { header: "referer" }, operator: "contains", value: "localhost" },
+        { field: { header: "referer" }, operator: "contains", value: "127.0.0.1" },
+      ],
+    });
+  }
+
+  return { and: children };
 }
 
+// Issue 11: mirror the full rule conditions (IP + method + path) so the preview
+// count reflects what the engine actually matches, not just IP.
 function matchesRule(ev: SecurityEvent, source: SecurityEvent): boolean {
   if (ev.client_ip !== source.client_ip) return false;
-  if (source.path && source.path !== "/") {
-    if (source.path.includes(".")) return ev.path === source.path;
-    return ev.path.startsWith(source.path);
+
+  if (source.method && source.method !== "*") {
+    if (ev.method !== source.method) return false;
   }
+
+  if (source.path && source.path !== "/") {
+    if (source.path.includes(".")) {
+      if (ev.path !== source.path) return false;
+    } else {
+      if (!ev.path.startsWith(source.path)) return false;
+    }
+  }
+
   return true;
 }
 
@@ -152,7 +174,10 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [switchWarning, setSwitchWarning] = useState<string | null>(null);
+  // Script state is only used when the user explicitly activates script mode.
   const [script, setScript] = useState("");
+  // Track whether the user is in script-first mode (script textarea is the source of truth).
+  const [scriptMode, setScriptMode] = useState(false);
   const [createdRuleId, setCreatedRuleId] = useState<string | null>(null);
 
   const { mutate: create, mutation: createMutation } = useCreate();
@@ -160,11 +185,14 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
   const submitting = createMutation.isPending || updateMutation.isPending;
 
   // ── Reset when modal opens with a new event ───────────────────────────────
+  // destroyOnClose on the Modal also handles this, but the explicit reset
+  // ensures state is clean on rapid open/close cycles with the same event.
 
   useEffect(() => {
     if (!open || !event) return;
     setStep(0);
     setEditorMode("visual");
+    setScriptMode(false);
     setJsonText("");
     setJsonError(null);
     setTreeError(null);
@@ -203,11 +231,23 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
     },
   });
 
+  // Issue 6: surface fetch errors instead of silently returning [].
+  const previewFetchError = previewQuery.query.isError
+    ? (previewQuery.query.error as { message?: string } | undefined)?.message ??
+      "Failed to load preview events"
+    : null;
+
   const allPreviewEvents: SecurityEvent[] = (() => {
+    if (previewFetchError) return [];
     const raw = previewQuery.result?.data;
     if (Array.isArray(raw)) return raw as SecurityEvent[];
     const nested = (raw as unknown as { data: SecurityEvent[] } | undefined)?.data;
-    return Array.isArray(nested) ? nested : [];
+    if (Array.isArray(nested)) return nested;
+    // Neither shape matched — data provider returned something unexpected.
+    if (!previewQuery.query.isLoading && raw !== undefined) {
+      console.warn("[preview] unexpected response shape", raw);
+    }
+    return [];
   })();
 
   const matchedEvents = event
@@ -241,6 +281,10 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
   };
 
   // ── Build payload from form + editor state ────────────────────────────────
+  // Issue 5: editorMode controls what goes into the payload — the script
+  // textarea is only the source of truth when scriptMode is true.
+  // This prevents a stale auto-generated script from silently overriding the
+  // visual conditions the user just edited.
 
   const buildPayload = (
     meta: RuleFormFields,
@@ -257,14 +301,21 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
       action_msg: meta.action_msg ?? null,
     };
 
-    if (script.trim()) {
+    if (scriptMode && script.trim()) {
+      // Script-first: use Rhai, explicitly clear any tree so the backend
+      // doesn't accidentally run old match_tree from a previous save.
       payload.script = script;
+      payload.match_tree = null;
       payload.conditions = [];
     } else if (resolvedTree) {
+      // Visual/JSON mode: use the condition tree, explicitly null script so
+      // the backend clears any script stored from a prior draft save.
       payload.match_tree = resolvedTree;
+      payload.script = null;
       payload.conditions = [];
     } else {
       payload.condition_op = "and";
+      payload.script = null;
       payload.conditions = [];
     }
 
@@ -308,7 +359,7 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
     return { tree: null, error: false };
   };
 
-  // ── Save as draft (POST or PATCH if already created) ─────────────────────
+  // ── Save as draft (POST or PUT if already created) ────────────────────────
 
   const handleSaveDraft = async () => {
     let meta: RuleFormFields;
@@ -359,7 +410,7 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
     }
   };
 
-  // ── Enable rule (PATCH enabled: true) ─────────────────────────────────────
+  // ── Enable rule ───────────────────────────────────────────────────────────
 
   const handleEnableRule = () => {
     if (!createdRuleId) return;
@@ -522,12 +573,15 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
               >
                 <Input />
               </Form.Item>
+              {/* Issue 10: tooltip explains why enabled is forced off in draft */}
               <Form.Item
                 name="enabled"
                 label={t("common.enabled")}
                 valuePropName="checked"
               >
-                <Switch disabled />
+                <Tooltip title="Enable only after reviewing the event log in Step 2">
+                  <Switch disabled />
+                </Tooltip>
               </Form.Item>
             </Space>
 
@@ -578,15 +632,39 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
             </Form.Item>
 
             {/* ── Rhai Script ── */}
-            <Form.Item label={t("rules.script")} style={{ marginTop: 12 }}>
+            {/* Issue 5: script textarea is only used when scriptMode is true.
+                A separate toggle prevents the auto-generated script from
+                silently overriding the visual conditions the user edited. */}
+            <Form.Item
+              label={
+                <Space>
+                  <span>{t("rules.script")}</span>
+                  <Switch
+                    size="small"
+                    checked={scriptMode}
+                    onChange={setScriptMode}
+                    checkedChildren="On"
+                    unCheckedChildren="Off"
+                  />
+                </Space>
+              }
+              style={{ marginTop: 12 }}
+            >
               <Input.TextArea
                 rows={4}
                 value={script}
                 onChange={(e) => setScript(e.target.value)}
-                style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+                disabled={!scriptMode}
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: 12,
+                  opacity: scriptMode ? 1 : 0.5,
+                }}
               />
               <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                {t("security.rhaiAutoGenNote")}
+                {scriptMode
+                  ? t("security.rhaiAutoGenNote")
+                  : "Script inactive — visual conditions are used. Toggle on to override with Rhai."}
               </Typography.Text>
             </Form.Item>
           </Form>
@@ -618,8 +696,24 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
             description={t("security.previewWarning")}
           />
 
+          {/* Issue 6: surface fetch errors instead of silently showing [] */}
+          {previewFetchError && (
+            <Alert
+              type="error"
+              showIcon
+              message="Failed to load preview events"
+              description={previewFetchError}
+            />
+          )}
+
+          {/* Issue 7: clarify that the count is filtered by IP+method+path,
+              not a full engine simulation, so admins understand the scope */}
           <Typography.Text type="secondary">
             {t("security.foundMatches", { count: matchedEvents.length })}
+            {" — "}
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              filtered by IP, method &amp; path (client-side simulation; does not account for SSRF referer checks)
+            </Typography.Text>
           </Typography.Text>
 
           <Table
