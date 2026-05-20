@@ -621,9 +621,8 @@ impl Database {
         req: UpdateCustomRule,
     ) -> Result<Option<CustomRule>, StorageError> {
         // Fetch current row so absent fields fall back to existing values.
-        let current = match self.get_custom_rule(id).await? {
-            Some(r) => r,
-            None => return Ok(None),
+        let Some(current) = self.get_custom_rule(id).await? else {
+            return Ok(None);
         };
 
         // match_tree takes priority: pack it into the conditions JSON column.
