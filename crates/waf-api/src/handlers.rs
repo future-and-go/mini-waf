@@ -113,6 +113,11 @@ pub async fn update_host(
     let old_port = old_host.port as u16;
     state.router.unregister(&old_host.host, old_port);
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let defense_config: waf_common::DefenseConfig = host
+        .defense_json
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
     let config = Arc::new(HostConfig {
         code: host.code.clone(),
         host: host.host.clone(),
@@ -125,6 +130,7 @@ pub async fn update_host(
         cert_file: host.cert_file.clone(),
         key_file: host.key_file.clone(),
         start_status: host.start_status,
+        defense_config,
         ..HostConfig::default()
     });
     state.router.register(&config);

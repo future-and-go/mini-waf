@@ -830,6 +830,35 @@ rules:
     }
 
     #[test]
+    fn ssti_pattern_blocks_template_expressions() {
+        let yaml = r#"kind: custom_rule_v1
+id: TEST-SSTI-001
+name: SSTI test
+enabled: true
+action: block
+pattern: '(?i)(?:\$\{\s*[0-9]+\s*\*\s*[0-9]+\s*\}|\{\{\s*[0-9]+\s*\*\s*[0-9]+\s*\}\}|<%=\s*[0-9]+\s*\*\s*[0-9]+\s*%>|#\{[0-9]+\s*\*\s*[0-9]+\})'
+category: ssti
+severity: critical
+paranoia: 1
+"#;
+        let checker = OWASPCheck::from_yaml(yaml);
+        assert_eq!(checker.rule_count(), 1, "SSTI rule should be loaded");
+
+        // Body check
+        let mut ctx = make_ctx("POST", "/api/feedback", 0);
+        ctx.body_preview = bytes::Bytes::from("{\"comment\":\"{{7*7}}\"}");
+        assert!(checker.check(&ctx).is_some(), "SSTI {{7*7}} in body should block");
+
+        let mut ctx2 = make_ctx("POST", "/api/feedback", 0);
+        ctx2.body_preview = bytes::Bytes::from("{\"comment\":\"${7*7}\"}");
+        assert!(checker.check(&ctx2).is_some(), "SSTI dollar-brace in body should block");
+
+        // Query check
+        let ctx3 = make_ctx_with_query("name=%24%7B7*7%7D");
+        assert!(checker.check(&ctx3).is_some(), "SSTI dollar-brace in query should block");
+    }
+
+    #[test]
     fn detect_sqli_paranoia_level_filtering() {
         let yaml = r#"
 version: "1.0"
