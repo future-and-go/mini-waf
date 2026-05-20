@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use waf_storage::models::{
     AttackLogQuery, CreateCertificate, CreateCustomRule, CreateHost, CreateIpRule, CreateLbBackend,
-    CreateSensitivePattern, CreateUrlRule, SecurityEventQuery, UpdateHost, UpsertHotlinkConfig,
+    CreateSensitivePattern, CreateUrlRule, SecurityEventQuery, UpdateCustomRule, UpdateHost,
+    UpsertHotlinkConfig,
 };
 
 use waf_common::HostConfig;
@@ -404,6 +405,41 @@ pub async fn delete_custom_rule(State(state): State<Arc<AppState>>, Path(id): Pa
         .custom_rules
         .remove_rule(&rule.host_code, &rule.id.to_string());
     Ok(Json(json!({ "success": true, "data": null })))
+}
+
+pub async fn update_custom_rule(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateCustomRule>,
+) -> ApiResult<Json<Value>> {
+    use waf_engine::rules::engine::from_db_rule;
+
+    // Fetch old rule for engine hot-removal (need host_code before update).
+    let old = state
+        .db
+        .get_custom_rule(id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("Rule {id} not found")))?;
+
+    let row = state
+        .db
+        .update_custom_rule(id, req)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("Rule {id} not found")))?;
+
+    // Hot-reload: remove stale entry then re-add if still enabled.
+    state
+        .engine
+        .custom_rules
+        .remove_rule(&old.host_code, &id.to_string());
+
+    if row.enabled {
+        if let Ok(rule) = from_db_rule(&row) {
+            state.engine.custom_rules.add_rule(rule);
+        }
+    }
+
+    Ok(Json(json!({ "success": true, "data": row })))
 }
 
 // ─── Sensitive Patterns ───────────────────────────────────────────────────────
