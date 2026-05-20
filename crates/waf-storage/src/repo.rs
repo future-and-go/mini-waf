@@ -620,42 +620,66 @@ impl Database {
         id: Uuid,
         req: UpdateCustomRule,
     ) -> Result<Option<CustomRule>, StorageError> {
-        // Pack match_tree into the conditions column when explicitly provided.
+        // Fetch current row so absent fields fall back to existing values.
+        let current = match self.get_custom_rule(id).await? {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+
+        // match_tree takes priority: pack it into the conditions JSON column.
+        // Otherwise use the explicitly provided conditions, else keep existing.
         let conditions_val = if let Some(tree) = req.match_tree {
-            Some(serde_json::json!({ "match_tree": tree }))
+            serde_json::json!({ "match_tree": tree })
+        } else if let Some(c) = req.conditions {
+            c
         } else {
-            req.conditions
+            current.conditions.clone()
+        };
+
+        // Double-option fields: None = keep old, Some(v) = write v (may be NULL).
+        let description = match req.description {
+            None => current.description,
+            Some(v) => v,
+        };
+        let action_msg = match req.action_msg {
+            None => current.action_msg,
+            Some(v) => v,
+        };
+        let script = match req.script {
+            None => current.script,
+            Some(v) => v,
         };
 
         let row = sqlx::query_as::<_, CustomRule>(
             r"UPDATE custom_rules SET
-                host_code    = COALESCE($2,  host_code),
-                name         = COALESCE($3,  name),
-                description  = COALESCE($4,  description),
-                priority     = COALESCE($5,  priority),
-                enabled      = COALESCE($6,  enabled),
-                condition_op = COALESCE($7,  condition_op),
-                conditions   = COALESCE($8,  conditions),
-                action       = COALESCE($9,  action),
-                action_status= COALESCE($10, action_status),
-                action_msg   = COALESCE($11, action_msg),
-                script       = COALESCE($12, script),
+                host_code    = $2,
+                name         = $3,
+                description  = $4,
+                priority     = $5,
+                enabled      = $6,
+                condition_op = $7,
+                conditions   = $8,
+                action       = $9,
+                action_status= $10,
+                action_msg   = $11,
+                script       = $12,
                 updated_at   = NOW()
               WHERE id = $1
               RETURNING *",
         )
         .bind(id)
-        .bind(&req.host_code)
-        .bind(&req.name)
-        .bind(&req.description)
-        .bind(req.priority)
-        .bind(req.enabled)
-        .bind(&req.condition_op)
-        .bind(&conditions_val)
-        .bind(&req.action)
-        .bind(req.action_status)
-        .bind(&req.action_msg)
-        .bind(&req.script)
+        // Simple Option fields: None falls back to current value.
+        .bind(req.host_code.unwrap_or(current.host_code))
+        .bind(req.name.unwrap_or(current.name))
+        .bind(description)
+        .bind(req.priority.unwrap_or(current.priority))
+        .bind(req.enabled.unwrap_or(current.enabled))
+        .bind(req.condition_op.unwrap_or(current.condition_op))
+        .bind(conditions_val)
+        .bind(req.action.unwrap_or(current.action))
+        .bind(req.action_status.unwrap_or(current.action_status))
+        .bind(action_msg)
+        .bind(script)
         .fetch_optional(&self.pool)
         .await?;
 
