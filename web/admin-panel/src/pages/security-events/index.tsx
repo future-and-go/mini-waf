@@ -1,4 +1,5 @@
 import {
+  App,
   Card,
   Table,
   Tag,
@@ -14,7 +15,7 @@ import {
   Divider,
   Skeleton,
 } from "antd";
-import { ReloadOutlined, InfoCircleOutlined } from "@ant-design/icons";
+import { ReloadOutlined, InfoCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import { useTable, useOne } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
@@ -22,6 +23,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { SecurityEvent } from "../../types/api";
 import { fmtDateTime } from "../../utils/format";
+import { CreateRuleFromEventModal } from "./CreateRuleFromEventModal";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -47,9 +49,10 @@ function methodColor(method: string): string {
 interface EventDetailDrawerProps {
   eventId: string | null;
   onClose: () => void;
+  onCreateRule: (event: SecurityEvent) => void;
 }
 
-const EventDetailDrawer: React.FC<EventDetailDrawerProps> = ({ eventId, onClose }) => {
+const EventDetailDrawer: React.FC<EventDetailDrawerProps> = ({ eventId, onClose, onCreateRule }) => {
   const { t } = useTranslation();
 
   const { query } = useOne<SecurityEvent>({
@@ -185,6 +188,15 @@ const EventDetailDrawer: React.FC<EventDetailDrawerProps> = ({ eventId, onClose 
               </Divider>
             </>
           )}
+
+          <Divider />
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => onCreateRule(event)}
+          >
+            {t("security.createRuleFromEvent")}
+          </Button>
         </Space>
       ) : null}
     </Drawer>
@@ -195,6 +207,7 @@ const EventDetailDrawer: React.FC<EventDetailDrawerProps> = ({ eventId, onClose 
 
 export const SecurityEventsPage: React.FC = () => {
   const { t } = useTranslation();
+  const { message } = App.useApp();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [hostCode, setHostCode] = useState(searchParams.get("host_code") ?? "");
@@ -205,6 +218,7 @@ export const SecurityEventsPage: React.FC = () => {
   const [action, setAction] = useState<string | undefined>(searchParams.get("action") ?? undefined);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [createRuleEvent, setCreateRuleEvent] = useState<SecurityEvent | null>(null);
   // Track last synced URL key to prevent looping when applyFilters also calls setSearchParams.
   const lastSyncedRef = useRef<string>("");
 
@@ -462,6 +476,17 @@ export const SecurityEventsPage: React.FC = () => {
       <EventDetailDrawer
         eventId={selectedEventId}
         onClose={() => setSelectedEventId(null)}
+        onCreateRule={(ev) => setCreateRuleEvent(ev)}
+      />
+
+      <CreateRuleFromEventModal
+        open={!!createRuleEvent}
+        event={createRuleEvent}
+        onClose={() => setCreateRuleEvent(null)}
+        onCreated={(_id) => {
+          setCreateRuleEvent(null);
+          message.success(t("security.createRuleCreated"));
+        }}
       />
     </Space>
   );

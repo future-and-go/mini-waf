@@ -318,6 +318,45 @@ pub struct CreateCustomRule {
     pub script: Option<String>,
 }
 
+// ── Double-option deserializer ────────────────────────────────────────────────
+// Distinguishes three JSON states for nullable string columns:
+//   absent field  → None          (keep existing DB value)
+//   explicit null → Some(None)    (write NULL to DB)
+//   string value  → Some(Some(v)) (write new value to DB)
+#[allow(clippy::option_option)]
+fn deser_opt_null<'de, D, T>(de: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Ok(Some(Option::deserialize(de)?))
+}
+
+/// Partial-update custom rule request (all fields optional for PATCH/PUT)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpdateCustomRule {
+    pub host_code: Option<String>,
+    pub name: Option<String>,
+    /// `None` = keep, `Some(None)` = set NULL, `Some(Some(v))` = set value.
+    #[serde(default, deserialize_with = "deser_opt_null")]
+    pub description: Option<Option<String>>,
+    pub priority: Option<i32>,
+    pub enabled: Option<bool>,
+    pub condition_op: Option<String>,
+    /// Raw conditions array or pre-packed `{"match_tree": ...}` object.
+    pub conditions: Option<serde_json::Value>,
+    /// If present, overrides `conditions` — packed as `{"match_tree": ...}` before storage.
+    pub match_tree: Option<serde_json::Value>,
+    pub action: Option<String>,
+    pub action_status: Option<i32>,
+    /// `None` = keep, `Some(None)` = set NULL, `Some(Some(v))` = set value.
+    #[serde(default, deserialize_with = "deser_opt_null")]
+    pub action_msg: Option<Option<String>>,
+    /// `None` = keep, `Some(None)` = set NULL, `Some(Some(v))` = set value.
+    #[serde(default, deserialize_with = "deser_opt_null")]
+    pub script: Option<Option<String>>,
+}
+
 /// Create sensitive pattern request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSensitivePattern {

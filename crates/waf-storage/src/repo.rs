@@ -10,7 +10,8 @@ use crate::models::{
     CreateTunnel, CreateUrlRule, CreateWasmPlugin, CrowdSecConfigRow, CrowdSecEventQuery, CrowdSecEventRow, CustomRule,
     GeoDistEntry, GeoStats, Host, HotlinkConfig, LbBackend, NotificationConfig, NotificationLog, RecentEvent,
     RefreshToken, SecurityEvent, SecurityEventQuery, SensitivePattern, StatsOverview, TimeSeriesPoint, TopEntry,
-    TunnelRow, UpdateCertificatePem, UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
+    TunnelRow, UpdateCertificatePem, UpdateCustomRule, UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig,
+    WasmPluginRow,
 };
 
 impl Database {
@@ -612,6 +613,76 @@ impl Database {
             .execute(&self.pool)
             .await?;
         Ok(r.rows_affected() > 0)
+    }
+
+    pub async fn update_custom_rule(
+        &self,
+        id: Uuid,
+        req: UpdateCustomRule,
+    ) -> Result<Option<CustomRule>, StorageError> {
+        // Fetch current row so absent fields fall back to existing values.
+        let Some(current) = self.get_custom_rule(id).await? else {
+            return Ok(None);
+        };
+
+        // match_tree takes priority: pack it into the conditions JSON column.
+        // Otherwise use the explicitly provided conditions, else keep existing.
+        let conditions_val = if let Some(tree) = req.match_tree {
+            serde_json::json!({ "match_tree": tree })
+        } else if let Some(c) = req.conditions {
+            c
+        } else {
+            current.conditions.clone()
+        };
+
+        // Double-option fields: None = keep old, Some(v) = write v (may be NULL).
+        let description = match req.description {
+            None => current.description,
+            Some(v) => v,
+        };
+        let action_msg = match req.action_msg {
+            None => current.action_msg,
+            Some(v) => v,
+        };
+        let script = match req.script {
+            None => current.script,
+            Some(v) => v,
+        };
+
+        let row = sqlx::query_as::<_, CustomRule>(
+            r"UPDATE custom_rules SET
+                host_code    = $2,
+                name         = $3,
+                description  = $4,
+                priority     = $5,
+                enabled      = $6,
+                condition_op = $7,
+                conditions   = $8,
+                action       = $9,
+                action_status= $10,
+                action_msg   = $11,
+                script       = $12,
+                updated_at   = NOW()
+              WHERE id = $1
+              RETURNING *",
+        )
+        .bind(id)
+        // Simple Option fields: None falls back to current value.
+        .bind(req.host_code.unwrap_or(current.host_code))
+        .bind(req.name.unwrap_or(current.name))
+        .bind(description)
+        .bind(req.priority.unwrap_or(current.priority))
+        .bind(req.enabled.unwrap_or(current.enabled))
+        .bind(req.condition_op.unwrap_or(current.condition_op))
+        .bind(conditions_val)
+        .bind(req.action.unwrap_or(current.action))
+        .bind(req.action_status.unwrap_or(current.action_status))
+        .bind(action_msg)
+        .bind(script)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
     }
 
     // ─── Sensitive Patterns ───────────────────────────────────────────────────
