@@ -530,13 +530,21 @@ pub enum LoadBalanceStrategy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_field_names)]
 pub struct DefenseConfig {
+    #[serde(default = "bool_true")]
     pub bot: bool,
+    #[serde(default = "bool_true")]
     pub sqli: bool,
+    #[serde(default = "bool_true")]
     pub xss: bool,
+    #[serde(default = "bool_true")]
     pub scan: bool,
+    #[serde(default = "bool_true")]
     pub rce: bool,
+    #[serde(default = "bool_true")]
     pub sensitive: bool,
+    #[serde(default = "bool_true")]
     pub dir_traversal: bool,
+    #[serde(default)]
     pub owasp_set: bool,
     /// CC / rate-limit protection enabled
     #[serde(default = "bool_true")]
