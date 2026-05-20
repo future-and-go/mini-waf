@@ -57,6 +57,7 @@ pub async fn start_test_server() -> TestServer {
     // Force a JWT_SECRET so AppState::new succeeds. This env-var is process
     // wide; we set it once and let cargo-test parallelism reuse the value
     // (every fixture sets the same string).
+    // SAFETY: test-only; called before any other threads read these env vars.
     unsafe {
         std::env::set_var("JWT_SECRET", "integration-test-secret-key-32bytes-min");
         std::env::set_var("MASTER_KEY", "integration-test-master-key-32bytes-min");
@@ -125,6 +126,7 @@ pub async fn start_test_server() -> TestServer {
 /// starting the server. Used by panel_api integration tests that need to
 /// exercise the success branches of GET/PUT /api/panel-config.
 pub async fn start_test_server_with_panel() -> (TestServer, std::path::PathBuf) {
+    // SAFETY: test-only; called before any other threads read these env vars.
     unsafe {
         std::env::set_var("JWT_SECRET", "integration-test-secret-key-32bytes-min");
         std::env::set_var("MASTER_KEY", "integration-test-master-key-32bytes-min");
@@ -203,6 +205,7 @@ pub async fn start_test_server_with_cluster() -> TestServer {
     use waf_cluster::{NodeState, StorageMode};
     use waf_common::config::ClusterConfig;
 
+    // SAFETY: test-only; called before any other threads read these env vars.
     unsafe {
         std::env::set_var("JWT_SECRET", "integration-test-secret-key-32bytes-min");
         std::env::set_var("MASTER_KEY", "integration-test-master-key-32bytes-min");
@@ -282,6 +285,7 @@ pub async fn start_test_server_with_cluster() -> TestServer {
 pub async fn start_test_server_with_crowdsec() -> TestServer {
     use waf_engine::DecisionCache;
 
+    // SAFETY: test-only; called before any other threads read these env vars.
     unsafe {
         std::env::set_var("JWT_SECRET", "integration-test-secret-key-32bytes-min");
         std::env::set_var("MASTER_KEY", "integration-test-master-key-32bytes-min");
@@ -349,6 +353,7 @@ pub async fn start_test_server_with_crowdsec() -> TestServer {
 /// Variant that wires `victoria_logs_base_url` to a controllable mock HTTP
 /// server so /api/v1/logs/* can hit the active branches.
 pub async fn start_test_server_with_logs(vl_base: String) -> TestServer {
+    // SAFETY: test-only; called before any other threads read these env vars.
     unsafe {
         std::env::set_var("JWT_SECRET", "integration-test-secret-key-32bytes-min");
         std::env::set_var("MASTER_KEY", "integration-test-master-key-32bytes-min");
@@ -424,4 +429,92 @@ pub fn client() -> reqwest::Client {
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .expect("build reqwest client")
+}
+
+/// Host code used by [`seed_one_of_each`] and shared across stats integration
+/// tests. Tests that filter by host_code (`?host_code=h1`) MUST use this
+/// constant so a single rename here doesn't silently turn assertions into
+/// no-ops.
+pub const SEED_HOST_CODE: &str = "h1";
+
+/// Seed one `attack_log` (action=block) + one `security_event` (action=block)
+/// so every overview sub-query returns a non-trivial value.
+pub async fn seed_one_of_each(db: &waf_storage::Database) {
+    use uuid::Uuid;
+    use waf_storage::models::{AttackLog, CreateSecurityEvent};
+
+    let now = chrono::Utc::now();
+    db.create_attack_log(AttackLog {
+        id: Uuid::new_v4(),
+        host_code: SEED_HOST_CODE.into(),
+        host: "example.com".into(),
+        client_ip: "10.0.0.1".into(),
+        method: "GET".into(),
+        path: "/seed".into(),
+        query: None,
+        rule_id: Some("SQLI-1".into()),
+        rule_name: "sqli-seed".into(),
+        action: "block".into(),
+        phase: "request".into(),
+        detail: None,
+        request_headers: None,
+        geo_info: None,
+        created_at: now,
+    })
+    .await
+    .expect("seed attack_log");
+
+    db.create_security_event(CreateSecurityEvent {
+        host_code: SEED_HOST_CODE.into(),
+        client_ip: "10.0.0.2".into(),
+        method: "POST".into(),
+        path: "/seed".into(),
+        rule_id: Some("XSS-1".into()),
+        rule_name: "xss-seed".into(),
+        action: "block".into(),
+        detail: None,
+        geo_info: None,
+    })
+    .await
+    .expect("seed security_event");
+}
+
+/// Insert one `security_event` row with arbitrary host/path/rule/action.
+/// Used by integration tests that need granular control over which rows
+/// exist (e.g., to verify host_code or action filters partition results).
+pub async fn insert_security_event(
+    db: &waf_storage::Database,
+    host: &str,
+    path: &str,
+    rule_id: Option<&str>,
+    rule_name: &str,
+    action: &str,
+) {
+    use waf_storage::models::CreateSecurityEvent;
+    db.create_security_event(CreateSecurityEvent {
+        host_code: host.into(),
+        client_ip: "127.0.0.1".into(),
+        method: "GET".into(),
+        path: path.into(),
+        rule_id: rule_id.map(str::to_string),
+        rule_name: rule_name.into(),
+        action: action.into(),
+        detail: None,
+        geo_info: None,
+    })
+    .await
+    .expect("insert_security_event");
+}
+
+/// GET `path` with the server's admin token and return the parsed JSON body.
+pub async fn fetch(s: &TestServer, path: &str) -> serde_json::Value {
+    client()
+        .get(url_for(s.addr, path))
+        .bearer_auth(&s.admin_token)
+        .send()
+        .await
+        .expect("fetch send")
+        .json()
+        .await
+        .expect("fetch json")
 }

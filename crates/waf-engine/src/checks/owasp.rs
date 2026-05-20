@@ -831,7 +831,7 @@ rules:
 
     #[test]
     fn ssti_pattern_blocks_template_expressions() {
-        let yaml = r#"kind: custom_rule_v1
+        let yaml = r"kind: custom_rule_v1
 id: TEST-SSTI-001
 name: SSTI test
 enabled: true
@@ -840,7 +840,7 @@ pattern: '(?i)(?:\$\{\s*[0-9]+\s*\*\s*[0-9]+\s*\}|\{\{\s*[0-9]+\s*\*\s*[0-9]+\s*
 category: ssti
 severity: critical
 paranoia: 1
-"#;
+";
         let checker = OWASPCheck::from_yaml(yaml);
         assert_eq!(checker.rule_count(), 1, "SSTI rule should be loaded");
 
@@ -855,7 +855,10 @@ paranoia: 1
 
         // Query check
         let ctx3 = make_ctx_with_query("name=%24%7B7*7%7D");
-        assert!(checker.check(&ctx3).is_some(), "SSTI dollar-brace in query should block");
+        assert!(
+            checker.check(&ctx3).is_some(),
+            "SSTI dollar-brace in query should block"
+        );
     }
 
     #[test]

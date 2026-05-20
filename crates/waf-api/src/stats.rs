@@ -5,10 +5,32 @@ use axum::{
     Json,
     extract::{Query, State},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::error::ApiResult;
 use crate::state::AppState;
+
+// ---------------------------------------------------------------------------
+// Deserializer helpers
+// ---------------------------------------------------------------------------
+
+/// Deserialize `Option<String>` such that an empty or whitespace-only value
+/// becomes `None`. Required for query-param filters that the frontend sends
+/// as empty strings when the user clears a control.
+fn empty_string_as_none<'de, D>(de: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(de)?;
+    Ok(opt.and_then(|s| {
+        let t = s.trim();
+        if t.is_empty() { None } else { Some(t.to_string()) }
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Query structs
+// ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 pub struct TimeseriesQuery {
@@ -16,6 +38,48 @@ pub struct TimeseriesQuery {
     /// Number of hours to look back (default 24)
     pub hours: Option<i64>,
 }
+
+#[derive(Deserialize)]
+pub struct EndpointsQuery {
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub host_code: Option<String>,
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub action: Option<String>,
+    /// Number of hours to look back (1..=720, default 24)
+    pub hours: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct OverviewQuery {
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub host_code: Option<String>,
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub action: Option<String>,
+    /// Optional time window (None = all-time, current default)
+    pub hours: Option<i64>,
+}
+
+// ---------------------------------------------------------------------------
+// Hour-clamping helpers
+// ---------------------------------------------------------------------------
+
+/// Clamp optional hours param to 1..=720, defaulting to 24 when None.
+/// Used for endpoints that REQUIRE a window (e.g., heatmap, timeseries).
+fn clamp_hours_default(opt: Option<i64>) -> i64 {
+    opt.unwrap_or(24).clamp(1, 720)
+}
+
+/// Clamp optional hours to 1..=720, preserving `None`.
+/// Used for endpoints where the window is OPTIONAL (e.g., overview defaults
+/// to all-time data). Pairs with [`clamp_hours_default`].
+#[allow(clippy::single_option_map)] // named helper is the readability win here
+fn clamp_hours_optional(opt: Option<i64>) -> Option<i64> {
+    opt.map(|h| h.clamp(1, 720))
+}
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
 
 /// GET /api/stats/overview
 ///
@@ -25,8 +89,16 @@ pub struct TimeseriesQuery {
 /// - Historical counters from `security_events` and `attack_logs`.
 /// - Derived series for category/action/country pie charts.
 /// - Compact recent-event feed so the UI can render without a second round-trip.
-pub async fn stats_overview(State(state): State<Arc<AppState>>) -> ApiResult<Json<serde_json::Value>> {
-    let overview = state.db.get_stats_overview().await?;
+pub async fn stats_overview(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<OverviewQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let filter = waf_storage::StatsFilter {
+        hours: clamp_hours_optional(q.hours),
+        host_code: q.host_code,
+        action: q.action,
+    };
+    let overview = state.db.get_stats_overview(&filter).await?;
     let total_requests_live = state.total_requests();
     let total_blocked_live = state.total_blocked();
 
@@ -91,7 +163,7 @@ pub async fn stats_timeseries(
     State(state): State<Arc<AppState>>,
     Query(q): Query<TimeseriesQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let hours = q.hours.unwrap_or(24).clamp(1, 720);
+    let hours = clamp_hours_default(q.hours);
     let series = state.db.get_stats_timeseries(q.host_code.as_deref(), hours).await?;
     Ok(Json(serde_json::json!({ "success": true, "data": series })))
 }
@@ -129,4 +201,138 @@ pub async fn stats_geo(State(state): State<Arc<AppState>>) -> ApiResult<Json<ser
             "country_distribution": geo.country_distribution,
         }
     })))
+}
+
+/// GET /api/stats/endpoints
+///
+/// Path × Attack-Category heatmap. Returns sparse cells (only non-zero
+/// (path, category) combinations) plus metadata for the dashboard heatmap
+/// component.
+pub async fn stats_endpoints(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<EndpointsQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let filter = waf_storage::HeatmapFilter {
+        hours: clamp_hours_default(q.hours),
+        host_code: q.host_code,
+        action: q.action,
+    };
+    let heatmap = state.db.get_endpoint_heatmap(&filter).await?;
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "data": {
+            "cells": heatmap.cells,
+            "metadata": {
+                "total_events":     heatmap.total_events,
+                "paths_sampled":    heatmap.paths_sampled,
+                "categories_total": heatmap.categories_total,
+                "window_hours":     heatmap.window_hours,
+                "timestamp":        heatmap.generated_at,
+            }
+        }
+    })))
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamp_hours_default_uses_24_when_none() {
+        assert_eq!(clamp_hours_default(None), 24);
+    }
+
+    #[test]
+    fn clamp_hours_default_clamps_below_one() {
+        assert_eq!(clamp_hours_default(Some(0)), 1);
+        assert_eq!(clamp_hours_default(Some(-99)), 1);
+    }
+
+    #[test]
+    fn clamp_hours_default_clamps_above_720() {
+        assert_eq!(clamp_hours_default(Some(721)), 720);
+        assert_eq!(clamp_hours_default(Some(i64::MAX)), 720);
+    }
+
+    #[test]
+    fn clamp_hours_default_passes_through_in_range() {
+        assert_eq!(clamp_hours_default(Some(1)), 1);
+        assert_eq!(clamp_hours_default(Some(168)), 168);
+        assert_eq!(clamp_hours_default(Some(720)), 720);
+    }
+
+    #[test]
+    fn clamp_hours_optional_preserves_none() {
+        assert_eq!(clamp_hours_optional(None), None);
+    }
+
+    #[test]
+    fn clamp_hours_optional_clamps_both_ends() {
+        assert_eq!(clamp_hours_optional(Some(0)), Some(1));
+        assert_eq!(clamp_hours_optional(Some(99_999)), Some(720));
+    }
+
+    #[test]
+    fn clamp_hours_optional_passes_through_in_range() {
+        assert_eq!(clamp_hours_optional(Some(24)), Some(24));
+        assert_eq!(clamp_hours_optional(Some(720)), Some(720));
+    }
+
+    #[test]
+    fn empty_string_as_none_treats_empty_as_none() {
+        let q: EndpointsQuery = serde_json::from_value(serde_json::json!({
+            "host_code": "",
+            "action": "",
+        }))
+        .expect("parse");
+        assert_eq!(q.host_code, None);
+        assert_eq!(q.action, None);
+    }
+
+    #[test]
+    fn empty_string_as_none_treats_whitespace_as_none() {
+        let q: OverviewQuery = serde_json::from_value(serde_json::json!({
+            "host_code": "   ",
+            "action": "\t",
+        }))
+        .expect("parse");
+        assert_eq!(q.host_code, None);
+        assert_eq!(q.action, None);
+    }
+
+    #[test]
+    fn empty_string_as_none_preserves_trimmed_value() {
+        let q: OverviewQuery = serde_json::from_value(serde_json::json!({
+            "host_code": " h1 ",
+            "action": "block",
+        }))
+        .expect("parse");
+        assert_eq!(q.host_code.as_deref(), Some("h1"));
+        assert_eq!(q.action.as_deref(), Some("block"));
+    }
+
+    #[test]
+    fn empty_string_as_none_handles_missing_keys() {
+        let q: OverviewQuery = serde_json::from_value(serde_json::json!({})).expect("parse");
+        assert_eq!(q.host_code, None);
+        assert_eq!(q.action, None);
+        assert_eq!(q.hours, None);
+    }
+
+    #[test]
+    fn empty_string_as_none_handles_explicit_null() {
+        let q: OverviewQuery = serde_json::from_value(serde_json::json!({
+            "host_code": null,
+            "action": null,
+            "hours": null,
+        }))
+        .expect("parse");
+        assert_eq!(q.host_code, None);
+        assert_eq!(q.action, None);
+        assert_eq!(q.hours, None);
+    }
 }

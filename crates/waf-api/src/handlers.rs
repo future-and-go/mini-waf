@@ -112,20 +112,23 @@ pub async fn update_host(
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let old_port = old_host.port as u16;
     state.router.unregister(&old_host.host, old_port);
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let defense_config: waf_common::DefenseConfig = host
         .defense_json
         .as_ref()
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let port_u16 = host.port as u16;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let remote_port_u16 = host.remote_port as u16;
     let config = Arc::new(HostConfig {
         code: host.code.clone(),
         host: host.host.clone(),
-        port: host.port as u16,
+        port: port_u16,
         ssl: host.ssl,
         guard_status: host.guard_status,
         remote_host: host.remote_host.clone(),
-        remote_port: host.remote_port as u16,
+        remote_port: remote_port_u16,
         remote_ip: host.remote_ip.clone(),
         cert_file: host.cert_file.clone(),
         key_file: host.key_file.clone(),
