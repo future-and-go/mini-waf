@@ -10,7 +10,8 @@ use crate::models::{
     CreateTunnel, CreateUrlRule, CreateWasmPlugin, CrowdSecConfigRow, CrowdSecEventQuery, CrowdSecEventRow, CustomRule,
     GeoDistEntry, GeoStats, Host, HotlinkConfig, LbBackend, NotificationConfig, NotificationLog, RecentEvent,
     RefreshToken, SecurityEvent, SecurityEventQuery, SensitivePattern, StatsOverview, TimeSeriesPoint, TopEntry,
-    TunnelRow, UpdateCertificatePem, UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
+    TunnelRow, UpdateCertificatePem, UpdateCustomRule, UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig,
+    WasmPluginRow,
 };
 
 impl Database {
@@ -612,6 +613,53 @@ impl Database {
             .execute(&self.pool)
             .await?;
         Ok(r.rows_affected() > 0)
+    }
+
+    pub async fn update_custom_rule(
+        &self,
+        id: Uuid,
+        req: UpdateCustomRule,
+    ) -> Result<Option<CustomRule>, StorageError> {
+        // Pack match_tree into the conditions column when explicitly provided.
+        let conditions_val = if let Some(tree) = req.match_tree {
+            Some(serde_json::json!({ "match_tree": tree }))
+        } else {
+            req.conditions
+        };
+
+        let row = sqlx::query_as::<_, CustomRule>(
+            r"UPDATE custom_rules SET
+                host_code    = COALESCE($2,  host_code),
+                name         = COALESCE($3,  name),
+                description  = COALESCE($4,  description),
+                priority     = COALESCE($5,  priority),
+                enabled      = COALESCE($6,  enabled),
+                condition_op = COALESCE($7,  condition_op),
+                conditions   = COALESCE($8,  conditions),
+                action       = COALESCE($9,  action),
+                action_status= COALESCE($10, action_status),
+                action_msg   = COALESCE($11, action_msg),
+                script       = COALESCE($12, script),
+                updated_at   = NOW()
+              WHERE id = $1
+              RETURNING *",
+        )
+        .bind(id)
+        .bind(&req.host_code)
+        .bind(&req.name)
+        .bind(&req.description)
+        .bind(req.priority)
+        .bind(req.enabled)
+        .bind(&req.condition_op)
+        .bind(&conditions_val)
+        .bind(&req.action)
+        .bind(req.action_status)
+        .bind(&req.action_msg)
+        .bind(&req.script)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
     }
 
     // ─── Sensitive Patterns ───────────────────────────────────────────────────

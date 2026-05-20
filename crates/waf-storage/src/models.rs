@@ -318,6 +318,25 @@ pub struct CreateCustomRule {
     pub script: Option<String>,
 }
 
+/// Partial-update custom rule request (all fields optional for PATCH/PUT)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpdateCustomRule {
+    pub host_code: Option<String>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub priority: Option<i32>,
+    pub enabled: Option<bool>,
+    pub condition_op: Option<String>,
+    /// Raw conditions array or pre-packed `{"match_tree": ...}` object.
+    pub conditions: Option<serde_json::Value>,
+    /// If present, overrides `conditions` — packed as `{"match_tree": ...}` before storage.
+    pub match_tree: Option<serde_json::Value>,
+    pub action: Option<String>,
+    pub action_status: Option<i32>,
+    pub action_msg: Option<String>,
+    pub script: Option<String>,
+}
+
 /// Create sensitive pattern request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSensitivePattern {
