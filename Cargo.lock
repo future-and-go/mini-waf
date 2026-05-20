@@ -3938,6 +3938,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rustls",
+ "serde_json",
  "sha2",
  "tar",
  "tempfile",
