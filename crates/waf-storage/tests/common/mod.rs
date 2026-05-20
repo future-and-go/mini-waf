@@ -48,3 +48,34 @@ pub async fn start_postgres() -> PgFixture {
         _container: container,
     }
 }
+
+/// Insert a single `security_events` row with `created_at = NOW() - INTERVAL hours_ago hours`.
+/// Uses `make_interval(hours => $N::int)` (no string concat) — safe for parameterized tests.
+pub async fn insert_event(
+    pool: &sqlx::PgPool,
+    host: &str,
+    path: &str,
+    rule_id: Option<&str>,
+    action: &str,
+    hours_ago: i64,
+) {
+    // Invariant: tests pass small positive offsets (1..200h). The .unwrap_or(0)
+    // fallback would silently insert "now" instead of panicking, which keeps
+    // the helper compatible with `#![deny(clippy::unwrap_used)]` upstream while
+    // still being obvious if a future test accidentally passes a huge value.
+    let hours_i32 = i32::try_from(hours_ago).unwrap_or(0);
+    sqlx::query(
+        "INSERT INTO security_events \
+         (host_code, client_ip, method, path, rule_id, rule_name, action, detail, geo_info, created_at) \
+         VALUES ($1, '1.2.3.4', 'GET', $2, $3, 'test-rule', $4, NULL, NULL, \
+                 NOW() - make_interval(hours => $5::int))",
+    )
+    .bind(host)
+    .bind(path)
+    .bind(rule_id)
+    .bind(action)
+    .bind(hours_i32)
+    .execute(pool)
+    .await
+    .expect("insert_event");
+}
