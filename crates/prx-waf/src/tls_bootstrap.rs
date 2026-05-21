@@ -1,10 +1,12 @@
 //! TLS listener bootstrap.
 //!
-//! Inspects `AppConfig.hosts` for entries with `ssl = true` and existing
-//! `cert_file` / `key_file` paths, then surfaces them as `TlsHostBinding`
-//! records. `prx-waf::main` consumes these to call
+//! Inspects `AppConfig.hosts` for entries with `tls_terminate = true` and
+//! existing `cert_file` / `key_file` paths, then surfaces them as
+//! `TlsHostBinding` records. `prx-waf::main` consumes these to call
 //! `pingora_proxy::HttpProxyService::add_tls_with_settings` on the shared
-//! `listen_addr_tls` socket.
+//! `listen_addr_tls` socket. `tls_terminate` is independent of `HostEntry.ssl`
+//! (which controls upstream TLS) so a WAF can terminate HTTPS for a host
+//! while still forwarding plaintext to the backend.
 //!
 //! Per-host errors are isolated — a malformed entry never tears down TLS for
 //! the other hosts. `collect_tls_bindings` returns the valid bindings and a
@@ -33,9 +35,9 @@ pub struct TlsHostBinding {
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum TlsBindingError {
-    #[error("host '{host}' has ssl=true but cert_file is missing/empty in config")]
+    #[error("host '{host}' has tls_terminate=true but cert_file is missing/empty in config")]
     MissingCertPath { host: String },
-    #[error("host '{host}' has ssl=true but key_file is missing/empty in config")]
+    #[error("host '{host}' has tls_terminate=true but key_file is missing/empty in config")]
     MissingKeyPath { host: String },
     #[error("host '{host}': cert_file '{path}' does not exist on disk")]
     CertFileNotFound { host: String, path: String },
@@ -160,7 +162,7 @@ fn bind_for_host<F: FileChecker, V: PemValidator>(
     fs: &F,
     validator: &V,
 ) -> Result<Option<TlsHostBinding>, TlsBindingError> {
-    if !host.ssl.unwrap_or(false) {
+    if !host.tls_terminate.unwrap_or(false) {
         return Ok(None);
     }
 
@@ -252,13 +254,13 @@ mod tests {
         }
     }
 
-    fn host(name: &str, ssl: Option<bool>, cert: Option<&str>, key: Option<&str>) -> HostEntry {
+    fn host(name: &str, tls_terminate: Option<bool>, cert: Option<&str>, key: Option<&str>) -> HostEntry {
         HostEntry {
             host: name.to_string(),
             port: 443,
             remote_host: "127.0.0.1".to_string(),
             remote_port: 8080,
-            ssl,
+            ssl: None,
             guard_status: None,
             cert_file: cert.map(String::from),
             key_file: key.map(String::from),
@@ -270,6 +272,7 @@ mod tests {
             upstream_write_timeout_ms: None,
             upstream_idle_timeout_ms: None,
             upstream_circuit_503_retry_after_s: None,
+            tls_terminate,
         }
     }
 
@@ -288,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn host_without_ssl_skipped() {
+    fn host_without_tls_terminate_skipped() {
         let cfg = cfg(vec![host("a.test", Some(false), None, None)]);
         let scan = collect_tls_bindings_with(&cfg, &StubFs::with(&[]), &AcceptAllPems);
         assert!(scan.bindings.is_empty());
@@ -296,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn host_with_ssl_none_skipped() {
+    fn host_with_tls_terminate_none_skipped() {
         let cfg = cfg(vec![host("a.test", None, None, None)]);
         let scan = collect_tls_bindings_with(&cfg, &StubFs::with(&[]), &AcceptAllPems);
         assert!(scan.bindings.is_empty());
@@ -304,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn ssl_without_cert_path_records_error() {
+    fn tls_terminate_without_cert_path_records_error() {
         let cfg = cfg(vec![host("a.test", Some(true), None, Some("/k"))]);
         let scan = collect_tls_bindings_with(&cfg, &StubFs::with(&[]), &AcceptAllPems);
         assert!(scan.bindings.is_empty());
@@ -317,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn ssl_without_key_path_records_error() {
+    fn tls_terminate_without_key_path_records_error() {
         let cfg = cfg(vec![host("a.test", Some(true), Some("/c"), None)]);
         let scan = collect_tls_bindings_with(&cfg, &StubFs::with(&[]), &AcceptAllPems);
         assert_eq!(
@@ -326,6 +329,44 @@ mod tests {
                 host: "a.test".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn ssl_true_alone_does_not_bind_listener() {
+        // Regression guard for #91: `ssl` (upstream TLS) and `tls_terminate`
+        // (listener bind) must stay orthogonal. A host with `ssl=true` but no
+        // `tls_terminate` MUST NOT bind the WAF listener — that field controls
+        // whether the proxy talks TLS to the upstream, nothing more.
+        let entry = HostEntry {
+            ssl: Some(true),
+            tls_terminate: None,
+            cert_file: Some("/c.pem".into()),
+            key_file: Some("/k.pem".into()),
+            ..host("a.test", None, None, None)
+        };
+        let scan = collect_tls_bindings_with(&cfg(vec![entry]), &StubFs::with(&["/c.pem", "/k.pem"]), &AcceptAllPems);
+        assert!(
+            scan.bindings.is_empty(),
+            "ssl=true alone must not trigger listener bind"
+        );
+        assert!(scan.errors.is_empty(), "no error expected when not opted in");
+    }
+
+    #[test]
+    fn ssl_and_tls_terminate_are_independent() {
+        // Both fields can be set simultaneously: WAF terminates client TLS AND
+        // re-encrypts to upstream HTTPS. Listener should bind regardless of
+        // `ssl`.
+        let entry = HostEntry {
+            ssl: Some(true),
+            tls_terminate: Some(true),
+            cert_file: Some("/c.pem".into()),
+            key_file: Some("/k.pem".into()),
+            ..host("a.test", None, None, None)
+        };
+        let scan = collect_tls_bindings_with(&cfg(vec![entry]), &StubFs::with(&["/c.pem", "/k.pem"]), &AcceptAllPems);
+        assert_eq!(scan.bindings.len(), 1);
+        assert!(scan.errors.is_empty());
     }
 
     #[test]
@@ -416,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_ssl_hosts_all_returned_in_order() {
+    fn multiple_tls_terminate_hosts_all_returned_in_order() {
         let cfg = cfg(vec![
             host("a.test", Some(true), Some("/a.pem"), Some("/ak.pem")),
             host("b.test", Some(false), None, None),
@@ -434,9 +475,9 @@ mod tests {
 
     #[test]
     fn invalid_host_does_not_drop_valid_ones() {
-        // Regression guard: previously a single broken SSL host propagated `Err`
-        // and discarded every other binding. Now the bad host surfaces as one
-        // entry in `errors`, and the good ones still bind.
+        // Regression guard: previously a single broken TLS-terminating host
+        // propagated `Err` and discarded every other binding. Now the bad host
+        // surfaces as one entry in `errors`, and the good ones still bind.
         let cfg = cfg(vec![
             host("a.test", Some(true), Some("/a.pem"), Some("/ak.pem")),
             host("b.test", Some(true), None, Some("/bk.pem")),
@@ -500,7 +541,7 @@ mod real_fs_tests {
             port: 443,
             remote_host: "127.0.0.1".to_string(),
             remote_port: 8080,
-            ssl: Some(true),
+            ssl: None,
             guard_status: None,
             cert_file: Some(cert.to_string_lossy().into_owned()),
             key_file: Some(key.to_string_lossy().into_owned()),
@@ -512,6 +553,7 @@ mod real_fs_tests {
             upstream_write_timeout_ms: None,
             upstream_idle_timeout_ms: None,
             upstream_circuit_503_retry_after_s: None,
+            tls_terminate: Some(true),
         }
     }
 

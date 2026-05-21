@@ -1397,7 +1397,9 @@ fn run_server(config: &AppConfig, config_file_path: &str, vlogs_layer_slot: Laye
     proxy_service.add_tcp(&config.proxy.listen_addr);
 
     // Native TLS termination: bind `proxy.listen_addr_tls` when at least one
-    // `[[hosts]]` entry sets `ssl = true` and points at on-disk cert/key files.
+    // `[[hosts]]` entry sets `tls_terminate = true` and points at on-disk
+    // cert/key files. `tls_terminate` is independent of the host's `ssl` flag
+    // (which only controls whether the upstream connection uses TLS).
     // Pingora's rustls listener uses a single `with_single_cert` ServerConfig,
     // so multi-domain deployments must use a SAN certificate covering every
     // served host. The first valid binding wins; the rest are logged so a
