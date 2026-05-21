@@ -298,6 +298,30 @@ const fn is_transport_unresponsive(et: &pingora_core::ErrorType) -> bool {
     )
 }
 
+/// Resolve the request's target host, supporting both HTTP/1.x (`Host` header)
+/// and HTTP/2 (where the host arrives in the `:authority` pseudo-header that
+/// Pingora exposes via the request URI). Returns an empty string when neither
+/// source is set — the caller treats that as "no route" and fails closed.
+///
+/// Pure on `(headers, uri)`; delegates to [`resolve_host_from_parts`] so unit
+/// tests cover the H1/H2/absolute-URI matrix without a live Pingora session.
+fn resolve_request_host(session: &Session) -> &str {
+    let req = session.req_header();
+    resolve_host_from_parts(&req.headers, &req.uri)
+}
+
+fn resolve_host_from_parts<'a>(headers: &'a http::HeaderMap, uri: &'a http::Uri) -> &'a str {
+    if let Some(host) = headers
+        .get(http::header::HOST)
+        .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return host;
+    }
+    uri.host().unwrap_or("")
+}
+
 /// FR-039: copy the per-host upstream timeouts into the Pingora [`HttpPeer`]
 /// options. Pulled out of `upstream_peer()` so unit tests can verify the
 /// mapping without spinning up a full Pingora `Server`.
@@ -381,11 +405,7 @@ impl ProxyHttp for WafProxy {
     async fn upstream_peer(&self, session: &mut Session, ctx: &mut GatewayCtx) -> pingora_core::Result<Box<HttpPeer>> {
         self.request_counter.fetch_add(1, Ordering::Relaxed);
 
-        let host_header = session
-            .get_header("host")
-            .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
-            .unwrap_or("")
-            .to_string();
+        let host_header = resolve_request_host(session).to_string();
 
         debug!("Routing request for host: {}", host_header);
 
@@ -474,11 +494,7 @@ impl ProxyHttp for WafProxy {
 
         // Build request context early so WAF runs before upstream_peer.
         if ctx.request_ctx.is_none() {
-            let host_header = session
-                .get_header("host")
-                .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
-                .unwrap_or("")
-                .to_string();
+            let host_header = resolve_request_host(session).to_string();
             if let Some(host_config) = self.router.resolve(&host_header) {
                 ctx.host_config = Some(Arc::clone(&host_config));
                 let mut builder = RequestCtxBuilder::new(session, self.trust_proxy_headers, &self.trusted_proxies)
@@ -1172,5 +1188,73 @@ mod fr039_tests {
 
         let (h, _) = ErrorPageFactory::render(403, None).expect("render 403");
         assert!(h.headers.get("retry-after").is_none());
+    }
+}
+
+#[cfg(test)]
+mod host_resolution_tests {
+    //! Regression coverage for #92 — `resolve_host_from_parts` must work for
+    //! both HTTP/1.x (`Host` header) and HTTP/2 (`:authority` reaches us
+    //! through the request URI). Pure on `(headers, uri)` so we exercise the
+    //! matrix without booting Pingora.
+    use super::resolve_host_from_parts;
+    use http::{HeaderMap, HeaderValue, Uri};
+
+    #[test]
+    fn h1_uses_host_header_when_uri_is_path_only() {
+        let mut headers = HeaderMap::new();
+        headers.insert(http::header::HOST, HeaderValue::from_static("example.com"));
+        let uri: Uri = "/health".parse().expect("parse path-only uri");
+        assert_eq!(resolve_host_from_parts(&headers, &uri), "example.com");
+    }
+
+    #[test]
+    fn h2_falls_back_to_uri_authority_when_host_header_absent() {
+        // Pingora's H2 server places the `:authority` pseudo-header into the
+        // request URI; the `Host` header is not synthesised back.
+        let headers = HeaderMap::new();
+        let uri: Uri = "https://example.com/path".parse().expect("parse absolute uri");
+        assert_eq!(resolve_host_from_parts(&headers, &uri), "example.com");
+    }
+
+    #[test]
+    fn empty_host_header_falls_back_to_uri_authority() {
+        // A blank `Host: ` header must not mask a usable authority — RFC 7230
+        // §5.4 makes either source acceptable.
+        let mut headers = HeaderMap::new();
+        headers.insert(http::header::HOST, HeaderValue::from_static("   "));
+        let uri: Uri = "https://example.com/".parse().expect("parse absolute uri");
+        assert_eq!(resolve_host_from_parts(&headers, &uri), "example.com");
+    }
+
+    #[test]
+    fn host_header_preferred_over_uri_authority() {
+        // When both are present (e.g. an H1 client that also sent an absolute
+        // request-URI) the `Host` header is authoritative — matches
+        // pre-existing router behaviour.
+        let mut headers = HeaderMap::new();
+        headers.insert(http::header::HOST, HeaderValue::from_static("api.example.com"));
+        let uri: Uri = "http://other.example.com/path".parse().expect("parse absolute uri");
+        assert_eq!(resolve_host_from_parts(&headers, &uri), "api.example.com");
+    }
+
+    #[test]
+    fn returns_empty_when_neither_source_set() {
+        let headers = HeaderMap::new();
+        let uri: Uri = "/".parse().expect("parse path-only uri");
+        assert_eq!(resolve_host_from_parts(&headers, &uri), "");
+    }
+
+    #[test]
+    fn invalid_utf8_host_header_falls_back_to_uri() {
+        // Non-UTF-8 byte sequence in `Host` — we drop it and let the URI take
+        // over rather than emit a route lookup for garbled bytes.
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::HOST,
+            HeaderValue::from_bytes(b"\xFF\xFEinvalid").expect("non-utf8 header value"),
+        );
+        let uri: Uri = "https://fallback.example.com/".parse().expect("parse absolute uri");
+        assert_eq!(resolve_host_from_parts(&headers, &uri), "fallback.example.com");
     }
 }
