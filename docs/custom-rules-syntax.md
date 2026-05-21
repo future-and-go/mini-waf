@@ -26,7 +26,9 @@ A rule is a JSON object (DB column `conditions` is `jsonb`):
   "action": "block",
   "action_status": 403,
   "action_msg": null,
-  "script": null
+  "script": null,
+  "risk_delta": null,
+  "risk_action": null
 }
 ```
 
@@ -38,7 +40,11 @@ A rule is a JSON object (DB column `conditions` is `jsonb`):
 | `conditions`    | `Condition[]`   | Legacy flat shape (still supported) |
 | `match_tree`    | `ConditionNode` | **New (FR-003).** Takes precedence when present |
 | `action`        | `block`\|`allow`\|`log`\|`challenge` | |
+| `action_status` | int             | HTTP status code returned on block (default `403`) |
+| `action_msg`    | string?         | Custom response body / message |
 | `script`        | string?         | Rhai expression — overrides `conditions`/`match_tree` when set |
+| `risk_delta`    | int?            | FR-025: risk score contribution when rule matches (typically 1–100) |
+| `risk_action`   | string?         | FR-025: `"block"` forces immediate block via risk override |
 
 ---
 
@@ -77,6 +83,22 @@ A rule is a JSON object (DB column `conditions` is `jsonb`):
 | `in_list` / `not_in_list` | string[] | Pre-compiled to `AHashSet` (de-duped) |
 | `cidr_match`   | string    | `IpNet` parse; matches `ctx.client_ip` |
 | `gt` / `lt` / `gte` / `lte` | int | Field parsed as `i64` |
+
+#### Specialised Operators (Registry / OWASP Compatibility)
+
+These operators exist for registry-format YAML compatibility. They bypass the
+condition matcher and run their own multi-field scan with URL-decode protection.
+
+| Operator        | Purpose |
+|-----------------|---------|
+| `pm_from_file`  | Pattern matching from external phrase file |
+| `detect_sqli`   | SQL injection detection via libinjection |
+| `detect_xss`    | XSS detection via libinjection |
+| `contains_any`  | Substring matching against multiple values |
+
+**Constraints:** Specialised operators cannot be used inside `match_tree` nodes —
+they are dispatched via `specialised_op` at the rule level. Attempting to compile
+one into a condition tree produces a warn log and the rule is skipped.
 
 ### Wildcard / Glob Semantics
 
@@ -140,13 +162,119 @@ Wire format uses **key-presence disambiguation**:
 
 ## Eval Order
 
+### Priority & Scope
+
+Rules are sorted **ascending** by `priority` (lower number = evaluated first).
+Default priority: `100` via API, `0` via YAML files.
+
+1. **Host-specific rules** are evaluated first (sorted by priority within the host bucket).
+2. **Global rules** (`host_code: "*"`) are evaluated second (also sorted by priority).
+3. Host-specific rules **always** take precedence over global rules regardless of
+   priority value — priority only determines order *within* each group.
+
+### Per-Rule Evaluation Hierarchy
+
 For each rule (priority ascending):
 
-1. If `script` is set → evaluate Rhai expression (legacy escape hatch).
-2. Else if pre-compiled tree present → evaluate `CompiledNode` (preferred fast path).
-3. Else → legacy flat eval over `conditions` + `condition_op`.
+1. If `specialised_op` is set → dispatch to specialised check (multi-field URL-decode scan).
+2. If `script` is set → evaluate Rhai expression (legacy escape hatch).
+3. Else if pre-compiled `match_tree` present → evaluate `CompiledNode` (preferred fast path).
+4. Else if `conditions` is non-empty → legacy flat eval with `condition_op`.
+5. Else if `pattern` is set → regex match against `pattern_field` (registry fallback).
 
-First match wins; engine returns a `DetectionResult` with the rule id/name.
+### Match Semantics
+
+- **First blocking detection** is saved as the `DetectionResult` (rule id/name/action).
+- **All matching rules** contribute `risk_delta` to the cumulative `RuleVerdict`
+  (FR-025 risk scoring). A priority-200 rule still contributes its delta even if
+  a priority-10 rule already matched.
+- Rules targeting `response_body` are **skipped** during request-phase evaluation;
+  they run separately in the response phase.
+
+## Risk Scoring (FR-025)
+
+Custom rules integrate with the cumulative risk scoring system. When a rule
+matches, it can contribute a risk score delta instead of (or in addition to)
+a blocking action.
+
+| Field         | Type   | Default | Notes |
+|---------------|--------|---------|-------|
+| `risk_delta`  | i16?   | `null`  | Points added to cumulative risk score (typically 1–100) |
+| `risk_action` | string? | `null` | `"block"` sets `override_block = true`, forcing immediate block |
+
+**How it works:**
+
+1. Engine evaluates **all** matching rules (not just the first).
+2. Each match with a `risk_delta` pushes a `RiskDelta { rule_id, delta }` into the verdict.
+3. If any match has `risk_action: "block"`, the verdict's `override_block` flag is set.
+4. The risk scorer aggregates deltas to determine the final action.
+
+**Example:** A `log` rule with `risk_delta: 20` won't block on its own, but
+three such rules matching the same request accumulate 60 risk points, which
+may trigger the scorer's threshold.
+
+> **Note:** `risk_delta` and `risk_action` are stored in the database schema
+> but are not yet exposed in the `CreateCustomRule` / `UpdateCustomRule` API
+> request types. They can be set via direct DB manipulation or YAML file loading.
+
+---
+
+## Rhai Scripts
+
+Rules with `script` set evaluate a Rhai expression instead of `conditions`
+or `match_tree`. Scripts must return `bool`; errors are logged and treated as
+`false` (fail-safe).
+
+### Available Variables
+
+| Variable         | Type   | Source |
+|------------------|--------|--------|
+| `ip`             | string | `ctx.client_ip` |
+| `path`           | string | URI path |
+| `method`         | string | HTTP method |
+| `query`          | string | Query string |
+| `host`           | string | Host header |
+| `user_agent`     | string | `User-Agent` header |
+| `referer`        | string | `Referer` header |
+| `content_type`   | string | `Content-Type` header |
+| `content_length` | int    | Content length (i64) |
+| `cookie`         | string | Full `Cookie:` header |
+
+### Sandbox Limits
+
+| Limit              | Value   |
+|--------------------|---------|
+| Max operations     | 100,000 |
+| Max call levels    | 16      |
+| Max expr depths    | 64 / 32 |
+
+Scripts exceeding these limits fail silently (warn log).
+
+### Example
+
+```json
+{
+  "script": "path.contains(\"/admin\") && ip.starts_with(\"192.168.\")"
+}
+```
+
+---
+
+## Response Body Evaluation
+
+Rules targeting `response_body` are evaluated **separately** in the response
+phase via `check_response_body(host_code, body_text)`. They are skipped during
+request-phase evaluation.
+
+**Current support:**
+- Only pre-compiled `pattern` regex against `pattern_field: "response_body"`
+- Condition trees, Rhai scripts, and specialised operators are **not yet wired**
+  for response phase (Phase 2)
+
+**Evaluation order:** Host-specific response-body rules first, then global (`"*"`).
+First match returns a `DetectionResult`.
+
+---
 
 ## Compilation & Hot-Reload
 
@@ -200,6 +328,8 @@ action: block                   # default block
 action_status: 403              # default 403
 action_msg: "Forbidden"
 script: null                    # optional Rhai expression
+risk_delta: null                # FR-025: risk score contribution (i16)
+risk_action: null               # FR-025: "block" for override
 ```
 
 A file may contain a single document or a multi-document YAML stream
@@ -215,6 +345,8 @@ A file may contain a single document or a multi-document YAML stream
 | `condition_op`  | `and`        |
 | `action`        | `block`      |
 | `action_status` | `403`        |
+| `risk_delta`    | `null`       |
+| `risk_action`   | `null`       |
 
 ### Hot-Reload
 
