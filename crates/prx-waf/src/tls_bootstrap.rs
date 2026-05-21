@@ -254,12 +254,7 @@ mod tests {
         }
     }
 
-    fn host(
-        name: &str,
-        tls_terminate: Option<bool>,
-        cert: Option<&str>,
-        key: Option<&str>,
-    ) -> HostEntry {
+    fn host(name: &str, tls_terminate: Option<bool>, cert: Option<&str>, key: Option<&str>) -> HostEntry {
         HostEntry {
             host: name.to_string(),
             port: 443,
@@ -350,7 +345,10 @@ mod tests {
             ..host("a.test", None, None, None)
         };
         let scan = collect_tls_bindings_with(&cfg(vec![entry]), &StubFs::with(&["/c.pem", "/k.pem"]), &AcceptAllPems);
-        assert!(scan.bindings.is_empty(), "ssl=true alone must not trigger listener bind");
+        assert!(
+            scan.bindings.is_empty(),
+            "ssl=true alone must not trigger listener bind"
+        );
         assert!(scan.errors.is_empty(), "no error expected when not opted in");
     }
 
