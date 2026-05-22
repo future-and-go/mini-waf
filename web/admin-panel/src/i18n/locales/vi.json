@@ -353,6 +353,7 @@
     "torExitNodes": "Tor Exit Nodes",
     "blockedAsns": "ASN bị chặn",
     "feedStatus": "Trạng thái Feed",
+    "feedEnabled": "đã bật",
     "refreshFeeds": "Làm mới Feeds"
   },
   "certificates": {
@@ -495,6 +496,7 @@
     "relayProxy": "Relay / Proxy",
     "topIsps": "Top ISP",
     "xffSpoof": "Giả mạo XFF",
+    "xffSpoofDesc": "Sự kiện giả mạo XFF sử dụng luật BOT-XFF-SPOOF. Các sự kiện relay/proxy hiển thị bên dưới.",
     "detectedIsp": "ISP phát hiện",
     "ruleTriggered": "Luật kích hoạt",
     "noRelayProxy": "Không phát hiện sự kiện relay/proxy"

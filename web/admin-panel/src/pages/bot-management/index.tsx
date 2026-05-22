@@ -290,7 +290,7 @@ export const BotManagementPage: React.FC = () => {
               type="info"
               showIcon
               message={t("botManagement.xffSpoof")}
-              description={t("botManagement.xffSpoof") + " events use rule BOT-XFF-SPOOF. Relay/proxy events shown below."}
+              description={t("botManagement.xffSpoofDesc")}
               style={{ marginBottom: 0 }}
             />
             <Table<SecurityEvent>

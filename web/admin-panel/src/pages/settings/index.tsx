@@ -194,7 +194,9 @@ export const SettingsPage: React.FC = () => {
   const isLoading = query.isLoading;
   const reloading = reloadMutation.isPending;
   const feedReloading = feedReloadMutation.isPending;
-  const reputationStatus = reputationQuery.result?.data;
+  const reputationStatus =
+    (reputationQuery.result?.data as unknown as { data: ReputationStatus })?.data ??
+    (reputationQuery.result?.data as unknown as ReputationStatus);
   const registryData = registryQuery.result?.data;
 
   const feedRows = useMemo<FeedRow[]>(() => {
@@ -223,7 +225,7 @@ export const SettingsPage: React.FC = () => {
       width: 130,
       render: (v: number, r: FeedRow) => (
         <Tag color={v > 0 ? "green" : "default"}>
-          {v}/{r.count} enabled
+          {v}/{r.count} {t("settings.feedEnabled")}
         </Tag>
       ),
     },
@@ -667,7 +669,9 @@ export const SettingsPage: React.FC = () => {
                           title="Test this path in a new tab"
                           onClick={(e) => {
                             e.stopPropagation();
-                            window.open(window.location.origin + pathStr, "_blank");
+                            if (pathStr.startsWith("/")) {
+                              window.open(window.location.origin + pathStr, "_blank", "noopener,noreferrer");
+                            }
                           }}
                         />
                       </Tag>
@@ -867,7 +871,6 @@ export const SettingsPage: React.FC = () => {
           <Button
             icon={<ReloadOutlined spin={feedReloading} />}
             onClick={onFeedReload}
-            loading={feedReloading}
           >
             {t("settings.refreshFeeds")}
           </Button>
