@@ -137,6 +137,9 @@
     "riskDistribution": "Risk Score Distribution",
     "topIpsByRisk": "Top IPs by Risk",
     "ipStatus": "Status",
+    "ipHighRisk": "High Risk",
+    "ipActive": "Active",
+    "ipMonitoring": "Monitoring",
     "rankNum": "Rank",
     "topCountries": "Top Attacking Countries"
   },

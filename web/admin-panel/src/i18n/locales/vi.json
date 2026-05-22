@@ -137,6 +137,9 @@
     "riskDistribution": "Phân bổ điểm rủi ro",
     "topIpsByRisk": "IP rủi ro cao nhất",
     "ipStatus": "Trạng thái",
+    "ipHighRisk": "Rủi ro cao",
+    "ipActive": "Đang hoạt động",
+    "ipMonitoring": "Giám sát",
     "rankNum": "Hạng",
     "topCountries": "Quốc gia tấn công nhiều nhất"
   },

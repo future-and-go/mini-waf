@@ -1226,7 +1226,10 @@ impl Database {
             .unwrap_or(0);
 
             if honeypot_count > 0 {
-                action_breakdown.push(TopEntry { key: "honeypot".to_string(), count: honeypot_count });
+                action_breakdown.push(TopEntry {
+                    key: "honeypot".to_string(),
+                    count: honeypot_count,
+                });
             }
         }
 
@@ -1737,8 +1740,7 @@ impl Database {
         let offset = (page - 1) * page_size;
 
         // PATCH 1: pre-format prefix pattern so the SQL check remains a simple equality
-        let rule_id_prefix_pattern: Option<String> =
-            query.rule_id_prefix.as_ref().map(|p| format!("{p}%"));
+        let rule_id_prefix_pattern: Option<String> = query.rule_id_prefix.as_ref().map(|p| format!("{p}%"));
 
         let total: i64 = sqlx::query_scalar(
             r"SELECT COUNT(*) FROM security_events

@@ -50,8 +50,7 @@ use crate::security::{admin_ip_check_middleware, list_audit_log, rate_limit_midd
 use crate::state::AppState;
 use crate::static_files::static_handler;
 use crate::stats::{
-    stats_endpoints, stats_geo, stats_overview, stats_timeseries, stats_timeseries_by_category,
-    threat_intel_status,
+    stats_endpoints, stats_geo, stats_overview, stats_timeseries, stats_timeseries_by_category, threat_intel_status,
 };
 use crate::tunnels::{create_tunnel, delete_tunnel, list_tunnels, ws_tunnel};
 use crate::websocket::{ws_events, ws_logs};

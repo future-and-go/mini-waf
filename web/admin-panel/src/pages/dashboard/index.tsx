@@ -252,7 +252,11 @@ export const DashboardPage: React.FC = () => {
     {
       title: t("dashboard.ipStatus"),
       width: 110,
-      render: () => <Tag color="red">Suspicious</Tag>,
+      render: (_: unknown, row: TopEntry & { rank: number }) => {
+        if (row.count > 10) return <Tag color="red">{t("dashboard.ipHighRisk")}</Tag>;
+        if (row.count > 3) return <Tag color="orange">{t("dashboard.ipActive")}</Tag>;
+        return <Tag color="gold">{t("dashboard.ipMonitoring")}</Tag>;
+      },
     },
   ];
 
