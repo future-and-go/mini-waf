@@ -17,7 +17,9 @@ import { useCustom, useCustomMutation } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { useMemo, useState } from "react";
-import type { BotPattern } from "../../types/api";
+import type { BotPattern, SecurityEvent, StatsOverview } from "../../types/api";
+import { TopList } from "../../components/top-list";
+import { fmtDateTime } from "../../utils/format";
 
 interface PatternsResponse {
   patterns?: BotPattern[];
@@ -42,6 +44,7 @@ const TABS = [
   { key: "ai", i18nKey: "botManagement.aiCrawlers", tag: "ai-crawler" },
   { key: "seo", i18nKey: "botManagement.seoTools", tag: "seo-tool" },
   { key: "custom", i18nKey: "botManagement.custom", tag: "custom" },
+  { key: "relay-proxy", i18nKey: "botManagement.relayProxy", tag: "relay-proxy" },
 ] as const;
 
 export const BotManagementPage: React.FC = () => {
@@ -57,6 +60,26 @@ export const BotManagementPage: React.FC = () => {
     url: "/api/bot-patterns",
     method: "get",
     queryOptions: { staleTime: 60_000 },
+  });
+
+  const relayQuery = useCustom<{ data: SecurityEvent[]; total: number }>({
+    url: "/api/security-events",
+    method: "get",
+    config: { query: { rule_id: "BOT-RELAY", page_size: 50, page: 1 } },
+    queryOptions: { staleTime: 30_000, enabled: tab === "relay-proxy" },
+  });
+
+  const proxyQuery = useCustom<{ data: SecurityEvent[]; total: number }>({
+    url: "/api/security-events",
+    method: "get",
+    config: { query: { rule_id: "BOT-PROXY", page_size: 50, page: 1 } },
+    queryOptions: { staleTime: 30_000, enabled: tab === "relay-proxy" },
+  });
+
+  const overviewQuery = useCustom<StatsOverview>({
+    url: "/api/stats/overview",
+    method: "get",
+    queryOptions: { staleTime: 30_000, enabled: tab === "relay-proxy" },
   });
   const { mutate: createPattern, mutation: createMutation } = useCustomMutation();
   const { mutate: togglePattern } = useCustomMutation();
@@ -113,8 +136,68 @@ export const BotManagementPage: React.FC = () => {
     setTestResult(matches);
   };
 
+  const relayProxyData = useMemo(() => {
+    const relay = relayQuery.result?.data?.data ?? [];
+    const proxy = proxyQuery.result?.data?.data ?? [];
+    return [...relay, ...proxy]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 100);
+  }, [relayQuery.result, proxyQuery.result]);
+
+  const statsOverview = overviewQuery.result?.data;
+
   const actionTagColor = (a: string): string =>
     ({ block: "red", log: "gold", allow: "green" }[a] ?? "default");
+
+  const relayColumns: ColumnsType<SecurityEvent> = [
+    {
+      title: t("security.time"),
+      dataIndex: "created_at",
+      width: 170,
+      render: (v: string) => (
+        <span style={{ color: "#8c8c8c", fontSize: 12 }}>{fmtDateTime(v)}</span>
+      ),
+    },
+    {
+      title: t("security.clientIP"),
+      dataIndex: "client_ip",
+      width: 140,
+      render: (v: string) => (
+        <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{v}</span>
+      ),
+    },
+    {
+      title: t("botManagement.detectedIsp"),
+      key: "isp",
+      width: 160,
+      render: (_: unknown, r: SecurityEvent) => r.geo_info?.isp ?? "—",
+    },
+    {
+      title: t("botManagement.ruleTriggered"),
+      dataIndex: "rule_id",
+      width: 140,
+      render: (v: string | null) =>
+        v ? (
+          <Tag style={{ fontSize: 11 }}>{v}</Tag>
+        ) : (
+          <span style={{ color: "#bfbfbf" }}>—</span>
+        ),
+    },
+    {
+      title: t("security.action"),
+      dataIndex: "action",
+      width: 90,
+      render: (v: string) => <Tag color={v === "block" ? "red" : "default"}>{v}</Tag>,
+    },
+    {
+      title: t("security.path"),
+      dataIndex: "path",
+      ellipsis: true,
+      render: (v: string) => (
+        <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11 }} title={v}>{v}</span>
+      ),
+    },
+  ];
 
   const columns: ColumnsType<BotPattern> = [
     { title: t("botManagement.id"), dataIndex: "id", width: 130, render: (v) => <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "#8c8c8c" }}>{v}</span> },
@@ -182,24 +265,54 @@ export const BotManagementPage: React.FC = () => {
             label: (
               <span>
                 {t(x.i18nKey)}{" "}
-                <Tag style={{ marginLeft: 4 }}>
-                  {x.key === "custom"
-                    ? patterns.filter((p) => p.source === "custom").length
-                    : patterns.filter((p) => p.tags?.includes(x.tag)).length}
-                </Tag>
+                {x.key !== "relay-proxy" && (
+                  <Tag style={{ marginLeft: 4 }}>
+                    {x.key === "custom"
+                      ? patterns.filter((p) => p.source === "custom").length
+                      : patterns.filter((p) => p.tags?.includes(x.tag)).length}
+                  </Tag>
+                )}
               </span>
             ),
           }))}
         />
-        <Table
-          rowKey="id"
-          size="small"
-          dataSource={filtered}
-          columns={columns}
-          loading={isLoading}
-          pagination={false}
-          locale={{ emptyText: t("botManagement.noPatterns") }}
-        />
+
+        {tab === "relay-proxy" ? (
+          <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+            <TopList
+              title={t("botManagement.topIsps")}
+              items={statsOverview?.top_isps}
+              badgeColor="#1677ff"
+            />
+            <Alert
+              type="info"
+              showIcon
+              message={t("botManagement.xffSpoof")}
+              description={t("botManagement.xffSpoof") + " events use rule BOT-XFF-SPOOF. Relay/proxy events shown below."}
+              style={{ marginBottom: 0 }}
+            />
+            <Table<SecurityEvent>
+              rowKey="id"
+              size="small"
+              dataSource={relayProxyData}
+              columns={relayColumns}
+              loading={relayQuery.query.isLoading || proxyQuery.query.isLoading}
+              pagination={false}
+              locale={{ emptyText: t("botManagement.noRelayProxy") }}
+              scroll={{ x: 800 }}
+            />
+          </Space>
+        ) : (
+          <Table
+            rowKey="id"
+            size="small"
+            dataSource={filtered}
+            columns={columns}
+            loading={isLoading}
+            pagination={false}
+            locale={{ emptyText: t("botManagement.noPatterns") }}
+          />
+        )}
       </Card>
 
       <Modal

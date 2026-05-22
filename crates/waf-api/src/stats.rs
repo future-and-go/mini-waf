@@ -233,6 +233,27 @@ pub async fn stats_endpoints(
     })))
 }
 
+/// GET /api/threat-intel/status
+///
+/// PATCH 4: gracefully-degraded reputation feed status endpoint.
+/// Real-time feed stats are not exposed at runtime; returns a structured
+/// response so the frontend receives 200 (not 404) and can render a
+/// "feeds loaded at startup" message instead of an error toast.
+pub async fn threat_intel_status(
+    State(_state): State<Arc<AppState>>,
+) -> ApiResult<Json<serde_json::Value>> {
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "data": {
+            "available": false,
+            "message": "Reputation feeds are loaded at startup. Check startup logs for feed status.",
+            "tor_count": null,
+            "asn_count": null,
+            "last_refreshed": null,
+        }
+    })))
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------

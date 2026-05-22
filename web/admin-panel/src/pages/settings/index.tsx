@@ -16,7 +16,11 @@ import {
   Tooltip,
   Typography,
   App,
+  Statistic,
+  Table,
+  Spin,
 } from "antd";
+import type { ColumnsType } from "antd/es/table";
 import {
   BugOutlined,
   CheckCircleOutlined,
@@ -27,10 +31,13 @@ import {
   SaveOutlined,
   SecurityScanOutlined,
   ThunderboltOutlined,
+  LinkOutlined,
+  DatabaseOutlined,
 } from "@ant-design/icons";
 import { useCustom, useCustomMutation } from "@refinedev/core";
+import { RiskBandPreview } from "../../components/risk-band-preview";
 import type { HttpError } from "@refinedev/core";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { SystemStatus } from "../../types/api";
 import { httpClient } from "../../utils/axios";
@@ -67,6 +74,24 @@ interface PanelConfigEnvelope {
   revision: number;
   path: string;
   main_config_file?: string;
+}
+
+interface RegistryOverview {
+  enabled?: number;
+  disabled?: number;
+  rules?: Array<{ id?: string; source?: string; category?: string; enabled?: boolean; name?: string }>;
+}
+
+interface ReputationStatus {
+  tor_count?: number;
+  asn_count?: number;
+}
+
+interface FeedRow {
+  key: string;
+  name: string;
+  count: number;
+  enabled: number;
 }
 
 // ─── Reusable section card ────────────────────────────────────────────────────
@@ -149,10 +174,70 @@ export const SettingsPage: React.FC = () => {
   });
 
   const { mutate: reload, mutation: reloadMutation } = useCustomMutation();
+  const { mutate: feedReload, mutation: feedReloadMutation } = useCustomMutation();
+
+  const registryQuery = useCustom<RegistryOverview>({
+    url: "/api/rules/registry",
+    method: "get",
+    queryOptions: { staleTime: 5 * 60_000, retry: false },
+    errorNotification: false,
+  });
+
+  const reputationQuery = useCustom<ReputationStatus>({
+    url: "/api/threat-intel/status",
+    method: "get",
+    queryOptions: { staleTime: 120_000, retry: false },
+    errorNotification: false,
+  });
 
   const status = result?.data;
   const isLoading = query.isLoading;
   const reloading = reloadMutation.isPending;
+  const feedReloading = feedReloadMutation.isPending;
+  const reputationStatus = reputationQuery.result?.data;
+  const registryData = registryQuery.result?.data;
+
+  const feedRows = useMemo<FeedRow[]>(() => {
+    if (!registryData?.rules) return [];
+    const sourceMap = new Map<string, { count: number; enabled: number }>();
+    for (const rule of registryData.rules) {
+      const src = rule.source ?? "builtin";
+      const prev = sourceMap.get(src) ?? { count: 0, enabled: 0 };
+      prev.count++;
+      if (rule.enabled) prev.enabled++;
+      sourceMap.set(src, prev);
+    }
+    return Array.from(sourceMap.entries()).map(([name, data]) => ({
+      key: name,
+      name,
+      count: data.count,
+      enabled: data.enabled,
+    }));
+  }, [registryData]);
+
+  const feedColumns: ColumnsType<FeedRow> = [
+    { title: t("common.name"), dataIndex: "name", ellipsis: true },
+    {
+      title: t("settings.feedStatus"),
+      dataIndex: "enabled",
+      width: 130,
+      render: (v: number, r: FeedRow) => (
+        <Tag color={v > 0 ? "green" : "default"}>
+          {v}/{r.count} enabled
+        </Tag>
+      ),
+    },
+  ];
+
+  const onFeedReload = () => {
+    feedReload(
+      { url: "/api/rules/reload", method: "post", values: {} },
+      {
+        onSuccess: () => message.success(`${t("settings.refreshFeeds")} — OK`),
+        onError: (err: HttpError) => message.error(err.message),
+      },
+    );
+  };
 
   const onReload = () => {
     reload(
@@ -511,6 +596,16 @@ export const SettingsPage: React.FC = () => {
                   <InputNumber min={2} max={100} size="small" style={{ width: 80, marginLeft: 12 }} />
                 </Form.Item>
               </Row>
+              <div style={{ marginTop: 16 }}>
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
+                  {t("settings.riskBandPreview")}
+                </Typography.Text>
+                <RiskBandPreview
+                  riskAllow={riskAllow}
+                  riskChallenge={riskChallenge}
+                  riskBlock={riskBlock}
+                />
+              </div>
             </SectionCard>
 
             {/* ── Challenge Engine ─────────────────────────────────────── */}
@@ -520,7 +615,24 @@ export const SettingsPage: React.FC = () => {
             >
               <Form.Item name="challenge_type" label={t("settings.panel.challengeType")} style={{ marginBottom: 0 }}>
                 <Select
-                  style={{ width: 240 }}
+                  style={{ width: 300 }}
+                  optionRender={(option) => {
+                    const descs: Record<string, string> = {
+                      js_challenge: t("settings.challenge_js_help"),
+                      proof_of_work: t("settings.challenge_pow_help"),
+                      captcha: t("settings.challenge_captcha_help"),
+                    };
+                    return (
+                      <Space direction="vertical" size={2}>
+                        <span>{option.label}</span>
+                        {descs[String(option.value)] && (
+                          <Typography.Text type="secondary" style={{ fontSize: 11, whiteSpace: "normal" }}>
+                            {descs[String(option.value)]}
+                          </Typography.Text>
+                        )}
+                      </Space>
+                    );
+                  }}
                   options={[
                     { value: "js_challenge", label: t("settings.panel.challengeJs") },
                     { value: "captcha", label: t("settings.panel.challengeCaptcha") },
@@ -536,15 +648,35 @@ export const SettingsPage: React.FC = () => {
               title={t("settings.panel.honeypotPaths")}
               description={t("settings.panel.honeypotPathsHelp")}
             >
-              <Form.Item name="honeypot_paths" style={{ marginBottom: 0 }}>
+              <Form.Item name="honeypot_paths" style={{ marginBottom: 4 }}>
                 <Select
                   mode="tags"
                   style={{ width: "100%" }}
                   tokenSeparators={[","]}
                   placeholder="/trap-path"
                   suffixIcon={null}
+                  tagRender={(props) => {
+                    const { label, closable, onClose } = props;
+                    const pathStr = typeof label === "string" ? label : String(label ?? "");
+                    return (
+                      <Tag closable={closable} onClose={onClose} style={{ display: "inline-flex", alignItems: "center" }}>
+                        {label}
+                        <LinkOutlined
+                          style={{ marginLeft: 4, fontSize: 11, cursor: "pointer", color: "#1677ff" }}
+                          title="Test this path in a new tab"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            window.open(window.location.origin + pathStr, "_blank");
+                          }}
+                        />
+                      </Tag>
+                    );
+                  }}
                 />
               </Form.Item>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t("settings.honeypotHelp")}
+              </Typography.Text>
             </SectionCard>
 
             {/* ── Response Filtering ────────────────────────────────────── */}
@@ -674,6 +806,71 @@ export const SettingsPage: React.FC = () => {
             </Row>
           </>
         )}
+
+        {/* ── Threat Intelligence ──────────────────────────────────── */}
+        <SectionCard
+          icon={<DatabaseOutlined style={{ color: "#722ed1" }} />}
+          title={t("settings.threatIntel")}
+        >
+          {reputationQuery.query.isError ? (
+            <Alert
+              type="info"
+              showIcon
+              message="Reputation feeds are configured at startup. No live API available. Check startup logs for feed status."
+              style={{ marginBottom: 16 }}
+            />
+          ) : (
+            <Row gutter={[24, 16]} style={{ marginBottom: 16 }}>
+              <Col>
+                <Statistic
+                  title={t("settings.torExitNodes")}
+                  value={reputationStatus?.tor_count ?? "—"}
+                  loading={reputationQuery.query.isLoading}
+                />
+              </Col>
+              <Col>
+                <Statistic
+                  title={t("settings.blockedAsns")}
+                  value={reputationStatus?.asn_count ?? "—"}
+                  loading={reputationQuery.query.isLoading}
+                />
+              </Col>
+            </Row>
+          )}
+
+          <Typography.Text strong style={{ display: "block", marginBottom: 8 }}>
+            {t("settings.feedStatus")}
+          </Typography.Text>
+          {registryQuery.query.isLoading ? (
+            <div style={{ padding: "16px 0" }}>
+              <Spin size="small" />
+            </div>
+          ) : feedRows.length > 0 ? (
+            <Table<FeedRow>
+              rowKey="key"
+              size="small"
+              dataSource={feedRows}
+              columns={feedColumns}
+              pagination={false}
+              style={{ marginBottom: 16 }}
+            />
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              message="Reputation feeds are configured at startup. No live API available. Check startup logs for feed status."
+              style={{ marginBottom: 16 }}
+            />
+          )}
+
+          <Button
+            icon={<ReloadOutlined spin={feedReloading} />}
+            onClick={onFeedReload}
+            loading={feedReloading}
+          >
+            {t("settings.refreshFeeds")}
+          </Button>
+        </SectionCard>
 
         {/* ── API Connection Info ───────────────────────────────────── */}
         <Card title={t("settings.configuration")} size="small">

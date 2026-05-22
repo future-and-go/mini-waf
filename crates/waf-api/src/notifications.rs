@@ -438,8 +438,8 @@ pub async fn test_notification(
     let payload = NotificationPayload {
         event_type: "test".into(),
         host_code: cfg.host_code.clone(),
-        title: "PRX-WAF Test Notification".into(),
-        message: "This is a test notification from PRX-WAF.".into(),
+        title: "F&G WAF Test Notification".into(),
+        message: "This is a test notification from F&G WAF.".into(),
         timestamp: Utc::now(),
     };
 

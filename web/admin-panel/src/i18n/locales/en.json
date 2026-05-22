@@ -27,7 +27,8 @@
     "cacheDashboard": "Cache Dashboard",
     "fraud": "Fraud Detection",
     "txVelocity": "TX Velocity",
-    "ruleAnalytics": "Rule Analytics"
+    "ruleAnalytics": "Rule Analytics",
+    "transactionVelocity": "Transaction Velocity"
   },
   "common": {
     "save": "Save",
@@ -77,7 +78,7 @@
     "username": "Username",
     "password": "Password",
     "loginButton": "Sign In",
-    "loginTitle": "PRX-WAF Admin",
+    "loginTitle": "F&G WAF Admin",
     "loginSubtitle": "Web Application Firewall",
     "invalidCredentials": "Invalid credentials",
     "signingIn": "Signing in...",
@@ -129,7 +130,15 @@
     "heatmapTotalEvents": "Total events",
     "heatmapPathsSampled": "Paths sampled",
     "heatmapCategoriesTotal": "Categories",
-    "heatmapWindow": "Window"
+    "heatmapWindow": "Window",
+    "challenged": "Challenged",
+    "challenge_rate": "Challenge Rate",
+    "honeypotHits": "Honeypot Hits",
+    "riskDistribution": "Risk Score Distribution",
+    "topIpsByRisk": "Top IPs by Risk",
+    "ipStatus": "Status",
+    "rankNum": "Rank",
+    "topCountries": "Top Attacking Countries"
   },
   "hosts": {
     "title": "Hosts",
@@ -199,7 +208,15 @@
     "backToEdit": "Back to Edit",
     "rhaiAutoGenNote": "Script is auto-generated from event signals. Review before enabling.",
     "priorityNote": "Priority 1 = highest priority (fires before all other custom rules)",
-    "createRuleCreated": "Custom rule created. Review the event log before enabling."
+    "createRuleCreated": "Custom rule created. Review the event log before enabling.",
+    "challenged": "Challenged",
+    "honeypot": "Honeypot",
+    "filterCountry": "Filter by Country",
+    "allEvents": "All",
+    "blockedEvents": "Blocked",
+    "allowedEvents": "Allowed",
+    "challengedEvents": "Challenged",
+    "honeypotEvents": "Honeypot"
   },
   "rules": {
     "title": "Rule Management",
@@ -318,7 +335,17 @@
       "discard": "Discard changes",
       "fileChangedExternal": "File changed externally — your unsaved changes may conflict.",
       "reloadFromDisk": "Reload from disk"
-    }
+    },
+    "challenge_js_help": "Executes a JavaScript proof in the browser. Transparent to real users; stops most bots.",
+    "challenge_pow_help": "Requires the browser to solve a CPU-bound puzzle. Stronger than JS challenge; slight UX delay.",
+    "challenge_captcha_help": "Shows a CAPTCHA to the user. Highest friction; use only for high-risk scenarios.",
+    "honeypotHelp": "Any request to these paths is blocked immediately and assigned maximum risk score.",
+    "riskBandPreview": "Threshold Preview",
+    "threatIntel": "Threat Intelligence",
+    "torExitNodes": "Tor Exit Nodes",
+    "blockedAsns": "Blocked ASNs",
+    "feedStatus": "Feed Status",
+    "refreshFeeds": "Refresh Feeds"
   },
   "certificates": {
     "title": "SSL Certificates",
@@ -456,7 +483,13 @@
     "description": "Description",
     "confirmAdd": "Add Pattern",
     "enabled": "Enabled",
-    "disabled": "Disabled"
+    "disabled": "Disabled",
+    "relayProxy": "Relay / Proxy",
+    "topIsps": "Top ISPs",
+    "xffSpoof": "XFF Spoofing",
+    "detectedIsp": "Detected ISP",
+    "ruleTriggered": "Rule Triggered",
+    "noRelayProxy": "No relay/proxy events detected"
   },
   "ruleSources": {
     "title": "Rule Sources",
@@ -555,7 +588,12 @@
     "configEditHint": "To change thresholds: edit configs/tx-velocity.yaml and reload rules.",
     "seqThreshold": "Login → OTP → Deposit sequence completed in < 1500 ms",
     "withdrawThreshold": "≥ 5 withdrawals within a 60-second window",
-    "limitThreshold": "≥ 3 limit-change requests within 5 minutes"
+    "limitThreshold": "≥ 3 limit-change requests within 5 minutes",
+    "transactionVelocity": "Transaction Velocity",
+    "sequenceTooFast": "Sequence Too Fast",
+    "withdrawalBursts": "Withdrawal Bursts",
+    "limitStorms": "Limit Change Storms",
+    "configSnapshot": "Config Snapshot"
   },
   "analytics": {
     "title": "Rule Analytics",
@@ -595,6 +633,11 @@
     "addToBlocklistConfirm": "Block all traffic from {{ip}}?",
     "notFound": "Event not found",
     "loading": "Loading event..."
+  },
+  "securityEvents": {
+    "challengedEvents": "Challenged",
+    "honeypot": "Honeypot",
+    "filterCountry": "Filter by Country"
   },
   "cache": {
     "title": "Cache Dashboard",

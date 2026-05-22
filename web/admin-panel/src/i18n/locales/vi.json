@@ -27,7 +27,8 @@
     "cacheDashboard": "Bảng điều khiển Cache",
     "fraud": "Phát hiện gian lận",
     "txVelocity": "Vận tốc TX",
-    "ruleAnalytics": "Phân tích Rule"
+    "ruleAnalytics": "Phân tích Rule",
+    "transactionVelocity": "Vận tốc giao dịch"
   },
   "common": {
     "save": "Lưu",
@@ -77,7 +78,7 @@
     "username": "Tên đăng nhập",
     "password": "Mật khẩu",
     "loginButton": "Đăng nhập",
-    "loginTitle": "PRX-WAF Admin",
+    "loginTitle": "F&G WAF Admin",
     "loginSubtitle": "Tường lửa ứng dụng web",
     "invalidCredentials": "Sai thông tin đăng nhập",
     "signingIn": "Đang đăng nhập...",
@@ -129,7 +130,15 @@
     "heatmapTotalEvents": "Tổng sự kiện",
     "heatmapPathsSampled": "Paths mẫu",
     "heatmapCategoriesTotal": "Hạng mục",
-    "heatmapWindow": "Cửa sổ"
+    "heatmapWindow": "Cửa sổ",
+    "challenged": "Thách thức",
+    "challenge_rate": "Tỷ lệ thách thức",
+    "honeypotHits": "Honeypot Hits",
+    "riskDistribution": "Phân bổ điểm rủi ro",
+    "topIpsByRisk": "IP rủi ro cao nhất",
+    "ipStatus": "Trạng thái",
+    "rankNum": "Hạng",
+    "topCountries": "Quốc gia tấn công nhiều nhất"
   },
   "hosts": {
     "title": "Hosts",
@@ -188,7 +197,15 @@
     "region": "Vùng",
     "isp": "Nhà cung cấp",
     "org": "Tổ chức",
-    "noDetail": "Không có chi tiết"
+    "noDetail": "Không có chi tiết",
+    "challenged": "Thách thức",
+    "honeypot": "Honeypot",
+    "filterCountry": "Lọc theo quốc gia",
+    "allEvents": "Tất cả",
+    "blockedEvents": "Bị chặn",
+    "allowedEvents": "Cho phép",
+    "challengedEvents": "Thách thức",
+    "honeypotEvents": "Honeypot"
   },
   "rules": {
     "title": "Quản lý luật",
@@ -307,7 +324,17 @@
       "discard": "Huỷ thay đổi",
       "fileChangedExternal": "File đã thay đổi bên ngoài — thay đổi chưa lưu có thể xung đột.",
       "reloadFromDisk": "Tải lại từ đĩa"
-    }
+    },
+    "challenge_js_help": "Thực thi bằng chứng JavaScript trong trình duyệt. Trong suốt với người dùng thật; chặn hầu hết bot.",
+    "challenge_pow_help": "Yêu cầu trình duyệt giải câu đố CPU-bound. Mạnh hơn JS challenge; gây chậm nhẹ cho UX.",
+    "challenge_captcha_help": "Hiển thị CAPTCHA cho người dùng. Ma sát cao nhất; chỉ dùng cho kịch bản rủi ro cao.",
+    "honeypotHelp": "Mọi yêu cầu đến các path này bị chặn ngay lập tức và nhận điểm rủi ro tối đa.",
+    "riskBandPreview": "Xem trước ngưỡng",
+    "threatIntel": "Tình báo mối đe dọa",
+    "torExitNodes": "Tor Exit Nodes",
+    "blockedAsns": "ASN bị chặn",
+    "feedStatus": "Trạng thái Feed",
+    "refreshFeeds": "Làm mới Feeds"
   },
   "certificates": {
     "title": "Chứng chỉ SSL",
@@ -445,7 +472,13 @@
     "description": "Mô tả",
     "confirmAdd": "Thêm mẫu",
     "enabled": "Bật",
-    "disabled": "Tắt"
+    "disabled": "Tắt",
+    "relayProxy": "Relay / Proxy",
+    "topIsps": "Top ISP",
+    "xffSpoof": "Giả mạo XFF",
+    "detectedIsp": "ISP phát hiện",
+    "ruleTriggered": "Luật kích hoạt",
+    "noRelayProxy": "Không phát hiện sự kiện relay/proxy"
   },
   "ruleSources": {
     "title": "Nguồn luật",
@@ -566,6 +599,11 @@
     "notFound": "Không tìm thấy sự kiện",
     "loading": "Đang tải sự kiện..."
   },
+  "securityEvents": {
+    "challengedEvents": "Thách thức",
+    "honeypot": "Honeypot",
+    "filterCountry": "Lọc theo quốc gia"
+  },
   "cache": {
     "title": "Bảng điều khiển Cache",
     "subtitle": "Chỉ số hiệu suất cache thời gian thực",
@@ -613,6 +651,11 @@
     "configEditHint": "Để thay đổi ngưỡng: chỉnh sửa configs/tx-velocity.yaml rồi tải lại luật.",
     "seqThreshold": "Chuỗi Đăng nhập → OTP → Nạp tiền hoàn tất trong < 1500 ms",
     "withdrawThreshold": "≥ 5 lần rút tiền trong vòng 60 giây",
-    "limitThreshold": "≥ 3 yêu cầu thay đổi hạn mức trong 5 phút"
+    "limitThreshold": "≥ 3 yêu cầu thay đổi hạn mức trong 5 phút",
+    "transactionVelocity": "Vận tốc giao dịch",
+    "sequenceTooFast": "Chuỗi quá nhanh",
+    "withdrawalBursts": "Rút tiền dồn dập",
+    "limitStorms": "Thay đổi hạn mức liên tục",
+    "configSnapshot": "Ảnh chụp cấu hình"
   }
 }
