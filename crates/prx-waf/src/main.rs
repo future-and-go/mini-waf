@@ -1412,10 +1412,8 @@ fn run_server(config: &AppConfig, config_file_path: &str, vlogs_layer_slot: Laye
             } else {
                 use pingora_core::listeners::tls::TlsSettings;
                 use pingora_rustls::ResolvesServerCert;
-                let resolver: Arc<dyn ResolvesServerCert> = Arc::new(gateway::DbCertResolver::new(
-                    ssl_mgr.cache_handle(),
-                    allowlist_handle,
-                ));
+                let resolver: Arc<dyn ResolvesServerCert> =
+                    Arc::new(gateway::DbCertResolver::new(ssl_mgr.cache_handle(), allowlist_handle));
                 let mut tls_settings = TlsSettings::with_cert_resolver(resolver);
                 tls_settings.enable_h2();
                 proxy_service.add_tls_with_settings(&config.proxy.listen_addr_tls, None, tls_settings);

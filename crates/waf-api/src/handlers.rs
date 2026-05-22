@@ -610,10 +610,7 @@ pub async fn delete_certificate(State(state): State<Arc<AppState>>, Path(id): Pa
 /// Force the SSL manager to re-read this certificate from the database and
 /// repopulate the in-memory cache. Returns 503 when the binary was started
 /// without a TLS listener configured.
-pub async fn reload_certificate(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<Uuid>,
-) -> ApiResult<Json<Value>> {
+pub async fn reload_certificate(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
     let Some(ssl) = state.ssl_manager.as_ref() else {
         return Err(ApiError::ServiceUnavailable(
             "TLS subsystem not configured (set [tls] in config and restart)".into(),
