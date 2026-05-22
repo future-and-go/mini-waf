@@ -21,16 +21,25 @@ use pingora_error::ErrorType::InternalError;
 use pingora_error::{Error, OrErr, Result};
 use pingora_rustls::load_certs_and_key_files;
 use pingora_rustls::ClientCertVerifier;
+use pingora_rustls::ResolvesServerCert;
 use pingora_rustls::ServerConfig;
 use pingora_rustls::{version, TlsAcceptor as RusTlsAcceptor};
 
 use crate::protocols::{ALPN, IO};
 
+/// Source of certificate material for `TlsSettings`.
+///
+/// Static files preserve the original Pingora API. The resolver variant enables
+/// dynamic per-SNI certificate selection via `rustls::server::ResolvesServerCert`.
+enum CertSource {
+    StaticFiles { cert_path: String, key_path: String },
+    Resolver(Arc<dyn ResolvesServerCert>),
+}
+
 /// The TLS settings of a listening endpoint
 pub struct TlsSettings {
     alpn_protocols: Option<Vec<Vec<u8>>>,
-    cert_path: String,
-    key_path: String,
+    cert_source: CertSource,
     client_cert_verifier: Option<Arc<dyn ClientCertVerifier>>,
 }
 
@@ -51,14 +60,6 @@ impl TlsSettings {
         // rustls 0.23+ requires an explicit CryptoProvider.
         pingora_rustls::install_default_crypto_provider();
 
-        let Ok(Some((certs, key))) = load_certs_and_key_files(&self.cert_path, &self.key_path)
-        else {
-            panic!(
-                "Failed to load provided certificates \"{}\" or key \"{}\".",
-                self.cert_path, self.key_path
-            )
-        };
-
         let builder =
             ServerConfig::builder_with_protocol_versions(&[&version::TLS12, &version::TLS13]);
         let builder = if let Some(verifier) = self.client_cert_verifier {
@@ -66,12 +67,26 @@ impl TlsSettings {
         } else {
             builder.with_no_client_auth()
         };
-        let mut config = builder
-            .with_single_cert(certs, key)
-            .explain_err(InternalError, |e| {
-                format!("Failed to create server listener config: {e}")
-            })
-            .unwrap();
+
+        let mut config = match self.cert_source {
+            CertSource::StaticFiles {
+                cert_path,
+                key_path,
+            } => {
+                let Ok(Some((certs, key))) = load_certs_and_key_files(&cert_path, &key_path) else {
+                    panic!(
+                        "Failed to load provided certificates \"{cert_path}\" or key \"{key_path}\"."
+                    )
+                };
+                builder
+                    .with_single_cert(certs, key)
+                    .explain_err(InternalError, |e| {
+                        format!("Failed to create server listener config: {e}")
+                    })
+                    .unwrap()
+            }
+            CertSource::Resolver(resolver) => builder.with_cert_resolver(resolver),
+        };
 
         if let Some(alpn_protocols) = self.alpn_protocols {
             config.alpn_protocols = alpn_protocols;
@@ -104,8 +119,26 @@ impl TlsSettings {
     {
         Ok(TlsSettings {
             alpn_protocols: None,
-            cert_path: cert_path.to_string(),
-            key_path: key_path.to_string(),
+            cert_source: CertSource::StaticFiles {
+                cert_path: cert_path.to_string(),
+                key_path: key_path.to_string(),
+            },
+            client_cert_verifier: None,
+        })
+    }
+
+    /// Build a `TlsSettings` that resolves the server certificate dynamically
+    /// per-connection via a `rustls::server::ResolvesServerCert` implementation.
+    ///
+    /// Use this when certificate material lives in a database or other dynamic
+    /// store and must be selected by SNI hostname during the TLS handshake.
+    pub fn with_cert_resolver(resolver: Arc<dyn ResolvesServerCert>) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        Ok(TlsSettings {
+            alpn_protocols: None,
+            cert_source: CertSource::Resolver(resolver),
             client_cert_verifier: None,
         })
     }
