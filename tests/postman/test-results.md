@@ -1,7 +1,7 @@
 # Test Results — F&G WAF end-to-end (post deploy ff1e17f1)
 
-**Test date:** 2026-05-22 16:55 UTC
-**Suite:** `tests/postman/waf-coverage.postman_collection.json`
+**Test date:** 2026-05-22 23:55 (GMT+7)  
+**Suite:** `tests/postman/waf-coverage.postman_collection.json`  
 
 ## Deployment under test
 
