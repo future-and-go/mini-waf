@@ -49,7 +49,10 @@ use crate::rules_api::{get_rule_registry, import_rules, reload_rule_registry, to
 use crate::security::{admin_ip_check_middleware, list_audit_log, rate_limit_middleware, security_headers_middleware};
 use crate::state::AppState;
 use crate::static_files::static_handler;
-use crate::stats::{stats_endpoints, stats_geo, stats_overview, stats_timeseries, stats_timeseries_by_category};
+use crate::stats::{
+    stats_endpoints, stats_geo, stats_overview, stats_timeseries, stats_timeseries_by_category,
+    threat_intel_status,
+};
 use crate::tunnels::{create_tunnel, delete_tunnel, list_tunnels, ws_tunnel};
 use crate::websocket::{ws_events, ws_logs};
 
@@ -163,6 +166,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/stats/timeseries-by-category", get(stats_timeseries_by_category))
         .route("/api/stats/geo", get(stats_geo))
         .route("/api/stats/endpoints", get(stats_endpoints))
+        // PATCH 4: reputation/threat-intel status (graceful degraded response)
+        .route("/api/threat-intel/status", get(threat_intel_status))
         // Phase 4: Notifications
         .route(
             "/api/notifications",

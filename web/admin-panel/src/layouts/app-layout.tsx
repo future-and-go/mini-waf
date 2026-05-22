@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Layout, Menu, Typography, Button, Select, Space, Dropdown, Avatar, theme } from "antd";
+import { Layout, Menu, Typography, Button, Select, Space, Dropdown, Avatar, theme, Badge } from "antd";
 import type { MenuProps } from "antd";
 import {
   MenuFoldOutlined,
@@ -10,7 +10,7 @@ import {
   UserOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { useGetIdentity, useLogout, useGo } from "@refinedev/core";
+import { useGetIdentity, useLogout, useGo, useCustom } from "@refinedev/core";
 import { useLocation } from "react-router-dom";
 import { navItems, type NavItem } from "../utils/nav-items";
 import { useUiStore } from "../stores/ui-store";
@@ -51,10 +51,29 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const go = useGo();
   const location = useLocation();
   const { mutate: logout } = useLogout();
-  // Auth hooks (useGetIdentity/useLogin/useLogout) keep the flat
-  // UseQueryResult shape in v5 — no `result` wrapper like data hooks.
   const { data: identity } = useGetIdentity<IdentityShape>();
   const { token } = theme.useToken();
+
+  // XFF spoof badge on bot-management nav item (Task 2c)
+  const xffQuery = useCustom<{ data: unknown[]; total: number }>({
+    url: "/api/security-events",
+    method: "get",
+    config: { query: { rule_id: "BOT-XFF-SPOOF", page_size: 1 } },
+    queryOptions: { staleTime: 60_000, refetchInterval: 60_000, retry: false },
+  });
+  const xffCount = xffQuery.result?.data?.total ?? 0;
+
+  // Honeypot dot badge on security-events nav item (Task 5d)
+  const honeypotQuery = useCustom<{ data: Array<{ created_at: string }>; total: number }>({
+    url: "/api/security-events",
+    method: "get",
+    config: { query: { rule_id: "HONEY", page_size: 1 } },
+    queryOptions: { staleTime: 30_000, refetchInterval: 30_000, retry: false },
+  });
+  const honeypotLatest = honeypotQuery.result?.data?.data?.[0]?.created_at;
+  const honeypotDot = honeypotLatest
+    ? Date.now() - new Date(honeypotLatest).getTime() < 5 * 60_000
+    : false;
 
   const groups = useMemo(() => groupBySection(navItems), []);
 
@@ -66,6 +85,26 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     return matches[0]?.key ?? "dashboard";
   }, [location.pathname]);
 
+  const getNavLabel = (itemKey: string, base: string): React.ReactNode => {
+    if (itemKey === "bot-management" && xffCount > 0) {
+      return (
+        <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {base}
+          <Badge count={xffCount} size="small" style={{ marginLeft: 6 }} />
+        </span>
+      );
+    }
+    if (itemKey === "security-events" && honeypotDot) {
+      return (
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {base}
+          <Badge dot status="error" />
+        </span>
+      );
+    }
+    return base;
+  };
+
   // AntD Menu items can be: leaf, divider, or group. flatMap mixes shapes;
   // annotate as MenuItem[] so TS doesn't infer a narrow leaf-only union.
   type MenuItem = NonNullable<MenuProps["items"]>[number];
@@ -75,7 +114,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       return {
         key: item.key,
         icon: <Icon />,
-        label: t(item.i18nKey),
+        label: getNavLabel(item.key, t(item.i18nKey)),
         onClick: () => go({ to: item.path, type: "push" }),
       };
     });
@@ -121,7 +160,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           ) : (
             <div>
               <Typography.Title level={5} style={{ margin: 0 }}>
-                PRX-WAF
+                F&G WAF
               </Typography.Title>
               <Typography.Text type="secondary" style={{ fontSize: 11 }}>
                 {t("auth.adminPanel")}

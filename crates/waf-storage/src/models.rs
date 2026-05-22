@@ -294,6 +294,8 @@ pub struct SecurityEventQuery {
     pub client_ip: Option<String>,
     pub rule_name: Option<String>,
     pub rule_id: Option<String>,
+    // PATCH 1: prefix-based rule_id filter — matches rule_id ILIKE 'prefix%'
+    pub rule_id_prefix: Option<String>,
     pub path: Option<String>,
     pub action: Option<String>,
     pub country: Option<String>,

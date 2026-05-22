@@ -19,7 +19,7 @@ use waf_engine::{
 };
 use waf_storage::Database;
 
-/// PRX-WAF — High-performance Pingora-based Web Application Firewall
+/// F&G WAF — High-performance Pingora-based Web Application Firewall
 #[derive(Parser, Debug)]
 #[command(name = "prx-waf", version, about)]
 struct Cli {
@@ -313,7 +313,7 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
-    info!("PRX-WAF v{}", env!("CARGO_PKG_VERSION"));
+    info!("F&G WAF v{}", env!("CARGO_PKG_VERSION"));
 
     let config = load_config(&cli.config).unwrap_or_else(|e| {
         tracing::warn!("Failed to load config from {}: {}. Using defaults.", cli.config, e);
