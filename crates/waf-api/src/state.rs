@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-use gateway::{HostRouter, ResponseCache, TunnelRegistry};
+use gateway::{HostRouter, ResponseCache, SslManager, TunnelRegistry};
 use waf_engine::{CommunityReporter, CrowdSecClient, DecisionCache, PluginManager, WafEngine};
 use waf_storage::Database;
 
@@ -65,6 +65,10 @@ pub struct AppState {
     /// distinct-value enumeration is expensive on `VictoriaLogs` and the FE
     /// only needs it to populate filter dropdowns.
     pub logs_streams_cache: Arc<crate::logs::StreamsCache>,
+    /// Native TLS / ACME manager. `None` when the binary runs without the TLS
+    /// listener (e.g. when fronting via nginx is still in place). Endpoints
+    /// that depend on it MUST return 503 instead of unwrapping.
+    pub ssl_manager: Option<Arc<SslManager>>,
 }
 
 impl AppState {
@@ -113,6 +117,7 @@ impl AppState {
             main_config_file: None,
             victoria_logs_base_url: None,
             logs_streams_cache: crate::logs::new_streams_cache(),
+            ssl_manager: None,
         })
     }
 

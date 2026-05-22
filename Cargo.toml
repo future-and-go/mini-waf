@@ -30,11 +30,18 @@ tokio = { version = "1", features = ["full"] }
 # Crates.io versions kept; [patch.crates-io] at workspace root redirects to
 # vendor/pingora so its own workspace inheritance still resolves. The fork is
 # patched with ClientHello/H2 frame inspector hooks for FR-010 device fingerprinting.
-pingora = { version = "0.8", features = ["lb"] }
-pingora-core = { version = "0.8" }
-pingora-proxy = { version = "0.8" }
+pingora = { version = "0.8", features = ["lb", "rustls"] }
+pingora-core = { version = "0.8", features = ["rustls"] }
+pingora-proxy = { version = "0.8", features = ["rustls"] }
 pingora-http = { version = "0.8" }
 pingora-timeout = { version = "0.8" }
+# Vendored helper crate inside pingora's workspace — used directly by the
+# gateway/SSL resolver to import `ResolvesServerCert` / `CertifiedKey` / `ClientHello`
+# without taking a direct dependency on the upstream `rustls` types.
+pingora-rustls = { path = "vendor/pingora/pingora-rustls" }
+# PEM parsing for DB-stored certificates. Pinned to the version pingora-rustls
+# uses internally to avoid duplicate-type errors at the resolver boundary.
+rustls-pemfile = "2.1"
 
 # API framework
 axum = { version = "0.8", features = ["macros", "ws", "multipart"] }

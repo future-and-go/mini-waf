@@ -52,8 +52,10 @@ impl TlsSettings {
     /// Create a Rustls acceptor based on the current setting for certificates,
     /// keys, and protocols.
     ///
-    /// _NOTE_ This function will panic if there is an error in loading
-    /// certificate files or constructing the builder
+    /// _NOTE_ This function will panic if the `StaticFiles` variant fails to
+    /// load the configured cert/key PEM files. The `Resolver` variant is
+    /// infallible at build time — failures surface per-handshake when the
+    /// resolver returns `None`.
     ///
     /// Todo: Return a result instead of panicking XD
     pub fn build(self) -> Acceptor {
@@ -132,15 +134,13 @@ impl TlsSettings {
     ///
     /// Use this when certificate material lives in a database or other dynamic
     /// store and must be selected by SNI hostname during the TLS handshake.
-    pub fn with_cert_resolver(resolver: Arc<dyn ResolvesServerCert>) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        Ok(TlsSettings {
+    /// Infallible — the constructor only stores the resolver `Arc`.
+    pub fn with_cert_resolver(resolver: Arc<dyn ResolvesServerCert>) -> Self {
+        TlsSettings {
             alpn_protocols: None,
             cert_source: CertSource::Resolver(resolver),
             client_cert_verifier: None,
-        })
+        }
     }
 
     pub fn with_callbacks() -> Result<Self>

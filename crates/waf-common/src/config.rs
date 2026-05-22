@@ -45,6 +45,31 @@ pub struct AppConfig {
     /// FR-035 outbound response-header leak prevention. Disabled by default.
     #[serde(default)]
     pub outbound: OutboundConfig,
+    /// Native TLS / ACME configuration. All fields optional — when omitted, the
+    /// WAF runs without a TLS listener (operator may still front with nginx).
+    #[serde(default)]
+    pub tls: TlsConfig,
+}
+
+/// Native TLS termination + ACME automation configuration.
+///
+/// `acme_email` is required only at first ACME issuance, not at startup. An
+/// operator running with manual PEM uploads can leave it `None`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TlsConfig {
+    /// Contact email for the Let's Encrypt account. Required for ACME issue/renew.
+    #[serde(default)]
+    pub acme_email: Option<String>,
+    /// Use LE staging endpoint instead of production. Default `false`.
+    #[serde(default)]
+    pub acme_staging: bool,
+    /// Cache refresh poll interval in seconds. Default 60.
+    #[serde(default = "default_tls_refresh_secs")]
+    pub cache_refresh_secs: u64,
+}
+
+const fn default_tls_refresh_secs() -> u64 {
+    60
 }
 
 /// Path reference for `configs/rate-limit.yaml`.
@@ -267,7 +292,20 @@ pub struct HostEntry {
     pub remote_port: u16,
     pub ssl: Option<bool>,
     pub guard_status: Option<bool>,
+    /// Per-host opt-in for native TLS termination by the WAF binary.
+    ///
+    /// Orthogonal to `ssl` (which gates upstream TLS). When `Some(true)`, the
+    /// DB-backed cert resolver will serve a certificate for this host on the
+    /// TLS listener (`proxy.listen_addr_tls`). When `None`/`Some(false)`, the
+    /// resolver returns `None` for this SNI even if a cert exists in the DB,
+    /// preserving the "TLS terminated upstream / WAF speaks plaintext" intent.
+    #[serde(default)]
+    pub tls_terminate: Option<bool>,
+    /// Deprecated. Kept for one release to log a startup warning. Cert material
+    /// now lives in the `certificates` DB table; populate via the admin UI
+    /// (manual upload) or the ACME endpoints.
     pub cert_file: Option<String>,
+    /// Deprecated. See `cert_file`.
     pub key_file: Option<String>,
     /// OWASP CRS rule pipeline. Defaults to `true` for TOML-declared hosts
     /// (operators expect a sensible "WAF on" baseline) — the DB admin UI

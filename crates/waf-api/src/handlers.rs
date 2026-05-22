@@ -599,7 +599,30 @@ pub async fn delete_certificate(State(state): State<Arc<AppState>>, Path(id): Pa
     if !deleted {
         return Err(ApiError::NotFound(format!("Certificate {id} not found")));
     }
+    if let Some(ssl) = state.ssl_manager.as_ref() {
+        // Best-effort cache invalidate post-delete. We don't know the domain here
+        // without an extra query; leave it to the next refresh tick to evict.
+        let _ = ssl;
+    }
     Ok(Json(json!({ "success": true, "data": null })))
+}
+
+/// Force the SSL manager to re-read this certificate from the database and
+/// repopulate the in-memory cache. Returns 503 when the binary was started
+/// without a TLS listener configured.
+pub async fn reload_certificate(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    let Some(ssl) = state.ssl_manager.as_ref() else {
+        return Err(ApiError::ServiceUnavailable(
+            "TLS subsystem not configured (set [tls] in config and restart)".into(),
+        ));
+    };
+    ssl.reload_cert(id)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("cert reload failed: {e}")))?;
+    Ok(Json(json!({ "success": true, "data": { "id": id, "reloaded": true } })))
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
