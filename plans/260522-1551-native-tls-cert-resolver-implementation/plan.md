@@ -38,7 +38,7 @@ Multi-cluster cert sync, DNS-01/wildcard, OCSP stapling, mTLS, PG column encrypt
 | # | Phase | Status | LOC | Risk | File |
 |---|---|---|---|---|---|
 | 01 | Vendor pingora rustls patch | **completed 2026-05-22** | 59 net | Low | [phase-01-vendor-pingora-rustls-patch.md](./phase-01-vendor-pingora-rustls-patch.md) |
-| 02 | DbCertResolver + cache + SslManager wire | pending | ~400 | **Med** | [phase-02-dbcertresolver-cache-sslmanager-wire.md](./phase-02-dbcertresolver-cache-sslmanager-wire.md) |
+| 02 | DbCertResolver + cache + SslManager wire | **completed 2026-05-22** | ~600 | **Med** | [phase-02-dbcertresolver-cache-sslmanager-wire.md](./phase-02-dbcertresolver-cache-sslmanager-wire.md) |
 | 03 | ACME account persistence + HTTP-01 challenge filter | pending | ~500 | **Med** | [phase-03-acme-account-persist-http01-filter.md](./phase-03-acme-account-persist-http01-filter.md) |
 | 04 | Background renewal + per-domain mutex + backoff | pending | ~250 | Low | [phase-04-background-renewal-and-hardening.md](./phase-04-background-renewal-and-hardening.md) |
 | 05 | UI "Request via ACME" + CLI commands | pending | ~300 | Low | [phase-05-ui-cli-commands.md](./phase-05-ui-cli-commands.md) |

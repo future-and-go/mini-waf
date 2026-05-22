@@ -25,5 +25,5 @@ pub use pipeline::{FilterCtx, RequestFilter, RequestFilterChain, ResponseFilter,
 pub use protocol::{ProtoCounters, Protocol};
 pub use proxy::WafProxy;
 pub use router::HostRouter;
-pub use ssl::SslManager;
+pub use ssl::{DbCertResolver, SslManager};
 pub use tunnel::{TunnelConfig, TunnelConnection, TunnelRegistry, TunnelStatus, generate_token, hash_token};

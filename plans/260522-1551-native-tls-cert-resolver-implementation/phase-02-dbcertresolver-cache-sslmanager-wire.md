@@ -1,10 +1,16 @@
 ---
 phase: 2
 title: "DbCertResolver + cache hydration + SslManager wire main.rs"
-status: pending
+status: completed
 priority: P1
 effort: "3d"
 dependencies: [1]
+completed_at: 2026-05-22
+verification:
+  workspace_check: "2m58s clean (cargo check --features gateway/valkey)"
+  vendor_test: "3/3 pass — tls_settings_with_resolver"
+  loc_delta: "~600 across vendor patch updates + ssl/ module + main.rs wire + API extensions"
+notes: "Live cutover VM Singapore deferred — code path ready, operator decides when to switch from nginx fronting."
 ---
 
 # Phase 02: DbCertResolver + cache hydration + SslManager wire
