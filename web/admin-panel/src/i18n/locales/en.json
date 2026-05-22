@@ -354,6 +354,7 @@
     "torExitNodes": "Tor Exit Nodes",
     "blockedAsns": "Blocked ASNs",
     "feedStatus": "Feed Status",
+    "feedEnabled": "enabled",
     "refreshFeeds": "Refresh Feeds"
   },
   "certificates": {
@@ -496,6 +497,7 @@
     "relayProxy": "Relay / Proxy",
     "topIsps": "Top ISPs",
     "xffSpoof": "XFF Spoofing",
+    "xffSpoofDesc": "XFF Spoofing events use rule BOT-XFF-SPOOF. Relay/proxy events shown below.",
     "detectedIsp": "Detected ISP",
     "ruleTriggered": "Rule Triggered",
     "noRelayProxy": "No relay/proxy events detected"
