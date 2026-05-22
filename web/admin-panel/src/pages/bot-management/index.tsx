@@ -144,7 +144,9 @@ export const BotManagementPage: React.FC = () => {
       .slice(0, 100);
   }, [relayQuery.result, proxyQuery.result]);
 
-  const statsOverview = overviewQuery.result?.data;
+  const statsOverview =
+    (overviewQuery.result?.data as unknown as { data: StatsOverview })?.data ??
+    (overviewQuery.result?.data as unknown as StatsOverview);
 
   const actionTagColor = (a: string): string =>
     ({ block: "red", log: "gold", allow: "green" }[a] ?? "default");

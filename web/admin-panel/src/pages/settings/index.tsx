@@ -620,6 +620,7 @@ export const SettingsPage: React.FC = () => {
                     const descs: Record<string, string> = {
                       js_challenge: t("settings.challenge_js_help"),
                       proof_of_work: t("settings.challenge_pow_help"),
+                      pow: t("settings.challenge_pow_help"),
                       captcha: t("settings.challenge_captcha_help"),
                     };
                     return (

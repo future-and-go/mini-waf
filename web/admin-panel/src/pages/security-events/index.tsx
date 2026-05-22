@@ -250,14 +250,16 @@ export const SecurityEventsPage: React.FC = () => {
     const urlHostCode = searchParams.get("host_code");
     const urlAction = searchParams.get("action");
     const urlPath = searchParams.get("path");
+    const urlCountry = searchParams.get("country");
 
-    if (urlClientIp || urlRuleId || urlRuleName || urlHostCode || urlAction || urlPath) {
+    if (urlClientIp || urlRuleId || urlRuleName || urlHostCode || urlAction || urlPath || urlCountry !== null) {
       if (urlHostCode !== null) setHostCode(urlHostCode);
       if (urlClientIp !== null) setClientIp(urlClientIp);
       if (urlRuleId !== null) setRuleId(urlRuleId);
       if (urlRuleName !== null) setRuleName(urlRuleName);
       if (urlPath !== null) setPath(urlPath);
       if (urlAction !== null) setAction(urlAction || undefined);
+      if (urlCountry !== null) setCountryFilter(urlCountry || undefined);
 
       setFilters(
         [
@@ -267,6 +269,7 @@ export const SecurityEventsPage: React.FC = () => {
           { field: "rule_name", operator: "eq", value: urlRuleName || undefined },
           { field: "path", operator: "contains", value: urlPath || undefined },
           { field: "action", operator: "eq", value: urlAction || undefined },
+          { field: "country", operator: "eq", value: urlCountry || undefined },
         ],
         "replace",
       );
