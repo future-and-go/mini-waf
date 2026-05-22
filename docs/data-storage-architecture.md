@@ -368,7 +368,7 @@ Node A (Main)          Node B (Worker)        Node C (Worker)
 
 ## Admin UI Architecture
 
-**Stack:** Vue 3, Vite, Tailwind, Pinia (state), vue-router (hash mode), axios, vue-i18n (11 locales), TypeScript.
+**Stack:** React 18 + Refine 5.0, Vite, Ant Design 5, TypeScript, i18n (11 locales).
 
 ### View Structure (21 pages)
 
@@ -398,39 +398,7 @@ Node A (Main)          Node B (Worker)        Node C (Worker)
 
 ### Data Flow
 
-```
-View Component
-    │
-    ▼
-store.getters (Pinia)
-    │
-    ▼
-api/index.ts (axios client)
-    │
-    ├─ JWT token from store
-    ├─ 15s timeout
-    ├─ Auto-logout on 401
-    │
-    ▼
-Axum handler: /api/...
-    │
-    ├─ JWT verify middleware
-    ├─ IP allowlist check
-    ├─ Rate limit check
-    │
-    ▼
-Business logic
-    │
-    ├─ Query PostgreSQL
-    ├─ Update RuleRegistry
-    ├─ Broadcast to cluster peers
-    │
-    ▼
-JSON response
-    │
-    ▼
-View component (re-render)
-```
+Request → React Component → API client (Refine) → JWT auth → Axum handler → PostgreSQL → Response → UI update
 
 ### WebSocket Subscriptions
 

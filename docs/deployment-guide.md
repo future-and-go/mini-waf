@@ -679,7 +679,7 @@ RUST_LOG=prx_waf=info,gateway=debug prx-waf run
 
 ### Metrics Export
 
-Coming in v0.3.0: Prometheus metrics endpoint (`/metrics`).
+Prometheus metrics available at `/metrics` endpoint. Includes WAF detection counters, rate limiting stats, DDoS detection metrics, cache statistics, and cluster health metrics.
 
 ---
 

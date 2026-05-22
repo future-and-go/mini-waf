@@ -6,17 +6,23 @@ All notable changes to PRX-WAF are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
-### Documentation
-- Clarified FR-008 access-list dry-run behavior, including gateway log fields and the `full_bypass` caveat.
-- Corrected request-pipeline Phase-0 ordering to match implementation: Host gate → IP blacklist → IP whitelist.
-
-### Changed
-- **Migration 0009**: Widened `bot_patterns.pattern` column from VARCHAR(500) to TEXT to support arbitrarily long regex patterns in bot detection rules.
-- **Migration 0009**: Documented expanded `bot_patterns.pattern_type` vocabulary (user_agent, headers, body, path; legacy: ua, ip, behavior) via SQL COMMENT.
-- **Migration 0009**: Documented expanded `bot_patterns.action` vocabulary (block, log, challenge, allow) via SQL COMMENT.
+### Added
+- **FR-030 — Endpoint Heatmap**: Real-time attack distribution by endpoint + stats overview filters (commit 54d642b)
+- **Admin Panel**: Rule analytics dashboard + security event detail view (commit 5faa764)
 
 ### Fixed
-- **Schema Alignment (Phase 3)**: Resolved mismatch between PostgreSQL `bot_patterns` schema and YAML bot-detection rules + Rust `RuleAction` enum.
+- **Bot Detection**: Fixed bot management logic (commit 98a2216)
+- **TLS Listener**: Reverted native TLS listener (listen_addr_tls) — back to nginx fronting; separated TLS-terminate intent from upstream-TLS with proper H2 host routing (commits efc90a1, 0f0c051)
+- **Security**: Dependency bump astral-tokio-tar 0.6.1 → 0.6.2 (RUSTSEC-2026-0145) (commit ac38cd0)
+
+### Documentation
+- Clarified FR-008 access-list dry-run behavior, Phase-0 ordering
+- Added FR-025 risk scoring documentation and new rule fields (commit 19f61ba)
+- Corrected request-pipeline Phase-0 ordering: Host gate → IP blacklist → IP whitelist
+
+### Changed
+- **Migration 0009**: Widened `bot_patterns.pattern` VARCHAR(500) → TEXT; expanded `pattern_type` + `action` vocabulary
+- **Admin UI**: Enhanced security event detail with FR-030 analytics
 
 ---
 
