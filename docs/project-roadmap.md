@@ -82,7 +82,7 @@
 
 ---
 
-## Unreleased (In Progress — 2026-05-15)
+## v0.2.0 Features (Released 2026-03-27) — Technical Details
 
 ### FR-004 — Rate Limiting (Complete ✓)
 

@@ -2,8 +2,8 @@
 
 **Author:** David (AI CEO)
 **Date:** 2026-03-16
-**Status:** Draft — Awaiting Review
-**Version:** 2.0 (revised after codebase audit)
+**Status:** Finalized (v0.1.0-rc.1 and v0.2.0)
+**Version:** 2.0
 
 **Related:** See also [`./cluster-protocol.md`](./cluster-protocol.md) for QUIC protocol specification, wire format, election algorithm, rule sync, and implementation phases.
 

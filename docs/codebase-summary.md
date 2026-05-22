@@ -2,22 +2,22 @@
 
 ## Overview
 
-PRX-WAF is a 7-crate Rust workspace (~26K LOC) implementing a production-grade reverse proxy WAF with clustering, WASM plugins, and comprehensive observability.
+PRX-WAF is a 7-crate Rust workspace implementing a production-grade reverse proxy WAF with clustering, WASM plugins, and comprehensive observability. **~95K production LOC + ~27K test LOC = ~122K total** (v0.2.0, Rust 2024 edition).
 
 ---
 
 ## Crate Inventory
 
-| Crate | LOC | Purpose | Key Dependencies |
-|-------|-----|---------|------------------|
-| **prx-waf** | 1,552 | CLI binary, server bootstrap | tokio, tracing, clap |
-| **gateway** | 1,868 | Pingora reverse proxy, HTTP/3, SSL, response cache | pingora-core, quinn, rustls, moka |
-| **waf-engine** | 11,154 | 16-phase detection pipeline, rule registry, WASM plugins | aho-corasick, rhai, libinjectionrs, wasmtime |
-| **waf-storage** | 2,293 | PostgreSQL persistence layer (sqlx) | sqlx (postgres), chrono, uuid |
-| **waf-api** | 4,040 | Axum REST API, JWT/TOTP auth, WebSocket, embedded UI | axum, jsonwebtoken, argon2, tokio-tungstenite |
-| **waf-common** | 1,457 | Shared types, config, crypto, RequestCtx | serde, tokio, aes-gcm, instant-acme |
-| **waf-cluster** | 3,804 | QUIC mTLS mesh, Raft-lite election, rule sync | quinn, rustls, rcgen, lz4_flex |
-| **Total** | **26,168** | Production Rust WAF | 50+ workspace deps |
+| Crate | Prod LOC | Purpose | Key Dependencies |
+|-------|----------|---------|------------------|
+| **prx-waf** | ~2K | CLI binary, server bootstrap | tokio, tracing, clap |
+| **gateway** | ~15K | Pingora reverse proxy, HTTP/3, SSL, response cache | pingora-core, quinn, rustls, moka |
+| **waf-engine** | ~55K | 16-phase detection pipeline, rule registry, WASM plugins | aho-corasick, rhai, libinjectionrs, wasmtime |
+| **waf-storage** | ~5K | PostgreSQL persistence layer (sqlx) | sqlx (postgres), chrono, uuid |
+| **waf-api** | ~8K | Axum REST API, JWT/TOTP auth, WebSocket, embedded UI | axum, jsonwebtoken, argon2, tokio-tungstenite |
+| **waf-common** | ~3K | Shared types, config, crypto, RequestCtx | serde, tokio, aes-gcm, instant-acme |
+| **waf-cluster** | ~7K | QUIC mTLS mesh, Raft-lite election, rule sync | quinn, rustls, rcgen, lz4_flex |
+| **Total (Prod)** | **~95K** | Production Rust WAF (+ ~27K tests) | 50+ workspace deps |
 
 ---
 

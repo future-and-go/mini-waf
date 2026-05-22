@@ -28,20 +28,16 @@ PRX-WAF is a production-ready reverse proxy WAF built on [Pingora](https://githu
 
 **Rules & Automation**
 
-- OWASP Core Rule Set (CRS) support; 51 built-in rules (7 CVE patches, 24 OWASP, 6 advanced)
-- **File-based custom rules (FR-003)**: `rules/custom/*.yaml` auto-loaded with `kind: custom_rule_v1`
-- Hot-reload: file watcher (notify) + SIGHUP handler; atomic reload without downtime
-- Rhai scripting engine for custom detection rules (sandboxed)
-- ModSecurity rule parser (basic subset: ARGS, REQUEST_HEADERS, REQUEST_URI, REQUEST_BODY)
-- WASM plugin system (wasmtime 43; sandboxed)
-- Remote rule source loading (async, configurable size/timeout, fails safe)
+- OWASP Core Rule Set (CRS): 556 YAML rules (8 categories: OWASP 274, ModSecurity 46, CVE 43, Advanced 77, Bot 42, GeoIP 2, API 64, Custom 8)
+- Hot-reload: file watcher + SIGHUP; atomic reload without downtime
+- Rhai scripting + WASM plugins (wasmtime 43) for custom detection
+- Remote rule source async loading (10MB limit, 30s timeout)
 
 **Integrations**
 
-- CrowdSec: Bouncer (decision cache from LAPI) + AppSec (remote HTTP inspection) + Log Pusher
-- Sensitive word detection via Aho-Corasick multi-pattern matching
-- Anti-hotlink protection (Referer-based validation per host)
-- Notification system: Email (SMTP), Webhook, Telegram
+- CrowdSec: Bouncer + AppSec + Log Pusher
+- Sensitive word detection (Aho-Corasick) + anti-hotlink protection
+- Notifications: Email, Webhook, Telegram
 
 **Clustering & High Availability**
 
@@ -157,16 +153,16 @@ seeds       = []
 
 ## Crate Structure
 
-| Crate         | LOC        | Purpose                                                 |
-| ------------- | ---------- | ------------------------------------------------------- |
-| `prx-waf`     | 1,552      | Binary: CLI entry point, server bootstrap               |
-| `gateway`     | 1,868      | Pingora proxy, HTTP/3, SSL automation, response caching |
-| `waf-engine`  | 11,154     | Detection pipeline (16 phases), rules engine, plugins   |
-| `waf-storage` | 2,293      | PostgreSQL layer (sqlx), migrations, models             |
-| `waf-api`     | 4,040      | Axum REST API, JWT/TOTP, WebSocket, embedded UI         |
-| `waf-common`  | 1,457      | Shared types: RequestCtx, WafDecision, config           |
-| `waf-cluster` | 3,804      | Cluster consensus (QUIC/mTLS), rule sync, election      |
-| **Total**     | **26,168** | Production Rust WAF                                     |
+| Crate         | Prod LOC | Purpose                                                 |
+| ------------- | -------- | ------------------------------------------------------- |
+| `prx-waf`     | ~2K      | Binary: CLI entry point, server bootstrap               |
+| `gateway`     | ~15K     | Pingora proxy, HTTP/3, SSL automation, response caching |
+| `waf-engine`  | ~55K     | Detection pipeline (16 phases), rules engine, plugins   |
+| `waf-storage` | ~5K      | PostgreSQL layer (sqlx), migrations, models             |
+| `waf-api`     | ~8K      | Axum REST API, JWT/TOTP, WebSocket, embedded UI         |
+| `waf-common`  | ~3K      | Shared types: RequestCtx, WafAction, config             |
+| `waf-cluster` | ~7K      | Cluster consensus (QUIC/mTLS), rule sync, election      |
+| **Total (Prod)** | **~95K** | Production Rust WAF (plus ~27K tests)                   |
 
 ---
 
@@ -215,26 +211,7 @@ Health check: `curl http://localhost:9527/health`
 
 ## API Reference
 
-**Endpoints** (all require JWT token except `/api/auth/login` and `/health`)
-
-| Method         | Path                  | Description               |
-| -------------- | --------------------- | ------------------------- |
-| POST           | `/api/auth/login`     | Obtain JWT token          |
-| GET            | `/api/hosts`          | List proxy hosts          |
-| POST           | `/api/hosts`          | Create proxy host         |
-| GET/PUT/DELETE | `/api/hosts/:id`      | Get/update/delete host    |
-| GET/POST       | `/api/block-ips`      | IP blocklist              |
-| GET/POST       | `/api/block-urls`     | URL blocklist             |
-| GET            | `/api/attack-logs`    | Security events           |
-| GET            | `/api/security-events`              | List security events (paginated, filtered)    |
-| GET            | `/api/security-events/{id}`         | Single security event detail (UUID)           |
-| GET            | `/api/stats/timeseries-by-category` | Per-category hourly bucket counts, last N h   |
-| POST           | `/api/reload`         | Hot-reload rules          |
-| GET            | `/api/cluster/status` | Cluster health            |
-| WS             | `/ws/events`          | Real-time security events |
-| WS             | `/ws/logs`            | Real-time access logs     |
-
-See [API docs](./docs/system-architecture.md) for all 70+ endpoints.
+70+ endpoints available. Key routes: `/api/auth/login`, `/api/hosts`, `/api/security-events`, `/api/reload`, `/api/cluster/status`, WebSocket streams `/ws/events` and `/ws/logs`. All endpoints require JWT except login. See [System Architecture](./docs/system-architecture.md) for complete reference.
 
 ---
 
