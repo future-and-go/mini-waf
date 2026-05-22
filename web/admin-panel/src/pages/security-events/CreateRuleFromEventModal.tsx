@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Modal,
   Steps,
@@ -18,6 +18,7 @@ import {
   Tooltip,
   App,
 } from "antd";
+import { ReloadOutlined, ClockCircleOutlined } from "@ant-design/icons";
 import { useCreate, useUpdate, useCustom } from "@refinedev/core";
 import { useTranslation } from "react-i18next";
 import type { ColumnsType } from "antd/es/table";
@@ -180,6 +181,12 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
   const [scriptMode, setScriptMode] = useState(false);
   const [createdRuleId, setCreatedRuleId] = useState<string | null>(null);
 
+  // ── Auto-refresh state ────────────────────────────────────────────────────
+  const [refreshInterval, setRefreshInterval] = useState<number>(0);
+  const [secondsAgo, setSecondsAgo] = useState<number | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const { mutate: create, mutation: createMutation } = useCreate();
   const { mutate: update, mutation: updateMutation } = useUpdate();
   const submitting = createMutation.isPending || updateMutation.isPending;
@@ -226,10 +233,52 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
     },
     queryOptions: {
       enabled: step === 1 && !!event?.client_ip,
-      staleTime: 30_000,
+      staleTime: 0,
       queryKey: ["preview-events", event?.client_ip, event?.path],
     },
   });
+
+  // ── Manual / auto refetch helper ──────────────────────────────────────────
+
+  const doRefetch = useCallback(() => {
+    void previewQuery.query.refetch();
+    setSecondsAgo(0);
+  }, [previewQuery.query]);
+
+  // Tick the "seconds ago" counter every second after a fetch completes.
+  useEffect(() => {
+    if (step !== 1) return;
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    setSecondsAgo(0);
+    countdownTimerRef.current = setInterval(() => {
+      setSecondsAgo((s) => (s !== null ? s + 1 : null));
+    }, 1000);
+    return () => {
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, previewQuery.query.dataUpdatedAt]);
+
+  // Set up / tear down the periodic auto-refresh interval.
+  useEffect(() => {
+    if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
+    if (step === 1 && refreshInterval > 0) {
+      refreshTimerRef.current = setInterval(doRefetch, refreshInterval * 1000);
+    }
+    return () => {
+      if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
+    };
+  }, [step, refreshInterval, doRefetch]);
+
+  // Clean up timers when the modal closes.
+  useEffect(() => {
+    if (!open) {
+      if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+      setRefreshInterval(0);
+      setSecondsAgo(null);
+    }
+  }, [open]);
 
   // Issue 6: surface fetch errors instead of silently returning [].
   const previewFetchError = previewQuery.query.isError
@@ -706,22 +755,75 @@ export const CreateRuleFromEventModal: React.FC<Props> = ({
             />
           )}
 
-          {/* Issue 7: clarify that the count is filtered by IP+method+path,
-              not a full engine simulation, so admins understand the scope */}
-          <Typography.Text type="secondary">
-            {t("security.foundMatches", { count: matchedEvents.length })}
-            {" — "}
-            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-              filtered by IP, method &amp; path (client-side simulation; does not account for SSRF referer checks)
+          {/* ── Refresh toolbar ──────────────────────────────────────────── */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 8,
+              padding: "8px 12px",
+              background: "var(--ant-color-fill-quaternary, #f5f5f5)",
+              borderRadius: 6,
+              border: "1px solid var(--ant-color-border-secondary, #e0e0e0)",
+            }}
+          >
+            {/* Left: match count */}
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {t("security.foundMatches", { count: matchedEvents.length })}
+              <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
+                — filtered by IP, method &amp; path (client-side simulation)
+              </Typography.Text>
             </Typography.Text>
-          </Typography.Text>
+
+            {/* Right: refresh controls */}
+            <Space size={8} wrap>
+              <Space size={4}>
+                <ClockCircleOutlined style={{ color: "#8c8c8c", fontSize: 12 }} />
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {t("security.autoRefresh")}:
+                </Typography.Text>
+                <Select
+                  size="small"
+                  value={refreshInterval}
+                  onChange={setRefreshInterval}
+                  style={{ width: 80 }}
+                  options={[
+                    { value: 0, label: t("security.refreshOff") },
+                    { value: 5, label: "5s" },
+                    { value: 10, label: "10s" },
+                    { value: 30, label: "30s" },
+                    { value: 60, label: "60s" },
+                  ]}
+                />
+              </Space>
+
+              <Button
+                size="small"
+                icon={<ReloadOutlined spin={previewQuery.query.isFetching} />}
+                onClick={doRefetch}
+                loading={previewQuery.query.isFetching}
+              >
+                {t("security.refreshNow")}
+              </Button>
+
+              {secondsAgo !== null && (
+                <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                  {secondsAgo === 0
+                    ? t("security.justRefreshed")
+                    : t("security.lastRefreshed", { ago: secondsAgo })}
+                </Typography.Text>
+              )}
+            </Space>
+          </div>
 
           <Table
             rowKey="id"
             size="small"
             dataSource={matchedEvents}
             columns={previewColumns}
-            loading={previewQuery.query.isLoading}
+            loading={previewQuery.query.isFetching}
             pagination={{ pageSize: 10, showSizeChanger: false }}
             scroll={{ x: 700 }}
             locale={{ emptyText: t("security.noEvents") }}

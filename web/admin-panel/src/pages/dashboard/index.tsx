@@ -9,6 +9,9 @@ import {
   Table,
   Typography,
   theme,
+  Statistic,
+  Alert,
+  Empty,
 } from "antd";
 import {
   ReloadOutlined,
@@ -24,6 +27,8 @@ import {
   AlertOutlined,
   EnvironmentOutlined,
   WifiOutlined,
+  ExclamationCircleOutlined,
+  BugOutlined,
 } from "@ant-design/icons";
 import { useCustom } from "@refinedev/core";
 import { useTranslation } from "react-i18next";
@@ -32,11 +37,12 @@ import type { ColumnsType } from "antd/es/table";
 import { KpiCard } from "../../components/kpi-card";
 import { TopList } from "../../components/top-list";
 import { CategoryBars, categoryColors, actionColors } from "../../components/category-bars";
+import { RiskBandPreview } from "../../components/risk-band-preview";
 import { TrafficChart } from "../../components/traffic-chart";
 import { EngineBadge } from "../../components/engine-badge";
 import { EndpointHeatmap } from "../../components/endpoint-heatmap";
 import { DashboardFilters } from "../../components/dashboard-filters";
-import type { RecentEvent, StatsOverview, TrafficPoint, EndpointHeatmap as EndpointHeatmapData } from "../../types/api";
+import type { RecentEvent, StatsOverview, TopEntry, TrafficPoint, EndpointHeatmap as EndpointHeatmapData } from "../../types/api";
 import { fmtNum, fmtPct, fmtTime } from "../../utils/format";
 
 const ENGINES = [
@@ -60,6 +66,24 @@ interface RuleRegistry {
   enabled?: number;
   disabled?: number;
   rules?: { category?: string }[];
+}
+
+interface PanelConfigData {
+  config?: {
+    risk_allow?: number;
+    risk_challenge?: number;
+    risk_block?: number;
+  };
+}
+
+// ISO 3166-1 alpha-2 code → emoji flag
+function getFlagEmoji(iso: string): string {
+  if (!iso || iso.length !== 2) return "🌍";
+  return iso
+    .toUpperCase()
+    .split("")
+    .map((c) => String.fromCodePoint(127397 + c.charCodeAt(0)))
+    .join("");
 }
 
 export const DashboardPage: React.FC = () => {
@@ -108,6 +132,13 @@ export const DashboardPage: React.FC = () => {
     queryOptions: { staleTime: 5 * 60_000 },
   });
 
+  const panelConfig = useCustom<PanelConfigData>({
+    url: "/api/panel-config",
+    method: "get",
+    queryOptions: { staleTime: 60_000, retry: false },
+  });
+  const panelCfg = panelConfig.result?.data?.config;
+
   const heatmap = useCustom<EndpointHeatmapData>({
     url: "/api/stats/endpoints",
     method: "get",
@@ -128,6 +159,27 @@ export const DashboardPage: React.FC = () => {
   const stats = overview.result?.data;
   const traffic = timeseries.result?.data ?? [];
   const reg = registry.result?.data;
+
+  const challengeCount = stats?.action_breakdown?.find((e) => e.key === "challenge")?.count ?? 0;
+  const honeypotCount = stats?.action_breakdown?.find((e) => e.key === "honeypot")?.count ?? 0;
+  const challengeRate =
+    stats?.total_requests && stats.total_requests > 0
+      ? ((challengeCount / stats.total_requests) * 100).toFixed(1)
+      : "0.0";
+
+  const countriesWithFlags = useMemo(
+    () =>
+      (stats?.top_countries ?? []).map((e) => ({
+        ...e,
+        key: `${getFlagEmoji(e.key)} ${e.key}`,
+      })),
+    [stats?.top_countries],
+  );
+
+  const riskIpData = useMemo(
+    () => (stats?.top_ips ?? []).map((e, i) => ({ ...e, rank: i + 1 })),
+    [stats?.top_ips],
+  );
 
   const ruleStats = useMemo(() => {
     const total = (reg?.enabled ?? 0) + (reg?.disabled ?? 0);
@@ -170,7 +222,43 @@ export const DashboardPage: React.FC = () => {
     timeseries.query.refetch();
     registry.query.refetch();
     heatmap.query.refetch();
+    panelConfig.query.refetch();
   };
+
+  const riskIpColumns: ColumnsType<TopEntry & { rank: number }> = [
+    {
+      title: t("dashboard.rankNum"),
+      dataIndex: "rank",
+      width: 60,
+      render: (v: number) => (
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          #{v}
+        </Typography.Text>
+      ),
+    },
+    {
+      title: t("dashboard.topIPs"),
+      dataIndex: "key",
+      render: (v: string) => (
+        <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{v}</span>
+      ),
+    },
+    {
+      title: t("common.total"),
+      dataIndex: "count",
+      width: 100,
+      render: (v: number) => fmtNum(v),
+    },
+    {
+      title: t("dashboard.ipStatus"),
+      width: 110,
+      render: (_: unknown, row: TopEntry & { rank: number }) => {
+        if (row.count > 10) return <Tag color="red">{t("dashboard.ipHighRisk")}</Tag>;
+        if (row.count > 3) return <Tag color="orange">{t("dashboard.ipActive")}</Tag>;
+        return <Tag color="gold">{t("dashboard.ipMonitoring")}</Tag>;
+      },
+    },
+  ];
 
   const recentColumns: ColumnsType<RecentEvent> = [
     {
@@ -293,6 +381,45 @@ export const DashboardPage: React.FC = () => {
         </Col>
       </Row>
 
+      {/* Challenged + Honeypot KPI row */}
+      <Row gutter={[12, 12]}>
+        <Col xs={12} lg={6}>
+          <Card size="small" style={{ height: "100%" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+              <div>
+                <Statistic
+                  title={t("dashboard.challenged")}
+                  value={fmtNum(challengeCount)}
+                  loading={overview.query.isLoading}
+                  valueStyle={{ fontSize: 22, fontWeight: 600 }}
+                />
+                <Tag color="orange" style={{ marginTop: 4, fontSize: 11 }}>
+                  {challengeRate}% {t("dashboard.challenge_rate")}
+                </Tag>
+              </div>
+              <div
+                style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: "#fa8c161a", display: "flex",
+                  alignItems: "center", justifyContent: "center", flexShrink: 0,
+                }}
+              >
+                <ExclamationCircleOutlined style={{ color: "#fa8c16", fontSize: 18 }} />
+              </div>
+            </div>
+          </Card>
+        </Col>
+        <Col xs={12} lg={6}>
+          <KpiCard
+            label={t("dashboard.honeypotHits")}
+            value={fmtNum(honeypotCount)}
+            icon={BugOutlined}
+            color="purple"
+            loading={overview.query.isLoading}
+          />
+        </Col>
+      </Row>
+
       <Card
         size="small"
         title={t("dashboard.trafficChart")}
@@ -325,12 +452,76 @@ export const DashboardPage: React.FC = () => {
         </Col>
       </Row>
 
+      {/* Risk Score Distribution */}
+      {!panelConfig.query.isError && (
+        <Card
+          size="small"
+          title={t("dashboard.riskDistribution")}
+          loading={panelConfig.query.isLoading && !panelCfg}
+        >
+          {panelCfg ? (
+            <Row gutter={[16, 16]} align="middle">
+              <Col xs={24} lg={14}>
+                <RiskBandPreview
+                  riskAllow={panelCfg.risk_allow ?? 50}
+                  riskChallenge={panelCfg.risk_challenge ?? 74}
+                  riskBlock={panelCfg.risk_block ?? 75}
+                />
+              </Col>
+              <Col xs={24} lg={10}>
+                <Row gutter={[8, 0]}>
+                  <Col span={8}>
+                    <Statistic
+                      title={t("security.allowed")}
+                      value={stats?.action_breakdown?.find((e) => e.key === "allow")?.count ?? 0}
+                      valueStyle={{ color: "#52c41a", fontSize: 18 }}
+                      loading={overview.query.isLoading}
+                    />
+                  </Col>
+                  <Col span={8}>
+                    <Statistic
+                      title={t("dashboard.challenged")}
+                      value={challengeCount}
+                      valueStyle={{ color: "#fa8c16", fontSize: 18 }}
+                      loading={overview.query.isLoading}
+                    />
+                  </Col>
+                  <Col span={8}>
+                    <Statistic
+                      title={t("security.blocked")}
+                      value={stats?.action_breakdown?.find((e) => e.key === "block")?.count ?? 0}
+                      valueStyle={{ color: "#f5222d", fontSize: 18 }}
+                      loading={overview.query.isLoading}
+                    />
+                  </Col>
+                </Row>
+              </Col>
+            </Row>
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              message={t("settings.panel.notConfigured")}
+            />
+          )}
+        </Card>
+      )}
+
       <Card size="small" title={t("dashboard.endpointHeatmap")}>
         <EndpointHeatmap
           data={heatmap.result?.data}
           loading={heatmap.query.isLoading}
         />
       </Card>
+
+      <Row gutter={[12, 12]}>
+        <Col xs={24} lg={12}>
+          <TopList title={t("dashboard.topCountries")} items={countriesWithFlags} icon={EnvironmentOutlined} badgeColor="#722ed1" />
+        </Col>
+        <Col xs={24} lg={12}>
+          <TopList title={t("dashboard.topIsps")} items={stats?.top_isps} icon={WifiOutlined} badgeColor="#1677ff" />
+        </Col>
+      </Row>
 
       <Row gutter={[12, 12]}>
         <Col xs={24} lg={12}>
@@ -341,14 +532,19 @@ export const DashboardPage: React.FC = () => {
         </Col>
       </Row>
 
-      <Row gutter={[12, 12]}>
-        <Col xs={24} lg={12}>
-          <TopList title={t("dashboard.topCountries")} items={stats?.top_countries} icon={EnvironmentOutlined} badgeColor="#722ed1" />
-        </Col>
-        <Col xs={24} lg={12}>
-          <TopList title={t("dashboard.topIsps")} items={stats?.top_isps} icon={WifiOutlined} badgeColor="#1677ff" />
-        </Col>
-      </Row>
+      {/* Top IPs by Risk table */}
+      <Card size="small" title={t("dashboard.topIpsByRisk")}>
+        <Table<TopEntry & { rank: number }>
+          rowKey="key"
+          size="small"
+          dataSource={riskIpData}
+          columns={riskIpColumns}
+          loading={overview.query.isLoading}
+          pagination={false}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+          scroll={{ x: 400 }}
+        />
+      </Card>
 
       <Card size="small" title={t("dashboard.detectionEngines")}>
         <Row gutter={[8, 8]}>
