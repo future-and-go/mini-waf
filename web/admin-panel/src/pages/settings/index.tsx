@@ -171,6 +171,7 @@ export const SettingsPage: React.FC = () => {
     url: "/api/panel-config",
     method: "get",
     queryOptions: { staleTime: 3_000, refetchInterval: 15_000, retry: false },
+    errorNotification: false,
   });
 
   const { mutate: reload, mutation: reloadMutation } = useCustomMutation();
