@@ -28,7 +28,7 @@ pub struct DbCertResolver {
 }
 
 impl DbCertResolver {
-    pub fn new(
+    pub const fn new(
         cache: Arc<DashMap<String, Arc<CertifiedKey>>>,
         tls_terminate_hosts: Arc<RwLock<HashSet<String>>>,
     ) -> Self {
@@ -64,13 +64,13 @@ impl ResolvesServerCert for DbCertResolver {
 mod tests {
     use super::*;
 
-    fn new_resolver() -> (
-        DbCertResolver,
-        Arc<DashMap<String, Arc<CertifiedKey>>>,
-        Arc<RwLock<HashSet<String>>>,
-    ) {
-        let cache: Arc<DashMap<String, Arc<CertifiedKey>>> = Arc::new(DashMap::new());
-        let hosts: Arc<RwLock<HashSet<String>>> = Arc::new(RwLock::new(HashSet::new()));
+    type CertCache = Arc<DashMap<String, Arc<CertifiedKey>>>;
+    type TlsTerminateHosts = Arc<RwLock<HashSet<String>>>;
+    type ResolverFixture = (DbCertResolver, CertCache, TlsTerminateHosts);
+
+    fn new_resolver() -> ResolverFixture {
+        let cache: CertCache = Arc::new(DashMap::new());
+        let hosts: TlsTerminateHosts = Arc::new(RwLock::new(HashSet::new()));
         let resolver = DbCertResolver::new(Arc::clone(&cache), Arc::clone(&hosts));
         (resolver, cache, hosts)
     }

@@ -10,5 +10,5 @@ pub mod build_certified_key;
 pub mod manager;
 pub mod resolver;
 
-pub use manager::{ChallengeStore, SslManager};
+pub use manager::{CertInfo, ChallengeStore, SslManager};
 pub use resolver::DbCertResolver;
