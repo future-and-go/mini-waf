@@ -26,8 +26,8 @@ pub fn build_certified_key(cert_pem: &str, key_pem: &str) -> Result<Arc<Certifie
         .context("failed to read private key from PEM")?
         .ok_or_else(|| anyhow!("private key PEM contained no key"))?;
 
-    let provider = rustls::crypto::CryptoProvider::get_default()
-        .ok_or_else(|| anyhow!("no rustls CryptoProvider installed"))?;
+    let provider =
+        rustls::crypto::CryptoProvider::get_default().ok_or_else(|| anyhow!("no rustls CryptoProvider installed"))?;
     let signing_key = provider
         .key_provider
         .load_private_key(key_der)

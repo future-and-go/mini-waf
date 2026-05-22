@@ -105,11 +105,7 @@ impl SslManager {
     /// (manual PEM upload only). The cache and TLS-terminate allowlist start
     /// empty; call [`hydrate_cache`] and [`set_tls_terminate_hosts`] before
     /// binding the TLS listener.
-    pub fn new(
-        db: Arc<Database>,
-        acme_email: Option<impl Into<String>>,
-        acme_staging: bool,
-    ) -> Self {
+    pub fn new(db: Arc<Database>, acme_email: Option<impl Into<String>>, acme_staging: bool) -> Self {
         Self {
             db,
             challenges: Arc::new(ChallengeStore::new()),
@@ -216,10 +212,7 @@ impl SslManager {
     ///
     /// Phase 02 KISS choice — a coarse poll is sufficient for single-node, ~50
     /// hosts. Replace with `LISTEN/NOTIFY` if/when multi-cluster lands.
-    pub fn spawn_cache_refresh_task(
-        self: Arc<Self>,
-        interval_secs: u64,
-    ) -> tokio::task::JoinHandle<()> {
+    pub fn spawn_cache_refresh_task(self: Arc<Self>, interval_secs: u64) -> tokio::task::JoinHandle<()> {
         let interval = Duration::from_secs(interval_secs.max(1));
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(interval);
@@ -272,10 +265,9 @@ impl SslManager {
         use instant_acme::{Account, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderStatus};
         use rcgen::{CertificateParams, KeyPair};
 
-        let acme_email = self
-            .acme_email
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("tls.acme_email is not configured — set it in TOML before requesting an ACME cert"))?;
+        let acme_email = self.acme_email.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("tls.acme_email is not configured — set it in TOML before requesting an ACME cert")
+        })?;
 
         info!("Requesting ACME certificate for domain: {}", domain);
 
