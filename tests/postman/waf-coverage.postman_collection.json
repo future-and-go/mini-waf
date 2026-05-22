@@ -1,0 +1,235 @@
+{
+  "info": {
+    "name": "F&G WAF coverage (mini-waf 1.1.0)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "End-to-end test cho mini-waf (commit ff1e17f1) + waf-upstream Go backend. Cover legit traffic, admin API, attack detection, và 3 coverage gaps đã biết. See README.md."
+  },
+  "variable": [
+    { "key": "upstream_url", "value": "https://waf-upstream.ace-trail.com" },
+    { "key": "admin_url", "value": "https://mini-waf.ace-trail.com" },
+    { "key": "admin_user", "value": "admin" },
+    { "key": "admin_pass", "value": "5ed605f0e1dc4f104624c049" },
+    { "key": "access_token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "0. Auth",
+      "item": [
+        {
+          "name": "Login (sets {{access_token}})",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{admin_url}}/api/auth/login", "host": ["{{admin_url}}"], "path": ["api","auth","login"] },
+            "body": { "mode": "raw", "raw": "{\"username\":\"{{admin_user}}\",\"password\":\"{{admin_pass}}\"}" }
+          },
+          "event": [{
+            "listen": "test",
+            "script": { "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const j = pm.response.json();",
+              "pm.test('access_token present', () => pm.expect(j.data.access_token).to.be.a('string'));",
+              "pm.collectionVariables.set('access_token', j.data.access_token);"
+            ]}
+          }]
+        }
+      ]
+    },
+    {
+      "name": "1. Mini-WAF admin API",
+      "item": [
+        { "name": "GET /ui/ — admin SPA shell",
+          "request": { "method": "GET", "url": "{{admin_url}}/ui/" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "pm.test('F&G WAF banner present', () => pm.expect(pm.response.text()).to.include('F&amp;G WAF Admin Panel'));"
+          ]}}] },
+        { "name": "GET /api/panel-config — requires auth",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{admin_url}}/api/panel-config"
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "const j = pm.response.json();",
+            "pm.test('panel config envelope', () => pm.expect(j.data.config).to.have.property('shadow_mode'));",
+            "pm.test('honeypot_paths configured', () => pm.expect(j.data.config.honeypot_paths.length).to.be.greaterThan(0));"
+          ]}}] },
+        { "name": "GET /api/hosts — list hosts (DB-backed)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": "{{admin_url}}/api/hosts"
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('200 OK', () => pm.response.to.have.status(200));",
+            "const j = pm.response.json();",
+            "pm.test('2 hosts seeded', () => pm.expect(j.data.length).to.equal(2));",
+            "pm.test('ssl=false after rollback', () => pm.expect(j.data.every(h => h.ssl === false)).to.be.true);"
+          ]}}] }
+      ]
+    },
+    {
+      "name": "2. Upstream public (no auth) — expect 2xx",
+      "item": [
+        { "name": "GET / — home page", "request": { "method": "GET", "url": "{{upstream_url}}/" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] }}] },
+        { "name": "GET /about", "request": { "method": "GET", "url": "{{upstream_url}}/about" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] }}] },
+        { "name": "GET /sitemap.xml", "request": { "method": "GET", "url": "{{upstream_url}}/sitemap.xml" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] }}] },
+        { "name": "GET /game/list", "request": { "method": "GET", "url": "{{upstream_url}}/game/list" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] }}] },
+        { "name": "GET /game/1 — path param", "request": { "method": "GET", "url": "{{upstream_url}}/game/1" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] }}] },
+        { "name": "GET /api/public/stats", "request": { "method": "GET", "url": "{{upstream_url}}/api/public/stats" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] }}] },
+        { "name": "OPTIONS /api/public/stats — CORS preflight", "request": { "method": "OPTIONS", "url": "{{upstream_url}}/api/public/stats" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('204 No Content', () => pm.response.to.have.status(204));"] }}] },
+        { "name": "POST /api/feedback — minimal body (expect 400 schema)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{upstream_url}}/api/feedback",
+            "body": { "mode": "raw", "raw": "{\"msg\":\"good\"}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('400 schema-fail (not 403)', () => pm.expect(pm.response.code).to.equal(400));"
+          ]}}] }
+      ]
+    },
+    {
+      "name": "3. Upstream auth-required — expect 401",
+      "item": [
+        { "name": "GET /api/profile", "request": { "method": "GET", "url": "{{upstream_url}}/api/profile" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('401', () => pm.response.to.have.status(401));"] }}] },
+        { "name": "GET /api/transactions", "request": { "method": "GET", "url": "{{upstream_url}}/api/transactions" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('401', () => pm.response.to.have.status(401));"] }}] },
+        { "name": "GET /admin/dashboard", "request": { "method": "GET", "url": "{{upstream_url}}/admin/dashboard" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('401', () => pm.response.to.have.status(401));"] }}] },
+        { "name": "POST /deposit",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{upstream_url}}/deposit",
+            "body": { "mode": "raw", "raw": "{\"amount\":100}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('401', () => pm.response.to.have.status(401));"] }}] },
+        { "name": "POST /login bad creds",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{upstream_url}}/login",
+            "body": { "mode": "raw", "raw": "{\"username\":\"alice\",\"password\":\"x\"}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('401', () => pm.response.to.have.status(401));"] }}] }
+      ]
+    },
+    {
+      "name": "4. WAF attacks — GET query (expect 403)",
+      "item": [
+        { "name": "SQLi classic — ?id=1' OR '1'='1", "request": { "method": "GET", "url": "{{upstream_url}}/?id=1%27+OR+%271%27%3D%271" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('403 blocked', () => pm.response.to.have.status(403));",
+            "pm.test('block page from mini-waf', () => pm.expect(pm.response.text()).to.include('Request Blocked'));"
+          ]}}] },
+        { "name": "SQLi union", "request": { "method": "GET", "url": "{{upstream_url}}/?id=1+UNION+SELECT+null,null--+-" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] }}] },
+        { "name": "SQLi drop table", "request": { "method": "GET", "url": "{{upstream_url}}/?id=1%27%3BDROP+TABLE+users--" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] }}] },
+        { "name": "XSS script tag", "request": { "method": "GET", "url": "{{upstream_url}}/?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] }}] },
+        { "name": "XSS img onerror", "request": { "method": "GET", "url": "{{upstream_url}}/?q=%3Cimg+src%3Dx+onerror%3Dalert(1)%3E" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] }}] },
+        { "name": "XSS javascript: URL", "request": { "method": "GET", "url": "{{upstream_url}}/?q=javascript:alert(document.cookie)" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] }}] },
+        { "name": "LFI ../../../../etc/passwd", "request": { "method": "GET", "url": "{{upstream_url}}/?file=..%2F..%2F..%2F..%2Fetc%2Fpasswd" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] }}] },
+        { "name": "LFI double-encoded", "request": { "method": "GET", "url": "{{upstream_url}}/?file=..%252f..%252fetc%252fshadow" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] }}] },
+        { "name": "cmd injection — ?cmd=cat /etc/passwd", "request": { "method": "GET", "url": "{{upstream_url}}/?cmd=cat+%2Fetc%2Fpasswd" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] }}] },
+        { "name": "cmd chain — ?cmd=;ls -la", "request": { "method": "GET", "url": "{{upstream_url}}/?cmd=%3Bls+-la" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] }}] },
+        { "name": "SSRF file:// scheme", "request": { "method": "GET", "url": "{{upstream_url}}/?url=file%3A%2F%2F%2Fetc%2Fpasswd" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] }}] }
+      ]
+    },
+    {
+      "name": "5. WAF attacks — POST body (expect 403)",
+      "item": [
+        { "name": "XSS in JSON body",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{upstream_url}}/api/feedback",
+            "body": { "mode": "raw", "raw": "{\"msg\":\"<script>alert(1)</script>\"}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] }}] },
+        { "name": "XXE in XML body",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/xml" }],
+            "url": "{{upstream_url}}/api/analytics/events",
+            "body": { "mode": "raw", "raw": "<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] }}] }
+      ]
+    },
+    {
+      "name": "6. WAF coverage gaps (currently LOT — track regression)",
+      "item": [
+        { "name": "GAP P0: SQLi in JSON body /login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{upstream_url}}/login",
+            "body": { "mode": "raw", "raw": "{\"username\":\"admin' OR '1'='1\",\"password\":\"x\"}" }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('current gap: 401 from upstream (not 403)', () => pm.expect([401,403]).to.include(pm.response.code));",
+            "if (pm.response.code === 403) console.log('GAP CLOSED — switch expected to 403 only');"
+          ]}}] },
+        { "name": "GAP P1: SSRF AWS IMDS in query",
+          "request": { "method": "GET", "url": "{{upstream_url}}/?host=169.254.169.254%2Flatest%2Fmeta-data%2F" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('current gap: 200 from upstream (not 403)', () => pm.expect([200,403]).to.include(pm.response.code));",
+            "if (pm.response.code === 403) console.log('GAP CLOSED — switch expected to 403 only');"
+          ]}}] },
+        { "name": "GAP P1: honeypot /.env",
+          "request": { "method": "GET", "url": "{{upstream_url}}/.env" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('current gap: 404 from upstream (not 403)', () => pm.expect([404,403]).to.include(pm.response.code));",
+            "if (pm.response.code === 403) console.log('GAP CLOSED — switch expected to 403 only');"
+          ]}}] },
+        { "name": "GAP P1: honeypot /phpmyadmin",
+          "request": { "method": "GET", "url": "{{upstream_url}}/phpmyadmin" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('current gap: 404 from upstream (not 403)', () => pm.expect([404,403]).to.include(pm.response.code));"
+          ]}}] },
+        { "name": "GAP P1: honeypot /wp-admin/install.php",
+          "request": { "method": "GET", "url": "{{upstream_url}}/wp-admin/install.php" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('current gap: 404 from upstream (not 403)', () => pm.expect([404,403]).to.include(pm.response.code));"
+          ]}}] }
+      ]
+    },
+    {
+      "name": "7. Misc",
+      "item": [
+        { "name": "GET /health — mini-waf intercept (200 empty)",
+          "request": { "method": "GET", "url": "{{upstream_url}}/health" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('200 (liveness intercept)', () => pm.response.to.have.status(200));",
+            "pm.test('empty body — does NOT reach upstream', () => pm.expect(pm.response.text()).to.equal(''));"
+          ]}}] },
+        { "name": "Compare: scan-enum block (works) — /.gitlab-ci.yml",
+          "request": { "method": "GET", "url": "{{upstream_url}}/.gitlab-ci.yml" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('SCAN-ENUM-001 blocks this — 403', () => pm.response.to.have.status(403));"
+          ]}}] }
+      ]
+    }
+  ]
+}
