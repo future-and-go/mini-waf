@@ -596,66 +596,7 @@ PRX_WAF_API__ADMIN_IP_ALLOWLIST=10.0.0.0/8,192.168.0.0/16
 
 ## TLS Certificate Management
 
-### Native TLS Listener (file-based certs)
-
-Bind the WAF directly on `proxy.listen_addr_tls` (default `0.0.0.0:443`) by
-declaring at least one `[[hosts]]` entry with `tls_terminate = true` and
-on-disk `cert_file` / `key_file` paths:
-
-```toml
-[proxy]
-listen_addr     = "0.0.0.0:80"
-listen_addr_tls = "0.0.0.0:443"
-
-[[hosts]]
-host          = "example.com"
-port          = 443
-remote_host   = "127.0.0.1"
-remote_port   = 8080
-ssl           = false  # upstream is plaintext (HTTP) — the WAF terminates TLS
-tls_terminate = true   # bind this cert on the WAF's port 443
-cert_file     = "/etc/mini-waf/certs/example.com/fullchain.pem"
-key_file      = "/etc/mini-waf/certs/example.com/privkey.pem"
-```
-
-`tls_terminate` (listener bind) and `ssl` (upstream uses TLS) are independent
-knobs. The matrix:
-
-| `tls_terminate` | `ssl` | Effect |
-|---|---|---|
-| `true`  | `false` | WAF terminates HTTPS for clients, forwards plaintext to upstream (most common) |
-| `true`  | `true`  | WAF terminates client TLS, re-encrypts to an HTTPS upstream |
-| `false` | `true`  | No WAF listener bind; passthrough to upstream over HTTPS via a different terminator |
-| `false` | `false` | Plaintext end-to-end (legacy / behind an external TLS proxy) |
-
-Behavior:
-
-- Listener is opt-in. With no `tls_terminate = true` host, port 443 stays closed
-  and the proxy keeps serving plaintext only (legacy behaviour preserved).
-- Each `tls_terminate = true` host is validated independently at startup:
-  - `cert_file` / `key_file` paths must exist on disk.
-  - PEM content is parsed before being handed to Pingora (catches mismatched
-    keypairs, corrupted PEM, or non-PEM files without panicking the proxy).
-  - Any host that fails one of these checks is logged at ERROR level and
-    skipped. Other valid TLS-terminating hosts still bind.
-- If every `tls_terminate = true` host fails validation, the listener is not
-  bound and the proxy keeps serving plaintext only.
-- The **leaf certificate must appear first** in `fullchain.pem` (before any
-  intermediates). The validator detects the reversed order and surfaces an
-  actionable error rather than silently failing the TLS handshake.
-- ALPN advertises `h2,http/1.1`; HTTP/2 over TLS is enabled automatically.
-
-### Multi-domain (SNI) deployments
-
-The current rustls-backed listener uses a single `with_single_cert`
-`ServerConfig`. To serve multiple hostnames on the same port 443, use a
-**SAN certificate** that includes every served hostname (issue one Let's
-Encrypt cert with `-d a.example.com -d b.example.com …`). The first
-`[[hosts]]` entry with valid cert/key wins; additional `tls_terminate = true`
-hosts log a warning at boot. Per-host distinct certs via a custom SNI resolver
-are planned in a follow-up.
-
-### Let's Encrypt (Automatic — DB-backed, in development)
+### Let's Encrypt (Automatic)
 
 ```toml
 [[hosts]]
@@ -665,11 +606,7 @@ acme_enabled = true
 acme_email = "admin@example.com"
 ```
 
-The ACME issuance pipeline (`SslManager` in `crates/gateway/src/ssl.rs`) issues
-certificates, stores PEM in PostgreSQL, and exposes an auto-renewal task. It
-is wired for the management API but does **not** yet feed certificates back
-into the runtime TLS listener — operators currently provision certs to the
-filesystem and point `cert_file` / `key_file` at them.
+Certificates auto-renewed 30 days before expiry. Stored in PostgreSQL `certificates` table.
 
 ### Manual Certificate
 
