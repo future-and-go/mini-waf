@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import {
   Row, Col, Card, Button, Space, Typography, Table, Tag,
-  Input, Select, Switch, Drawer, Descriptions, Empty,
+  Input, Select, Switch, Drawer, Descriptions, Empty, Tooltip,
 } from "antd";
 import {
   ReloadOutlined, DownloadOutlined, ClearOutlined, InfoCircleOutlined,
-  ArrowRightOutlined,
+  ArrowRightOutlined, SearchOutlined, FilterOutlined,
 } from "@ant-design/icons";
 import { useCustom, useTable } from "@refinedev/core";
 import { useTranslation } from "react-i18next";
@@ -40,6 +40,12 @@ interface AnalyticsFilters {
   action?: string;
   ruleId?: string;
   searchPath?: string;
+  // Rules Details table search fields
+  searchRuleId?: string;
+  searchRuleName?: string;
+  searchAction?: string;
+  searchClientIp?: string;
+  searchCountry?: string;
 }
 
 // ── Quick-view drawer ─────────────────────────────────────────────────────────
@@ -129,7 +135,16 @@ export const RuleAnalyticsPage: React.FC = () => {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [quickEvent, setQuickEvent] = useState<SecurityEvent | null>(null);
 
-  const hasActiveFilters = !!(filters.category || filters.action || filters.ruleId || filters.searchPath);
+  const hasActiveFilters = !!(
+    filters.category || filters.action || filters.ruleId || filters.searchPath ||
+    filters.searchRuleId || filters.searchRuleName || filters.searchAction ||
+    filters.searchClientIp || filters.searchCountry
+  );
+
+  const hasTableFilters = !!(
+    filters.searchRuleId || filters.searchRuleName || filters.searchAction ||
+    filters.searchClientIp || filters.searchCountry
+  );
 
   // ── Stats overview (10s) ─────────────────────────────────────────────────
   const overview = useCustom<StatsOverview>({
@@ -221,14 +236,19 @@ export const RuleAnalyticsPage: React.FC = () => {
     },
   });
 
-  // Apply compound filter to table whenever analytics filter changes
+  // Apply compound filter to table whenever analytics filter changes.
+  // Table search fields (searchRuleId, etc.) take precedence over the
+  // chart-driven filters (ruleId, action) when both are set simultaneously.
   const applyTableFilters = (f: AnalyticsFilters) => {
     setTableFilters(
       [
-        { field: "host_code", operator: "eq", value: f.hostCode || undefined },
-        { field: "action", operator: "eq", value: f.action || undefined },
-        { field: "rule_id", operator: "eq", value: f.ruleId || undefined },
-        { field: "path", operator: "contains", value: f.searchPath || undefined },
+        { field: "host_code",  operator: "eq",       value: f.hostCode          || undefined },
+        { field: "action",     operator: "eq",       value: f.searchAction || f.action || undefined },
+        { field: "rule_id",    operator: "eq",       value: f.searchRuleId || f.ruleId || undefined },
+        { field: "path",       operator: "contains", value: f.searchPath        || undefined },
+        { field: "rule_name",  operator: "eq",       value: f.searchRuleName    || undefined },
+        { field: "client_ip",  operator: "eq",       value: f.searchClientIp    || undefined },
+        { field: "country",    operator: "contains", value: f.searchCountry     || undefined },
       ],
       "replace",
     );
@@ -525,7 +545,16 @@ export const RuleAnalyticsPage: React.FC = () => {
       {/* Full Rules Details table */}
       <Card
         size="small"
-        title={t("analytics.rulesDetails")}
+        title={
+          <Space size={8}>
+            <span>{t("analytics.rulesDetails")}</span>
+            {hasTableFilters && (
+              <Tag color="blue" style={{ fontSize: 11 }}>
+                <FilterOutlined /> {t("analytics.filtered")}
+              </Tag>
+            )}
+          </Space>
+        }
         extra={
           <Space>
             <Switch
@@ -545,6 +574,88 @@ export const RuleAnalyticsPage: React.FC = () => {
           </Space>
         }
       >
+        {/* ── Search bar ─────────────────────────────────────────────────── */}
+        <Space
+          wrap
+          size={6}
+          style={{
+            marginBottom: 10,
+            padding: "8px 10px",
+            background: "var(--ant-color-fill-quaternary, #fafafa)",
+            borderRadius: 6,
+            border: "1px solid var(--ant-color-border-secondary, #e8e8e8)",
+            width: "100%",
+          }}
+        >
+          <Input
+            size="small"
+            allowClear
+            prefix={<SearchOutlined style={{ color: "#bfbfbf", fontSize: 11 }} />}
+            placeholder={t("security.ruleId")}
+            value={filters.searchRuleId ?? ""}
+            onChange={(e) => updateFilter({ searchRuleId: e.target.value || undefined })}
+            style={{ width: 140, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+          />
+          <Input
+            size="small"
+            allowClear
+            prefix={<SearchOutlined style={{ color: "#bfbfbf", fontSize: 11 }} />}
+            placeholder={t("security.ruleName")}
+            value={filters.searchRuleName ?? ""}
+            onChange={(e) => updateFilter({ searchRuleName: e.target.value || undefined })}
+            style={{ width: 160 }}
+          />
+          <Select
+            size="small"
+            allowClear
+            placeholder={t("security.action")}
+            value={filters.searchAction ?? undefined}
+            onChange={(v) => updateFilter({ searchAction: v ?? undefined })}
+            style={{ width: 120 }}
+            options={[
+              { value: "block",     label: <Tag color="red"    style={{ color: "#fff", margin: 0 }}>block</Tag>      },
+              { value: "allow",     label: <Tag color="green"  style={{ color: "#fff", margin: 0 }}>allow</Tag>      },
+              { value: "log",       label: <Tag color="gold"   style={{ color: "#fff", margin: 0 }}>log</Tag>        },
+              { value: "challenge", label: <Tag color="blue"   style={{ color: "#fff", margin: 0 }}>challenge</Tag>  },
+            ]}
+          />
+          <Input
+            size="small"
+            allowClear
+            prefix={<SearchOutlined style={{ color: "#bfbfbf", fontSize: 11 }} />}
+            placeholder={t("security.clientIP")}
+            value={filters.searchClientIp ?? ""}
+            onChange={(e) => updateFilter({ searchClientIp: e.target.value || undefined })}
+            style={{ width: 150, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+          />
+          <Input
+            size="small"
+            allowClear
+            prefix={<SearchOutlined style={{ color: "#bfbfbf", fontSize: 11 }} />}
+            placeholder={t("security.country")}
+            value={filters.searchCountry ?? ""}
+            onChange={(e) => updateFilter({ searchCountry: e.target.value || undefined })}
+            style={{ width: 110 }}
+          />
+          {hasTableFilters && (
+            <Tooltip title={t("analytics.clearFilters")}>
+              <Button
+                size="small"
+                icon={<ClearOutlined />}
+                onClick={() =>
+                  updateFilter({
+                    searchRuleId: undefined,
+                    searchRuleName: undefined,
+                    searchAction: undefined,
+                    searchClientIp: undefined,
+                    searchCountry: undefined,
+                  })
+                }
+              />
+            </Tooltip>
+          )}
+        </Space>
+
         <Table
           rowKey="id"
           size="small"

@@ -294,6 +294,8 @@ pub struct SecurityEventQuery {
     pub client_ip: Option<String>,
     pub rule_name: Option<String>,
     pub rule_id: Option<String>,
+    // PATCH 1: prefix-based rule_id filter — matches rule_id ILIKE 'prefix%'
+    pub rule_id_prefix: Option<String>,
     pub path: Option<String>,
     pub action: Option<String>,
     pub country: Option<String>,
@@ -311,7 +313,12 @@ pub struct CreateCustomRule {
     pub priority: Option<i32>,
     pub enabled: Option<bool>,
     pub condition_op: Option<String>,
+    /// Flat legacy conditions array.  Ignored when `match_tree` is also set.
+    #[serde(default)]
     pub conditions: serde_json::Value,
+    /// Preferred: structured condition tree.  Packed as `{"match_tree": …}`
+    /// in the `conditions` DB column, same convention as `UpdateCustomRule`.
+    pub match_tree: Option<serde_json::Value>,
     pub action: Option<String>,
     pub action_status: Option<i32>,
     pub action_msg: Option<String>,

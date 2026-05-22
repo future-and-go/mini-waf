@@ -574,6 +574,15 @@ impl Database {
     pub async fn create_custom_rule(&self, req: CreateCustomRule) -> Result<CustomRule, StorageError> {
         let id = Uuid::new_v4();
         let now = chrono::Utc::now();
+
+        // match_tree takes priority: pack it into the conditions JSON column,
+        // same convention as update_custom_rule.
+        let conditions_val = if let Some(tree) = req.match_tree {
+            serde_json::json!({ "match_tree": tree })
+        } else {
+            req.conditions
+        };
+
         let row = sqlx::query_as::<_, CustomRule>(
             r"INSERT INTO custom_rules
                (id, host_code, name, description, priority, enabled, condition_op, conditions,
@@ -587,7 +596,7 @@ impl Database {
         .bind(req.priority.unwrap_or(100))
         .bind(req.enabled.unwrap_or(true))
         .bind(req.condition_op.as_deref().unwrap_or("and"))
-        .bind(&req.conditions)
+        .bind(&conditions_val)
         .bind(req.action.as_deref().unwrap_or("block"))
         .bind(req.action_status.unwrap_or(403))
         .bind(&req.action_msg)
@@ -1180,7 +1189,7 @@ impl Database {
         // action filter intentionally NOT applied here: the purpose of this
         // subquery IS to show the mix of all actions. Applying action=$3 would
         // collapse the chart to a single bar. hours + host_code filters apply.
-        let action_breakdown: Vec<TopEntry> = sqlx::query(
+        let mut action_breakdown: Vec<TopEntry> = sqlx::query(
             "SELECT action AS entry_key, COUNT(*)::bigint AS cnt \
              FROM security_events \
              WHERE ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
@@ -1200,6 +1209,29 @@ impl Database {
         .fetch_all(&self.pool)
         .await
         .unwrap_or_default();
+
+        // PATCH 3: if HONEY-prefixed events exist but action is stored as 'block',
+        // inject a synthetic 'honeypot' entry so the frontend can distinguish them.
+        if !action_breakdown.iter().any(|e| e.key == "honeypot") {
+            let honeypot_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*)::bigint FROM security_events \
+                 WHERE rule_id ILIKE 'HONEY%' \
+                   AND ($1::int IS NULL OR created_at >= NOW() - make_interval(hours => $1)) \
+                   AND ($2::text IS NULL OR host_code = $2)",
+            )
+            .bind(hours_bind)
+            .bind(host_bind)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+
+            if honeypot_count > 0 {
+                action_breakdown.push(TopEntry {
+                    key: "honeypot".to_string(),
+                    count: honeypot_count,
+                });
+            }
+        }
 
         // ── Subquery #12: recent events activity feed ─────────────────────────
         // Inline CASE replaced by category_of(rule_id) (DRY refactor).
@@ -1707,6 +1739,9 @@ impl Database {
         let page_size = query.page_size.unwrap_or(20).clamp(1, 100);
         let offset = (page - 1) * page_size;
 
+        // PATCH 1: pre-format prefix pattern so the SQL check remains a simple equality
+        let rule_id_prefix_pattern: Option<String> = query.rule_id_prefix.as_ref().map(|p| format!("{p}%"));
+
         let total: i64 = sqlx::query_scalar(
             r"SELECT COUNT(*) FROM security_events
                WHERE ($1::text IS NULL OR host_code = $1)
@@ -1716,7 +1751,8 @@ impl Database {
                  AND ($5::text IS NULL OR geo_info->>'iso_code' = $5)
                  AND ($6::text IS NULL OR geo_info->>'country' ILIKE '%' || $6 || '%')
                  AND ($7::text IS NULL OR rule_id = $7)
-                 AND ($8::text IS NULL OR path ILIKE '%' || $8 || '%')",
+                 AND ($8::text IS NULL OR path ILIKE '%' || $8 || '%')
+                 AND ($9::text IS NULL OR rule_id ILIKE $9)",
         )
         .bind(&query.host_code)
         .bind(&query.client_ip)
@@ -1726,6 +1762,7 @@ impl Database {
         .bind(&query.country)
         .bind(&query.rule_id)
         .bind(&query.path)
+        .bind(&rule_id_prefix_pattern)
         .fetch_one(&self.pool)
         .await?;
 
@@ -1739,8 +1776,9 @@ impl Database {
                  AND ($6::text IS NULL OR geo_info->>'country' ILIKE '%' || $6 || '%')
                  AND ($7::text IS NULL OR rule_id = $7)
                  AND ($8::text IS NULL OR path ILIKE '%' || $8 || '%')
+                 AND ($9::text IS NULL OR rule_id ILIKE $9)
                ORDER BY created_at DESC
-               LIMIT $9 OFFSET $10",
+               LIMIT $10 OFFSET $11",
         )
         .bind(&query.host_code)
         .bind(&query.client_ip)
@@ -1750,6 +1788,7 @@ impl Database {
         .bind(&query.country)
         .bind(&query.rule_id)
         .bind(&query.path)
+        .bind(&rule_id_prefix_pattern)
         .bind(page_size)
         .bind(offset)
         .fetch_all(&self.pool)

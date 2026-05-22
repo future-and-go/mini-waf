@@ -14,12 +14,13 @@ import {
   Badge,
   Divider,
   Skeleton,
+  Tabs,
 } from "antd";
 import { ReloadOutlined, InfoCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import { useTable, useOne } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { SecurityEvent } from "../../types/api";
 import { fmtDateTime } from "../../utils/format";
@@ -216,6 +217,8 @@ export const SecurityEventsPage: React.FC = () => {
   const [ruleName, setRuleName] = useState(searchParams.get("rule_name") ?? "");
   const [path, setPath] = useState(searchParams.get("path") ?? "");
   const [action, setAction] = useState<string | undefined>(searchParams.get("action") ?? undefined);
+  const [countryFilter, setCountryFilter] = useState<string | undefined>(searchParams.get("country") ?? undefined);
+  const [activeTab, setActiveTab] = useState("all");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [createRuleEvent, setCreateRuleEvent] = useState<SecurityEvent | null>(null);
@@ -247,14 +250,16 @@ export const SecurityEventsPage: React.FC = () => {
     const urlHostCode = searchParams.get("host_code");
     const urlAction = searchParams.get("action");
     const urlPath = searchParams.get("path");
+    const urlCountry = searchParams.get("country");
 
-    if (urlClientIp || urlRuleId || urlRuleName || urlHostCode || urlAction || urlPath) {
+    if (urlClientIp || urlRuleId || urlRuleName || urlHostCode || urlAction || urlPath || urlCountry !== null) {
       if (urlHostCode !== null) setHostCode(urlHostCode);
       if (urlClientIp !== null) setClientIp(urlClientIp);
       if (urlRuleId !== null) setRuleId(urlRuleId);
       if (urlRuleName !== null) setRuleName(urlRuleName);
       if (urlPath !== null) setPath(urlPath);
       if (urlAction !== null) setAction(urlAction || undefined);
+      if (urlCountry !== null) setCountryFilter(urlCountry || undefined);
 
       setFilters(
         [
@@ -264,6 +269,7 @@ export const SecurityEventsPage: React.FC = () => {
           { field: "rule_name", operator: "eq", value: urlRuleName || undefined },
           { field: "path", operator: "contains", value: urlPath || undefined },
           { field: "action", operator: "eq", value: urlAction || undefined },
+          { field: "country", operator: "eq", value: urlCountry || undefined },
         ],
         "replace",
       );
@@ -279,11 +285,11 @@ export const SecurityEventsPage: React.FC = () => {
         { field: "rule_name", operator: "eq", value: ruleName || undefined },
         { field: "path", operator: "contains", value: path || undefined },
         { field: "action", operator: "eq", value: action || undefined },
+        { field: "country", operator: "eq", value: countryFilter || undefined },
       ],
       "replace",
     );
     setCurrentPage(1);
-    // Sync filter state to URL for deep-linking
     const params: Record<string, string> = {};
     if (hostCode) params.host_code = hostCode;
     if (clientIp) params.client_ip = clientIp;
@@ -291,11 +297,49 @@ export const SecurityEventsPage: React.FC = () => {
     if (ruleName) params.rule_name = ruleName;
     if (path) params.path = path;
     if (action) params.action = action;
+    if (countryFilter) params.country = countryFilter;
     setSearchParams(params, { replace: true });
+  };
+
+  const onQuickTab = (tabKey: string) => {
+    setActiveTab(tabKey);
+    let tabAction: string | undefined;
+    let tabRuleId = "";
+    switch (tabKey) {
+      case "blocked": tabAction = "block"; break;
+      case "allowed": tabAction = "allow"; break;
+      case "challenged": tabAction = "challenge"; break;
+      case "honeypot": tabRuleId = "HONEY"; break;
+      default: break;
+    }
+    setAction(tabAction);
+    setRuleId(tabRuleId);
+    setFilters(
+      [
+        { field: "host_code", operator: "eq", value: hostCode || undefined },
+        { field: "client_ip", operator: "eq", value: clientIp || undefined },
+        { field: "rule_id", operator: "eq", value: tabRuleId || undefined },
+        { field: "rule_name", operator: "eq", value: ruleName || undefined },
+        { field: "path", operator: "contains", value: path || undefined },
+        { field: "action", operator: "eq", value: tabAction || undefined },
+        { field: "country", operator: "eq", value: countryFilter || undefined },
+      ],
+      "replace",
+    );
+    setCurrentPage(1);
   };
 
   const data = Array.isArray(result?.data) ? result.data : [];
   const total = result?.total ?? 0;
+
+  const uniqueCountries = useMemo(() => {
+    const countries = new Set<string>();
+    data.forEach((e) => {
+      const c = e.geo_info?.country ?? e.country;
+      if (c) countries.add(c);
+    });
+    return Array.from(countries).sort();
+  }, [data]);
 
   const columns: ColumnsType<SecurityEvent> = [
     {
@@ -393,6 +437,20 @@ export const SecurityEventsPage: React.FC = () => {
         </Space>
       </Space>
 
+      <Tabs
+        activeKey={activeTab}
+        onChange={onQuickTab}
+        size="small"
+        style={{ marginBottom: 4 }}
+        items={[
+          { key: "all", label: t("security.allActions") },
+          { key: "blocked", label: t("security.block") },
+          { key: "allowed", label: t("security.allow") },
+          { key: "challenged", label: t("securityEvents.challengedEvents") },
+          { key: "honeypot", label: t("securityEvents.honeypot") },
+        ]}
+      />
+
       <Card size="small">
         <Space wrap style={{ marginBottom: 12 }}>
           <Input
@@ -439,7 +497,18 @@ export const SecurityEventsPage: React.FC = () => {
             options={[
               { value: "block", label: t("security.block") },
               { value: "allow", label: t("security.allow") },
+              { value: "challenge", label: t("securityEvents.challengedEvents") },
             ]}
+          />
+          <Select
+            placeholder={t("securityEvents.filterCountry")}
+            value={countryFilter}
+            onChange={(v) => setCountryFilter(v)}
+            onClear={() => setCountryFilter(undefined)}
+            allowClear
+            showSearch
+            style={{ width: 160 }}
+            options={uniqueCountries.map((c) => ({ value: c, label: c }))}
           />
           <Button type="primary" onClick={applyFilters}>
             {t("security.filter")}

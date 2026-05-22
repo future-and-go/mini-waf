@@ -75,7 +75,7 @@
     "username": "用户名",
     "password": "密码",
     "loginButton": "登录",
-    "loginTitle": "PRX-WAF 管理",
+    "loginTitle": "F&G WAF 管理",
     "loginSubtitle": "Web 应用防火墙",
     "invalidCredentials": "凭据无效",
     "signingIn": "登录中...",
