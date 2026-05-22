@@ -1,6 +1,5 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
-mod tls_bootstrap;
 mod victoria_logs;
 
 use std::path::PathBuf;
@@ -1395,70 +1394,16 @@ fn run_server(config: &AppConfig, config_file_path: &str, vlogs_layer_slot: Laye
 
     let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
     proxy_service.add_tcp(&config.proxy.listen_addr);
-
-    // Native TLS termination: bind `proxy.listen_addr_tls` when at least one
-    // `[[hosts]]` entry sets `tls_terminate = true` and points at on-disk
-    // cert/key files. `tls_terminate` is independent of the host's `ssl` flag
-    // (which only controls whether the upstream connection uses TLS).
-    // Pingora's rustls listener uses a single `with_single_cert` ServerConfig,
-    // so multi-domain deployments must use a SAN certificate covering every
-    // served host. The first valid binding wins; the rest are logged so a
-    // misconfigured cert is visible at boot.
-    // Per-host errors are logged but do NOT disable TLS for other valid hosts.
-    // PEM content is pre-validated in collect_tls_bindings so the rustls
-    // listener's later `TlsSettings::build()` panic path can't fire.
-    let tls_scan = tls_bootstrap::collect_tls_bindings(config);
-    for err in &tls_scan.errors {
-        tracing::error!("TLS: skipping host — {err}");
-    }
-    let tls_listener_bound = tls_scan.bindings.first().is_some_and(|primary| {
-        let cert = primary.cert_path.display().to_string();
-        let key = primary.key_path.display().to_string();
-        // PEM was pre-validated in `collect_tls_bindings`. The rustls backend's
-        // `intermediate()` only stores the paths (no parse), so its Err branch
-        // never fires here. Keeping the match for future-proofing against the
-        // boringssl/openssl backends, which validate eagerly inside `intermediate()`.
-        match pingora_core::listeners::tls::TlsSettings::intermediate(&cert, &key) {
-            Ok(mut settings) => {
-                settings.enable_h2();
-                proxy_service.add_tls_with_settings(&config.proxy.listen_addr_tls, None, settings);
-                info!(
-                    "TLS listener bound on {} (primary SNI host: {}, cert: {})",
-                    config.proxy.listen_addr_tls, primary.sni_host, cert
-                );
-                if tls_scan.bindings.len() > 1 {
-                    let extra: Vec<&str> = tls_scan.bindings.iter().skip(1).map(|b| b.sni_host.as_str()).collect();
-                    tracing::warn!(
-                        "TLS: {} additional host(s) configured but only the first cert is bound. \
-                         Use a SAN certificate to serve [{}] on the same listener.",
-                        extra.len(),
-                        extra.join(", ")
-                    );
-                }
-                true
-            }
-            Err(e) => {
-                tracing::error!(
-                    "TLS listener disabled — Pingora rejected cert '{}' / key '{}': {e}",
-                    cert,
-                    key
-                );
-                false
-            }
-        }
-    });
-
     server.add_service(proxy_service);
 
     info!("Proxy listening on {}", config.proxy.listen_addr);
-    if tls_listener_bound {
-        info!(
-            "ALPN: H1/H2 served via shared Pingora listener (plaintext on {} + TLS on {})",
-            config.proxy.listen_addr, config.proxy.listen_addr_tls
-        );
-    } else {
-        info!("ALPN: H1/H2 served via shared Pingora listener (plaintext H1 + h2c)");
-    }
+    // AC-22 / phase-05: the Pingora HTTP service shares a single ALPN-aware
+    // listener for H1+H2 when TLS is configured (`add_tls_with_settings`).
+    // The `add_tcp` path used here is plaintext, so h2 is only reachable via
+    // h2c prior-knowledge; h2-over-TLS depends on an upstream listener
+    // wrapper that advertises `h2,http/1.1`. Logged here to make the
+    // protocol surface visible at startup.
+    info!("ALPN: H1/H2 served via shared Pingora listener (plaintext H1 + h2c)");
     info!("Management API listening on {}", config.api.listen_addr);
     if config.http3.enabled {
         info!("HTTP/3 (QUIC) listener on {}", config.http3.listen_addr);

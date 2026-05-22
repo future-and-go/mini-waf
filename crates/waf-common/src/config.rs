@@ -265,19 +265,10 @@ pub struct HostEntry {
     pub port: u16,
     pub remote_host: String,
     pub remote_port: u16,
-    /// Talk to the upstream over TLS (HTTPS). Default `false` (plaintext).
-    /// Orthogonal to `tls_terminate` — set this only when the upstream itself
-    /// speaks TLS.
     pub ssl: Option<bool>,
     pub guard_status: Option<bool>,
     pub cert_file: Option<String>,
     pub key_file: Option<String>,
-    /// Bind this host's `cert_file` / `key_file` on the proxy's native TLS
-    /// listener (`proxy.listen_addr_tls`). Default `false`. Independent of
-    /// `ssl`: most deployments terminate TLS at the WAF while forwarding to a
-    /// plaintext upstream (`tls_terminate=true`, `ssl=false`).
-    #[serde(default)]
-    pub tls_terminate: Option<bool>,
     /// OWASP CRS rule pipeline. Defaults to `true` for TOML-declared hosts
     /// (operators expect a sensible "WAF on" baseline) — the DB admin UI
     /// keeps its own opt-in toggle.

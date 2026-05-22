@@ -31,8 +31,8 @@ tokio = { version = "1", features = ["full"] }
 # vendor/pingora so its own workspace inheritance still resolves. The fork is
 # patched with ClientHello/H2 frame inspector hooks for FR-010 device fingerprinting.
 pingora = { version = "0.8", features = ["lb"] }
-pingora-core = { version = "0.8", features = ["rustls"] }
-pingora-proxy = { version = "0.8", features = ["rustls"] }
+pingora-core = { version = "0.8" }
+pingora-proxy = { version = "0.8" }
 pingora-http = { version = "0.8" }
 pingora-timeout = { version = "0.8" }
 
