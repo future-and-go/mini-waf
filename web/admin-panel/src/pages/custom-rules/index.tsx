@@ -10,11 +10,13 @@ import {
   Switch,
   App,
   Tooltip,
+  Input,
 } from "antd";
 import {
   CopyOutlined,
   EditOutlined,
   PlusOutlined,
+  SearchOutlined,
 } from "@ant-design/icons";
 import { useTable, useDelete, useUpdate } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
@@ -52,6 +54,7 @@ export const CustomRulesPage: React.FC = () => {
   const [filterHostCode, setFilterHostCode] = useState<string | undefined>();
   const [filterAction, setFilterAction] = useState<RuleAction | undefined>();
   const [filterEnabled, setFilterEnabled] = useState<string | undefined>();
+  const [filterById, setFilterById] = useState("");
   const [drawerState, setDrawerState] = useState<DrawerState>({ open: false });
 
   const { tableQuery, result } = useTable<CustomRule>({
@@ -69,11 +72,13 @@ export const CustomRulesPage: React.FC = () => {
   const allRules: CustomRule[] = Array.isArray(result?.data) ? (result.data as CustomRule[]) : [];
 
   // Client-side filtering (no server-side filter params for this resource)
+  const idQuery = filterById.trim().toLowerCase();
   const filtered = allRules.filter((r) => {
     if (filterHostCode && r.host_code !== filterHostCode) return false;
     if (filterAction && r.action !== filterAction) return false;
     if (filterEnabled === "enabled" && !r.enabled) return false;
     if (filterEnabled === "disabled" && r.enabled) return false;
+    if (idQuery && !r.id.toLowerCase().includes(idQuery)) return false;
     return true;
   });
 
@@ -122,6 +127,36 @@ export const CustomRulesPage: React.FC = () => {
   };
 
   const columns: ColumnsType<CustomRule> = [
+    {
+      title: t("rules.ruleId"),
+      dataIndex: "id",
+      width: 155,
+      render: (v: string) => (
+        <Space size={4}>
+          <Tooltip title={v}>
+            <Typography.Text
+              code
+              style={{ fontSize: 11, cursor: "default" }}
+            >
+              {v.slice(0, 8)}…
+            </Typography.Text>
+          </Tooltip>
+          <Tooltip title={t("common.copy")}>
+            <Button
+              type="text"
+              size="small"
+              icon={<CopyOutlined style={{ fontSize: 11 }} />}
+              style={{ padding: "0 2px", height: "auto" }}
+              onClick={() => {
+                void navigator.clipboard.writeText(v).then(() => {
+                  void message.success(t("common.copied"));
+                });
+              }}
+            />
+          </Tooltip>
+        </Space>
+      ),
+    },
     {
       title: t("common.name"),
       dataIndex: "name",
@@ -211,6 +246,14 @@ export const CustomRulesPage: React.FC = () => {
 
       <Card size="small">
         <Space wrap style={{ marginBottom: 12 }}>
+          <Input
+            allowClear
+            prefix={<SearchOutlined style={{ color: "#bfbfbf" }} />}
+            placeholder={t("rules.searchById")}
+            value={filterById}
+            onChange={(e) => setFilterById(e.target.value)}
+            style={{ width: 210, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+          />
           <Select
             allowClear
             placeholder={t("rules.host")}

@@ -574,6 +574,15 @@ impl Database {
     pub async fn create_custom_rule(&self, req: CreateCustomRule) -> Result<CustomRule, StorageError> {
         let id = Uuid::new_v4();
         let now = chrono::Utc::now();
+
+        // match_tree takes priority: pack it into the conditions JSON column,
+        // same convention as update_custom_rule.
+        let conditions_val = if let Some(tree) = req.match_tree {
+            serde_json::json!({ "match_tree": tree })
+        } else {
+            req.conditions
+        };
+
         let row = sqlx::query_as::<_, CustomRule>(
             r"INSERT INTO custom_rules
                (id, host_code, name, description, priority, enabled, condition_op, conditions,
@@ -587,7 +596,7 @@ impl Database {
         .bind(req.priority.unwrap_or(100))
         .bind(req.enabled.unwrap_or(true))
         .bind(req.condition_op.as_deref().unwrap_or("and"))
-        .bind(&req.conditions)
+        .bind(&conditions_val)
         .bind(req.action.as_deref().unwrap_or("block"))
         .bind(req.action_status.unwrap_or(403))
         .bind(&req.action_msg)
