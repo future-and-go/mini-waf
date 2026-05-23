@@ -43,7 +43,7 @@ pub struct Acceptor {
 }
 
 impl TlsSettings {
-    pub fn build(self) -> Acceptor {
+    pub fn build(self) -> Result<Acceptor> {
         let mut builder = Config::builder();
 
         // Default security policy with TLS 1.3 support
@@ -94,9 +94,9 @@ impl TlsSettings {
             security_policy: Some(policy.clone()),
         };
 
-        Acceptor {
+        Ok(Acceptor {
             acceptor: TlsAcceptor::new(connection_builder),
-        }
+        })
     }
 
     /// Enable HTTP/2 support for this endpoint, which is default off.
