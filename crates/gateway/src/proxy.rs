@@ -1294,7 +1294,10 @@ mod alpn_tests {
         };
         apply_upstream_tls_verify(&mut p, &hc);
         assert!(!p.options.verify_cert, "verify_cert must be false when skip=true");
-        assert!(!p.options.verify_hostname, "verify_hostname must be false when skip=true");
+        assert!(
+            !p.options.verify_hostname,
+            "verify_hostname must be false when skip=true"
+        );
     }
 
     #[test]
@@ -1307,20 +1310,33 @@ mod alpn_tests {
         };
         apply_upstream_tls_verify(&mut p, &hc);
         assert!(p.options.verify_cert, "verify_cert must remain true when skip=false");
-        assert!(p.options.verify_hostname, "verify_hostname must remain true when skip=false");
+        assert!(
+            p.options.verify_hostname,
+            "verify_hostname must remain true when skip=false"
+        );
     }
 
     #[test]
     fn skip_ssl_verify_noop_when_ssl_off() {
         let mut p = ssl_peer();
-        // Even with skip=true, ssl=false means no TLS at all — flags unchanged.
+        // Capture Pingora's baseline before the call so the assertion stays
+        // correct even if future Pingora versions change the default.
+        let before_cert = p.options.verify_cert;
+        let before_hostname = p.options.verify_hostname;
+        // Even with skip=true, ssl=false means no TLS — flags must be untouched.
         let hc = HostConfig {
             ssl: false,
             upstream_skip_ssl_verify: true,
             ..HostConfig::default()
         };
         apply_upstream_tls_verify(&mut p, &hc);
-        assert!(p.options.verify_cert);
-        assert!(p.options.verify_hostname);
+        assert_eq!(
+            p.options.verify_cert, before_cert,
+            "must not touch verify_cert when ssl=false"
+        );
+        assert_eq!(
+            p.options.verify_hostname, before_hostname,
+            "must not touch verify_hostname when ssl=false"
+        );
     }
 }

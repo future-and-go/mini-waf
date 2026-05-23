@@ -449,3 +449,64 @@ impl RusTlsServerCertVerifier for CustomServerCertVerifier {
         self.delegate.supported_verify_schemes()
     }
 }
+
+#[cfg(test)]
+mod no_verify_tests {
+    use super::*;
+    use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+
+    fn dummy_cert() -> CertificateDer<'static> {
+        // Intentionally garbage bytes — NoVerifyServerCertVerifier must accept anything.
+        CertificateDer::from(vec![0xde, 0xad, 0xbe, 0xef; 8])
+    }
+
+    #[test]
+    fn no_verify_verifier_accepts_any_cert() {
+        let v = NoVerifyServerCertVerifier;
+        let cert = dummy_cert();
+        let server = ServerName::try_from("untrusted.example.com").expect("valid server name");
+        let result = v.verify_server_cert(&cert, &[], &server, &[], UnixTime::now());
+        assert!(result.is_ok(), "NoVerifyServerCertVerifier must accept any certificate");
+    }
+
+    #[test]
+    fn no_verify_verifier_accepts_mismatched_hostname() {
+        let v = NoVerifyServerCertVerifier;
+        let cert = dummy_cert();
+        // Hostname deliberately doesn't match anything in the (garbage) cert.
+        let server = ServerName::try_from("hostname-mismatch.invalid").expect("valid server name");
+        let result = v.verify_server_cert(&cert, &[], &server, &[], UnixTime::now());
+        assert!(result.is_ok(), "NoVerifyServerCertVerifier must accept hostname mismatches");
+    }
+
+    #[test]
+    fn no_verify_verifier_accepts_tls12_signature() {
+        use rustls::internal::msgs::handshake::DigitallySignedStruct;
+        let v = NoVerifyServerCertVerifier;
+        let cert = dummy_cert();
+        let dss = DigitallySignedStruct::new(SignatureScheme::RSA_PSS_SHA256, vec![0u8; 64]);
+        let result = v.verify_tls12_signature(b"handshake-message", &cert, &dss);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn no_verify_verifier_accepts_tls13_signature() {
+        use rustls::internal::msgs::handshake::DigitallySignedStruct;
+        let v = NoVerifyServerCertVerifier;
+        let cert = dummy_cert();
+        let dss = DigitallySignedStruct::new(SignatureScheme::ED25519, vec![0u8; 64]);
+        let result = v.verify_tls13_signature(b"handshake-message", &cert, &dss);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn no_verify_verifier_reports_all_standard_schemes() {
+        let v = NoVerifyServerCertVerifier;
+        let schemes = v.supported_verify_schemes();
+        // Must include at minimum the schemes used by modern TLS stacks.
+        assert!(schemes.contains(&SignatureScheme::RSA_PSS_SHA256));
+        assert!(schemes.contains(&SignatureScheme::ECDSA_NISTP256_SHA256));
+        assert!(schemes.contains(&SignatureScheme::ED25519));
+        assert!(!schemes.is_empty());
+    }
+}

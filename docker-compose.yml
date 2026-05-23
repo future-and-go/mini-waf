@@ -76,8 +76,6 @@ services:
       timeout: 10s
       start_period: 30s
       retries: 3
-    extra_hosts:
-      - "local-https.test:172.29.0.8"   # self-signed nginx used for skip_ssl_verify testing
     cap_add:
       - NET_ADMIN      # required for Pingora raw socket support
     ulimits:

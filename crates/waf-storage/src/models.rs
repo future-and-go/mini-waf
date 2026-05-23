@@ -227,8 +227,8 @@ pub struct CreateHost {
     pub start_status: bool,
     #[serde(default)]
     pub log_only_mode: bool,
-    /// Upstream ALPN strategy. Serialised as snake_case string ("h1_only",
-    /// "h2h1", "h2_only"). Defaults to "h2h1" when omitted.
+    /// Upstream ALPN strategy. Canonical string values: `"h1_only"`,
+    /// `"h2h1"`, `"h2_only"`. Defaults to `"h2h1"` when omitted.
     #[serde(default = "default_upstream_alpn")]
     pub upstream_alpn: String,
     /// Skip TLS certificate verification for the upstream. Default `false`.
