@@ -20,6 +20,8 @@ fn proxy_config_defaults() {
     assert!(p.worker_threads.is_none());
     assert!(!p.trust_proxy_headers);
     assert!(p.trusted_proxies.is_empty());
+    assert!(p.tls_cert_pem.is_none());
+    assert!(p.tls_key_pem.is_none());
 }
 
 #[test]
