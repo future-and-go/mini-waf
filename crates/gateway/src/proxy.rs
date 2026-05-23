@@ -413,6 +413,26 @@ fn build_request_chain() -> RequestFilterChain {
     chain
 }
 
+fn effective_host_header(req: &pingora_http::RequestHeader) -> Option<String> {
+    req.headers
+        .get("host")
+        .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .or_else(|| req.uri.authority().map(|a| a.as_str().to_string()))
+}
+
+fn ensure_host_header_from_authority(req: &mut pingora_http::RequestHeader) -> pingora_core::Result<()> {
+    if req.headers.get("host").is_some() {
+        return Ok(());
+    }
+    let Some(authority) = req.uri.authority().map(|a| a.as_str().to_string()) else {
+        return Ok(());
+    };
+    req.insert_header("host", authority.as_str())
+        .map_err(|e| pingora_core::Error::because(pingora_core::ErrorType::InternalError, "set host from authority", e))
+}
+
 #[async_trait]
 impl ProxyHttp for WafProxy {
     type CTX = GatewayCtx;
@@ -424,11 +444,7 @@ impl ProxyHttp for WafProxy {
     async fn upstream_peer(&self, session: &mut Session, ctx: &mut GatewayCtx) -> pingora_core::Result<Box<HttpPeer>> {
         self.request_counter.fetch_add(1, Ordering::Relaxed);
 
-        let host_header = session
-            .get_header("host")
-            .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
-            .unwrap_or("")
-            .to_string();
+        let host_header = effective_host_header(session.req_header()).unwrap_or_default();
 
         debug!("Routing request for host: {}", host_header);
 
@@ -526,11 +542,7 @@ impl ProxyHttp for WafProxy {
 
         // Build request context early so WAF runs before upstream_peer.
         if ctx.request_ctx.is_none() {
-            let host_header = session
-                .get_header("host")
-                .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
-                .unwrap_or("")
-                .to_string();
+            let host_header = effective_host_header(session.req_header()).unwrap_or_default();
             if let Some(host_config) = self.router.resolve(&host_header) {
                 ctx.host_config = Some(Arc::clone(&host_config));
                 let mut builder = RequestCtxBuilder::new(session, self.trust_proxy_headers, &self.trusted_proxies)
@@ -726,6 +738,7 @@ impl ProxyHttp for WafProxy {
     where
         Self::CTX: Send + Sync,
     {
+        ensure_host_header_from_authority(upstream_request)?;
         if let (Some(req_ctx), Some(hc)) = (&ctx.request_ctx, &ctx.host_config) {
             // peer_ip is the IMMEDIATE TCP peer (not the resolved client).
             // The two differ when trust_proxy_headers=true and the peer is
@@ -1033,6 +1046,45 @@ impl ProxyHttp for WafProxy {
                 ctx.upstream_addr.as_deref().unwrap_or("unknown"),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod authority_host_tests {
+    use super::*;
+    use pingora_http::RequestHeader;
+
+    fn request_with_uri(uri: &str) -> RequestHeader {
+        let mut req = RequestHeader::build("GET", b"/", None).expect("build");
+        req.set_uri(uri.parse().expect("uri"));
+        req
+    }
+
+    #[test]
+    fn effective_host_prefers_host_header() {
+        let mut req = request_with_uri("https://authority.example/");
+        req.insert_header("host", "host.example").expect("host");
+
+        assert_eq!(effective_host_header(&req).as_deref(), Some("host.example"));
+    }
+
+    #[test]
+    fn effective_host_falls_back_to_authority() {
+        let req = request_with_uri("https://test2.com/");
+
+        assert_eq!(effective_host_header(&req).as_deref(), Some("test2.com"));
+    }
+
+    #[test]
+    fn ensure_host_header_copies_authority_once() {
+        let mut req = request_with_uri("https://test2.com/");
+
+        ensure_host_header_from_authority(&mut req).expect("ensure");
+        assert_eq!(req.headers.get("host").expect("host").as_bytes(), b"test2.com");
+
+        req.insert_header("host", "existing.example").expect("replace");
+        ensure_host_header_from_authority(&mut req).expect("ensure");
+        assert_eq!(req.headers.get("host").expect("host").as_bytes(), b"existing.example");
     }
 }
 

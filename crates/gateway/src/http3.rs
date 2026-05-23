@@ -195,6 +195,8 @@ where
         .headers
         .get("host")
         .and_then(|v| v.to_str().ok())
+        .filter(|v| !v.is_empty())
+        .or_else(|| parts.uri.authority().map(http::uri::Authority::as_str))
         .unwrap_or_default();
 
     // Resolve host config from router; if no route, still run WAF with default config
