@@ -171,7 +171,7 @@
     "alpnH1Only": "HTTP/1.1 only",
     "alpnH2Only": "HTTP/2 only (strict)",
     "skipSslVerify": "Skip SSL Verify",
-    "skipSslVerifyTooltip": "Disable upstream certificate verification. Use for self-signed certs or when the CA store is unavailable. Only applies when SSL is on."
+    "skipSslVerifyTooltip": "⚠️ DANGER: Disables upstream TLS certificate verification entirely. The connection becomes vulnerable to man-in-the-middle attacks. Only use for self-signed certs in controlled, non-production environments. Never enable in production."
   },
   "security": {
     "title": "Live Events",

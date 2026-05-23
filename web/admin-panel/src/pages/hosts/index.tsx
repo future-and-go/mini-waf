@@ -20,7 +20,7 @@ import { useTable, useCreate, useDelete, useUpdate } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
-import type { Host } from "../../types/api";
+import type { Host, UpstreamAlpn } from "../../types/api";
 
 interface HostFormShape {
   host: string;
@@ -31,7 +31,7 @@ interface HostFormShape {
   remote_port: number;
   start_status: boolean;
   log_only_mode: boolean;
-  upstream_alpn: string;
+  upstream_alpn: UpstreamAlpn;
   upstream_skip_ssl_verify: boolean;
   remarks?: string;
 }
@@ -102,8 +102,8 @@ export const HostsPage: React.FC = () => {
       remote_port: host.remote_port,
       start_status: host.start_status,
       log_only_mode: host.log_only_mode ?? false,
-      upstream_alpn: (host as any).upstream_alpn ?? "h2h1",
-      upstream_skip_ssl_verify: (host as any).upstream_skip_ssl_verify ?? false,
+      upstream_alpn: host.upstream_alpn ?? "h2h1",
+      upstream_skip_ssl_verify: host.upstream_skip_ssl_verify ?? false,
       remarks: host.remarks ?? "",
     });
   };
@@ -199,7 +199,7 @@ export const HostsPage: React.FC = () => {
     },
   ];
 
-  const alpnOptions = [
+  const alpnOptions: { value: UpstreamAlpn; label: string }[] = [
     { value: "h2h1",    label: t("hosts.alpnH2H1") },
     { value: "h1_only", label: t("hosts.alpnH1Only") },
     { value: "h2_only", label: t("hosts.alpnH2Only") },

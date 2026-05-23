@@ -146,7 +146,7 @@
     "alpnH1Only": "仅 HTTP/1.1",
     "alpnH2Only": "仅 HTTP/2（严格）",
     "skipSslVerify": "跳过 SSL 验证",
-    "skipSslVerifyTooltip": "禁用上游证书验证。用于自签名证书或 CA 仓库不可用时。仅在启用 SSL 时有效。"
+    "skipSslVerifyTooltip": "⚠️ 危险：完全禁用上游 TLS 证书验证，连接将易受中间人攻击。仅在受控的非生产环境中用于自签名证书。切勿在生产环境中启用。"
   },
   "security": {
     "title": "实时事件",

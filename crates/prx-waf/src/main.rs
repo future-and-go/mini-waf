@@ -1595,11 +1595,7 @@ async fn init_async(
             .as_ref()
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
-        let upstream_alpn = match host.upstream_alpn.as_str() {
-            "h1_only" => UpstreamAlpn::H1Only,
-            "h2_only" => UpstreamAlpn::H2Only,
-            _ => UpstreamAlpn::H2H1,
-        };
+        let upstream_alpn = UpstreamAlpn::from_db_str(&host.upstream_alpn);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let cfg = Arc::new(HostConfig {
             code: host.code.clone(),

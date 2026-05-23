@@ -171,7 +171,7 @@
     "alpnH1Only": "Chỉ HTTP/1.1",
     "alpnH2Only": "Chỉ HTTP/2 (strict)",
     "skipSslVerify": "Bỏ qua xác minh SSL",
-    "skipSslVerifyTooltip": "Tắt kiểm tra chứng chỉ upstream. Dùng cho cert tự ký hoặc khi CA store không khả dụng. Chỉ áp dụng khi bật SSL."
+    "skipSslVerifyTooltip": "⚠️ NGUY HIỂM: Tắt hoàn toàn việc xác minh chứng chỉ TLS upstream. Kết nối sẽ dễ bị tấn công man-in-the-middle. Chỉ dùng cho cert tự ký trong môi trường kiểm soát, không phải production. Không bao giờ bật trong production."
   },
   "security": {
     "title": "Sự kiện trực tiếp",
