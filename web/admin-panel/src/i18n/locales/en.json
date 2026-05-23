@@ -4,7 +4,7 @@
     "hosts": "Hosts",
     "ipRules": "IP Rules",
     "urlRules": "URL Rules",
-    "securityEvents": "Security Events",
+    "securityEvents": "Live Events",
     "logs": "Security Logs",
     "customRules": "Custom Rules",
     "certificates": "SSL Certificates",
@@ -102,8 +102,8 @@
     "categoryBreakdown": "Attack Categories",
     "actionBreakdown": "Enforcement Actions",
     "trafficChart": "Traffic (last 24h)",
-    "recentEvents": "Recent Security Events",
-    "liveEvents": "Live Security Events",
+    "recentEvents": "Recent Live Events",
+    "liveEvents": "Live Events",
     "detectionEngines": "Detection Engines",
     "live": "● Live",
     "disconnected": "○ Disconnected",
@@ -164,10 +164,17 @@
     "http": "HTTP",
     "editHost": "Edit Host",
     "upstreamPort": "Upstream port",
-    "logOnly": "Log only"
+    "logOnly": "Log only",
+    "upstreamAlpn": "Upstream ALPN",
+    "upstreamAlpnTooltip": "ALPN only applies to TLS upstreams (SSL on)",
+    "alpnH2H1": "Auto (h2 + http/1.1)",
+    "alpnH1Only": "HTTP/1.1 only",
+    "alpnH2Only": "HTTP/2 only (strict)",
+    "skipSslVerify": "Skip SSL Verify",
+    "skipSslVerifyTooltip": "⚠️ DANGER: Disables upstream TLS certificate verification entirely. The connection becomes vulnerable to man-in-the-middle attacks. Only use for self-signed certs in controlled, non-production environments. Never enable in production."
   },
   "security": {
-    "title": "Security Events",
+    "title": "Live Events",
     "clientIP": "Client IP",
     "method": "Method",
     "path": "Path",
@@ -627,7 +634,7 @@
     "totalEvents": "Total events"
   },
   "eventDetail": {
-    "title": "Security Event",
+    "title": "Live Event",
     "back": "Back",
     "overview": "Overview",
     "detail": "Detail",

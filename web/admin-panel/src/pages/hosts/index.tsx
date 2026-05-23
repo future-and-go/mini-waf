@@ -9,16 +9,18 @@ import {
   Input,
   InputNumber,
   Switch,
+  Select,
+  Tooltip,
   App,
   Typography,
   Popconfirm,
 } from "antd";
-import { PlusOutlined, ReloadOutlined, EditOutlined } from "@ant-design/icons";
+import { PlusOutlined, ReloadOutlined, EditOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import { useTable, useCreate, useDelete, useUpdate } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
-import type { Host } from "../../types/api";
+import type { Host, UpstreamAlpn } from "../../types/api";
 
 interface HostFormShape {
   host: string;
@@ -29,6 +31,8 @@ interface HostFormShape {
   remote_port: number;
   start_status: boolean;
   log_only_mode: boolean;
+  upstream_alpn: UpstreamAlpn;
+  upstream_skip_ssl_verify: boolean;
   remarks?: string;
 }
 
@@ -41,6 +45,8 @@ const DEFAULT_FORM: HostFormShape = {
   remote_port: 8080,
   start_status: true,
   log_only_mode: false,
+  upstream_alpn: "h2h1",
+  upstream_skip_ssl_verify: false,
   remarks: "",
 };
 
@@ -51,6 +57,8 @@ export const HostsPage: React.FC = () => {
   const [editForm] = Form.useForm<HostFormShape>();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<Host | null>(null);
+  const [createSsl, setCreateSsl] = useState(false);
+  const [editSsl, setEditSsl] = useState(false);
 
   const { tableQuery, result } = useTable<Host>({
     resource: "hosts",
@@ -84,6 +92,7 @@ export const HostsPage: React.FC = () => {
 
   const onOpenEdit = (host: Host) => {
     setEditingHost(host);
+    setEditSsl(host.ssl);
     editForm.setFieldsValue({
       host: host.host,
       port: host.port,
@@ -93,6 +102,8 @@ export const HostsPage: React.FC = () => {
       remote_port: host.remote_port,
       start_status: host.start_status,
       log_only_mode: host.log_only_mode ?? false,
+      upstream_alpn: host.upstream_alpn ?? "h2h1",
+      upstream_skip_ssl_verify: host.upstream_skip_ssl_verify ?? false,
       remarks: host.remarks ?? "",
     });
   };
@@ -188,7 +199,17 @@ export const HostsPage: React.FC = () => {
     },
   ];
 
-  const formBody = (form: ReturnType<typeof Form.useForm<HostFormShape>>[0]) => (
+  const alpnOptions: { value: UpstreamAlpn; label: string }[] = [
+    { value: "h2h1",    label: t("hosts.alpnH2H1") },
+    { value: "h1_only", label: t("hosts.alpnH1Only") },
+    { value: "h2_only", label: t("hosts.alpnH2Only") },
+  ];
+
+  const formBody = (
+    form: ReturnType<typeof Form.useForm<HostFormShape>>[0],
+    sslOn: boolean,
+    setSslOn: (v: boolean) => void,
+  ) => (
     <Form form={form} layout="vertical" initialValues={DEFAULT_FORM}>
       <Space.Compact style={{ width: "100%" }}>
         <Form.Item name="host" label={t("hosts.hostname")} rules={[{ required: true }]} style={{ flex: 2 }}>
@@ -209,9 +230,9 @@ export const HostsPage: React.FC = () => {
       <Form.Item name="remarks" label={t("hosts.remarks")}>
         <Input />
       </Form.Item>
-      <Space size="large">
+      <Space size="large" wrap>
         <Form.Item name="ssl" label={t("hosts.ssl")} valuePropName="checked">
-          <Switch />
+          <Switch onChange={setSslOn} />
         </Form.Item>
         <Form.Item name="guard_status" label={t("hosts.guard")} valuePropName="checked">
           <Switch />
@@ -223,6 +244,33 @@ export const HostsPage: React.FC = () => {
           <Switch />
         </Form.Item>
       </Space>
+      <Form.Item
+        name="upstream_alpn"
+        label={
+          <span>
+            {t("hosts.upstreamAlpn")}&nbsp;
+            <Tooltip title={t("hosts.upstreamAlpnTooltip")}>
+              <InfoCircleOutlined style={{ color: "#8c8c8c" }} />
+            </Tooltip>
+          </span>
+        }
+      >
+        <Select options={alpnOptions} disabled={!sslOn} style={{ width: 240 }} />
+      </Form.Item>
+      <Form.Item
+        name="upstream_skip_ssl_verify"
+        valuePropName="checked"
+        label={
+          <span>
+            {t("hosts.skipSslVerify")}&nbsp;
+            <Tooltip title={t("hosts.skipSslVerifyTooltip")}>
+              <InfoCircleOutlined style={{ color: "#8c8c8c" }} />
+            </Tooltip>
+          </span>
+        }
+      >
+        <Switch disabled={!sslOn} />
+      </Form.Item>
     </Form>
   );
 
@@ -258,28 +306,28 @@ export const HostsPage: React.FC = () => {
       <Modal
         title={t("hosts.newHost")}
         open={createOpen}
-        onCancel={() => { setCreateOpen(false); createForm.resetFields(); }}
+        onCancel={() => { setCreateOpen(false); setCreateSsl(false); createForm.resetFields(); }}
         onOk={onSubmit}
         confirmLoading={creating}
         okText={t("common.create")}
         cancelText={t("common.cancel")}
         destroyOnClose
       >
-        {formBody(createForm)}
+        {formBody(createForm, createSsl, setCreateSsl)}
       </Modal>
 
       {/* Edit modal */}
       <Modal
         title={t("hosts.editHost")}
         open={!!editingHost}
-        onCancel={() => { setEditingHost(null); editForm.resetFields(); }}
+        onCancel={() => { setEditingHost(null); setEditSsl(false); editForm.resetFields(); }}
         onOk={onEditSubmit}
         confirmLoading={updating}
         okText={t("common.save")}
         cancelText={t("common.cancel")}
         destroyOnClose
       >
-        {formBody(editForm)}
+        {formBody(editForm, editSsl, setEditSsl)}
       </Modal>
     </Space>
   );

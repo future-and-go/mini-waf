@@ -156,6 +156,37 @@ We keep all important docs in `./docs` folder and keep updating them, structure 
 - Verify with `cargo fmt --all -- --check` (exits non-zero on any diff)
 - Format-only commits use `style:` prefix (no behavior change → not `fix:`)
 
+## Upstream TLS Options
+
+### Per-host ALPN (`upstream_alpn`)
+
+`HostConfig::upstream_alpn` (default `H2H1`) controls the ALPN advertisement
+in the upstream TLS ClientHello. Canonical DB/API strings:
+
+| Value | Meaning |
+|-------|---------|
+| `"h2h1"` | Advertise h2 + http/1.1 (default — negotiates best) |
+| `"h1_only"` | Advertise only http/1.1 — for legacy origins that reject h2 |
+| `"h2_only"` | Advertise only h2 — for gRPC / strict h2 backends |
+
+No-op when `ssl: false`. Parsed from DB via `UpstreamAlpn::from_db_str()`
+(logs `WARN` on unrecognised values, falls back to `H2H1`).
+
+### Per-host TLS verification skip (`upstream_skip_ssl_verify`)
+
+`HostConfig::upstream_skip_ssl_verify` (default `false`) controls whether
+Pingora verifies the upstream certificate chain and hostname. When `true`,
+both checks are disabled via the vendored `NoVerifyServerCertVerifier` in
+`vendor/pingora/pingora-core/src/connectors/tls/rustls/mod.rs`.
+
+⚠️ **Security note**: Enabling this makes the upstream connection vulnerable
+to MITM. Use only for self-signed origins in controlled test environments,
+or when the system CA store is unavailable in slim Docker images. Every
+request with this enabled emits a `WARN` log including the host name for
+audit purposes.
+
+No-op when `ssl: false`.
+
 ## Docker
 
 ```bash

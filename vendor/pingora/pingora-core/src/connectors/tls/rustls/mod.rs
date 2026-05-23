@@ -245,15 +245,25 @@ where
 
         // Builds the custom_verifier when verification_mode is set.
         if let Some(mode) = verification_mode {
-            let delegate = WebPkiServerVerifier::builder(Arc::clone(effective_ca_store))
-                .build()
-                .or_err(InvalidCert, "Failed to build WebPkiServerVerifier")?;
+            // For SkipAll mode, bypass WebPkiServerVerifier entirely — it requires a
+            // non-empty CA store and would fail when the system CA store is unavailable
+            // (e.g. slim Docker images where openssl_probe cannot locate the bundle).
+            // The NoVerifyServerCertVerifier accepts any certificate unconditionally.
+            if matches!(mode, VerificationMode::SkipAll) {
+                updated_config
+                    .dangerous()
+                    .set_certificate_verifier(Arc::new(NoVerifyServerCertVerifier));
+            } else {
+                let delegate = WebPkiServerVerifier::builder(Arc::clone(effective_ca_store))
+                    .build()
+                    .or_err(InvalidCert, "Failed to build WebPkiServerVerifier")?;
 
-            let custom_verifier = Arc::new(CustomServerCertVerifier::new(delegate, mode));
+                let custom_verifier = Arc::new(CustomServerCertVerifier::new(delegate, mode));
 
-            updated_config
-                .dangerous()
-                .set_certificate_verifier(custom_verifier);
+                updated_config
+                    .dangerous()
+                    .set_certificate_verifier(custom_verifier);
+            }
         }
     }
 
@@ -290,6 +300,61 @@ where
             ),
         },
         None => connect_future.await,
+    }
+}
+
+/// A no-op verifier that accepts any TLS server certificate unconditionally.
+/// Used for `SkipAll` mode when the system CA store may be empty.
+#[derive(Debug)]
+struct NoVerifyServerCertVerifier;
+
+impl RusTlsServerCertVerifier for NoVerifyServerCertVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp: &[u8],
+        _now: UnixTime,
+    ) -> core::result::Result<ServerCertVerified, RusTlsError> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> core::result::Result<HandshakeSignatureValid, RusTlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> core::result::Result<HandshakeSignatureValid, RusTlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        // Return all standard TLS signature schemes so any server cert type is accepted.
+        vec![
+            SignatureScheme::RSA_PKCS1_SHA1,
+            SignatureScheme::ECDSA_SHA1_Legacy,
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA512,
+            SignatureScheme::ECDSA_NISTP521_SHA512,
+            SignatureScheme::RSA_PSS_SHA256,
+            SignatureScheme::RSA_PSS_SHA384,
+            SignatureScheme::RSA_PSS_SHA512,
+            SignatureScheme::ED25519,
+            SignatureScheme::ED448,
+        ]
     }
 }
 
@@ -384,3 +449,18 @@ impl RusTlsServerCertVerifier for CustomServerCertVerifier {
         self.delegate.supported_verify_schemes()
     }
 }
+
+// NOTE: NoVerifyServerCertVerifier is not unit-tested here because vendor/pingora
+// is excluded from the workspace (see root Cargo.toml `exclude = ["vendor/pingora"]`)
+// and therefore `cargo test --workspace` never reaches this crate. Tests placed here
+// would compile only when running `cargo test -p pingora-core` explicitly, creating a
+// false sense of coverage.
+//
+// Functional coverage is provided at two levels:
+//   1. gateway/src/proxy.rs `alpn_tests::skip_ssl_verify_*` — verifies that
+//      `apply_upstream_tls_verify` correctly sets `peer.options.verify_cert = false`
+//      and `peer.options.verify_hostname = false` when `upstream_skip_ssl_verify = true`.
+//      These tests run in CI via `cargo test --workspace`.
+//   2. End-to-end: the local self-signed nginx test scenario (`local-https.test`)
+//      exercised during development confirmed the full TLS handshake path works with
+//      `VerificationMode::SkipAll` routing through this verifier.
