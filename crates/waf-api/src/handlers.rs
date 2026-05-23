@@ -17,7 +17,6 @@ use waf_common::{HostConfig, UpstreamAlpn};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
-
 // ─── Response wrapper ─────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
