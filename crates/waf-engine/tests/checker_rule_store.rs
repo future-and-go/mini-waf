@@ -49,7 +49,7 @@ async fn reload_all_loads_seeded_data() {
             remarks: None,
             start_status: true,
             log_only_mode: false,
-            upstream_alpn: Default::default(),
+            upstream_alpn: "h2h1".to_string(),
             upstream_skip_ssl_verify: false,
         })
         .await
@@ -104,7 +104,7 @@ async fn concurrent_reload_keeps_reader_consistent() {
             remarks: None,
             start_status: true,
             log_only_mode: false,
-            upstream_alpn: Default::default(),
+            upstream_alpn: "h2h1".to_string(),
             upstream_skip_ssl_verify: false,
         })
         .await
