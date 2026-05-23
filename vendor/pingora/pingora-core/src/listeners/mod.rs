@@ -147,7 +147,11 @@ impl TransportStackBuilder {
 
         Ok(TransportStack {
             l4,
-            tls: self.tls.take().map(|tls| Arc::new(tls.build())),
+            tls: self
+                .tls
+                .take()
+                .map(|tls| tls.build().map(Arc::new))
+                .transpose()?,
         })
     }
 }

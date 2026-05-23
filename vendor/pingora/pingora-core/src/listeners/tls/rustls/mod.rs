@@ -42,21 +42,28 @@ pub struct Acceptor {
 impl TlsSettings {
     /// Create a Rustls acceptor based on the current setting for certificates,
     /// keys, and protocols.
-    ///
-    /// _NOTE_ This function will panic if there is an error in loading
-    /// certificate files or constructing the builder
-    ///
-    /// Todo: Return a result instead of panicking XD
-    pub fn build(self) -> Acceptor {
+    pub fn build(self) -> Result<Acceptor> {
         // rustls 0.23+ requires an explicit CryptoProvider.
         pingora_rustls::install_default_crypto_provider();
 
-        let Ok(Some((certs, key))) = load_certs_and_key_files(&self.cert_path, &self.key_path)
+        let Some((certs, key)) =
+            load_certs_and_key_files(&self.cert_path, &self.key_path).explain_err(
+                InternalError,
+                |e| {
+                    format!(
+                        "Failed to load cert \"{}\" or key \"{}\": {e}",
+                        self.cert_path, self.key_path
+                    )
+                },
+            )?
         else {
-            panic!(
-                "Failed to load provided certificates \"{}\" or key \"{}\".",
-                self.cert_path, self.key_path
-            )
+            return Error::e_explain(
+                InternalError,
+                format!(
+                    "No certs/key found in \"{}\" / \"{}\"",
+                    self.cert_path, self.key_path
+                ),
+            );
         };
 
         let builder =
@@ -70,17 +77,16 @@ impl TlsSettings {
             .with_single_cert(certs, key)
             .explain_err(InternalError, |e| {
                 format!("Failed to create server listener config: {e}")
-            })
-            .unwrap();
+            })?;
 
         if let Some(alpn_protocols) = self.alpn_protocols {
             config.alpn_protocols = alpn_protocols;
         }
 
-        Acceptor {
+        Ok(Acceptor {
             acceptor: RusTlsAcceptor::from(Arc::new(config)),
             callbacks: None,
-        }
+        })
     }
 
     /// Enable HTTP/2 support for this endpoint, which is default off.
