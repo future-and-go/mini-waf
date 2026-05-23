@@ -107,12 +107,22 @@ fn default_format() -> String {
 /// * `sync-config.yaml`   — cluster rule-sync metadata
 /// * `cache.yaml`         — FR-009 per-route response cache rules
 ///   (loaded by `gateway::cache::CacheRuleWatcher`)
-/// * `access-lists.yaml`  — parses fine because its top-level has no `rules:`
-///   key (serde defaults `Vec` to empty), so it doesn't need an entry here.
+/// * `access-lists.yaml`  — FR-008 access-list config (`version`, `ip_whitelist`,
+///   `host_whitelist`, …). The multi-doc fallback would otherwise deserialize
+///   the single top-level document as `YamlRuleEntry` and warn on the missing
+///   `id` field on every reload.
 ///
 /// Without this list the registry warning floods boot logs with
 /// `Cannot parse cache.yaml: rules[0]: missing field 'name'` etc.
-const NON_RULE_META_FILES: &[&str] = &["sync-config.yaml", "cache.yaml"];
+const NON_RULE_META_FILES: &[&str] = &["sync-config.yaml", "cache.yaml", "access-lists.yaml"];
+
+/// Subdirectories of `rules/` that hold non-WAF-rule data and must not be
+/// recursed into by the scanner.
+///
+/// * `threat-intel` — operator allow/deny overrides and hyperscaler ASN/CIDR
+///   seed data loaded by `DatacenterSet::merge_yaml`. Documents look like
+///   `asns: [...]` / `cidrs: [...]` and would warn on missing `id` otherwise.
+const NON_RULE_DIRS: &[&str] = &["threat-intel"];
 
 /// Scan all `.yaml` files under `rules_dir` recursively and return rule entries.
 fn scan_yaml_rules(rules_dir: &Path) -> Vec<(String, String, Vec<YamlRuleEntry>)> {
@@ -133,6 +143,14 @@ fn collect_yaml_files(base: &Path, dir: &Path, out: &mut Vec<(String, String, Ve
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
+            // Skip data-only subdirs (e.g. threat-intel/) before recursing.
+            if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| NON_RULE_DIRS.contains(&name))
+            {
+                continue;
+            }
             collect_yaml_files(base, &path, out);
             continue;
         }
@@ -389,5 +407,36 @@ mod registry_scan_tests {
         let entries = groups.first().expect("at least one group");
         assert_eq!(entries.2.len(), 1);
         assert_eq!(entries.2.first().expect("rule entry").id, "r1");
+    }
+
+    /// `access-lists.yaml` has a single top-level document with no `id` field.
+    /// Without the filename skip, the multi-doc fallback parser warns on every
+    /// reload (`Skipping rule doc in access-lists.yaml: missing field 'id'`).
+    /// Anything in `threat-intel/` is operator/ASN data loaded elsewhere and
+    /// must not be recursed into.
+    #[test]
+    fn access_lists_and_threat_intel_are_skipped() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        fs::write(
+            root.join("real-rules.yaml"),
+            "source: test\nrules:\n  - id: r1\n    name: Real WAF rule\n    category: sqli\n",
+        )
+        .expect("write real-rules");
+        fs::write(
+            root.join("access-lists.yaml"),
+            "version: 1\ndry_run: false\nip_whitelist: []\nip_blacklist: []\n",
+        )
+        .expect("write access-lists");
+        fs::create_dir(root.join("threat-intel")).expect("mkdir threat-intel");
+        fs::write(
+            root.join("threat-intel").join("hyperscaler-asn-seed.yaml"),
+            "asns:\n  - 16509\ncidrs: []\n",
+        )
+        .expect("write asn seed");
+
+        let groups = scan_yaml_rules(root);
+        let files: Vec<&str> = groups.iter().map(|(f, _, _)| f.as_str()).collect();
+        assert_eq!(files, vec!["real-rules.yaml"]);
     }
 }
