@@ -124,10 +124,16 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      # Non-blocking: deploy job is the load-bearing step; if Release creation
+      # hiccups on a transient API blip we still want the EC2 to receive the
+      # new binary. Pass GITHUB_TOKEN explicitly because the action does not
+      # always pick it up correctly from a containerised step environment.
       - name: Attach to GitHub Release (tag pushes only)
         if: startsWith(github.ref, 'refs/tags/v')
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             dist/${{ steps.meta.outputs.artifact }}
             dist/${{ steps.meta.outputs.artifact }}.sha256
