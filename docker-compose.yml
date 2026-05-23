@@ -57,6 +57,10 @@ services:
       # the Compose stack uses the bundled `valkey` service automatically.
       # Valid values: memory | embedded | standalone | cluster (see docs/valkey-cache-guide.md §3.1).
       CACHE_BACKEND: ${CACHE_BACKEND:-standalone}
+      RUST_LOG: ${RUST_LOG:-info}
+      # Tell rustls-native-certs exactly where the Debian CA bundle is.
+      # openssl_probe sometimes fails to locate it in slim Docker images.
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
     volumes:
       - ./configs:/app/configs      # rw: waf-panel.toml is written by the admin API
       - ./rules:/app/rules:ro
