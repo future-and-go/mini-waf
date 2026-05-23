@@ -214,6 +214,12 @@ pub struct ProxyConfig {
     /// behaviour, NOT recommended for production).
     #[serde(default)]
     pub trusted_proxies: Vec<String>,
+    /// Path to TLS certificate PEM for the HTTPS listener.
+    #[serde(default)]
+    pub tls_cert_pem: Option<String>,
+    /// Path to TLS private key PEM for the HTTPS listener.
+    #[serde(default)]
+    pub tls_key_pem: Option<String>,
 }
 
 impl Default for ProxyConfig {
@@ -224,6 +230,21 @@ impl Default for ProxyConfig {
             worker_threads: None,
             trust_proxy_headers: false,
             trusted_proxies: Vec::new(),
+            tls_cert_pem: None,
+            tls_key_pem: None,
+        }
+    }
+}
+
+impl ProxyConfig {
+    /// Resolve TLS cert/key paths. Returns `Ok(Some((cert, key)))` when both
+    /// are configured, `Ok(None)` when neither is set, or an error if only
+    /// one of the two is provided.
+    pub fn resolve_tls_paths(&self) -> anyhow::Result<Option<(String, String)>> {
+        match (&self.tls_cert_pem, &self.tls_key_pem) {
+            (Some(cert), Some(key)) => Ok(Some((cert.clone(), key.clone()))),
+            (None, None) => Ok(None),
+            _ => anyhow::bail!("Both tls_cert_pem and tls_key_pem must be set together"),
         }
     }
 }

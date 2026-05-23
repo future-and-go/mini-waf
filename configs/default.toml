@@ -1,6 +1,8 @@
 [proxy]
 listen_addr = "0.0.0.0:80"
 listen_addr_tls = "0.0.0.0:443"
+tls_cert_pem = "/etc/prx-waf/tls/cert.pem"
+tls_key_pem  = "/etc/prx-waf/tls/key.pem"
 
 [api]
 listen_addr = "0.0.0.0:9527"

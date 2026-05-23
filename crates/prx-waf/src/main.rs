@@ -9,7 +9,9 @@ use clap::{Parser, Subcommand};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
+use anyhow::Context;
 use gateway::{HostRouter, TunnelConfig, WafProxy};
+use pingora_core::listeners::tls::TlsSettings;
 use waf_api::{AppState, start_api_server};
 use waf_common::config::{AppConfig, load_config};
 use waf_engine::logging::{AuditSender, BatchConfig, LayerSlot, VictoriaLogsLayer, spawn_batch_flusher};
@@ -1394,20 +1396,43 @@ fn run_server(config: &AppConfig, config_file_path: &str, vlogs_layer_slot: Laye
 
     let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
     proxy_service.add_tcp(&config.proxy.listen_addr);
+
+    // FR-040b — TLS listener wiring
+    let tls_paths = if let Some(paths) = config.proxy.resolve_tls_paths()? {
+        paths
+    } else {
+        let data_dir = PathBuf::from(&config.geoip.ipv4_xdb_path)
+            .parent()
+            .map_or_else(|| PathBuf::from("."), std::path::Path::to_path_buf);
+        ensure_self_signed_cert(&data_dir)?
+    };
+
+    if !std::path::Path::new(&tls_paths.0).exists() {
+        anyhow::bail!("TLS cert file not found: {}", tls_paths.0);
+    }
+    if !std::path::Path::new(&tls_paths.1).exists() {
+        anyhow::bail!("TLS key file not found: {}", tls_paths.1);
+    }
+
+    let mut tls_settings = TlsSettings::intermediate(&tls_paths.0, &tls_paths.1)
+        .context("Failed to create TLS settings — check cert/key validity")?;
+    tls_settings.enable_h2();
+
+    proxy_service.add_tls_with_settings(&config.proxy.listen_addr_tls, None, tls_settings);
+
     server.add_service(proxy_service);
 
-    info!("Proxy listening on {}", config.proxy.listen_addr);
-    // AC-22 / phase-05: the Pingora HTTP service shares a single ALPN-aware
-    // listener for H1+H2 when TLS is configured (`add_tls_with_settings`).
-    // The `add_tcp` path used here is plaintext, so h2 is only reachable via
-    // h2c prior-knowledge; h2-over-TLS depends on an upstream listener
-    // wrapper that advertises `h2,http/1.1`. Logged here to make the
-    // protocol surface visible at startup.
-    info!("ALPN: H1/H2 served via shared Pingora listener (plaintext H1 + h2c)");
+    info!(
+        "Protocol surface: HTTP({}) H1+h2c | HTTPS({}) H1+H2 ALPN{}",
+        config.proxy.listen_addr,
+        config.proxy.listen_addr_tls,
+        if config.http3.enabled {
+            format!(" | H3/QUIC({})", config.http3.listen_addr)
+        } else {
+            String::new()
+        }
+    );
     info!("Management API listening on {}", config.api.listen_addr);
-    if config.http3.enabled {
-        info!("HTTP/3 (QUIC) listener on {}", config.http3.listen_addr);
-    }
     info!("Press Ctrl+C to stop");
 
     // The VictoriaLogs supervisor listens for SIGTERM/SIGINT on its own and
@@ -1424,6 +1449,33 @@ fn run_server(config: &AppConfig, config_file_path: &str, vlogs_layer_slot: Laye
     }
 
     server.run_forever();
+}
+
+fn ensure_self_signed_cert(data_dir: &std::path::Path) -> anyhow::Result<(String, String)> {
+    let tls_dir = data_dir.join("tls");
+    let cert_path = tls_dir.join("self-signed-cert.pem");
+    let key_path = tls_dir.join("self-signed-key.pem");
+    if cert_path.exists() && key_path.exists() {
+        tracing::info!("Reusing existing self-signed TLS certificate");
+        return Ok((cert_path.display().to_string(), key_path.display().to_string()));
+    }
+    std::fs::create_dir_all(&tls_dir)
+        .with_context(|| format!("Failed to create TLS directory: {}", tls_dir.display()))?;
+    let (cert_pem, key_pem) =
+        gateway::SslManager::generate_self_signed("localhost").context("Failed to generate self-signed certificate")?;
+    std::fs::write(&cert_path, &cert_pem).with_context(|| format!("Failed to write cert: {}", cert_path.display()))?;
+    std::fs::write(&key_path, &key_pem).with_context(|| format!("Failed to write key: {}", key_path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("Failed to restrict key permissions: {}", key_path.display()))?;
+    }
+    tracing::warn!(
+        "TLS listener using self-signed certificate at {} — not for production",
+        cert_path.display()
+    );
+    Ok((cert_path.display().to_string(), key_path.display().to_string()))
 }
 
 /// Shutdown guards that keep background-task sender halves alive.
