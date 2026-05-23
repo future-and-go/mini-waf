@@ -312,12 +312,10 @@ pub(crate) const fn apply_fr039_timeouts(peer: &mut HttpPeer, host_config: &Host
 
 /// Apply per-host upstream ALPN and TLS verification settings to the Pingora peer.
 ///
-/// No-op when `ssl: false` — ALPN and verify flags only apply inside a TLS ClientHello.
-/// When TLS is on, maps [`waf_common::UpstreamAlpn`] → Pingora's
-/// [`pingora_core::protocols::ALPN`] so the upstream TLS handshake
-/// advertises the correct HTTP version(s). When `upstream_skip_ssl_verify` is
-/// true, certificate chain and hostname verification are disabled — useful for
-/// self-signed upstream certs or when the system CA store is unavailable.
+/// Set the upstream ALPN advertisement on `peer` from [`HostConfig`].
+///
+/// No-op when `ssl: false` — ALPN only applies inside a TLS ClientHello.
+/// Maps [`waf_common::UpstreamAlpn`] → Pingora's [`pingora_core::protocols::ALPN`].
 pub(crate) fn apply_upstream_alpn(peer: &mut HttpPeer, host_config: &HostConfig) {
     if !host_config.ssl {
         return;
@@ -329,15 +327,29 @@ pub(crate) fn apply_upstream_alpn(peer: &mut HttpPeer, host_config: &HostConfig)
         UpstreamAlpn::H2H1 => ALPN::H2H1,
         UpstreamAlpn::H2Only => ALPN::H2,
     };
-    if host_config.upstream_skip_ssl_verify {
-        peer.options.verify_cert = false;
-        peer.options.verify_hostname = false;
-    }
     debug!(
         host = %host_config.host,
         alpn = ?host_config.upstream_alpn,
-        skip_ssl_verify = host_config.upstream_skip_ssl_verify,
-        "upstream ALPN applied"
+        "upstream ALPN set"
+    );
+}
+
+/// Apply TLS certificate-verification flags from [`HostConfig`] to `peer`.
+///
+/// No-op when `ssl: false`. When `upstream_skip_ssl_verify` is `true`, both
+/// `verify_cert` and `verify_hostname` are disabled and a **WARN** is emitted
+/// — skipping verification leaves the connection MITM-vulnerable and must
+/// never be used in production without a deliberate, documented reason.
+pub(crate) fn apply_upstream_tls_verify(peer: &mut HttpPeer, host_config: &HostConfig) {
+    if !host_config.ssl || !host_config.upstream_skip_ssl_verify {
+        return;
+    }
+    peer.options.verify_cert = false;
+    peer.options.verify_hostname = false;
+    warn!(
+        host = %host_config.host,
+        "upstream TLS certificate verification DISABLED — connection is MITM-vulnerable; \
+         only use for self-signed certs in controlled environments"
     );
 }
 
@@ -454,6 +466,7 @@ impl ProxyHttp for WafProxy {
         let mut peer = HttpPeer::new(&upstream_addr, use_tls, host_config.remote_host.clone());
         apply_fr039_timeouts(&mut peer, &host_config);
         apply_upstream_alpn(&mut peer, &host_config);
+        apply_upstream_tls_verify(&mut peer, &host_config);
         Ok(Box::new(peer))
     }
 
@@ -1218,6 +1231,8 @@ mod alpn_tests {
         HttpPeer::new("127.0.0.1:443", true, "upstream".into())
     }
 
+    // ── apply_upstream_alpn ──────────────────────────────────────────────────
+
     #[test]
     fn ssl_false_is_noop() {
         let mut p = ssl_peer();
@@ -1265,5 +1280,47 @@ mod alpn_tests {
         };
         apply_upstream_alpn(&mut p, &hc);
         assert!(matches!(p.options.alpn, ALPN::H2));
+    }
+
+    // ── apply_upstream_tls_verify ────────────────────────────────────────────
+
+    #[test]
+    fn skip_ssl_verify_disables_both_checks() {
+        let mut p = ssl_peer();
+        let hc = HostConfig {
+            ssl: true,
+            upstream_skip_ssl_verify: true,
+            ..HostConfig::default()
+        };
+        apply_upstream_tls_verify(&mut p, &hc);
+        assert!(!p.options.verify_cert, "verify_cert must be false when skip=true");
+        assert!(!p.options.verify_hostname, "verify_hostname must be false when skip=true");
+    }
+
+    #[test]
+    fn skip_ssl_verify_default_false_preserves_verify() {
+        let mut p = ssl_peer();
+        let hc = HostConfig {
+            ssl: true,
+            upstream_skip_ssl_verify: false,
+            ..HostConfig::default()
+        };
+        apply_upstream_tls_verify(&mut p, &hc);
+        assert!(p.options.verify_cert, "verify_cert must remain true when skip=false");
+        assert!(p.options.verify_hostname, "verify_hostname must remain true when skip=false");
+    }
+
+    #[test]
+    fn skip_ssl_verify_noop_when_ssl_off() {
+        let mut p = ssl_peer();
+        // Even with skip=true, ssl=false means no TLS at all — flags unchanged.
+        let hc = HostConfig {
+            ssl: false,
+            upstream_skip_ssl_verify: true,
+            ..HostConfig::default()
+        };
+        apply_upstream_tls_verify(&mut p, &hc);
+        assert!(p.options.verify_cert);
+        assert!(p.options.verify_hostname);
     }
 }

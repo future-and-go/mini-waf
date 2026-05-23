@@ -23,6 +23,8 @@ export interface LoginResponse {
 
 // ─── Domain models (shape used by views — unknown fields preserved) ──────────
 
+export type UpstreamAlpn = "h2h1" | "h1_only" | "h2_only";
+
 export interface Host {
   id: string;
   host: string;
@@ -34,6 +36,8 @@ export interface Host {
   start_status: boolean;
   log_only_mode?: boolean;
   remarks?: string;
+  upstream_alpn: UpstreamAlpn;
+  upstream_skip_ssl_verify: boolean;
 }
 
 export interface IpRule {

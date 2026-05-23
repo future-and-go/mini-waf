@@ -256,22 +256,55 @@ pub struct DetectionResult {
 /// Controls which HTTP versions Pingora advertises in the TLS ClientHello when
 /// connecting to an upstream over `ssl: true`. Has no effect when `ssl: false`
 /// (plaintext TCP has no ALPN negotiation).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
+///
+/// Serde strings are pinned via explicit `#[serde(rename)]` so they match the
+/// DB default (`"h2h1"`) and the frontend values exactly — independent of any
+/// future `rename_all` convention change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum UpstreamAlpn {
     /// Advertise only `http/1.1`. Use for legacy origins that reject h2.
+    #[serde(rename = "h1_only")]
     H1Only,
     /// Advertise `h2, http/1.1`. **Default for `ssl: true`** — works with
     /// both modern (h2-required) and legacy origins via negotiation.
+    #[default]
+    #[serde(rename = "h2h1")]
     H2H1,
     /// Advertise only `h2`. Strict mode for gRPC or h2-only origins.
     /// Handshake fails if the origin does not speak h2.
+    #[serde(rename = "h2_only")]
     H2Only,
 }
 
-impl Default for UpstreamAlpn {
-    fn default() -> Self {
-        Self::H2H1
+impl UpstreamAlpn {
+    /// Parse the DB/API string representation, falling back to [`H2H1`] on
+    /// unrecognised values with a `WARN` log so operator typos are visible.
+    ///
+    /// Canonical strings: `"h1_only"`, `"h2h1"`, `"h2_only"`.
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "h1_only" => Self::H1Only,
+            "h2h1" => Self::H2H1,
+            "h2_only" => Self::H2Only,
+            other => {
+                tracing::warn!(
+                    value = %other,
+                    "unknown upstream_alpn in DB, falling back to h2h1"
+                );
+                Self::H2H1
+            }
+        }
+    }
+
+    /// Return the canonical DB/API string for this variant (inverse of
+    /// [`from_db_str`]). Used for INSERT/UPDATE binds.
+    #[must_use]
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::H1Only => "h1_only",
+            Self::H2H1 => "h2h1",
+            Self::H2Only => "h2_only",
+        }
     }
 }
 
@@ -802,16 +835,36 @@ mod tests {
 
     #[test]
     fn upstream_alpn_serde_round_trip() {
+        // Serde strings are pinned with explicit rename — "h2h1" (no underscore)
+        // matches the DB default and frontend values.
         let json = serde_json::to_string(&UpstreamAlpn::H1Only).unwrap();
         assert_eq!(json, r#""h1_only""#);
         let back: UpstreamAlpn = serde_json::from_str(&json).unwrap();
         assert_eq!(back, UpstreamAlpn::H1Only);
 
         let json = serde_json::to_string(&UpstreamAlpn::H2H1).unwrap();
-        assert_eq!(json, r#""h2_h1""#);
+        assert_eq!(json, r#""h2h1""#);
+        let back: UpstreamAlpn = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, UpstreamAlpn::H2H1);
 
         let json = serde_json::to_string(&UpstreamAlpn::H2Only).unwrap();
         assert_eq!(json, r#""h2_only""#);
+        let back: UpstreamAlpn = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, UpstreamAlpn::H2Only);
+    }
+
+    #[test]
+    fn upstream_alpn_from_db_str_round_trip() {
+        for variant in [UpstreamAlpn::H1Only, UpstreamAlpn::H2H1, UpstreamAlpn::H2Only] {
+            assert_eq!(UpstreamAlpn::from_db_str(variant.as_db_str()), variant);
+        }
+    }
+
+    #[test]
+    fn upstream_alpn_from_db_str_unknown_falls_back_to_h2h1() {
+        assert_eq!(UpstreamAlpn::from_db_str("h2_h1"), UpstreamAlpn::H2H1);
+        assert_eq!(UpstreamAlpn::from_db_str("garbage"), UpstreamAlpn::H2H1);
+        assert_eq!(UpstreamAlpn::from_db_str(""), UpstreamAlpn::H2H1);
     }
 
     #[test]
