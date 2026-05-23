@@ -51,7 +51,7 @@ jobs:
           dnf -y install \
             gcc gcc-c++ make cmake pkgconfig openssl-devel \
             git tar gzip xz which perl \
-            nodejs
+            nodejs npm
 
       - uses: actions/checkout@v4
         with:
