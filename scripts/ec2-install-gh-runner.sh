@@ -142,9 +142,17 @@ echo "==> Deploying prx-waf $VERSION"
 TMPCONF=$(mktemp)
 trap 'rm -f "$TMPCONF"' EXIT
 cp "$UNPACKED/configs/default.toml" "$TMPCONF"
-# Replace the first database_url line under [storage]. The default.toml file
-# already has one in that section, so an in-place sed is sufficient.
+# Render the shipped Docker-Compose defaults for a bare-metal host:
+#   - database_url:          inject value from /etc/prx-waf/env
+#   - [panel] config_path:   force absolute under /opt/prx-waf so the
+#                            running user can write the file (default config
+#                            resolves relative to the config file's parent
+#                            directory, which is /etc/prx-waf — read-only).
+#   - [cache.valkey] seeds:  swap the Compose hostname "valkey:6379" for the
+#                            local Valkey instance installed alongside prx-waf.
 sed -i "s|^database_url *=.*|database_url = \"${DATABASE_URL//|/\\|}\"|" "$TMPCONF"
+sed -i "s|^config_path *=.*waf-panel.toml.*|config_path = \"/opt/prx-waf/waf-panel.toml\"|" "$TMPCONF"
+sed -i 's|seeds *= *\["valkey:6379"\]|seeds = ["127.0.0.1:6379"]|' "$TMPCONF"
 install -o prx-waf -g prx-waf -m 0640 "$TMPCONF" "$CONF"
 
 # 2. Sync rules + non-default-toml configs into the working dir
