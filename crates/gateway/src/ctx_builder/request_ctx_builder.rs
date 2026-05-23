@@ -92,6 +92,11 @@ impl<'a> RequestCtxBuilder<'a> {
         }
 
         let uri = self.session.req_header().uri.clone();
+        if !headers.contains_key("host")
+            && let Some(authority) = uri.authority()
+        {
+            headers.insert("host".to_string(), authority.as_str().to_string());
+        }
         let content_length = headers
             .get("content-length")
             .and_then(|v| v.parse::<u64>().ok())
