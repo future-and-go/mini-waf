@@ -6,4 +6,4 @@
 -- Operators who need the old H1-only behaviour must explicitly set upstream_alpn
 -- to 'h1_only' on those hosts.
 ALTER TABLE hosts
-    ADD COLUMN IF NOT EXISTS upstream_alpn TEXT NOT NULL DEFAULT 'h2h1';
+    ADD COLUMN IF NOT EXISTS upstream_alpn VARCHAR(8) NOT NULL DEFAULT 'h2h1';

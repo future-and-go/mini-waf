@@ -314,14 +314,14 @@ pub(crate) const fn apply_fr039_timeouts(peer: &mut HttpPeer, host_config: &Host
 ///
 /// Set the upstream ALPN advertisement on `peer` from [`HostConfig`].
 ///
-/// No-op when `ssl: false` — ALPN only applies inside a TLS ClientHello.
+/// No-op when `ssl: false` — ALPN only applies inside a TLS `ClientHello`.
 /// Maps [`waf_common::UpstreamAlpn`] → Pingora's [`pingora_core::protocols::ALPN`].
 pub(crate) fn apply_upstream_alpn(peer: &mut HttpPeer, host_config: &HostConfig) {
+    use pingora_core::protocols::ALPN;
+    use waf_common::UpstreamAlpn;
     if !host_config.ssl {
         return;
     }
-    use pingora_core::protocols::ALPN;
-    use waf_common::UpstreamAlpn;
     peer.options.alpn = match host_config.upstream_alpn {
         UpstreamAlpn::H1Only => ALPN::H1,
         UpstreamAlpn::H2H1 => ALPN::H2H1,

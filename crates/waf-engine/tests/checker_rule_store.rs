@@ -49,6 +49,8 @@ async fn reload_all_loads_seeded_data() {
             remarks: None,
             start_status: true,
             log_only_mode: false,
+            upstream_alpn: Default::default(),
+            upstream_skip_ssl_verify: false,
         })
         .await
         .expect("create host");
@@ -102,6 +104,8 @@ async fn concurrent_reload_keeps_reader_consistent() {
             remarks: None,
             start_status: true,
             log_only_mode: false,
+            upstream_alpn: Default::default(),
+            upstream_skip_ssl_verify: false,
         })
         .await
         .expect("host");
