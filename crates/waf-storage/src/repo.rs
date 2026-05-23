@@ -49,15 +49,15 @@ impl Database {
             r"INSERT INTO hosts (
                 id, code, host, port, ssl, guard_status,
                 remote_host, remote_port, remote_ip, cert_file, key_file,
-                remarks, start_status, log_only_mode,
+                remarks, start_status, log_only_mode, upstream_alpn, upstream_skip_ssl_verify,
                 is_enable_load_balance, load_balance_stage,
                 created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6,
                 $7, $8, $9::inet, $10, $11,
-                $12, $13, $14,
+                $12, $13, $14, $15, $16,
                 false, 0,
-                $15, $15
+                $17, $17
             ) RETURNING *",
         )
         .bind(id)
@@ -74,6 +74,8 @@ impl Database {
         .bind(&req.remarks)
         .bind(req.start_status)
         .bind(req.log_only_mode)
+        .bind(&req.upstream_alpn)
+        .bind(req.upstream_skip_ssl_verify)
         .bind(now)
         .fetch_one(&self.pool)
         .await?;
@@ -99,7 +101,9 @@ impl Database {
                 remarks = COALESCE($11, remarks),
                 start_status = COALESCE($12, start_status),
                 log_only_mode = COALESCE($13, log_only_mode),
-                updated_at = $14
+                upstream_alpn = COALESCE($14, upstream_alpn),
+                upstream_skip_ssl_verify = COALESCE($15, upstream_skip_ssl_verify),
+                updated_at = $16
             WHERE id = $1
             RETURNING *",
         )
@@ -116,6 +120,8 @@ impl Database {
         .bind(req.remarks)
         .bind(req.start_status)
         .bind(req.log_only_mode)
+        .bind(req.upstream_alpn)
+        .bind(req.upstream_skip_ssl_verify)
         .bind(now)
         .fetch_optional(&self.pool)
         .await?;

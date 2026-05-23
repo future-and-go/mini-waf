@@ -1,0 +1,2 @@
+ALTER TABLE hosts
+    ADD COLUMN IF NOT EXISTS upstream_skip_ssl_verify BOOLEAN NOT NULL DEFAULT FALSE;

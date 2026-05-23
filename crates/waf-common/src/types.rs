@@ -251,6 +251,30 @@ pub struct DetectionResult {
     pub action_status: Option<u16>,
 }
 
+/// Upstream ALPN advertisement strategy for TLS connections to the origin.
+///
+/// Controls which HTTP versions Pingora advertises in the TLS ClientHello when
+/// connecting to an upstream over `ssl: true`. Has no effect when `ssl: false`
+/// (plaintext TCP has no ALPN negotiation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpstreamAlpn {
+    /// Advertise only `http/1.1`. Use for legacy origins that reject h2.
+    H1Only,
+    /// Advertise `h2, http/1.1`. **Default for `ssl: true`** — works with
+    /// both modern (h2-required) and legacy origins via negotiation.
+    H2H1,
+    /// Advertise only `h2`. Strict mode for gRPC or h2-only origins.
+    /// Handshake fails if the origin does not speak h2.
+    H2Only,
+}
+
+impl Default for UpstreamAlpn {
+    fn default() -> Self {
+        Self::H2H1
+    }
+}
+
 /// Host configuration matching `SamWaf` Hosts model
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -379,6 +403,18 @@ pub struct HostConfig {
     /// because the upstream was unresponsive (seconds).
     #[serde(default = "default_upstream_circuit_503_retry_after_s")]
     pub upstream_circuit_503_retry_after_s: u32,
+    /// Upstream ALPN advertisement for TLS connections.
+    /// Default `H2H1` — advertises both h2 and http/1.1, letting the origin
+    /// choose. Set to `H1Only` for legacy origins that mis-implement h2, or
+    /// `H2Only` for gRPC / strict h2 backends. No-op when `ssl: false`.
+    #[serde(default)]
+    pub upstream_alpn: UpstreamAlpn,
+    /// Skip TLS certificate verification for the upstream.
+    /// When `true`, Pingora will not verify the upstream's certificate chain or
+    /// hostname. Useful for self-signed certs or when the CA store is unavailable.
+    /// No-op when `ssl: false`. Default `false`.
+    #[serde(default)]
+    pub upstream_skip_ssl_verify: bool,
 }
 
 const fn default_preserve_host() -> bool {
@@ -504,6 +540,8 @@ impl Default for HostConfig {
             redact_mask_token: default_redact_mask_token(),
             redact_max_bytes: default_redact_max_bytes(),
             redact_case_insensitive: true,
+            upstream_alpn: UpstreamAlpn::H2H1,
+            upstream_skip_ssl_verify: false,
             upstream_connect_timeout_ms: default_upstream_connect_timeout_ms(),
             upstream_total_connection_timeout_ms: default_upstream_total_connection_timeout_ms(),
             upstream_read_timeout_ms: default_upstream_read_timeout_ms(),
@@ -752,7 +790,41 @@ impl Default for DefenseConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{HostConfig, HostUpstreamTimeoutError, parse_cookie_header};
+    use super::{HostConfig, HostUpstreamTimeoutError, UpstreamAlpn, parse_cookie_header};
+
+    // ── UpstreamAlpn default ────────────────────────────────────────────────
+
+    #[test]
+    fn upstream_alpn_default_is_h2h1() {
+        assert_eq!(UpstreamAlpn::default(), UpstreamAlpn::H2H1);
+        assert_eq!(HostConfig::default().upstream_alpn, UpstreamAlpn::H2H1);
+    }
+
+    #[test]
+    fn upstream_alpn_serde_round_trip() {
+        let json = serde_json::to_string(&UpstreamAlpn::H1Only).unwrap();
+        assert_eq!(json, r#""h1_only""#);
+        let back: UpstreamAlpn = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, UpstreamAlpn::H1Only);
+
+        let json = serde_json::to_string(&UpstreamAlpn::H2H1).unwrap();
+        assert_eq!(json, r#""h2_h1""#);
+
+        let json = serde_json::to_string(&UpstreamAlpn::H2Only).unwrap();
+        assert_eq!(json, r#""h2_only""#);
+    }
+
+    #[test]
+    fn upstream_alpn_missing_field_deserialises_as_h2h1() {
+        let baseline = HostConfig::default();
+        let mut value = serde_json::to_value(&baseline).unwrap();
+        if let serde_json::Value::Object(map) = &mut value {
+            map.remove("upstream_alpn");
+        }
+        let json = serde_json::to_string(&value).unwrap();
+        let hc: HostConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(hc.upstream_alpn, UpstreamAlpn::H2H1);
+    }
 
     // ── FR-039: upstream timeout schema + validator ─────────────────────────
 

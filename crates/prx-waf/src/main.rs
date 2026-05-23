@@ -1587,7 +1587,7 @@ async fn init_async(
     let hosts = db.list_hosts().await?;
     info!("Loading {} hosts from database", hosts.len());
     for host in &hosts {
-        use waf_common::{DefenseConfig, HostConfig};
+        use waf_common::{DefenseConfig, HostConfig, UpstreamAlpn};
         // Deserialize per-host defense overrides stored in `defense_json`.
         // Falls back to system defaults when the column is NULL or unparseable.
         let defense_config: DefenseConfig = host
@@ -1595,6 +1595,11 @@ async fn init_async(
             .as_ref()
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
+        let upstream_alpn = match host.upstream_alpn.as_str() {
+            "h1_only" => UpstreamAlpn::H1Only,
+            "h2_only" => UpstreamAlpn::H2Only,
+            _ => UpstreamAlpn::H2H1,
+        };
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let cfg = Arc::new(HostConfig {
             code: host.code.clone(),
@@ -1609,6 +1614,8 @@ async fn init_async(
             key_file: host.key_file.clone(),
             start_status: host.start_status,
             defense_config,
+            upstream_alpn,
+            upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
             ..HostConfig::default()
         });
         router.register(&cfg);

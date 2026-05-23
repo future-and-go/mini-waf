@@ -12,10 +12,20 @@ use waf_storage::models::{
     CreateSensitivePattern, CreateUrlRule, SecurityEventQuery, UpdateCustomRule, UpdateHost, UpsertHotlinkConfig,
 };
 
-use waf_common::HostConfig;
+use waf_common::{HostConfig, UpstreamAlpn};
 
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+
+/// Parse an `upstream_alpn` DB string into [`UpstreamAlpn`], falling back to
+/// the safe default (`H2H1`) on unrecognised values so old rows never panic.
+fn parse_upstream_alpn(s: &str) -> UpstreamAlpn {
+    match s {
+        "h1_only" => UpstreamAlpn::H1Only,
+        "h2_only" => UpstreamAlpn::H2Only,
+        _ => UpstreamAlpn::H2H1,
+    }
+}
 
 // ─── Response wrapper ─────────────────────────────────────────────────────────
 
@@ -60,6 +70,7 @@ pub async fn create_host(State(state): State<Arc<AppState>>, Json(req): Json<Cre
 
     // Register with router
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let upstream_alpn = parse_upstream_alpn(&host.upstream_alpn);
     let config = Arc::new(HostConfig {
         code: host.code.clone(),
         host: host.host.clone(),
@@ -72,6 +83,8 @@ pub async fn create_host(State(state): State<Arc<AppState>>, Json(req): Json<Cre
         cert_file: host.cert_file.clone(),
         key_file: host.key_file.clone(),
         start_status: host.start_status,
+        upstream_alpn,
+        upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
         ..HostConfig::default()
     });
     state.router.register(&config);
@@ -121,6 +134,7 @@ pub async fn update_host(
     let port_u16 = host.port as u16;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let remote_port_u16 = host.remote_port as u16;
+    let upstream_alpn = parse_upstream_alpn(&host.upstream_alpn);
     let config = Arc::new(HostConfig {
         code: host.code.clone(),
         host: host.host.clone(),
@@ -134,6 +148,8 @@ pub async fn update_host(
         key_file: host.key_file.clone(),
         start_status: host.start_status,
         defense_config,
+        upstream_alpn,
+        upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
         ..HostConfig::default()
     });
     state.router.register(&config);

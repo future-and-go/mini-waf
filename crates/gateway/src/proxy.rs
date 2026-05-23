@@ -310,6 +310,37 @@ pub(crate) const fn apply_fr039_timeouts(peer: &mut HttpPeer, host_config: &Host
     peer.options.idle_timeout = Some(Duration::from_millis(host_config.upstream_idle_timeout_ms));
 }
 
+/// Apply per-host upstream ALPN and TLS verification settings to the Pingora peer.
+///
+/// No-op when `ssl: false` — ALPN and verify flags only apply inside a TLS ClientHello.
+/// When TLS is on, maps [`waf_common::UpstreamAlpn`] → Pingora's
+/// [`pingora_core::protocols::ALPN`] so the upstream TLS handshake
+/// advertises the correct HTTP version(s). When `upstream_skip_ssl_verify` is
+/// true, certificate chain and hostname verification are disabled — useful for
+/// self-signed upstream certs or when the system CA store is unavailable.
+pub(crate) fn apply_upstream_alpn(peer: &mut HttpPeer, host_config: &HostConfig) {
+    if !host_config.ssl {
+        return;
+    }
+    use pingora_core::protocols::ALPN;
+    use waf_common::UpstreamAlpn;
+    peer.options.alpn = match host_config.upstream_alpn {
+        UpstreamAlpn::H1Only => ALPN::H1,
+        UpstreamAlpn::H2H1 => ALPN::H2H1,
+        UpstreamAlpn::H2Only => ALPN::H2,
+    };
+    if host_config.upstream_skip_ssl_verify {
+        peer.options.verify_cert = false;
+        peer.options.verify_hostname = false;
+    }
+    debug!(
+        host = %host_config.host,
+        alpn = ?host_config.upstream_alpn,
+        skip_ssl_verify = host_config.upstream_skip_ssl_verify,
+        "upstream ALPN applied"
+    );
+}
+
 /// FR-033: gate the body content scanner on a Content-Type allowlist so we
 /// never corrupt gRPC trailers, server-sent event streams, or arbitrary
 /// binary payloads. Allowed: textual + JSON / XML / JS bodies.
@@ -422,6 +453,7 @@ impl ProxyHttp for WafProxy {
         info!("Proxying {} → {}", host_header, upstream_addr);
         let mut peer = HttpPeer::new(&upstream_addr, use_tls, host_config.remote_host.clone());
         apply_fr039_timeouts(&mut peer, &host_config);
+        apply_upstream_alpn(&mut peer, &host_config);
         Ok(Box::new(peer))
     }
 
@@ -1172,5 +1204,66 @@ mod fr039_tests {
 
         let (h, _) = ErrorPageFactory::render(403, None).expect("render 403");
         assert!(h.headers.get("retry-after").is_none());
+    }
+}
+
+#[cfg(test)]
+mod alpn_tests {
+    use super::*;
+    use pingora_core::protocols::ALPN;
+    use waf_common::UpstreamAlpn;
+
+    fn ssl_peer() -> HttpPeer {
+        // Use a numeric address to avoid DNS resolution in unit tests.
+        HttpPeer::new("127.0.0.1:443", true, "upstream".into())
+    }
+
+    #[test]
+    fn ssl_false_is_noop() {
+        let mut p = ssl_peer();
+        let before = p.options.alpn.clone();
+        let hc = HostConfig {
+            ssl: false,
+            upstream_alpn: UpstreamAlpn::H2Only,
+            ..HostConfig::default()
+        };
+        apply_upstream_alpn(&mut p, &hc);
+        assert_eq!(p.options.alpn, before, "must not touch ALPN when TLS is off");
+    }
+
+    #[test]
+    fn h2h1_advertises_both() {
+        let mut p = ssl_peer();
+        let hc = HostConfig {
+            ssl: true,
+            upstream_alpn: UpstreamAlpn::H2H1,
+            ..HostConfig::default()
+        };
+        apply_upstream_alpn(&mut p, &hc);
+        assert!(matches!(p.options.alpn, ALPN::H2H1));
+    }
+
+    #[test]
+    fn h1_only() {
+        let mut p = ssl_peer();
+        let hc = HostConfig {
+            ssl: true,
+            upstream_alpn: UpstreamAlpn::H1Only,
+            ..HostConfig::default()
+        };
+        apply_upstream_alpn(&mut p, &hc);
+        assert!(matches!(p.options.alpn, ALPN::H1));
+    }
+
+    #[test]
+    fn h2_only() {
+        let mut p = ssl_peer();
+        let hc = HostConfig {
+            ssl: true,
+            upstream_alpn: UpstreamAlpn::H2Only,
+            ..HostConfig::default()
+        };
+        apply_upstream_alpn(&mut p, &hc);
+        assert!(matches!(p.options.alpn, ALPN::H2));
     }
 }

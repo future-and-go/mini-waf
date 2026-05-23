@@ -25,6 +25,8 @@ pub struct Host {
     pub load_balance_stage: i32,
     pub defense_json: Option<serde_json::Value>,
     pub log_only_mode: bool,
+    pub upstream_alpn: String,
+    pub upstream_skip_ssl_verify: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -225,6 +227,17 @@ pub struct CreateHost {
     pub start_status: bool,
     #[serde(default)]
     pub log_only_mode: bool,
+    /// Upstream ALPN strategy. Serialised as snake_case string ("h1_only",
+    /// "h2h1", "h2_only"). Defaults to "h2h1" when omitted.
+    #[serde(default = "default_upstream_alpn")]
+    pub upstream_alpn: String,
+    /// Skip TLS certificate verification for the upstream. Default `false`.
+    #[serde(default)]
+    pub upstream_skip_ssl_verify: bool,
+}
+
+fn default_upstream_alpn() -> String {
+    "h2h1".to_string()
 }
 
 /// Update host request
@@ -242,6 +255,8 @@ pub struct UpdateHost {
     pub remarks: Option<String>,
     pub start_status: Option<bool>,
     pub log_only_mode: Option<bool>,
+    pub upstream_alpn: Option<String>,
+    pub upstream_skip_ssl_verify: Option<bool>,
 }
 
 /// Create IP rule request
