@@ -1,0 +1,183 @@
+# Release pipeline.
+#
+# Trigger: pushing a tag matching v* (e.g. v0.2.1, v1.0.0-rc1) OR manual dispatch.
+#
+# Stages:
+#   1. build  — GitHub-hosted ubuntu-22.04 host, inside a rockylinux:9 container so
+#               the produced binary links against glibc 2.34 (matches the RHEL 9.7
+#               EC2 deploy target exactly). Outputs a tar.gz + sha256 with the
+#               binary, rules/, configs/, migrations/.
+#   2. deploy — Self-hosted runner on the EC2 (labels: self-hosted, linux, x64,
+#               prx-waf-ec2). Downloads the artifact, hands the unpacked tree to
+#               /usr/local/sbin/prx-waf-deploy (installed once by
+#               scripts/ec2-install-gh-runner.sh) which installs the binary,
+#               renders /etc/prx-waf/config.toml from /etc/prx-waf/env, runs
+#               migrations on first boot, and restarts the systemd service.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build & deploy (defaults to workflow ref)"
+        required: false
+
+permissions:
+  contents: write   # required by softprops/action-gh-release
+
+env:
+  RUST_VERSION: "1.91"
+  NODE_VERSION: "22"
+
+jobs:
+  build:
+    name: Build release binary (rocky9 / glibc 2.34)
+    runs-on: ubuntu-22.04
+    container:
+      image: rockylinux:9
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      artifact: ${{ steps.meta.outputs.artifact }}
+    steps:
+      - name: Install build dependencies
+        run: |
+          dnf -y install epel-release
+          dnf -y module reset nodejs
+          dnf -y module enable nodejs:${NODE_VERSION}
+          dnf -y install \
+            gcc gcc-c++ make cmake pkgconfig openssl-devel \
+            git tar gzip xz which perl \
+            nodejs
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: recursive
+
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain ${RUST_VERSION} --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-rocky9-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-rocky9-
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('web/admin-panel/package-lock.json') }}
+
+      - name: Build admin panel (embedded via rust_embed)
+        working-directory: web/admin-panel
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+
+      - name: Compute version + artifact name
+        id: meta
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "main" ]; then
+            VERSION="dev-$(date -u +%Y%m%d%H%M)-${GITHUB_SHA::7}"
+          fi
+          ARTIFACT="prx-waf-${VERSION}-linux-x86_64.tar.gz"
+          echo "version=${VERSION}"   >> "$GITHUB_OUTPUT"
+          echo "artifact=${ARTIFACT}" >> "$GITHUB_OUTPUT"
+
+      - name: Build prx-waf (release, valkey feature)
+        run: cargo build --release --locked --features gateway/valkey -p prx-waf
+
+      - name: Package release tarball
+        run: |
+          set -euo pipefail
+          STAGE="dist/prx-waf"
+          mkdir -p "$STAGE"
+          cp target/release/prx-waf "$STAGE/"
+          cp -r rules      "$STAGE/"
+          cp -r configs    "$STAGE/"
+          cp -r migrations "$STAGE/" 2>/dev/null || true
+          cp prx-waf.service "$STAGE/"
+          ( cd dist && tar czf "${{ steps.meta.outputs.artifact }}" prx-waf )
+          ( cd dist && sha256sum "${{ steps.meta.outputs.artifact }}" \
+              > "${{ steps.meta.outputs.artifact }}.sha256" )
+          ls -la dist/
+
+      - name: Upload build artifact (consumed by deploy job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: prx-waf-release
+          path: dist/${{ steps.meta.outputs.artifact }}*
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/${{ steps.meta.outputs.artifact }}
+            dist/${{ steps.meta.outputs.artifact }}.sha256
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+  deploy:
+    name: Deploy to EC2 (prx-waf-ec2)
+    needs: build
+    runs-on: [self-hosted, linux, x64, prx-waf-ec2]
+    concurrency:
+      group: deploy-prx-waf-ec2
+      cancel-in-progress: false
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: prx-waf-release
+          path: ./incoming
+
+      - name: Verify checksum + unpack
+        env:
+          ARTIFACT: ${{ needs.build.outputs.artifact }}
+        run: |
+          set -euo pipefail
+          cd incoming
+          sha256sum -c "${ARTIFACT}.sha256"
+          tar xzf "${ARTIFACT}"
+          test -x prx-waf/prx-waf
+
+      - name: Install + restart prx-waf
+        env:
+          UNPACKED: ${{ github.workspace }}/incoming/prx-waf
+          VERSION:  ${{ needs.build.outputs.version }}
+        run: sudo /usr/local/sbin/prx-waf-deploy "$UNPACKED" "$VERSION"
+
+      - name: Wait for /health
+        run: |
+          set -e
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9527/health >/dev/null; then
+              echo "prx-waf healthy after ${i}s"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::prx-waf failed to report healthy within 60s"
+          journalctl -u prx-waf -n 200 --no-pager || true
+          exit 1
+
+      - name: Cleanup unpacked artifact
+        if: always()
+        run: rm -rf ./incoming
