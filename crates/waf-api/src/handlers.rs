@@ -59,16 +59,15 @@ pub async fn create_host(State(state): State<Arc<AppState>>, Json(req): Json<Cre
     let host = state.db.create_host(req).await?;
 
     // Register with router
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let upstream_alpn = UpstreamAlpn::from_db_str(&host.upstream_alpn);
     let config = Arc::new(HostConfig {
         code: host.code.clone(),
         host: host.host.clone(),
-        port: host.port as u16,
+        port: u16::try_from(host.port).unwrap_or(80),
         ssl: host.ssl,
         guard_status: host.guard_status,
         remote_host: host.remote_host.clone(),
-        remote_port: host.remote_port as u16,
+        remote_port: u16::try_from(host.remote_port).unwrap_or(80),
         remote_ip: host.remote_ip.clone(),
         cert_file: host.cert_file.clone(),
         key_file: host.key_file.clone(),
@@ -112,18 +111,15 @@ pub async fn update_host(
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("Host {id} not found")))?;
     // Unregister old route, register updated config
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let old_port = old_host.port as u16;
+    let old_port = u16::try_from(old_host.port).unwrap_or(80);
     state.router.unregister(&old_host.host, old_port);
     let defense_config: waf_common::DefenseConfig = host
         .defense_json
         .as_ref()
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let port_u16 = host.port as u16;
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let remote_port_u16 = host.remote_port as u16;
+    let port_u16 = u16::try_from(host.port).unwrap_or(80);
+    let remote_port_u16 = u16::try_from(host.remote_port).unwrap_or(80);
     let upstream_alpn = UpstreamAlpn::from_db_str(&host.upstream_alpn);
     let config = Arc::new(HostConfig {
         code: host.code.clone(),
@@ -158,8 +154,7 @@ pub async fn delete_host(State(state): State<Arc<AppState>>, Path(id): Path<Uuid
         return Err(ApiError::NotFound(format!("Host {id} not found")));
     }
     // Unregister from in-memory router
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let port = host.port as u16;
+    let port = u16::try_from(host.port).unwrap_or(80);
     state.router.unregister(&host.host, port);
     // Clear any rules associated with this host
     state.engine.store.allow_ips.clear_host(&host.code);
