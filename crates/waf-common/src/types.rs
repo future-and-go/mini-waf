@@ -253,7 +253,7 @@ pub struct DetectionResult {
 
 /// Upstream ALPN advertisement strategy for TLS connections to the origin.
 ///
-/// Controls which HTTP versions Pingora advertises in the TLS ClientHello when
+/// Controls which HTTP versions Pingora advertises in the TLS `ClientHello` when
 /// connecting to an upstream over `ssl: true`. Has no effect when `ssl: false`
 /// (plaintext TCP has no ALPN negotiation).
 ///
