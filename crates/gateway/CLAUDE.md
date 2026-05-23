@@ -16,6 +16,24 @@ Pingora-based reverse-proxy data plane. Terminates TLS, routes HTTP/1, HTTP/2, a
 - **Error pages**: factory for WAF-decision and proxy error responses.
 - **Tiered classification**: per-host tier classifier with hot-reloadable policy registry and compiled-rule matcher (consumes `waf-common::tier`).
 - **Access phase**: dedicated pipeline stage running access-control + relay + device-fp checks before upstream selection.
+- **Upstream ALPN** (per-host): configurable TLS ALPN advertisement toward the origin, default `H2H1`.
+
+## Upstream ALPN
+
+`HostConfig::upstream_alpn` (`waf_common::UpstreamAlpn`) controls which HTTP
+versions Pingora advertises in the TLS ClientHello when connecting to an upstream
+over `ssl: true`. The helper `apply_upstream_alpn()` (in `proxy.rs`, symmetric
+with `apply_fr039_timeouts`) maps the enum to `pingora_core::protocols::ALPN`
+before returning the peer.
+
+| Value | Pingora ALPN | When to use |
+|---|---|---|
+| `H2H1` *(default)* | `h2, http/1.1` | Modern CDN-fronted origins (CloudFront, etc.). Lets the server pick h2. |
+| `H1Only` | `http/1.1` | Legacy origins that advertise h2 but mis-implement it. |
+| `H2Only` | `h2` | gRPC backends or strict h2-only origins. Handshake fails if server doesn't speak h2. |
+
+No-op when `ssl: false` (plaintext TCP has no ALPN). Hot-reloaded through the
+existing config watcher — no restart needed after changing the field.
 
 ## Response body internal-ref masking (AC-17)
 

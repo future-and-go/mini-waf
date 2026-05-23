@@ -4,7 +4,7 @@
     "hosts": "主机",
     "ipRules": "IP 规则",
     "urlRules": "URL 规则",
-    "securityEvents": "安全事件",
+    "securityEvents": "实时事件",
     "logs": "安全日志",
     "customRules": "自定义规则",
     "certificates": "SSL 证书",
@@ -99,8 +99,8 @@
     "categoryBreakdown": "攻击分类",
     "actionBreakdown": "处置动作",
     "trafficChart": "流量 (24小时)",
-    "recentEvents": "最近安全事件",
-    "liveEvents": "实时安全事件",
+    "recentEvents": "最近实时事件",
+    "liveEvents": "实时事件",
     "detectionEngines": "检测引擎",
     "live": "● 实时",
     "disconnected": "○ 未连接",
@@ -116,7 +116,7 @@
     "country": "国家",
     "legitTraffic": "合法",
     "blockedTraffic": "被阻止",
-    "noRecentEvents": "暂无安全事件 — WAF 一切正常。"
+    "noRecentEvents": "暂无实时事件 — WAF 一切正常。"
   },
   "hosts": {
     "title": "主机",
@@ -139,10 +139,17 @@
     "http": "HTTP",
     "editHost": "编辑主机",
     "upstreamPort": "上游端口",
-    "logOnly": "仅记录日志"
+    "logOnly": "仅记录日志",
+    "upstreamAlpn": "上游 ALPN",
+    "upstreamAlpnTooltip": "ALPN 仅适用于 TLS 上游（SSL 开启时）",
+    "alpnH2H1": "自动 (h2 + http/1.1)",
+    "alpnH1Only": "仅 HTTP/1.1",
+    "alpnH2Only": "仅 HTTP/2（严格）",
+    "skipSslVerify": "跳过 SSL 验证",
+    "skipSslVerifyTooltip": "禁用上游证书验证。用于自签名证书或 CA 仓库不可用时。仅在启用 SSL 时有效。"
   },
   "security": {
-    "title": "安全事件",
+    "title": "实时事件",
     "clientIP": "客户端 IP",
     "method": "方法",
     "path": "路径",
@@ -523,7 +530,7 @@
     "totalEvents": "Total events"
   },
   "eventDetail": {
-    "title": "Security Event",
+    "title": "实时事件",
     "back": "Back",
     "overview": "Overview",
     "detail": "Detail",

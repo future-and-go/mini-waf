@@ -4,7 +4,7 @@
     "hosts": "Hosts",
     "ipRules": "Luật IP",
     "urlRules": "Luật URL",
-    "securityEvents": "Sự kiện bảo mật",
+    "securityEvents": "Sự kiện trực tiếp",
     "logs": "Nhật ký bảo mật",
     "customRules": "Luật tùy chỉnh",
     "certificates": "Chứng chỉ SSL",
@@ -164,10 +164,17 @@
     "http": "HTTP",
     "editHost": "Sửa Host",
     "upstreamPort": "Upstream port",
-    "logOnly": "Chỉ ghi log"
+    "logOnly": "Chỉ ghi log",
+    "upstreamAlpn": "ALPN upstream",
+    "upstreamAlpnTooltip": "ALPN chỉ áp dụng khi bật SSL",
+    "alpnH2H1": "Tự động (h2 + http/1.1)",
+    "alpnH1Only": "Chỉ HTTP/1.1",
+    "alpnH2Only": "Chỉ HTTP/2 (strict)",
+    "skipSslVerify": "Bỏ qua xác minh SSL",
+    "skipSslVerifyTooltip": "Tắt kiểm tra chứng chỉ upstream. Dùng cho cert tự ký hoặc khi CA store không khả dụng. Chỉ áp dụng khi bật SSL."
   },
   "security": {
-    "title": "Sự kiện bảo mật",
+    "title": "Sự kiện trực tiếp",
     "clientIP": "IP nguồn",
     "method": "Method",
     "path": "Path",
@@ -602,7 +609,7 @@
     "totalEvents": "Tổng sự kiện"
   },
   "eventDetail": {
-    "title": "Sự kiện bảo mật",
+    "title": "Sự kiện trực tiếp",
     "back": "Quay lại",
     "overview": "Tổng quan",
     "detail": "Chi tiết",
