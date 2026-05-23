@@ -33,6 +33,11 @@ pub use rustls::{
     SignatureScheme, Stream,
 };
 
+// Re-exports for dynamic per-SNI certificate resolution via TlsSettings::with_cert_resolver.
+// ClientHello is consumed by ResolvesServerCert::resolve; CertifiedKey is its return type.
+pub use rustls::server::{ClientHello, ResolvesServerCert};
+pub use rustls::sign::CertifiedKey;
+
 /// Install the default `ring` CryptoProvider for rustls.
 ///
 /// rustls 0.23+ requires an explicit provider. This function installs `ring`

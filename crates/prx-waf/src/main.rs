@@ -1394,6 +1394,39 @@ fn run_server(config: &AppConfig, config_file_path: &str, vlogs_layer_slot: Laye
 
     let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
     proxy_service.add_tcp(&config.proxy.listen_addr);
+
+    // Native TLS listener (phase 02). Bind only when:
+    //  - `proxy.listen_addr_tls` is set,
+    //  - the SSL manager hydrated successfully in init_async, AND
+    //  - at least one host opted in via `tls_terminate = true` (avoids binding
+    //    443 to an empty resolver that would reject every handshake).
+    if !config.proxy.listen_addr_tls.is_empty() {
+        if let Some(ssl_mgr) = api_state.ssl_manager.as_ref() {
+            let allowlist_handle = ssl_mgr.tls_terminate_hosts_handle();
+            let allow_empty = { allowlist_handle.read().is_empty() };
+            if allow_empty {
+                info!(
+                    "TLS listener on {} skipped: no host opted in via `tls_terminate = true`",
+                    config.proxy.listen_addr_tls
+                );
+            } else {
+                use pingora_core::listeners::tls::TlsSettings;
+                use pingora_rustls::ResolvesServerCert;
+                let resolver: Arc<dyn ResolvesServerCert> =
+                    Arc::new(gateway::DbCertResolver::new(ssl_mgr.cache_handle(), allowlist_handle));
+                let mut tls_settings = TlsSettings::with_cert_resolver(resolver);
+                tls_settings.enable_h2();
+                proxy_service.add_tls_with_settings(&config.proxy.listen_addr_tls, None, tls_settings);
+                info!(
+                    "Native TLS listener bound on {} (DB-backed cert resolver, ALPN h2,http/1.1)",
+                    config.proxy.listen_addr_tls
+                );
+            }
+        } else {
+            info!("TLS listener skipped: SslManager not initialised");
+        }
+    }
+
     server.add_service(proxy_service);
 
     info!("Proxy listening on {}", config.proxy.listen_addr);
@@ -1836,6 +1869,69 @@ async fn init_async(
     } else {
         None
     };
+
+    // ── SSL manager (phase 02 — DB-backed cert serve + cache hydration) ────
+    // Build the cert manager regardless of whether ACME is configured: manual
+    // PEM uploads still flow through the same cache. The TLS listener is only
+    // bound later in `run_server` if `proxy.listen_addr_tls` is non-empty.
+    {
+        let ssl_mgr = std::sync::Arc::new(gateway::SslManager::new(
+            Arc::clone(&db),
+            config.tls.acme_email.clone(),
+            config.tls.acme_staging,
+        ));
+
+        // Hydrate cache BEFORE the TLS listener accepts connections (run_server
+        // does the bind). Fail-fast threshold: if the DB has rows but none load
+        // successfully, refuse to start — silent total outage is worse than a
+        // clear startup error (red-team C4).
+        let (loaded, total) = ssl_mgr.hydrate_cache().await?;
+        if total > 0 && loaded == 0 {
+            anyhow::bail!(
+                "All {total} certificates failed to parse — refusing to start TLS listener. \
+                 Check the `certificates` table and the rustls CryptoProvider install."
+            );
+        }
+
+        // Populate the `tls_terminate=true` allowlist from the TOML hosts. DB-
+        // backed hosts are not yet in the schema with this flag; phase 02 keeps
+        // the gate config-driven only. Operators wanting native TLS for a host
+        // declare it in `[[hosts]]` with `tls_terminate = true`.
+        let allowlist: Vec<String> = config
+            .hosts
+            .iter()
+            .filter(|h| h.tls_terminate == Some(true))
+            .map(|h| h.host.clone())
+            .collect();
+        if !allowlist.is_empty() {
+            info!(
+                "Native TLS termination enabled for {} host(s): {}",
+                allowlist.len(),
+                allowlist.join(", ")
+            );
+        }
+        ssl_mgr.set_tls_terminate_hosts(allowlist);
+
+        // Deprecation warning for legacy `cert_file` / `key_file` TOML fields.
+        // Phase 02 keeps the fields for one release; cert material now lives in
+        // the `certificates` table and is selected per-SNI by the resolver.
+        for entry in &config.hosts {
+            if entry.cert_file.is_some() || entry.key_file.is_some() {
+                tracing::warn!(
+                    host = %entry.host,
+                    "deprecated: `cert_file`/`key_file` in TOML are ignored — \
+                     upload PEM via the admin API and set `tls_terminate = true`"
+                );
+            }
+        }
+
+        // Background poll (default 60 s). Cheap to leave running even when no
+        // TLS listener is bound — phase 03 will rely on it picking up ACME-issued
+        // certs without a restart.
+        Arc::clone(&ssl_mgr).spawn_cache_refresh_task(config.tls.cache_refresh_secs);
+
+        api_state.ssl_manager = Some(Arc::clone(&ssl_mgr));
+    }
 
     let guards = ShutdownGuards {
         _crowdsec: crowdsec_shutdown_guard,

@@ -20,6 +20,9 @@ pub enum ApiError {
     #[error("Too many requests: {0}")]
     TooManyRequests(String),
 
+    #[error("Service unavailable: {0}")]
+    ServiceUnavailable(String),
+
     #[error("Internal server error: {0}")]
     Internal(#[from] anyhow::Error),
 
@@ -34,6 +37,7 @@ impl IntoResponse for ApiError {
             Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             Self::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
             Self::TooManyRequests(msg) => (StatusCode::TOO_MANY_REQUESTS, msg.clone()),
+            Self::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg.clone()),
             Self::Internal(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             Self::Storage(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         };

@@ -15,16 +15,20 @@
 
 #![allow(clippy::duration_suboptimal_units)] // prefer `from_secs` over MSRV‑gated `from_mins`/`from_hours`
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use dashmap::DashMap;
 use parking_lot::RwLock;
 
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use pingora_rustls::CertifiedKey;
 use waf_storage::{Database, models::CreateCertificate};
+
+use super::build_certified_key::build_certified_key;
 
 // ── Challenge store ───────────────────────────────────────────────────────────
 
@@ -79,20 +83,150 @@ pub struct SslManager {
     db: Arc<Database>,
     /// Pending ACME HTTP-01 challenges
     pub challenges: Arc<ChallengeStore>,
-    /// ACME contact email
-    acme_email: String,
+    /// ACME contact email (None when operator has no ACME configured yet)
+    acme_email: Option<String>,
     /// Use Let's Encrypt staging (true) or production (false)
     acme_staging: bool,
+    /// In-memory `domain → CertifiedKey` map. Shared with `DbCertResolver` so
+    /// the rustls handshake can do a lock-free per-SNI lookup. Hydrated at
+    /// startup from the `certificates` table; refreshed by the background poll.
+    cache: Arc<DashMap<String, Arc<CertifiedKey>>>,
+    /// Set of hostnames with `tls_terminate=true` in the TOML config. The
+    /// resolver consults this allowlist before returning a `CertifiedKey` —
+    /// preserves the "WAF speaks plaintext + nginx fronts TLS" intent for hosts
+    /// that have a cert in the DB but are not opted in to native termination.
+    tls_terminate_hosts: Arc<RwLock<HashSet<String>>>,
 }
 
 impl SslManager {
-    pub fn new(db: Arc<Database>, acme_email: impl Into<String>, acme_staging: bool) -> Self {
+    /// Construct a new `SslManager`.
+    ///
+    /// `acme_email` is `None` when the operator does not need ACME automation
+    /// (manual PEM upload only). The cache and TLS-terminate allowlist start
+    /// empty; call [`hydrate_cache`] and [`set_tls_terminate_hosts`] before
+    /// binding the TLS listener.
+    pub fn new(db: Arc<Database>, acme_email: Option<impl Into<String>>, acme_staging: bool) -> Self {
         Self {
             db,
             challenges: Arc::new(ChallengeStore::new()),
-            acme_email: acme_email.into(),
+            acme_email: acme_email.map(Into::into),
             acme_staging,
+            cache: Arc::new(DashMap::new()),
+            tls_terminate_hosts: Arc::new(RwLock::new(HashSet::new())),
         }
+    }
+
+    /// Clone of the cache handle. Pass to [`crate::ssl::DbCertResolver::new`].
+    pub fn cache_handle(&self) -> Arc<DashMap<String, Arc<CertifiedKey>>> {
+        Arc::clone(&self.cache)
+    }
+
+    /// Clone of the `tls_terminate=true` host allowlist. Shared with the
+    /// resolver to gate per-SNI lookup.
+    pub fn tls_terminate_hosts_handle(&self) -> Arc<RwLock<HashSet<String>>> {
+        Arc::clone(&self.tls_terminate_hosts)
+    }
+
+    /// Replace the `tls_terminate` allowlist with the given set of hostnames
+    /// (lower-cased internally). Call at startup after parsing the TOML config
+    /// and again after any host-config reload.
+    pub fn set_tls_terminate_hosts<I: IntoIterator<Item = String>>(&self, hosts: I) {
+        let mut set = self.tls_terminate_hosts.write();
+        set.clear();
+        for h in hosts {
+            set.insert(h.to_ascii_lowercase());
+        }
+    }
+
+    /// Load every active certificate from the database into the in-memory cache.
+    ///
+    /// Returns `(loaded, total_rows)`. Rows that fail to parse are logged and
+    /// skipped — caller decides whether to fail-fast when `loaded == 0 && total_rows > 0`.
+    pub async fn hydrate_cache(&self) -> anyhow::Result<(usize, usize)> {
+        let rows = self.db.list_certificates(None).await?;
+        let total = rows.len();
+        let mut loaded = 0usize;
+        for cert in rows {
+            if cert.status != "active" {
+                continue;
+            }
+            let Some(cert_pem) = cert.cert_pem.as_deref() else {
+                continue;
+            };
+            let Some(key_pem) = cert.key_pem.as_deref() else {
+                continue;
+            };
+            match build_certified_key(cert_pem, key_pem) {
+                Ok(ck) => {
+                    self.cache.insert(cert.domain.to_ascii_lowercase(), ck);
+                    loaded += 1;
+                }
+                Err(e) => {
+                    warn!(
+                        domain = %cert.domain,
+                        error = %e,
+                        "skipping certificate that failed to parse"
+                    );
+                }
+            }
+        }
+        info!("SslManager hydrated cache: {loaded}/{total} active certificates loaded");
+        Ok((loaded, total))
+    }
+
+    /// Drop the cache entry for a domain. Subsequent handshakes for that SNI
+    /// will fail until a fresh cert is loaded via [`reload_cert`] or
+    /// [`hydrate_cache`].
+    pub fn invalidate(&self, domain: &str) {
+        let key = domain.to_ascii_lowercase();
+        if self.cache.remove(&key).is_some() {
+            info!(domain = %domain, "invalidated cached certificate");
+        }
+    }
+
+    /// Reload a single certificate by id from the DB into the cache.
+    ///
+    /// Used by the admin API when an operator uploads a new PEM or forces a
+    /// reload, and (later) by the ACME flow after a successful renewal.
+    pub async fn reload_cert(&self, cert_id: Uuid) -> anyhow::Result<()> {
+        let cert = self
+            .db
+            .get_certificate(cert_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("certificate id {cert_id} not found"))?;
+        if cert.status != "active" {
+            self.invalidate(&cert.domain);
+            return Ok(());
+        }
+        let (Some(cert_pem), Some(key_pem)) = (cert.cert_pem.as_deref(), cert.key_pem.as_deref()) else {
+            self.invalidate(&cert.domain);
+            anyhow::bail!("certificate id {cert_id} has no PEM material");
+        };
+        let ck = build_certified_key(cert_pem, key_pem)?;
+        self.cache.insert(cert.domain.to_ascii_lowercase(), ck);
+        info!(domain = %cert.domain, id = %cert_id, "reloaded cached certificate");
+        Ok(())
+    }
+
+    /// Background task: re-hydrate the cache every `interval_secs` seconds.
+    ///
+    /// Phase 02 KISS choice — a coarse poll is sufficient for single-node, ~50
+    /// hosts. Replace with `LISTEN/NOTIFY` if/when multi-cluster lands.
+    pub fn spawn_cache_refresh_task(self: Arc<Self>, interval_secs: u64) -> tokio::task::JoinHandle<()> {
+        let interval = Duration::from_secs(interval_secs.max(1));
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(interval);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            // Skip the immediate first tick — the startup `hydrate_cache` call
+            // has just populated everything.
+            tick.tick().await;
+            loop {
+                tick.tick().await;
+                if let Err(e) = self.hydrate_cache().await {
+                    warn!("cache refresh failed: {e}");
+                }
+            }
+        })
     }
 
     /// Upload a certificate manually (from file or API).
@@ -124,9 +258,16 @@ impl SslManager {
     ///
     /// Stores challenge tokens so the gateway can serve them, then waits for
     /// ACME validation and stores the issued certificate in `PostgreSQL`.
+    ///
+    /// Requires `acme_email` to be set in the TLS config — returns an error
+    /// when called on an `SslManager` constructed without one.
     pub async fn request_certificate(self: Arc<Self>, host_code: &str, domain: &str) -> anyhow::Result<Uuid> {
         use instant_acme::{Account, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderStatus};
         use rcgen::{CertificateParams, KeyPair};
+
+        let acme_email = self.acme_email.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("tls.acme_email is not configured — set it in TOML before requesting an ACME cert")
+        })?;
 
         info!("Requesting ACME certificate for domain: {}", domain);
 
@@ -139,7 +280,7 @@ impl SslManager {
 
         let (account, _credentials) = Account::create(
             &NewAccount {
-                contact: &[&format!("mailto:{}", self.acme_email)],
+                contact: &[&format!("mailto:{acme_email}")],
                 terms_of_service_agreed: true,
                 only_return_existing: false,
             },
