@@ -446,7 +446,14 @@ impl ProxyHttp for WafProxy {
             ));
         }
 
-        let upstream_addr = format!("{}:{}", host_config.remote_host, host_config.remote_port);
+        // Use remote_ip when set to bypass container DNS (e.g. /etc/hosts overrides).
+        // SNI still uses remote_host so TLS handshake gets the correct hostname.
+        let upstream_connect_host = host_config
+            .remote_ip
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&host_config.remote_host);
+        let upstream_addr = format!("{}:{}", upstream_connect_host, host_config.remote_port);
         let use_tls = host_config.ssl;
 
         ctx.upstream_addr = Some(upstream_addr.clone());
