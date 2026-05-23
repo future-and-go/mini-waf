@@ -13,7 +13,7 @@ ExecStart=/usr/local/bin/prx-waf --config /etc/prx-waf/config.toml run
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s
-KillMode=process
+KillMode=mixed
 KillSignal=SIGTERM
 TimeoutStopSec=30
 
@@ -22,7 +22,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/prx-waf/certs /var/log/prx-waf
+ReadWritePaths=/opt/prx-waf /var/lib/prx-waf /var/log/prx-waf
 
 # Environment
 Environment=RUST_LOG=info
