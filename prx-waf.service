@@ -22,7 +22,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/prx-waf/certs /var/log/prx-waf
+ReadWritePaths=/opt/prx-waf /var/lib/prx-waf /var/log/prx-waf
 
 # Environment
 Environment=RUST_LOG=info
