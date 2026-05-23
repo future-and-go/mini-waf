@@ -42,7 +42,7 @@ fn sample_host() -> CreateHost {
         remarks: Some("test".into()),
         start_status: true,
         log_only_mode: false,
-        upstream_alpn: Default::default(),
+        upstream_alpn: "h2h1".to_string(),
         upstream_skip_ssl_verify: false,
     }
 }
