@@ -23,7 +23,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use waf_engine::rules::data_file_registry::DataFileRegistry;
 use waf_engine::rules::formats::custom_rule_yaml;
+use waf_engine::rules::formats::custom_rule_yaml::LoadContext;
 
 /// Recursively collect all `.yaml` files under `dir`.
 fn collect_yaml_files(dir: &Path) -> Vec<PathBuf> {
@@ -57,12 +59,19 @@ fn rules_dir() -> PathBuf {
 /// production `load_dir` behavior where per-file failures are logged, not fatal).
 fn load_all_rules() -> Vec<waf_engine::CustomRule> {
     let dir = rules_dir();
+    let canonical_root = dir.canonicalize().expect("canonicalise rules dir");
     let files = collect_yaml_files(&dir);
+    let registry = DataFileRegistry::new();
     let mut all_rules = Vec::new();
 
     for path in &files {
         let content = fs::read_to_string(path).expect("read yaml file");
-        if let Ok(rules) = custom_rule_yaml::parse(&content) {
+        let ctx = LoadContext {
+            yaml_path: path,
+            rules_root: &canonical_root,
+            registry: &registry,
+        };
+        if let Ok(rules) = custom_rule_yaml::parse_with_context(&content, Some(&ctx)) {
             all_rules.extend(rules);
         }
     }
@@ -73,7 +82,9 @@ fn load_all_rules() -> Vec<waf_engine::CustomRule> {
 #[test]
 fn all_yaml_rules_load_successfully() {
     let dir = rules_dir();
+    let canonical_root = dir.canonicalize().expect("canonicalise rules dir");
     let files = collect_yaml_files(&dir);
+    let registry = DataFileRegistry::new();
 
     let mut total_rules = 0;
     let mut total_files = 0;
@@ -81,7 +92,12 @@ fn all_yaml_rules_load_successfully() {
 
     for path in &files {
         let content = fs::read_to_string(path).expect("read yaml file");
-        match custom_rule_yaml::parse(&content) {
+        let ctx = LoadContext {
+            yaml_path: path,
+            rules_root: &canonical_root,
+            registry: &registry,
+        };
+        match custom_rule_yaml::parse_with_context(&content, Some(&ctx)) {
             Ok(rules) => {
                 total_rules += rules.len();
                 if !rules.is_empty() {
@@ -128,9 +144,8 @@ fn every_rule_has_matching_logic() {
         let has_conditions = !rule.conditions.is_empty();
         let has_tree = rule.match_tree.is_some();
         let has_script = rule.script.is_some();
-        let has_specialised = rule.specialised_op.is_some();
 
-        if !has_pattern && !has_conditions && !has_tree && !has_script && !has_specialised {
+        if !has_pattern && !has_conditions && !has_tree && !has_script {
             missing.push(rule.id.clone());
         }
     }

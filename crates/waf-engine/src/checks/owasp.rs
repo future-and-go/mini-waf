@@ -18,8 +18,10 @@ use tracing::{debug, warn};
 
 use waf_common::{DetectionResult, RequestCtx};
 
+use crate::rules::data_file_registry::DataFileRegistry;
 use crate::rules::engine::{CustomRulesEngine, Operator};
 use crate::rules::formats::custom_rule_yaml;
+use crate::rules::formats::custom_rule_yaml::LoadContext;
 
 use super::Check;
 
@@ -104,14 +106,30 @@ impl OWASPCheck {
     pub fn from_directory(dir: &Path) -> Self {
         let engine = CustomRulesEngine::new();
         let mut count = 0;
-        Self::walk_directory(dir, &engine, &mut count);
+        let registry = DataFileRegistry::new();
+        // Canonicalise once so the resolver's `starts_with` check uses a
+        // stable root regardless of how callers spelled the path.
+        let rules_root = match dir.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("Cannot canonicalise rules dir {}: {e}", dir.display());
+                return Self { engine, rule_count: 0 };
+            }
+        };
+        Self::walk_directory(dir, &rules_root, &registry, &engine, &mut count);
         Self {
             engine,
             rule_count: count,
         }
     }
 
-    fn walk_directory(dir: &Path, engine: &CustomRulesEngine, count: &mut usize) {
+    fn walk_directory(
+        dir: &Path,
+        rules_root: &Path,
+        registry: &DataFileRegistry,
+        engine: &CustomRulesEngine,
+        count: &mut usize,
+    ) {
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(err) => {
@@ -127,7 +145,7 @@ impl OWASPCheck {
                 if path.file_name().and_then(|n| n.to_str()) == Some("custom") {
                     continue;
                 }
-                Self::walk_directory(&path, engine, count);
+                Self::walk_directory(&path, rules_root, registry, engine, count);
                 continue;
             }
             if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
@@ -140,8 +158,13 @@ impl OWASPCheck {
                     continue;
                 }
             };
+            let ctx = LoadContext {
+                yaml_path: &path,
+                rules_root,
+                registry,
+            };
             // Try custom_rule_v1 format first
-            match custom_rule_yaml::parse(&content) {
+            match custom_rule_yaml::parse_with_context(&content, Some(&ctx)) {
                 Ok(rules) if !rules.is_empty() => {
                     let n = rules.len();
                     for rule in rules {
@@ -322,10 +345,10 @@ fn legacy_parse_ruleset(yaml: &str) -> Option<Vec<CustomRule>> {
 fn legacy_convert_rule(r: &LegacyYamlRule) -> Option<CustomRule> {
     // Virtual fields that need Rhai scripts (no ConditionField equivalent)
     if let Some(script) = legacy_virtual_field_script(&r.field, &r.operator, &r.value) {
-        return Some(legacy_rule_shell(r, Some(script), Vec::new(), None, None));
+        return Some(legacy_rule_shell(r, Some(script), Vec::new(), None));
     }
 
-    let (conditions, specialised_op, pattern) = match r.operator.as_str() {
+    let (conditions, pattern) = match r.operator.as_str() {
         "regex" => {
             let pattern_str = match &r.value {
                 LegacyYamlValue::Str(s) => s.clone(),
@@ -336,7 +359,7 @@ fn legacy_convert_rule(r: &LegacyYamlRule) -> Option<CustomRule> {
                 .build()
                 .map_err(|e| warn!("Invalid regex in OWASP rule {}: {e}", r.id))
                 .ok()?;
-            (Vec::new(), None, Some(re))
+            (Vec::new(), Some(re))
         }
         "contains" => {
             let s = match &r.value {
@@ -350,7 +373,6 @@ fn legacy_convert_rule(r: &LegacyYamlRule) -> Option<CustomRule> {
                     operator: Operator::Contains,
                     value: ConditionValue::Str(s),
                 }],
-                None,
                 None,
             )
         }
@@ -367,7 +389,6 @@ fn legacy_convert_rule(r: &LegacyYamlRule) -> Option<CustomRule> {
                     value: ConditionValue::List(list),
                 }],
                 None,
-                None,
             )
         }
         "gt" => {
@@ -382,7 +403,6 @@ fn legacy_convert_rule(r: &LegacyYamlRule) -> Option<CustomRule> {
                     operator: Operator::Gt,
                     value: ConditionValue::Number(n),
                 }],
-                None,
                 None,
             )
         }
@@ -399,18 +419,31 @@ fn legacy_convert_rule(r: &LegacyYamlRule) -> Option<CustomRule> {
                     value: ConditionValue::Number(n),
                 }],
                 None,
-                None,
             )
         }
-        "detect_sqli" | "@detectSQLi" => (Vec::new(), Some(Operator::DetectSqli), None),
-        "detect_xss" | "@detectXSS" => (Vec::new(), Some(Operator::DetectXss), None),
+        "detect_sqli" | "@detectSQLi" => (
+            vec![Condition {
+                field: legacy_map_detector_field(&r.field),
+                operator: Operator::DetectSqli,
+                value: ConditionValue::Str(String::new()),
+            }],
+            None,
+        ),
+        "detect_xss" | "@detectXSS" => (
+            vec![Condition {
+                field: legacy_map_detector_field(&r.field),
+                operator: Operator::DetectXss,
+                value: ConditionValue::Str(String::new()),
+            }],
+            None,
+        ),
         op => {
             debug!("Skipping OWASP rule {} with unsupported operator '{op}'", r.id);
             return None;
         }
     };
 
-    Some(legacy_rule_shell(r, None, conditions, pattern, specialised_op))
+    Some(legacy_rule_shell(r, None, conditions, pattern))
 }
 
 #[deprecated(
@@ -423,7 +456,6 @@ fn legacy_rule_shell(
     script: Option<String>,
     conditions: Vec<Condition>,
     pattern: Option<regex::Regex>,
-    specialised_op: Option<Operator>,
 ) -> CustomRule {
     CustomRule {
         id: r.id.clone(),
@@ -448,7 +480,6 @@ fn legacy_rule_shell(
         tags: Vec::new(),
         metadata: HashMap::new(),
         reference: None,
-        specialised_op,
     }
 }
 
@@ -502,6 +533,21 @@ fn legacy_map_field(field: &str) -> ConditionField {
             ConditionField::Body
         }
     }
+}
+
+/// Variant of [`legacy_map_field`] for `detect_sqli` / `detect_xss` rules:
+/// `"all"` / `"headers"` map to [`ConditionField::All`] so the matcher scans
+/// path → query → body → non-routing headers (matches CRS expectations).
+#[deprecated(
+    since = "0.1.0",
+    note = "Use custom_rule_yaml::parse() — all YAML rules now use custom_rule_v1 format"
+)]
+#[allow(deprecated)]
+fn legacy_map_detector_field(field: &str) -> ConditionField {
+    if matches!(field, "all" | "headers") {
+        return ConditionField::All;
+    }
+    legacy_map_field(field)
 }
 
 #[cfg(test)]
