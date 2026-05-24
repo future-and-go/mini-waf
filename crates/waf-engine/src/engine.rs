@@ -11,8 +11,10 @@ use waf_storage::{
     models::{AttackLog, CreateSecurityEvent},
 };
 
+use crate::audit_emitter::AuditEmitter;
 use crate::block_page::render_block_page;
 use crate::checker::{RuleStore, check_ip_blacklist, check_ip_whitelist, check_url_blacklist, check_url_whitelist};
+use crate::intel_status::FeedStatusRegistry;
 use waf_common::config::SqliScanConfig;
 
 use crate::checks::ddos::action::{BanAction, CombinedAction};
@@ -123,6 +125,15 @@ pub struct WafEngine {
     /// called by the binary boot path.  When set, every non-Allow decision
     /// from `inspect()` is mirrored into `VictoriaLogs` as an audit record.
     audit_sender: OnceLock<Arc<AuditSender>>,
+    // ── Issue #60: shared audit emitter (rate-limited DB persistence) ────────
+    /// `None` until [`set_audit_emitter`] is called by the binary boot path.
+    /// Detection modules (`relay`, `tx_velocity`, future canary) read this
+    /// via the engine handle and call [`AuditEmitter::emit`] to materialise
+    /// detection signals as rows in `security_events`.
+    audit_emitter: OnceLock<Arc<AuditEmitter>>,
+    /// `FeedStatusRegistry` skeleton populated by relay at startup; consumed
+    /// by the admin API `GET /api/reputation/status`.
+    feed_status: FeedStatusRegistry,
 }
 
 impl WafEngine {
@@ -227,6 +238,8 @@ impl WafEngine {
             ddos_check,
             ddos_reloader: OnceLock::new(),
             audit_sender: OnceLock::new(),
+            audit_emitter: OnceLock::new(),
+            feed_status: FeedStatusRegistry::new(),
         }
     }
 
@@ -397,6 +410,34 @@ impl WafEngine {
     /// after init when `[victoria_logs] enabled = true`).
     pub fn set_audit_sender(&self, sender: Arc<AuditSender>) {
         let _ = self.audit_sender.set(sender);
+    }
+
+    /// Plug the shared rate-limited audit emitter into the engine.
+    ///
+    /// The emitter materialises detection signals as `security_events` rows.
+    /// In phase 01 no callers are wired — relay (phase 02) and tx_velocity
+    /// (phase 03) PRs introduce the call sites. Until then, setting an
+    /// `enabled = true` config produces a startup warning so operators are
+    /// not surprised by an empty `security_events` table.
+    pub fn set_audit_emitter(&self, emitter: Arc<AuditEmitter>) {
+        if emitter.is_enabled() {
+            warn!(
+                target = "audit_emitter",
+                "audit_emitter enabled but no detection modules wired yet \
+                 (relay + tx_velocity wiring lands in follow-up PRs)"
+            );
+        }
+        let _ = self.audit_emitter.set(emitter);
+    }
+
+    /// Return the audit emitter if set, for relay/tx_velocity wiring.
+    pub fn audit_emitter(&self) -> Option<Arc<AuditEmitter>> {
+        self.audit_emitter.get().cloned()
+    }
+
+    /// Return the feed-status registry handle for the admin API.
+    pub fn feed_status(&self) -> FeedStatusRegistry {
+        self.feed_status.clone()
     }
 
     /// Return a reference to the `GeoCheck` so callers can load rules.
