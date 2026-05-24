@@ -7,10 +7,13 @@
 //! are rejected as a forward-compatibility safeguard.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
 
+use super::super::data_file_registry::{DataFileRegistry, build_inline_ac};
+use super::super::data_file_resolver::resolve_data_path;
 use super::super::engine::{
     Condition, ConditionField, ConditionNode, ConditionOp, ConditionValue, CustomRule, Operator, RuleAction,
 };
@@ -106,7 +109,27 @@ const KIND_PREFIX: &str = "custom_rule_";
 /// Multi-document YAML is supported (`---` separators). Documents without
 /// a `kind: custom_rule_v1` discriminator are skipped silently; documents
 /// that look like a versioned variant we don't recognise return `Err`.
+///
+/// `pm_from_file` rules are rejected here because they need a YAML-file path
+/// and a `rules_root` for the path-traversal guard — use
+/// [`parse_with_context`] for those.
 pub fn parse(content: &str) -> Result<Vec<CustomRule>> {
+    parse_with_context(content, None)
+}
+
+/// Per-load context required to resolve `pm_from_file` data files.
+pub struct LoadContext<'a> {
+    /// Path of the YAML file being parsed (anchor for `data/<value>` lookups).
+    pub yaml_path: &'a Path,
+    /// Canonicalised root the resolved data-file path must stay inside.
+    pub rules_root: &'a Path,
+    /// Process-wide Aho-Corasick automaton cache.
+    pub registry: &'a DataFileRegistry,
+}
+
+/// Path-aware variant of [`parse`] — required when documents use
+/// `operator: pm_from_file`.
+pub fn parse_with_context(content: &str, ctx: Option<&LoadContext<'_>>) -> Result<Vec<CustomRule>> {
     let mut out = Vec::new();
     for (idx, doc) in serde_yaml::Deserializer::from_str(content).enumerate() {
         let value =
@@ -137,14 +160,14 @@ pub fn parse(content: &str) -> Result<Vec<CustomRule>> {
 
         let dto: YamlCustomRule = serde_yaml::from_value(value.clone())
             .with_context(|| format!("document #{}: failed to parse custom_rule_v1", idx + 1))?;
-        let rule =
-            to_custom_rule(dto).with_context(|| format!("document #{}: failed to convert custom_rule_v1", idx + 1))?;
+        let rule = to_custom_rule(dto, ctx)
+            .with_context(|| format!("document #{}: failed to convert custom_rule_v1", idx + 1))?;
         out.push(rule);
     }
     Ok(out)
 }
 
-fn to_custom_rule(dto: YamlCustomRule) -> Result<CustomRule> {
+fn to_custom_rule(dto: YamlCustomRule, ctx: Option<&LoadContext<'_>>) -> Result<CustomRule> {
     let pattern = match &dto.pattern {
         Some(p) => Some(
             regex::RegexBuilder::new(p)
@@ -155,25 +178,20 @@ fn to_custom_rule(dto: YamlCustomRule) -> Result<CustomRule> {
         None => None,
     };
 
-    // Auto-convert Registry-style operator+value shorthand to a condition
-    // when no conditions, match_tree, or pattern are present.
-    // Specialised operators (pm_from_file, detect_sqli, detect_xss,
-    // contains_any) are stored in `specialised_op` for dispatch by the engine.
+    // Auto-convert Registry-style operator+value shorthand to a Condition
+    // when no conditions, match_tree, or pattern are present. All operators
+    // (including pm_from_file / contains_any / detect_sqli / detect_xss) are
+    // routed through the unified Condition/Matcher pipeline.
     let mut conditions = dto.conditions;
-    let mut specialised_op = None;
     if conditions.is_empty()
         && dto.match_tree.is_none()
         && pattern.is_none()
         && let (Some(op_str), Some(val)) = (&dto.operator, &dto.value)
     {
         let operator = parse_operator_str(op_str)?;
-        if is_specialised_operator(&operator) {
-            specialised_op = Some(operator);
-        } else {
-            let field = parse_pattern_field_to_condition(&dto.pattern_field);
-            let value = yaml_value_to_condition_value(val)?;
-            conditions.push(Condition { field, operator, value });
-        }
+        let field = parse_pattern_field_for_operator(&dto.pattern_field, &operator);
+        let value = build_condition_value(&operator, val, ctx)?;
+        conditions.push(Condition { field, operator, value });
     }
 
     Ok(CustomRule {
@@ -199,7 +217,6 @@ fn to_custom_rule(dto: YamlCustomRule) -> Result<CustomRule> {
         tags: dto.tags,
         metadata: dto.metadata,
         reference: dto.reference,
-        specialised_op,
     })
 }
 
@@ -223,6 +240,24 @@ fn parse_pattern_field_to_condition(field: &str) -> ConditionField {
             ConditionField::Body
         }
     }
+}
+
+/// Operator-aware field resolution.
+///
+/// For the multi-pattern / detector operators (`pm_from_file`, `contains_any`,
+/// `detect_sqli`, `detect_xss`), `pattern_field: all` (the parser default)
+/// expands to `ConditionField::All` so the engine scans path → query → body →
+/// non-routing-headers. Other operators retain the legacy `all → Body` mapping
+/// for back-compat with existing rules.
+fn parse_pattern_field_for_operator(field: &str, op: &Operator) -> ConditionField {
+    if matches!(
+        op,
+        Operator::PmFromFile | Operator::ContainsAny | Operator::DetectSqli | Operator::DetectXss
+    ) && matches!(field, "all" | "headers")
+    {
+        return ConditionField::All;
+    }
+    parse_pattern_field_to_condition(field)
 }
 
 /// Parse an operator string from OWASP/Registry format to `Operator`.
@@ -251,12 +286,46 @@ fn parse_operator_str(s: &str) -> Result<Operator> {
     })
 }
 
-/// Operators evaluated by specialised modules, not the generic condition matcher.
-const fn is_specialised_operator(op: &Operator) -> bool {
-    matches!(
-        op,
-        Operator::PmFromFile | Operator::DetectSqli | Operator::DetectXss | Operator::ContainsAny
-    )
+/// Build the `ConditionValue` for an operator + raw YAML value, performing
+/// any operator-specific compilation (Aho-Corasick build, data-file load).
+///
+/// * `pm_from_file` — resolves the filename under the YAML file's `data/` dir
+///   and loads the cached automaton from the registry. Requires `ctx`.
+/// * `contains_any` — splits the value on whitespace and builds an inline
+///   Aho-Corasick automaton.
+/// * `detect_sqli` / `detect_xss` — value is irrelevant to the libinjection
+///   matcher; an empty `Str` is emitted to satisfy the type.
+/// * other ops — generic YAML→`ConditionValue` mapping.
+fn build_condition_value(
+    op: &Operator,
+    val: &serde_yaml::Value,
+    ctx: Option<&LoadContext<'_>>,
+) -> Result<ConditionValue> {
+    match op {
+        Operator::PmFromFile => {
+            let filename = val
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("pm_from_file value must be a string filename"))?;
+            let load = ctx.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "pm_from_file requires LoadContext (call parse_with_context); rule references {filename}"
+                )
+            })?;
+            let path = resolve_data_path(load.yaml_path, filename, load.rules_root)?;
+            let ac = load.registry.load_or_get(&path)?;
+            Ok(ConditionValue::AhoCorasick(ac))
+        }
+        Operator::ContainsAny => {
+            let raw = val
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("contains_any value must be a whitespace-separated string"))?;
+            let patterns: Vec<String> = raw.split_whitespace().map(str::to_owned).collect();
+            let ac = build_inline_ac(&patterns)?;
+            Ok(ConditionValue::AhoCorasick(ac))
+        }
+        Operator::DetectSqli | Operator::DetectXss => Ok(ConditionValue::Str(String::new())),
+        _ => yaml_value_to_condition_value(val),
+    }
 }
 
 /// Convert a `serde_yaml::Value` to `ConditionValue`.

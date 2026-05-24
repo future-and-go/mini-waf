@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 
+use aho_corasick::AhoCorasick;
 use anyhow::Context as _;
 use dashmap::DashMap;
 use globset::{Glob, GlobBuilder, GlobMatcher};
@@ -55,6 +56,10 @@ pub enum ConditionField {
     /// Rules targeting this field are partitioned into a separate evaluation
     /// phase so they don't accidentally match against the request body.
     ResponseBody,
+    /// Multi-field scan: path → query → body → non-routing headers.
+    /// Used by `pm_from_file`, `contains_any`, `detect_sqli`, `detect_xss`
+    /// when YAML sets `pattern_field: all`.
+    All,
 }
 
 // Custom Deserialize: accepts both legacy bare strings (`"cookie"`,
@@ -93,6 +98,7 @@ impl<'de> Deserialize<'de> for ConditionField {
                     "geo_city" => Ok(ConditionField::GeoCity),
                     "geo_isp" => Ok(ConditionField::GeoIsp),
                     "response_body" => Ok(ConditionField::ResponseBody),
+                    "all" => Ok(ConditionField::All),
                     other => Err(E::unknown_variant(
                         other,
                         &[
@@ -113,6 +119,7 @@ impl<'de> Deserialize<'de> for ConditionField {
                             "geo_city",
                             "geo_isp",
                             "response_body",
+                            "all",
                         ],
                     )),
                 }
@@ -184,6 +191,11 @@ pub enum ConditionValue {
     Str(String),
     List(Vec<String>),
     Number(i64),
+    /// Pre-compiled Aho-Corasick automaton for `pm_from_file` / `contains_any`.
+    /// Constructed only at load time by the YAML parser — never produced by
+    /// serde round-trip, so the variant carries `#[serde(skip)]`.
+    #[serde(skip)]
+    AhoCorasick(Arc<AhoCorasick>),
 }
 
 // ── Single condition ──────────────────────────────────────────────────────────
@@ -258,9 +270,6 @@ pub struct CustomRule {
     pub metadata: HashMap<String, String>,
     /// External reference URL.
     pub reference: Option<String>,
-    /// Operator that can't be compiled into a condition tree (e.g. `detect_sqli`).
-    /// Stored so the rule engine can dispatch to specialised evaluation paths.
-    pub specialised_op: Option<Operator>,
 }
 
 // ── FR-025 Rule Verdict ───────────────────────────────────────────────────────
@@ -579,12 +588,6 @@ impl CustomRulesEngine {
             return false;
         }
 
-        // Specialised operators (detect_sqli, detect_xss) bypass the condition
-        // engine and run their own multi-field scan with URL-decode protection.
-        if let Some(ref op) = rule.specialised_op {
-            return eval_specialised(op, &rule.pattern_field, ctx);
-        }
-
         rule.script.as_ref().map_or_else(
             || {
                 entry.compiled.as_ref().map_or_else(
@@ -722,7 +725,6 @@ pub fn from_db_rule(row: &DbCustomRule) -> anyhow::Result<CustomRule> {
         tags: Vec::new(),
         metadata: HashMap::new(),
         reference: None,
-        specialised_op: None,
     })
 }
 
@@ -840,6 +842,11 @@ pub enum Matcher {
     // libinjection-based detectors (ported from OWASPCheck)
     DetectSqli,
     DetectXss,
+    // Aho-Corasick pattern matchers (case-insensitive, leftmost-first).
+    // `PatternSet` is sourced from a `.data` file (`pm_from_file`).
+    // `PatternList` is sourced from an inline whitespace-separated list (`contains_any`).
+    PatternSet(Arc<AhoCorasick>),
+    PatternList(Arc<AhoCorasick>),
 }
 
 /// Compile a raw rule into its eval-ready form.
@@ -937,10 +944,9 @@ fn compile_condition(cond: &Condition) -> anyhow::Result<CompiledCondition> {
         // libinjection detectors — value is ignored (detection is on the field)
         (Operator::DetectSqli, _) => Matcher::DetectSqli,
         (Operator::DetectXss, _) => Matcher::DetectXss,
-        // Operators handled by specialised modules — not evaluable as conditions.
-        (op @ (Operator::PmFromFile | Operator::ContainsAny), _) => {
-            anyhow::bail!("operator {op:?} is handled by a specialised check module, not the condition evaluator");
-        }
+        // Aho-Corasick multi-pattern matchers (pre-compiled at YAML load time).
+        (Operator::PmFromFile, V::AhoCorasick(ac)) => Matcher::PatternSet(ac.clone()),
+        (Operator::ContainsAny, V::AhoCorasick(ac)) => Matcher::PatternList(ac.clone()),
         (op, val) => {
             anyhow::bail!("unsupported operator/value combination: {op:?} / {val:?}");
         }
@@ -974,8 +980,28 @@ impl Matcher {
             Self::Lte(n) => fstr.parse::<i64>().is_ok_and(|v| v <= *n),
             Self::DetectSqli => detect_with_decode(fstr, |b| libinjectionrs::detect_sqli(b).is_injection()),
             Self::DetectXss => detect_with_decode(fstr, |b| libinjectionrs::detect_xss(b).is_injection()),
+            Self::PatternSet(ac) | Self::PatternList(ac) => ac_matches_with_decode(ac, fstr),
         }
     }
+}
+
+/// Aho-Corasick scan with URL-decode bypass protection.
+///
+/// Mirrors `detect_with_decode`: tries raw input first, then single-pass and
+/// recursive URL-decoded forms. Used for `pm_from_file` / `contains_any` so
+/// that `/%2Eenv` matches `.env` after decoding.
+fn ac_matches_with_decode(ac: &AhoCorasick, raw: &str) -> bool {
+    use crate::checks::{url_decode, url_decode_recursive};
+
+    if ac.is_match(raw) {
+        return true;
+    }
+    let decoded = url_decode(raw);
+    if decoded != raw && ac.is_match(&decoded) {
+        return true;
+    }
+    let recursive = url_decode_recursive(raw);
+    recursive != decoded && ac.is_match(&recursive)
 }
 
 /// Run a libinjection detector on raw + URL-decoded forms to catch encoding
@@ -1068,14 +1094,32 @@ fn pattern_matches_request(pattern: &Regex, field: &str, ctx: &RequestCtx) -> bo
 /// Recursive evaluator over a `CompiledNode` tree.
 fn eval_compiled_node(ctx: &RequestCtx, node: &CompiledNode) -> bool {
     match node {
-        CompiledNode::Leaf(c) => {
-            let fval = field_value(ctx, &c.field);
-            c.matcher.matches(fval.as_deref().unwrap_or(""), ctx.client_ip)
-        }
+        CompiledNode::Leaf(c) => eval_compiled_leaf(ctx, c),
         CompiledNode::And(v) => v.iter().all(|n| eval_compiled_node(ctx, n)),
         CompiledNode::Or(v) => v.iter().any(|n| eval_compiled_node(ctx, n)),
         CompiledNode::Not(b) => !eval_compiled_node(ctx, b),
     }
+}
+
+/// Evaluate a single compiled leaf, expanding `ConditionField::All` into a
+/// path → query → body → non-routing-headers iteration. First hit wins.
+fn eval_compiled_leaf(ctx: &RequestCtx, c: &CompiledCondition) -> bool {
+    if matches!(c.field, ConditionField::All) {
+        let body = String::from_utf8_lossy(&ctx.body_preview);
+        if c.matcher.matches(&ctx.path, ctx.client_ip)
+            || c.matcher.matches(&ctx.query, ctx.client_ip)
+            || c.matcher.matches(&body, ctx.client_ip)
+        {
+            return true;
+        }
+        return ctx
+            .headers
+            .iter()
+            .filter(|(k, _)| !is_routing_header(k))
+            .any(|(_, v)| c.matcher.matches(v, ctx.client_ip));
+    }
+    let fval = field_value(ctx, &c.field);
+    c.matcher.matches(fval.as_deref().unwrap_or(""), ctx.client_ip)
 }
 
 /// Returns `true` when a rule's `pattern_field` targets response body content.
@@ -1107,44 +1151,9 @@ fn field_value(ctx: &RequestCtx, field: &ConditionField) -> Option<String> {
         // ResponseBody is evaluated at response time, not request time.
         // Return None here so request-phase rules never match accidentally.
         ConditionField::ResponseBody => None,
-    }
-}
-
-// ── Specialised operator evaluation (detect_sqli, detect_xss) ────────────────
-
-/// Evaluate a specialised operator (libinjection) against request fields.
-///
-/// When `pattern_field` is `"all"`, scans path → query → body → headers
-/// (skipping routing headers). For a specific field, only that field is tested.
-/// All values are tested in raw + URL-decoded forms to catch encoding bypasses.
-fn eval_specialised(op: &Operator, pattern_field: &str, ctx: &RequestCtx) -> bool {
-    let detector: fn(&[u8]) -> bool = match op {
-        Operator::DetectSqli => |b| libinjectionrs::detect_sqli(b).is_injection(),
-        Operator::DetectXss => |b| libinjectionrs::detect_xss(b).is_injection(),
-        _ => return false,
-    };
-
-    let detect = |raw: &str| -> bool { detect_with_decode(raw, detector) };
-
-    match pattern_field {
-        "all" | "" => {
-            detect(&ctx.path)
-                || detect(&ctx.query)
-                || detect(&String::from_utf8_lossy(&ctx.body_preview))
-                || ctx
-                    .headers
-                    .iter()
-                    .filter(|(k, _)| !is_routing_header(k))
-                    .any(|(_, v)| detect(v))
-        }
-        "path" => detect(&ctx.path),
-        "query" => detect(&ctx.query),
-        "body" => detect(&String::from_utf8_lossy(&ctx.body_preview)),
-        "method" => detect(&ctx.method),
-        _ => {
-            // Named field — try headers
-            ctx.headers.get(pattern_field).is_some_and(|v| detect(v))
-        }
+        // `All` is a marker — it has no single value; iteration happens in
+        // `eval_compiled_node` / `eval_one_with_all`.
+        ConditionField::All => None,
     }
 }
 
@@ -1214,7 +1223,6 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
-            specialised_op: None,
         };
         engine.add_rule(rule);
 
@@ -1255,7 +1263,6 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
-            specialised_op: None,
         };
         engine.add_rule(rule);
 
@@ -1292,7 +1299,6 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
-            specialised_op: None,
         };
         engine.add_rule(rule);
 
@@ -1329,7 +1335,6 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
-            specialised_op: None,
         }
     }
 
@@ -1475,7 +1480,6 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
-            specialised_op: None,
         });
 
         assert!(engine.check(&make_ctx("/api/v1/admin", "GET", "1.2.3.4")).is_some());
@@ -1615,7 +1619,6 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
-            specialised_op: None,
         });
 
         assert!(engine.check(&make_ctx("/admin/x", "POST", "1.2.3.4")).is_some());
@@ -1664,7 +1667,6 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
-            specialised_op: None,
         });
 
         assert!(engine.check(&make_ctx_with_cookies("session=abc; other=x")).is_some());
@@ -1703,7 +1705,6 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
-            specialised_op: None,
         });
 
         assert!(engine.check(&make_ctx_with_cookies("a=b; track=1")).is_some());
@@ -1772,7 +1773,6 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
-            specialised_op: None,
         }
     }
 
@@ -2011,7 +2011,6 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
-            specialised_op: None,
         };
         engine.add_rule(rule);
 
@@ -2050,7 +2049,6 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
-            specialised_op: None,
         });
 
         assert!(engine.has_response_rules());
@@ -2091,7 +2089,6 @@ mod tests {
             tags: Vec::new(),
             metadata: HashMap::new(),
             reference: None,
-            specialised_op: None,
         });
 
         // Matches for the correct host
