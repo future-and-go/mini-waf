@@ -155,3 +155,100 @@ fn watcher_loads_pattern_based_rule() {
         engine.len()
     );
 }
+
+/// Verifies that modifying a `.data` file referenced by a `pm_from_file` rule
+/// causes the engine to pick up new patterns after a fresh load (DataFileRegistry
+/// mtime invalidation).
+#[test]
+fn data_file_reload_picks_up_new_pattern() {
+    use waf_engine::OWASPCheck;
+    use waf_engine::checks::Check;
+
+    let tmp = tempdir().expect("tempdir");
+    let rules_root = tmp.path().canonicalize().expect("canonicalize");
+
+    // Create the data/ subdirectory with a .data file
+    let data_dir = rules_root.join("data");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    let data_file = data_dir.join("test.data");
+    std::fs::write(&data_file, "forbidden\n").expect("write initial data");
+
+    // Write a YAML rule using pm_from_file pointing to test.data
+    let rule_yaml = r#"
+kind: custom_rule_v1
+id: HR-DATA-1
+name: hot reload data file test
+enabled: true
+action: block
+pattern_field: path
+operator: pm_from_file
+value: test.data
+category: test
+severity: critical
+paranoia: 1
+"#;
+    std::fs::write(rules_root.join("hr-data.yaml"), rule_yaml).expect("write rule yaml");
+
+    // Load engine — should block /forbidden
+    let checker = OWASPCheck::from_directory(&rules_root);
+    assert!(checker.rule_count() > 0, "should load at least 1 rule");
+
+    let host_config = Arc::new(HostConfig {
+        code: "test".into(),
+        host: "example.com".into(),
+        defense_config: waf_common::DefenseConfig {
+            owasp_set: true,
+            owasp_paranoia: 4,
+            ..Default::default()
+        },
+        ..HostConfig::default()
+    });
+
+    let ctx_forbidden = RequestCtx {
+        req_id: "hr-d1".into(),
+        client_ip: "1.2.3.4".parse().unwrap(),
+        client_port: 0,
+        method: "GET".into(),
+        host: "example.com".into(),
+        port: 80,
+        path: "/forbidden".into(),
+        query: String::new(),
+        headers: HashMap::new(),
+        body_preview: Bytes::new(),
+        content_length: 0,
+        is_tls: false,
+        host_config: Arc::clone(&host_config),
+        geo: None,
+        tier: waf_common::tier::Tier::CatchAll,
+        tier_policy: RequestCtx::default_tier_policy(),
+        cookies: HashMap::new(),
+    };
+    assert!(
+        checker.check(&ctx_forbidden).is_some(),
+        "GET /forbidden must be blocked by pm_from_file rule"
+    );
+
+    // /newbad should NOT be blocked yet
+    let ctx_newbad = RequestCtx {
+        path: "/newbad".into(),
+        req_id: "hr-d2".into(),
+        ..ctx_forbidden.clone()
+    };
+    assert!(
+        checker.check(&ctx_newbad).is_none(),
+        "GET /newbad must pass — not in data file yet"
+    );
+
+    // Append "newbad" to the data file
+    std::fs::write(&data_file, "forbidden\nnewbad\n").expect("update data file");
+
+    // Sleep briefly to ensure file mtime changes
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Re-load the engine (simulates what hot reload would do)
+    let checker2 = OWASPCheck::from_directory(&rules_root);
+    assert!(
+        checker2.check(&ctx_newbad).is_some(),
+        "GET /newbad must be blocked after data file update and re-load"
+    );
+}

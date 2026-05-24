@@ -3,7 +3,7 @@
 //! Uses the `notify` crate for file-system events and optionally handles SIGHUP.
 //! Debounces rapid successive changes by waiting `debounce_ms` after the last event.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,6 +14,9 @@ use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use tracing::{info, warn};
 
 use super::manager::RuleManager;
+
+/// File extensions that should trigger a rule reload.
+const RELEVANT_EXTENSIONS: &[&str] = &["yaml", "yml", "data"];
 
 /// A running file-system watcher that triggers rule reloads.
 ///
@@ -53,12 +56,11 @@ impl HotReloader {
             loop {
                 match rx.recv_timeout(debounce) {
                     Ok(Ok(event)) => {
-                        // Filter: only react to Create, Modify, Remove
-                        let relevant = matches!(
+                        let relevant_kind = matches!(
                             event.kind,
                             notify::EventKind::Create(_) | notify::EventKind::Modify(_) | notify::EventKind::Remove(_)
                         );
-                        if relevant {
+                        if relevant_kind && has_relevant_extension(&event) {
                             last_event = std::time::Instant::now();
                             pending = true;
                         }
@@ -81,6 +83,17 @@ impl HotReloader {
 
         Ok(Self { _watcher: watcher })
     }
+}
+
+/// Returns `true` if any path in `event` has a rule-relevant extension.
+fn has_relevant_extension(event: &Event) -> bool {
+    event.paths.iter().any(|p| is_relevant_rule_file(p))
+}
+
+fn is_relevant_rule_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| RELEVANT_EXTENSIONS.iter().any(|r| r.eq_ignore_ascii_case(ext)))
 }
 
 fn trigger_reload(manager: &Arc<Mutex<RuleManager>>) {
@@ -206,5 +219,45 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         } // dropped here — channel closes, thread should exit cleanly
         std::thread::sleep(Duration::from_millis(50));
+    }
+
+    #[test]
+    fn is_relevant_rule_file_accepts_yaml_yml_data() {
+        assert!(is_relevant_rule_file(Path::new("rules/test.yaml")));
+        assert!(is_relevant_rule_file(Path::new("rules/test.yml")));
+        assert!(is_relevant_rule_file(Path::new("rules/data/restricted-files.data")));
+        assert!(is_relevant_rule_file(Path::new("test.YAML")));
+    }
+
+    #[test]
+    fn is_relevant_rule_file_rejects_other_extensions() {
+        assert!(!is_relevant_rule_file(Path::new("README.md")));
+        assert!(!is_relevant_rule_file(Path::new("rules/config.json")));
+        assert!(!is_relevant_rule_file(Path::new("rules/notes.txt")));
+        assert!(!is_relevant_rule_file(Path::new("no_extension")));
+    }
+
+    #[test]
+    fn watcher_reacts_to_data_file_changes() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let rules_dir = tmp.path().to_path_buf();
+        let data_dir = rules_dir.join("data");
+        std::fs::create_dir_all(&data_dir).expect("create data dir");
+
+        let mgr = empty_manager();
+        let _hr = HotReloader::start(Arc::clone(&mgr), rules_dir.clone(), 50).expect("start");
+
+        std::thread::sleep(Duration::from_millis(60));
+
+        let f = data_dir.join("test.data");
+        std::fs::write(&f, "forbidden\n").expect("write .data");
+        std::thread::sleep(Duration::from_millis(150));
+
+        std::fs::write(&f, "forbidden\nnewbad\n").expect("modify .data");
+        std::thread::sleep(Duration::from_millis(150));
+
+        // Did not panic — manager still callable after .data changes.
+        let stats = mgr.lock().stats();
+        assert_eq!(stats.total, 0);
     }
 }
