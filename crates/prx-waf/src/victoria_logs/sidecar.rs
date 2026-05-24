@@ -250,7 +250,10 @@ async fn supervise(child: Child, cfg: VictoriaLogsConfig) {
             .arg(format!("--storageDataPath={}", cfg.storage_data_path))
             .arg(format!("--httpListenAddr={}", cfg.listen_addr))
             .arg(format!("--retentionPeriod={}", cfg.retention_period))
-            .arg(format!("--retention.maxDiskSpaceUsageBytes={}", cfg.max_disk_space_bytes))
+            .arg(format!(
+                "--retention.maxDiskSpaceUsageBytes={}",
+                cfg.max_disk_space_bytes
+            ))
             .arg(format!("--storage.minFreeDiskSpaceBytes={}", cfg.min_free_disk_bytes))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
