@@ -283,6 +283,19 @@ pub async fn get_rule_registry(State(state): State<Arc<AppState>>) -> impl IntoR
     let total = rules.len();
     let enabled = rules.iter().filter(|r| r.enabled).count();
 
+    let load_report = state.engine.custom_rules.load_report();
+    let failed_rules: Vec<serde_json::Value> = load_report
+        .failed
+        .iter()
+        .map(|f| {
+            json!({
+                "rule_id": f.rule_id,
+                "file": f.file.display().to_string(),
+                "reason": f.reason,
+            })
+        })
+        .collect();
+
     (
         StatusCode::OK,
         Json(json!({
@@ -290,6 +303,7 @@ pub async fn get_rule_registry(State(state): State<Arc<AppState>>) -> impl IntoR
             "total": total,
             "enabled": enabled,
             "disabled": total - enabled,
+            "failed_rules": failed_rules,
         })),
     )
 }

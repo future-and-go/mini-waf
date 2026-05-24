@@ -5,7 +5,9 @@ pub mod data_file_resolver;
 pub mod engine;
 pub mod formats;
 pub mod hot_reload;
+pub mod load_status;
 pub mod manager;
+pub mod metrics;
 pub mod registry;
 pub mod sources;
 

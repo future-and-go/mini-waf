@@ -23,11 +23,18 @@ import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useState } from "react";
 import type { RegistryRule } from "../../types/api";
 
+interface FailedRule {
+  rule_id: string;
+  file: string;
+  reason: string;
+}
+
 interface RegistryResponse {
   rules?: RegistryRule[];
   total?: number;
   enabled?: number;
   disabled?: number;
+  failed_rules?: FailedRule[];
 }
 
 const severityColor = (s?: string): string =>
@@ -90,6 +97,8 @@ export const RulesManagementPage: React.FC = () => {
   useEffect(() => {
     setPagination((p) => ({ ...p, current: 1 }));
   }, [search, filterCategory, filterSource, filterStatus]);
+
+  const failedRules: FailedRule[] = Array.isArray(normalized.failed_rules) ? normalized.failed_rules : [];
 
   const stats = useMemo(() => {
     const total = normalized.total ?? rules.length;
@@ -291,6 +300,25 @@ export const RulesManagementPage: React.FC = () => {
           </Card>
         </Col>
       </Row>
+
+      {failedRules.length > 0 && (
+        <Alert
+          type="error"
+          showIcon
+          message={`${failedRules.length} rule(s) failed to load`}
+          description={
+            <ul style={{ margin: 0, paddingLeft: 16 }}>
+              {failedRules.map((f) => (
+                <li key={f.rule_id}>
+                  <Tag color="red">{f.reason}</Tag>{" "}
+                  <Typography.Text code style={{ fontSize: 11 }}>{f.rule_id}</Typography.Text>
+                  {f.file ? <Typography.Text type="secondary" style={{ fontSize: 11 }}> ({f.file})</Typography.Text> : null}
+                </li>
+              ))}
+            </ul>
+          }
+        />
+      )}
 
       <Card size="small">
         <Space wrap style={{ marginBottom: 12 }}>

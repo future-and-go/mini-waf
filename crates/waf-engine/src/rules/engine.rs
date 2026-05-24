@@ -14,10 +14,13 @@ use aho_corasick::AhoCorasick;
 use anyhow::Context as _;
 use dashmap::DashMap;
 use globset::{Glob, GlobBuilder, GlobMatcher};
+use parking_lot::Mutex;
 use regex::Regex;
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
+
+use super::load_status::{self, RuleLoadFailure};
 
 use waf_common::{DetectionResult, Phase, RequestCtx};
 
@@ -305,6 +308,7 @@ pub struct RuleVerdict {
 pub struct CustomRulesEngine {
     rules: DashMap<String, Vec<RuleEntry>>,
     rhai: Arc<rhai::Engine>,
+    load_report: Mutex<load_status::RuleLoadReport>,
 }
 
 /// Where a rule was sourced from. Tracked per `RuleEntry` so the engine
@@ -358,6 +362,48 @@ impl CustomRulesEngine {
         Self {
             rules: DashMap::new(),
             rhai: Arc::new(engine),
+            load_report: Mutex::new(load_status::RuleLoadReport::default()),
+        }
+    }
+
+    /// Return a snapshot of the current load report (failed rules, etc.).
+    pub fn load_report(&self) -> load_status::RuleLoadReport {
+        self.load_report.lock().clone()
+    }
+
+    /// Emit a structured log summary of the last rule load cycle.
+    pub fn emit_load_summary(&self) {
+        let report = self.load_report.lock();
+        let loaded = report.loaded.len();
+        let failed = report.failed.len();
+        tracing::info!(loaded, failed, "rule_load_summary");
+        for f in &report.failed {
+            tracing::error!(
+                rule_id = %f.rule_id,
+                file = %f.file.display(),
+                reason = %f.reason,
+                "rule_load_failed"
+            );
+        }
+    }
+
+    /// Emit retro-audit log counting PatternSet/PatternList matcher instances.
+    pub fn emit_retro_audit(&self) {
+        let mut pm_count: usize = 0;
+        let mut ca_count: usize = 0;
+        for bucket in self.rules.iter() {
+            for entry in bucket.value() {
+                if let Some(compiled) = &entry.compiled {
+                    count_pattern_matchers(&compiled.root, &mut pm_count, &mut ca_count);
+                }
+            }
+        }
+        if pm_count > 0 || ca_count > 0 {
+            tracing::warn!(
+                pm_from_file_rules = pm_count,
+                contains_any_rules = ca_count,
+                "retro_audit: these rule types were inert prior to fix-260524-pm-matcher; coverage now active"
+            );
         }
     }
 
@@ -379,13 +425,57 @@ impl CustomRulesEngine {
 
     /// Append a single file-sourced rule. Tagged as `RuleSource::File` so
     /// `clear_file_rules` can wipe it on hot-reload.
+    ///
+    /// Tracks compile failures in the load report for observability.
     pub fn add_file_rule(&self, rule: CustomRule) {
-        self.insert_rule(rule, RuleSource::File);
+        self.insert_rule_tracked(rule, RuleSource::File);
     }
 
     fn insert_rule(&self, rule: CustomRule, source: RuleSource) {
         let host_code = rule.host_code.clone();
         let entry = RuleEntry::from_rule_with_source(rule, source);
+        let mut bucket = self.rules.entry(host_code).or_default();
+        bucket.push(entry);
+        bucket.sort_by_key(|e| e.raw.priority);
+    }
+
+    fn insert_rule_tracked(&self, rule: CustomRule, source: RuleSource) {
+        let rule_id = rule.id.clone();
+        let host_code = rule.host_code.clone();
+        let compile_result = compile_rule(&rule);
+        let entry = match compile_result {
+            Ok(compiled) => {
+                self.load_report.lock().record(load_status::RuleLoadStatus::Loaded {
+                    rule_id: rule_id.clone(),
+                });
+                RuleEntry {
+                    raw: rule,
+                    compiled,
+                    source,
+                }
+            }
+            Err(e) => {
+                let reason = load_status::classify_error(&e);
+                tracing::error!(
+                    rule_id = %rule_id,
+                    reason = reason,
+                    error = %e,
+                    "rule_load_failed"
+                );
+                self.load_report
+                    .lock()
+                    .record(load_status::RuleLoadStatus::Failed(RuleLoadFailure {
+                        rule_id: rule_id.clone(),
+                        file: std::path::PathBuf::from(&rule_id),
+                        reason: reason.to_string(),
+                    }));
+                RuleEntry {
+                    raw: rule,
+                    compiled: None,
+                    source,
+                }
+            }
+        };
         let mut bucket = self.rules.entry(host_code).or_default();
         bucket.push(entry);
         bucket.sort_by_key(|e| e.raw.priority);
@@ -400,6 +490,7 @@ impl CustomRulesEngine {
         for mut bucket in self.rules.iter_mut() {
             bucket.retain(|e| e.source != RuleSource::File);
         }
+        *self.load_report.lock() = load_status::RuleLoadReport::default();
     }
 
     /// Remove a rule by ID.
@@ -551,6 +642,13 @@ impl CustomRulesEngine {
             let matched = self.eval_single_rule(ctx, entry);
 
             if matched {
+                let _span = tracing::info_span!(
+                    "rule_fire",
+                    rule_id = %rule.id,
+                    host_code = %rule.host_code,
+                )
+                .entered();
+
                 // Collect risk delta if present
                 if let Some(delta) = rule.risk_delta {
                     verdict.risk_deltas.push(RiskDelta {
@@ -1154,6 +1252,23 @@ fn field_value(ctx: &RequestCtx, field: &ConditionField) -> Option<String> {
         // `All` is a marker — it has no single value; iteration happens in
         // `eval_compiled_node` / `eval_one_with_all`.
         ConditionField::All => None,
+    }
+}
+
+/// Walk a compiled tree and count PatternSet / PatternList matcher instances.
+fn count_pattern_matchers(node: &CompiledNode, pm_count: &mut usize, ca_count: &mut usize) {
+    match node {
+        CompiledNode::Leaf(c) => match &c.matcher {
+            Matcher::PatternSet(_) => *pm_count += 1,
+            Matcher::PatternList(_) => *ca_count += 1,
+            _ => {}
+        },
+        CompiledNode::And(v) | CompiledNode::Or(v) => {
+            for child in v {
+                count_pattern_matchers(child, pm_count, ca_count);
+            }
+        }
+        CompiledNode::Not(b) => count_pattern_matchers(b, pm_count, ca_count),
     }
 }
 
