@@ -391,7 +391,7 @@ impl CustomRulesEngine {
     pub fn emit_retro_audit(&self) {
         let mut pm_count: usize = 0;
         let mut ca_count: usize = 0;
-        for bucket in self.rules.iter() {
+        for bucket in &self.rules {
             for entry in bucket.value() {
                 if let Some(compiled) = &entry.compiled {
                     count_pattern_matchers(&compiled.root, &mut pm_count, &mut ca_count);
@@ -445,9 +445,9 @@ impl CustomRulesEngine {
         let compile_result = compile_rule(&rule);
         let entry = match compile_result {
             Ok(compiled) => {
-                self.load_report.lock().record(load_status::RuleLoadStatus::Loaded {
-                    rule_id: rule_id.clone(),
-                });
+                self.load_report
+                    .lock()
+                    .record(load_status::RuleLoadStatus::Loaded { rule_id });
                 RuleEntry {
                     raw: rule,
                     compiled,
@@ -1248,14 +1248,11 @@ fn field_value(ctx: &RequestCtx, field: &ConditionField) -> Option<String> {
         ConditionField::GeoIsp => ctx.geo.as_ref().map(|g| g.isp.clone()),
         // ResponseBody is evaluated at response time, not request time.
         // Return None here so request-phase rules never match accidentally.
-        ConditionField::ResponseBody => None,
-        // `All` is a marker — it has no single value; iteration happens in
-        // `eval_compiled_node` / `eval_one_with_all`.
-        ConditionField::All => None,
+        ConditionField::ResponseBody | ConditionField::All => None,
     }
 }
 
-/// Walk a compiled tree and count PatternSet / PatternList matcher instances.
+/// Walk a compiled tree and count `PatternSet` / `PatternList` matcher instances.
 fn count_pattern_matchers(node: &CompiledNode, pm_count: &mut usize, ca_count: &mut usize) {
     match node {
         CompiledNode::Leaf(c) => match &c.matcher {

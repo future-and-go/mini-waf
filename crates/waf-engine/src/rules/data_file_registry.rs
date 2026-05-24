@@ -63,7 +63,7 @@ impl DataFileRegistry {
         let meta = fs::metadata(path).with_context(|| format!("stat {}", path.display()))?;
         let size = meta.len();
         if size > MAX_DATA_FILE_BYTES {
-            bail!("data file too large: {} bytes (cap {})", size, MAX_DATA_FILE_BYTES);
+            bail!("data file too large: {size} bytes (cap {MAX_DATA_FILE_BYTES})");
         }
         let mtime = meta.modified().with_context(|| format!("mtime {}", path.display()))?;
 

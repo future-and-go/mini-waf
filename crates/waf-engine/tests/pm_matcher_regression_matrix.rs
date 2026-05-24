@@ -15,7 +15,9 @@
     clippy::indexing_slicing,
     clippy::missing_const_for_fn,
     clippy::needless_pass_by_value,
-    clippy::doc_markdown
+    clippy::doc_markdown,
+    clippy::panic,
+    clippy::print_stderr
 )]
 
 use std::collections::HashMap;

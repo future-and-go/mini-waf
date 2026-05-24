@@ -19,7 +19,8 @@
     clippy::approx_constant,
     clippy::missing_docs_in_private_items,
     clippy::doc_markdown,
-    clippy::missing_const_for_fn
+    clippy::missing_const_for_fn,
+    clippy::needless_raw_string_hashes
 )]
 
 use std::collections::HashMap;

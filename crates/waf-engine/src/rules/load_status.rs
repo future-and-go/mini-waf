@@ -94,7 +94,10 @@ mod tests {
         }));
         assert!(report.loaded.is_empty());
         assert_eq!(report.failed.len(), 1);
-        assert_eq!(report.failed[0].reason, "missing_data_file");
+        assert_eq!(
+            report.failed.first().expect("has one failure").reason,
+            "missing_data_file"
+        );
     }
 
     #[test]
