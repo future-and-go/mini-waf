@@ -234,7 +234,7 @@ async fn do_flush(client: &reqwest::Client, cfg: &BatchConfig, batch: &mut Vec<V
 
 /// POST `body` to `url` with one transparent retry on connection-level errors.
 ///
-/// reqwest pools connections; if VictoriaLogs closes an idle keep-alive
+/// `reqwest` pools connections; if `VictoriaLogs` closes an idle keep-alive
 /// connection the next request fails with "error sending request" (stale
 /// socket detected mid-send). Retrying once with the same client forces a
 /// fresh connection from the pool and succeeds immediately.
