@@ -223,7 +223,11 @@ async fn do_flush(client: &reqwest::Client, cfg: &BatchConfig, batch: &mut Vec<V
             // in addition to the reqwest wrapper message, so operators can tell
             // "VictoriaLogs not running" from "stale keep-alive" at a glance.
             let detail = e.source().map_or_else(|| e.to_string(), |src| format!("{e}: {src}"));
-            rate_limited_failure_warn(last_failure_ms, cfg.kind, &format!("VictoriaLogs ingest failed: {detail}"));
+            rate_limited_failure_warn(
+                last_failure_ms,
+                cfg.kind,
+                &format!("VictoriaLogs ingest failed: {detail}"),
+            );
         }
     }
 }
