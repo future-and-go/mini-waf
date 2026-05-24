@@ -47,7 +47,7 @@ impl Database {
     }
 
     /// Broadcast a security event to all WebSocket subscribers
-    pub(crate) fn broadcast_event(&self, event: serde_json::Value) {
+    pub fn broadcast_event(&self, event: serde_json::Value) {
         let _ = self.event_tx.send(event);
     }
 }

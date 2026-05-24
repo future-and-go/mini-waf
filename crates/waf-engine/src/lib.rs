@@ -1,4 +1,5 @@
 pub mod access;
+pub mod audit_emitter;
 pub mod block_page;
 pub mod challenge;
 pub mod checker;
@@ -9,6 +10,7 @@ pub mod device_fp;
 pub mod engine;
 pub mod geoip;
 pub mod geoip_updater;
+pub mod intel_status;
 pub mod logging;
 pub mod outbound;
 pub mod plugins;
