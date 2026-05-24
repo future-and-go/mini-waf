@@ -173,7 +173,7 @@ const MAX_RESTART_ATTEMPTS: u32 = 5;
 const RESTART_BACKOFF_BASE: Duration = Duration::from_secs(2);
 
 /// Supervisor task: monitors the child, routes shutdown signals, and
-/// auto-restarts VictoriaLogs on unexpected exit (up to [`MAX_RESTART_ATTEMPTS`]
+/// auto-restarts `VictoriaLogs` on unexpected exit (up to [`MAX_RESTART_ATTEMPTS`]
 /// times with exponential backoff).
 async fn supervise(child: Child, cfg: VictoriaLogsConfig) {
     let probe_client = match reqwest::Client::builder().timeout(HEALTH_REQUEST_TIMEOUT).build() {
