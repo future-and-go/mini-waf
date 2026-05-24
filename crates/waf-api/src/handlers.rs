@@ -74,6 +74,7 @@ pub async fn create_host(State(state): State<Arc<AppState>>, Json(req): Json<Cre
         start_status: host.start_status,
         upstream_alpn,
         upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
+        preserve_host: host.preserve_host,
         ..HostConfig::default()
     });
     state.router.register(&config);
@@ -136,6 +137,7 @@ pub async fn update_host(
         defense_config,
         upstream_alpn,
         upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
+        preserve_host: host.preserve_host,
         ..HostConfig::default()
     });
     state.router.register(&config);
