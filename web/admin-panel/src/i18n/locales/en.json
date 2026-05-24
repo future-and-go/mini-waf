@@ -171,7 +171,9 @@
     "alpnH1Only": "HTTP/1.1 only",
     "alpnH2Only": "HTTP/2 only (strict)",
     "skipSslVerify": "Skip SSL Verify",
-    "skipSslVerifyTooltip": "⚠️ DANGER: Disables upstream TLS certificate verification entirely. The connection becomes vulnerable to man-in-the-middle attacks. Only use for self-signed certs in controlled, non-production environments. Never enable in production."
+    "skipSslVerifyTooltip": "⚠️ DANGER: Disables upstream TLS certificate verification entirely. The connection becomes vulnerable to man-in-the-middle attacks. Only use for self-signed certs in controlled, non-production environments. Never enable in production.",
+    "preserveHost": "Preserve Host",
+    "preserveHostTooltip": "When ON (default), the client's Host header is forwarded to the upstream unchanged. Turn OFF to rewrite the Host header to the upstream hostname — required when the listener domain differs from the upstream virtual-host name (e.g. a local test domain proxying to a real site)."
   },
   "security": {
     "title": "Live Events",

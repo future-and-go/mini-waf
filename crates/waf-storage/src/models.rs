@@ -27,6 +27,7 @@ pub struct Host {
     pub log_only_mode: bool,
     pub upstream_alpn: String,
     pub upstream_skip_ssl_verify: bool,
+    pub preserve_host: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -234,10 +235,19 @@ pub struct CreateHost {
     /// Skip TLS certificate verification for the upstream. Default `false`.
     #[serde(default)]
     pub upstream_skip_ssl_verify: bool,
+    /// Forward the client `Host` header to upstream unchanged. Default `true`.
+    /// Set to `false` to rewrite `Host` to `remote_host` (needed when the
+    /// listener domain differs from the upstream virtual-host name).
+    #[serde(default = "default_preserve_host")]
+    pub preserve_host: bool,
 }
 
 fn default_upstream_alpn() -> String {
     "h2h1".to_string()
+}
+
+const fn default_preserve_host() -> bool {
+    true
 }
 
 /// Update host request
@@ -257,6 +267,7 @@ pub struct UpdateHost {
     pub log_only_mode: Option<bool>,
     pub upstream_alpn: Option<String>,
     pub upstream_skip_ssl_verify: Option<bool>,
+    pub preserve_host: Option<bool>,
 }
 
 /// Create IP rule request

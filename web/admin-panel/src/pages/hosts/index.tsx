@@ -33,6 +33,7 @@ interface HostFormShape {
   log_only_mode: boolean;
   upstream_alpn: UpstreamAlpn;
   upstream_skip_ssl_verify: boolean;
+  preserve_host: boolean;
   remarks?: string;
 }
 
@@ -47,6 +48,7 @@ const DEFAULT_FORM: HostFormShape = {
   log_only_mode: false,
   upstream_alpn: "h2h1",
   upstream_skip_ssl_verify: false,
+  preserve_host: true,
   remarks: "",
 };
 
@@ -104,6 +106,7 @@ export const HostsPage: React.FC = () => {
       log_only_mode: host.log_only_mode ?? false,
       upstream_alpn: host.upstream_alpn ?? "h2h1",
       upstream_skip_ssl_verify: host.upstream_skip_ssl_verify ?? false,
+      preserve_host: host.preserve_host ?? true,
       remarks: host.remarks ?? "",
     });
   };
@@ -270,6 +273,20 @@ export const HostsPage: React.FC = () => {
         }
       >
         <Switch disabled={!sslOn} />
+      </Form.Item>
+      <Form.Item
+        name="preserve_host"
+        valuePropName="checked"
+        label={
+          <span>
+            {t("hosts.preserveHost")}&nbsp;
+            <Tooltip title={t("hosts.preserveHostTooltip")}>
+              <InfoCircleOutlined style={{ color: "#8c8c8c" }} />
+            </Tooltip>
+          </span>
+        }
+      >
+        <Switch />
       </Form.Item>
     </Form>
   );
