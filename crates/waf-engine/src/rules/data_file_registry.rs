@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
@@ -46,6 +47,7 @@ struct CachedAc {
 #[derive(Debug, Default)]
 pub struct DataFileRegistry {
     cache: Mutex<HashMap<PathBuf, CachedAc>>,
+    reloads: AtomicU64,
 }
 
 impl DataFileRegistry {
@@ -75,6 +77,8 @@ impl DataFileRegistry {
             }
         }
 
+        self.reloads.fetch_add(1, Ordering::Relaxed);
+
         let patterns = read_patterns(path)?;
         if patterns.len() > MAX_PATTERNS {
             bail!("too many patterns in {}: {}", path.display(), patterns.len());
@@ -97,6 +101,11 @@ impl DataFileRegistry {
             },
         );
         Ok(arc)
+    }
+
+    /// Total number of cache-miss reloads since process start.
+    pub fn reloads_total(&self) -> u64 {
+        self.reloads.load(Ordering::Relaxed)
     }
 }
 
