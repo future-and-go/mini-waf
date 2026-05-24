@@ -11,7 +11,7 @@ pub struct RuleMetrics {
     rules_loaded_fail: AtomicU64,
     /// Total rule fire events.
     rule_fires: AtomicU64,
-    /// Data file reload events (cache misses in DataFileRegistry).
+    /// Data file reload events (cache misses in `DataFileRegistry`).
     data_file_reloads: AtomicU64,
 }
 

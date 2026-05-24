@@ -8,6 +8,7 @@
     clippy::disallowed_types,
     clippy::disallowed_methods,
     clippy::needless_pass_by_value,
+    clippy::doc_markdown,
     unused_imports
 )]
 
