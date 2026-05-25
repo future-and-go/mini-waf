@@ -406,3 +406,76 @@ Admin UI (Vue 3)
     │  ◄──── JSON Response ────────────────┘
 ```
 
+### WafEngine → Data File Registry (Hot-Reload .data Files)
+
+**v1.0.0 Feature**: Automatic hot-reload of external data files (dictionaries, Aho-Corasick patterns) without downtime.
+
+```
+File System (.data files)
+    │
+    ├─ rules/payloads.data ─┐
+    ├─ rules/wordlist.data  ├──► File Watcher (notify crate, 500ms debounce)
+    └─ rules/patterns.data  │
+                            ▼
+                      DataFileRegistry
+                            │
+        ┌───────────────────┼───────────────────┐
+        ▼                   ▼                   ▼
+    Cache Hit          Parse & Compile      Error Handler
+    (mtime+size            (Aho-Corasick)      (log, retain
+     match)              (10 MiB cap,         previous)
+                         100K patterns)
+        │                   │                   │
+        └───────────────────┼───────────────────┘
+                            ▼
+                      Arc<DashMap<Key, Automaton>>
+                            │
+                      Request-time
+                      pm_from_file / contains_any
+                      operators access via
+                      registry.load_or_get(path)
+```
+
+**Design**:
+- Cache key: `(canonicalized_path, mtime, size)` — detects file changes via fs metadata
+- Lock-free reads: Request-path uses cheap `Arc` clone (no mutex)
+- Lazy compilation: Automaton built only on first request, reused across invocations
+- Size limits: 10 MiB per file (soft warn ≥50k entries), hard-reject ≥500k
+- Hot-reload integration: File watcher thread detects changes, invalidates cache, recompiles in background
+- Fail-safe: Parse errors logged at WARN; previous automaton retained if new compile fails
+
+**Modules**:
+- `crates/waf-engine/src/rules/data_file_registry.rs` — Registry + caching logic
+- `crates/waf-engine/src/rules/data_file_resolver.rs` — Path resolution, `.data` file discovery
+- `crates/waf-engine/src/rules/load_status.rs` — Error tracking (MissingDataFile, InvalidRegex, etc.)
+- `crates/waf-engine/src/rules/metrics.rs` — `classify_error()` stable metric labels
+
+### Rule Load Status Reporting
+
+**v1.0.0 Feature**: Structured tracking of rule load failures with observability.
+
+```
+Rule Load Operation
+    │
+    ├─ File parse → JSON error → classify_error() → RuleLoadStatus::ParseError
+    ├─ Regex compile → invalid pattern → RuleLoadStatus::InvalidRegex
+    ├─ Data file missing → path not found → RuleLoadStatus::MissingDataFile
+    ├─ Path traversal → ../../../etc/passwd → RuleLoadStatus::PathTraversal
+    ├─ I/O failure → disk error → RuleLoadStatus::IoError
+    └─ Compile error → check logic failure → RuleLoadStatus::CompileError
+                           ▼
+                    RuleLoadReport
+                    (id, timestamp, status)
+                           ▼
+            Metrics (stable labels)
+            rule_load_errors_total{status="invalid_regex"}
+            rule_load_duration_ms
+```
+
+**Benefits**:
+- Graceful degradation: Load failures don't crash pipeline
+- Observability: Metric labels stable across all load scenarios
+- Troubleshooting: Clear status classification aids root-cause analysis
+
+**Integration**: Rule reload (via file watcher or API) invokes `classify_error()` to emit consistent metrics.
+

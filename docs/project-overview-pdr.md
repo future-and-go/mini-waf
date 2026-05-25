@@ -1,4 +1,4 @@
-# PRX-WAF Product Overview & PDR (v0.2.0)
+# PRX-WAF Product Overview & PDR (v1.0.0)
 
 ## Product Vision
 
@@ -207,7 +207,7 @@ Organizations deploying web applications face evolving threats:
 
 ## Success Metrics
 
-### v0.2.0 Release (2026-03-27) — Achieved
+### v0.2.0 Release (2026-03-27) — Complete
 
 1. **Clustering MVP**: 3-node cluster, QUIC mTLS, leader election, rule sync — stable in production
 2. **Security Hardening**: 8 panic elimination, SSRF validation, DNS rebinding guard, API security headers
@@ -217,10 +217,40 @@ Organizations deploying web applications face evolving threats:
 6. **Regression Testing**: 243 regression tests (116 added in v0.2.0); all passing
 7. **Dependency Audit**: 0 unaddressed CVEs; wasmtime upgraded (23→43, 5 CVEs fixed)
 
-### v0.2.x Post-Release (2026-04-29) — Shipped
+### v1.0.0 Release (2026-04-17) — Production Ready ✓
 
-1. **FR-004 — Rate Limiting**: Token-bucket (burst) + sliding-window (sustained) per tier; MemoryStore (DashMap, idle-eviction 10min, 100K cap) + RedisStore (Lua script) + BreakerStore (circuit-breaker fallback); dual IP+session keys; YAML hot-reload (configs/rate-limit.yaml); rule IDs RL-IP/RL-SESSION/RL-ERR
-2. **FR-009 — Smart Caching**: Tier-aware bypass (CRITICAL never cached), 6-gate Chain-of-Responsibility pipeline; tag-based purge index with admin endpoints (/api/cache/purge/tag, /api/cache/purge/route); cache stats tracking (hit/miss/bypassed); YAML hot-reload (rules/cache.yaml)
+**Major Release**: Observability, hot-reload enhancements, and advanced detection features
+
+1. **Hot-Reload for .data Files (May 2025)**
+   - `DataFileRegistry` pre-compiles and caches Aho-Corasick automata from `.data` files
+   - 10 MiB file size cap, 100K pattern limit per file
+   - Cache keyed by canonicalized path + mtime + size
+   - File watcher (notify crate) triggers reload with debounce; live updates without downtime
+
+2. **pm_from_file / contains_any Unification (May 2025)**
+   - Both operators dispatch through unified Condition pipeline
+   - Same `DataFileRegistry` for consistent behavior
+   - Regression test matrix validates backward compatibility
+
+3. **Rule Load Status Reporting (May 2025)**
+   - `RuleLoadStatus` and `RuleLoadReport` types for structured failure tracking
+   - Metric labels: missing_data_file, path_traversal, invalid_regex, compile_error, io_error, parse_error
+   - `classify_error()` for stable metric labels across all rule load scenarios
+   - Modules: `crates/waf-engine/src/rules/metrics.rs`, `load_status.rs`
+
+4. **Metrics & Observability**
+   - Prometheus `/metrics` endpoint with comprehensive counters and histograms
+   - Rule evaluation timing, cache performance, cluster health metrics
+   - Rate-limit and DDoS detector instrumentation
+
+5. **Advanced Detection**
+   - FR-010: Device fingerprinting (JA3/JA4/Akamai H2)
+   - FR-011: Behavioral anomaly detection (burst intervals, cadence, path patterns)
+   - FR-012: Transaction velocity detection (login→OTP→withdrawal sequences)
+   - FR-025: Cumulative risk scoring with decay and L0/L1/L2 layers
+
+1. **FR-004 — Rate Limiting (v0.2.x)**: Token-bucket (burst) + sliding-window (sustained) per tier; MemoryStore (DashMap, idle-eviction 10min, 100K cap) + RedisStore (Lua script) + BreakerStore (circuit-breaker fallback); dual IP+session keys; YAML hot-reload (configs/rate-limit.yaml); rule IDs RL-IP/RL-SESSION/RL-ERR
+2. **FR-009 — Smart Caching (v0.2.x)**: Tier-aware bypass (CRITICAL never cached), 6-gate Chain-of-Responsibility pipeline; tag-based purge index with admin endpoints (/api/cache/purge/tag, /api/cache/purge/route); cache stats tracking (hit/miss/bypassed); YAML hot-reload (rules/cache.yaml)
 
 ### v0.3.0 (Proposed — Q3 2026, Observability + Risk Scoring)
 

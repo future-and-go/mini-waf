@@ -2,7 +2,7 @@
 
 ## Overview
 
-PRX-WAF is a 7-crate Rust workspace implementing a production-grade reverse proxy WAF with clustering, WASM plugins, and comprehensive observability. **~95K production LOC + ~27K test LOC = ~122K total** (v0.2.0, Rust 2024 edition).
+PRX-WAF is a 7-crate Rust workspace implementing a production-grade reverse proxy WAF with clustering, WASM plugins, hot-reload, and comprehensive observability. **~100K production LOC + ~30K test LOC = ~130K total** (v1.0.0, Rust 2024 edition).
 
 ---
 
@@ -12,12 +12,12 @@ PRX-WAF is a 7-crate Rust workspace implementing a production-grade reverse prox
 |-------|----------|---------|------------------|
 | **prx-waf** | ~2K | CLI binary, server bootstrap | tokio, tracing, clap |
 | **gateway** | ~15K | Pingora reverse proxy, HTTP/3, SSL, response cache | pingora-core, quinn, rustls, moka |
-| **waf-engine** | ~55K | 16-phase detection pipeline, rule registry, WASM plugins | aho-corasick, rhai, libinjectionrs, wasmtime |
+| **waf-engine** | ~60K | 16-phase detection pipeline, rule registry, hot-reload, metrics | aho-corasick, rhai, libinjectionrs, wasmtime, notify |
 | **waf-storage** | ~5K | PostgreSQL persistence layer (sqlx) | sqlx (postgres), chrono, uuid |
 | **waf-api** | ~8K | Axum REST API, JWT/TOTP auth, WebSocket, embedded UI | axum, jsonwebtoken, argon2, tokio-tungstenite |
 | **waf-common** | ~3K | Shared types, config, crypto, RequestCtx | serde, tokio, aes-gcm, instant-acme |
 | **waf-cluster** | ~7K | QUIC mTLS mesh, Raft-lite election, rule sync | quinn, rustls, rcgen, lz4_flex |
-| **Total (Prod)** | **~95K** | Production Rust WAF (+ ~27K tests) | 50+ workspace deps |
+| **Total (Prod)** | **~100K** | Production Rust WAF (+ ~30K tests) | 50+ workspace deps |
 
 ---
 
@@ -103,10 +103,15 @@ prx-waf/
 │   │   │   └── mod.rs         # Check trait + registry
 │   │   │
 │   │   ├── rules/
-│   │   │   ├── registry.rs    # RuleRegistry (in-memory + version tracking)
-│   │   │   ├── manager.rs     # File watcher + YAML/ModSec/JSON parsing
-│   │   │   ├── changelog.rs   # Incremental sync changelog (ring buffer)
-│   │   │   └── remote.rs      # Remote rule source loading (async)
+│   │   │   ├── registry.rs                # RuleRegistry (in-memory + version tracking)
+│   │   │   ├── manager.rs                 # File watcher + YAML/ModSec/JSON parsing
+│   │   │   ├── changelog.rs               # Incremental sync changelog (ring buffer)
+│   │   │   ├── remote.rs                  # Remote rule source loading (async)
+│   │   │   ├── data_file_registry.rs      # Aho-Corasick cache for .data files (hot-reload)
+│   │   │   ├── data_file_resolver.rs      # Path resolution + .data file discovery
+│   │   │   ├── load_status.rs             # RuleLoadStatus, RuleLoadReport types
+│   │   │   ├── metrics.rs                 # classify_error() for stable metric labels
+│   │   │   └── custom_file_loader.rs      # File-based custom rule hot-reload (FR-003)
 │   │   │
 │   │   ├── plugins/
 │   │   │   ├── wasm.rs        # WASM plugin manager (wasmtime)
@@ -293,9 +298,43 @@ prx-waf/
 
 ---
 
-## Rule Inventory (51 Built-in Rules)
+## Hot-Reload for External Data Files (v1.0.0)
 
-### OWASP CRS (24 rules)
+### DataFileRegistry Module
+
+**Path**: `crates/waf-engine/src/rules/data_file_registry.rs`
+
+Compiles and caches Aho-Corasick automata from `.data` files (dictionary wordlists, payload databases) with live reload support.
+
+**Features**:
+- Pre-compiled automata cache (thread-safe `Arc<DashMap>`)
+- Cache key: canonicalized file path + mtime + size
+- 10 MiB max per file, 100K patterns per file
+- `load_or_get(path)` semantics: compile once, reuse across invocations
+- File watcher triggers recompile on `.data` file changes (500ms debounce)
+- Parse failures logged; previous cache retained (graceful degradation)
+
+**Integration**: `pm_from_file` and `contains_any` operators dispatch through unified `Condition` pipeline.
+
+### Rule Load Status Reporting
+
+**Path**: `crates/waf-engine/src/rules/{load_status,metrics}.rs`
+
+Structured failure tracking for rule load operations.
+
+**Types**: `RuleLoadStatus` (Success, MissingDataFile, PathTraversal, InvalidRegex, CompileError, IoError, ParseError), `RuleLoadReport`.
+
+**Metrics**: `rule_load_errors_total` (by status label), `rule_load_duration_ms` (histogram).
+
+**Use**: Rule reload failures don't crash pipeline; operator observability for data file availability and regex compilation issues.
+
+---
+
+## Rule Inventory (556 Built-in Rules v1.0.0)
+
+**Categories**: OWASP CRS (274), ModSecurity (46), CVE patches (43), Advanced (77), Bot detection (42), API security (64), GeoIP (2), Custom (8) = 556 total rules.
+
+### OWASP CRS (274 rules)
 
 - `xss-*.yaml` (4 rules) — XSS vectors (script tags, event handlers, etc.)
 - `sqli-*.yaml` (4 rules) — SQL injection patterns

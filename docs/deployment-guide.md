@@ -594,6 +594,18 @@ PRX_WAF_API__ADMIN_IP_ALLOWLIST=10.0.0.0/8,192.168.0.0/16
 
 ---
 
+## Data File Management (Hot-Reload .data Files)
+
+External data files (dictionaries, patterns) auto-cache via `DataFileRegistry` with hot-reload on file changes.
+
+**Quick setup**: Place `.data` files in `rules/` directory; rules reference via `pm_from_file` or `contains_any` operators. File watcher detects changes; recompile on next evaluation (no downtime, 500ms debounce).
+
+**Limits**: 10 MiB/file (hard), 100K patterns/file. Format: newline-delimited UTF-8.
+
+**Monitoring**: Metrics `rule_load_errors_total{status="missing_data_file"}`, `rule_load_duration_ms`.
+
+---
+
 ## TLS Certificate Management
 
 ### Let's Encrypt (Automatic)
