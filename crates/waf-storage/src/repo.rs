@@ -50,14 +50,16 @@ impl Database {
                 id, code, host, port, ssl, guard_status,
                 remote_host, remote_port, remote_ip, cert_file, key_file,
                 remarks, start_status, log_only_mode, upstream_alpn, upstream_skip_ssl_verify,
+                defense_json,
                 is_enable_load_balance, load_balance_stage,
                 created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6,
                 $7, $8, $9, $10, $11,
                 $12, $13, $14, $15, $16,
+                $17,
                 false, 0,
-                $17, $17
+                $18, $18
             ) RETURNING *",
         )
         .bind(id)
@@ -76,7 +78,8 @@ impl Database {
         .bind(req.log_only_mode)
         .bind(&req.upstream_alpn)
         .bind(req.upstream_skip_ssl_verify)
-        .bind(now)
+        .bind(&req.defense_json) // $17
+        .bind(now)               // $18
         .fetch_one(&self.pool)
         .await?;
 
@@ -103,7 +106,8 @@ impl Database {
                 log_only_mode = COALESCE($13, log_only_mode),
                 upstream_alpn = COALESCE($14, upstream_alpn),
                 upstream_skip_ssl_verify = COALESCE($15, upstream_skip_ssl_verify),
-                updated_at = $16
+                defense_json = COALESCE($16, defense_json),
+                updated_at = $17
             WHERE id = $1
             RETURNING *",
         )
@@ -122,7 +126,8 @@ impl Database {
         .bind(req.log_only_mode)
         .bind(req.upstream_alpn)
         .bind(req.upstream_skip_ssl_verify)
-        .bind(now)
+        .bind(req.defense_json) // $16
+        .bind(now)              // $17
         .fetch_optional(&self.pool)
         .await?;
 

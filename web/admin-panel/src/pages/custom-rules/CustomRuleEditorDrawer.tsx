@@ -55,9 +55,17 @@ export interface CustomRuleEditorDrawerProps {
 
 function initialTree(rule?: CustomRule): ConditionNode | null {
   if (!rule) return null;
+  // Backend normalises to top-level match_tree; handle both shapes defensively.
   if (rule.match_tree) return rule.match_tree;
-  if (rule.conditions?.length) {
-    return { [rule.condition_op ?? "and"]: rule.conditions } as ConditionNode;
+  // Fallback: packed shape {"match_tree": ...} still inside conditions
+  const cond = rule.conditions as unknown;
+  if (cond && typeof cond === "object" && !Array.isArray(cond)) {
+    const mt = (cond as Record<string, unknown>).match_tree;
+    if (mt) return mt as ConditionNode;
+  }
+  // Legacy flat array
+  if (Array.isArray(cond) && (cond as Condition[]).length > 0) {
+    return { [rule.condition_op ?? "and"]: cond } as ConditionNode;
   }
   return null;
 }

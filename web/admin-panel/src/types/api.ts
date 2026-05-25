@@ -25,6 +25,23 @@ export interface LoginResponse {
 
 export type UpstreamAlpn = "h2h1" | "h1_only" | "h2_only";
 
+export interface DefenseJson {
+  bot?: boolean;
+  sqli?: boolean;
+  xss?: boolean;
+  scan?: boolean;
+  rce?: boolean;
+  sensitive?: boolean;
+  dir_traversal?: boolean;
+  owasp_set?: boolean;
+  owasp_paranoia?: number;
+  cc?: boolean;
+  cc_rps?: number;
+  cc_burst?: number;
+  cc_ban_threshold?: number;
+  cc_ban_duration_secs?: number;
+}
+
 export interface Host {
   id: string;
   host: string;
@@ -38,6 +55,7 @@ export interface Host {
   remarks?: string;
   upstream_alpn: UpstreamAlpn;
   upstream_skip_ssl_verify: boolean;
+  defense_json?: DefenseJson | null;
 }
 
 export interface IpRule {
@@ -100,7 +118,9 @@ export interface CustomRule {
   priority: number;
   enabled: boolean;
   condition_op: ConditionOp;
-  conditions: Condition[];        // legacy flat shape, may be []
+  /** Flat legacy conditions (empty `[]` when match_tree is used). */
+  conditions: Condition[];
+  /** Structured condition tree — always present at top-level after API normalisation. */
   match_tree?: ConditionNode | null;
   action: RuleAction;
   action_status: number;
