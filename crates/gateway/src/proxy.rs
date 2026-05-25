@@ -588,22 +588,22 @@ impl ProxyHttp for WafProxy {
             return Ok(true);
         }
 
-        // HTTP → HTTPS redirect: when the host (or its corresponding port-443
-        // sibling) has `http_redirect: true` and the request arrived on a
-        // plain-text (non-TLS) connection, answer with 301.
-        // The fallback lookup covers the common case where both `host:80` and
-        // `host:443` are registered — the router bare-key resolves to port-80,
-        // but the redirect flag lives on the port-443 config.
-        let effective_http_redirect = request_ctx.host_config.http_redirect
-            || (!request_ctx.is_tls
-                && self
-                    .router
-                    .resolve(&format!("{}:443", request_ctx.host))
-                    .is_some_and(|c| c.http_redirect));
-        if effective_http_redirect && !request_ctx.is_tls {
+        // HTTP → HTTPS redirect (301).
+        //
+        // Semantics: set `http_redirect = true` on the **port-80** host record
+        // for a given hostname. The flag is meaningless on a TLS (port-443)
+        // host because `is_tls` will be `true` and the condition below never
+        // fires.  Assumes the HTTPS listener is on the standard port 443;
+        // non-standard HTTPS ports are not supported.
+        //
+        // The Location header uses `host_config.host` (the registered hostname)
+        // rather than the raw `Host` request header to prevent open-redirect
+        // abuse: the resolved host_config is already router-validated, whereas
+        // the request Host header is attacker-controlled.
+        if request_ctx.host_config.http_redirect && !request_ctx.is_tls {
             let location = format!(
                 "https://{}{}",
-                request_ctx.host,
+                request_ctx.host_config.host,
                 session.req_header().uri.path_and_query().map_or("/", |pq| pq.as_str()),
             );
             let mut resp = pingora_http::ResponseHeader::build(301, Some(2))?;

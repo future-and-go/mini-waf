@@ -173,7 +173,7 @@
     "skipSslVerify": "Skip SSL Verify",
     "skipSslVerifyTooltip": "⚠️ DANGER: Disables upstream TLS certificate verification entirely. The connection becomes vulnerable to man-in-the-middle attacks. Only use for self-signed certs in controlled, non-production environments. Never enable in production.",
     "httpRedirect": "HTTP → HTTPS Redirect",
-    "httpRedirectTooltip": "When enabled, plain-HTTP (port 80) requests for this host are automatically redirected to HTTPS (301 Moved Permanently). Enable together with SSL on the same hostname.",
+    "httpRedirectTooltip": "Redirects plain-HTTP requests to HTTPS (301). Must be enabled on the port-80 host record for this hostname, not on the port-443 record. Assumes the HTTPS listener is on the standard port 443.",
     "defenseSection": "Defense Profile",
     "defenseToggles": "Detection Engines",
     "defenseScan": "Scanner Detection",

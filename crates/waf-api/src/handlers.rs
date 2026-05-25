@@ -394,14 +394,11 @@ pub async fn reload_sqli_scan_config(
 /// The DB packs a tree into the `conditions` column as `{"match_tree": …}`.
 /// This helper unpacks that so callers never need to inspect the packed shape.
 fn unpack_custom_rule(row: waf_storage::models::CustomRule) -> Value {
-    let mut v = serde_json::to_value(&row).unwrap_or(Value::Null);
+    // CustomRule only contains JSON-safe types; serialization is infallible.
+    let mut v = serde_json::to_value(&row).expect("BUG: CustomRule serialization must not fail");
     if let Some(obj) = v.as_object_mut() {
         let packed = obj.get("conditions").cloned().unwrap_or(Value::Null);
-        if let Some(mt) = packed
-            .as_object()
-            .and_then(|m| m.get("match_tree"))
-            .cloned()
-        {
+        if let Some(mt) = packed.as_object().and_then(|m| m.get("match_tree")).cloned() {
             // Packed tree: expose match_tree top-level, conditions → []
             obj.insert("match_tree".to_string(), mt);
             obj.insert("conditions".to_string(), json!([]));

@@ -27,6 +27,9 @@ pub struct Host {
     pub log_only_mode: bool,
     pub upstream_alpn: String,
     pub upstream_skip_ssl_verify: bool,
+    /// Graceful degradation: defaults to `false` when the column is absent
+    /// (e.g. binary deployed before migration 0016 has run).
+    #[sqlx(default)]
     pub http_redirect: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

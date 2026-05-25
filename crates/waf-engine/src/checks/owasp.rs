@@ -961,10 +961,7 @@ paranoia: 1
         let checker = OWASPCheck::from_yaml(CRS_920350_YAML);
         let mut ctx = make_ctx_with_host_and_xff("13.214.252.169", "5.5.5.5");
         ctx.host = "13.214.252.169".into();
-        assert!(
-            checker.check(&ctx).is_some(),
-            "numeric IP in Host header must block"
-        );
+        assert!(checker.check(&ctx).is_some(), "numeric IP in Host header must block");
     }
 
     #[test]
