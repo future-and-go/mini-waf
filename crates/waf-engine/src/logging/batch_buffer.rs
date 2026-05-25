@@ -16,6 +16,7 @@
 //! the oldest, which would require a separate non-Tokio buffer).  This
 //! preserves chronological order and is sufficient for fail-open semantics.
 
+use std::error::Error as StdError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -129,7 +130,14 @@ pub fn spawn_batch_flusher(cfg: BatchConfig) -> BatchSender {
 }
 
 async fn flush_loop(mut rx: mpsc::Receiver<Value>, cfg: BatchConfig) {
-    let client = match reqwest::Client::builder().timeout(cfg.request_timeout).build() {
+    // tcp_keepalive detects half-open connections; pool_idle_timeout ensures
+    // stale pooled connections are recycled before VictoriaLogs closes them.
+    let client = match reqwest::Client::builder()
+        .timeout(cfg.request_timeout)
+        .tcp_keepalive(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(25))
+        .build()
+    {
         Ok(c) => c,
         Err(e) => {
             warn!(target: "victoria_logs::buffer", kind = cfg.kind, error = %e, "Failed to build reqwest client; flush loop exiting");
@@ -196,12 +204,7 @@ async fn do_flush(client: &reqwest::Client, cfg: &BatchConfig, batch: &mut Vec<V
         return;
     }
 
-    let outcome = client
-        .post(&cfg.url)
-        .header("Content-Type", "application/stream+json")
-        .body(body)
-        .send()
-        .await;
+    let outcome = post_with_retry(client, &cfg.url, body).await;
 
     match outcome {
         Ok(resp) if resp.status().is_success() => {
@@ -216,8 +219,45 @@ async fn do_flush(client: &reqwest::Client, cfg: &BatchConfig, batch: &mut Vec<V
             );
         }
         Err(e) => {
-            rate_limited_failure_warn(last_failure_ms, cfg.kind, &format!("VictoriaLogs ingest failed: {e}"));
+            // Surface the root cause (e.g. "connection refused", "connection reset")
+            // in addition to the reqwest wrapper message, so operators can tell
+            // "VictoriaLogs not running" from "stale keep-alive" at a glance.
+            let detail = e.source().map_or_else(|| e.to_string(), |src| format!("{e}: {src}"));
+            rate_limited_failure_warn(
+                last_failure_ms,
+                cfg.kind,
+                &format!("VictoriaLogs ingest failed: {detail}"),
+            );
         }
+    }
+}
+
+/// POST `body` to `url` with one transparent retry on connection-level errors.
+///
+/// `reqwest` pools connections; if `VictoriaLogs` closes an idle keep-alive
+/// connection the next request fails with "error sending request" (stale
+/// socket detected mid-send). Retrying once with the same client forces a
+/// fresh connection from the pool and succeeds immediately.
+/// Timeout and status errors are NOT retried — only connect/request errors.
+async fn post_with_retry(client: &reqwest::Client, url: &str, body: String) -> reqwest::Result<reqwest::Response> {
+    let result = client
+        .post(url)
+        .header("Content-Type", "application/stream+json")
+        .body(body.clone())
+        .send()
+        .await;
+
+    match result {
+        Err(ref e) if (e.is_connect() || e.is_request()) && !e.is_timeout() => {
+            // Stale pooled connection or transient reset — retry once.
+            client
+                .post(url)
+                .header("Content-Type", "application/stream+json")
+                .body(body)
+                .send()
+                .await
+        }
+        other => other,
     }
 }
 

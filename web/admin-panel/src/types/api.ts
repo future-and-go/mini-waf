@@ -38,6 +38,7 @@ export interface Host {
   remarks?: string;
   upstream_alpn: UpstreamAlpn;
   upstream_skip_ssl_verify: boolean;
+  preserve_host: boolean;
 }
 
 export interface IpRule {

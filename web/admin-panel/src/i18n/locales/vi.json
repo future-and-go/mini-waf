@@ -171,7 +171,9 @@
     "alpnH1Only": "Chỉ HTTP/1.1",
     "alpnH2Only": "Chỉ HTTP/2 (strict)",
     "skipSslVerify": "Bỏ qua xác minh SSL",
-    "skipSslVerifyTooltip": "⚠️ NGUY HIỂM: Tắt hoàn toàn việc xác minh chứng chỉ TLS upstream. Kết nối sẽ dễ bị tấn công man-in-the-middle. Chỉ dùng cho cert tự ký trong môi trường kiểm soát, không phải production. Không bao giờ bật trong production."
+    "skipSslVerifyTooltip": "⚠️ NGUY HIỂM: Tắt hoàn toàn việc xác minh chứng chỉ TLS upstream. Kết nối sẽ dễ bị tấn công man-in-the-middle. Chỉ dùng cho cert tự ký trong môi trường kiểm soát, không phải production. Không bao giờ bật trong production.",
+    "preserveHost": "Giữ nguyên Host",
+    "preserveHostTooltip": "Khi BẬT (mặc định), header Host của client được chuyển tiếp nguyên vẹn đến upstream. Tắt để ghi đè header Host thành tên host upstream — cần thiết khi domain listener khác với virtual-host upstream (ví dụ: domain test local proxy đến site thật)."
   },
   "security": {
     "title": "Sự kiện trực tiếp",

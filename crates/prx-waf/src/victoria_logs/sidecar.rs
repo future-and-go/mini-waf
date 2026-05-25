@@ -109,7 +109,7 @@ impl VictoriaLogsSidecar {
         // Fire-and-forget: the supervisor owns the child for the rest of
         // the process lifetime. Tokio does not abort tasks when their
         // `JoinHandle` is dropped, so we don't need to keep one.
-        tokio::spawn(supervise(child, listen_addr));
+        tokio::spawn(supervise(child, cfg.clone()));
 
         Ok(Some(Self { _private: () }))
     }
@@ -167,61 +167,120 @@ async fn wait_until_ready(listen_addr: &str) -> anyhow::Result<()> {
     }
 }
 
-/// Supervisor task: monitors the child and routes shutdown signals.
-///
-/// The supervisor listens directly for SIGTERM/SIGINT.  Pingora's
-/// `run_forever` calls `std::process::exit(0)` and never unwinds the parent
-/// stack, so a Drop-based shutdown path on [`VictoriaLogsSidecar`] would
-/// never fire.  Multiple tokio signal handlers can coexist on the same
-/// signal — pingora gets notified for its own graceful shutdown, and our
-/// supervisor gets notified to forward the signal to the child.
-async fn supervise(mut child: Child, listen_addr: String) {
-    let mut health_timer = tokio::time::interval(HEALTH_CHECK_INTERVAL);
-    // Reset so the first tick fires after a full interval, not immediately.
-    health_timer.reset();
-    let probe_url = format!("http://{listen_addr}/health");
+/// Maximum number of consecutive restart attempts before giving up.
+const MAX_RESTART_ATTEMPTS: u32 = 5;
+/// Initial backoff delay on the first restart; doubles each attempt (2s, 4s, 8s, …).
+const RESTART_BACKOFF_BASE: Duration = Duration::from_secs(2);
+
+/// Supervisor task: monitors the child, routes shutdown signals, and
+/// auto-restarts `VictoriaLogs` on unexpected exit (up to [`MAX_RESTART_ATTEMPTS`]
+/// times with exponential backoff).
+async fn supervise(child: Child, cfg: VictoriaLogsConfig) {
     let probe_client = match reqwest::Client::builder().timeout(HEALTH_REQUEST_TIMEOUT).build() {
         Ok(c) => c,
         Err(e) => {
             warn!(error = %e, "Could not build periodic health-probe client; liveness checks disabled");
-            // Fall back to a default client; if even default fails we just
-            // skip the probe but still react to child exits + shutdowns.
             reqwest::Client::new()
         }
     };
 
     let mut sigterm = signal_recv(SignalKind::Terminate);
     let mut sigint = signal_recv(SignalKind::Interrupt);
+    let mut current_child = child;
+    let mut restart_attempts: u32 = 0;
 
     loop {
-        tokio::select! {
-            // Process-level SIGTERM / SIGINT — forward to the child before
-            // pingora exits the whole process.
+        let mut health_timer = tokio::time::interval(HEALTH_CHECK_INTERVAL);
+        health_timer.reset();
+        let probe_url = format!("http://{}/health", cfg.listen_addr);
+
+        let exit_status = tokio::select! {
             Some(()) = sigterm.recv() => {
                 info!("SIGTERM received; forwarding to VictoriaLogs");
-                graceful_shutdown(&mut child).await;
+                graceful_shutdown(&mut current_child).await;
                 return;
             }
             Some(()) = sigint.recv() => {
                 info!("SIGINT received; forwarding to VictoriaLogs");
-                graceful_shutdown(&mut child).await;
+                graceful_shutdown(&mut current_child).await;
                 return;
             }
-            // Child exited on its own.
-            wait_res = child.wait() => {
+            wait_res = current_child.wait() => {
                 match wait_res {
-                    Ok(status) => error!(status = ?status, "VictoriaLogs exited unexpectedly; admin intervention required"),
-                    Err(e) => error!(error = %e, "Failed to wait on VictoriaLogs child"),
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!(error = %e, "Failed to wait on VictoriaLogs child");
+                        return;
+                    }
                 }
-                return;
             }
-            // Periodic liveness probe.
             _ = health_timer.tick() => {
                 match probe_client.get(&probe_url).send().await {
                     Ok(resp) if resp.status().is_success() => {}
                     Ok(resp) => warn!(status = %resp.status(), "VictoriaLogs '/health' returned non-success"),
                     Err(e) => warn!(error = %e, "VictoriaLogs '/health' probe failed"),
                 }
+                continue;
+            }
+        };
+
+        // VictoriaLogs exited unexpectedly — attempt restart with exponential backoff.
+        restart_attempts += 1;
+        if restart_attempts > MAX_RESTART_ATTEMPTS {
+            error!(
+                status = ?exit_status,
+                attempts = restart_attempts - 1,
+                "VictoriaLogs exited and exceeded max restart attempts; giving up — admin intervention required"
+            );
+            return;
+        }
+
+        let backoff = RESTART_BACKOFF_BASE * 2u32.saturating_pow(restart_attempts - 1);
+        warn!(
+            status = ?exit_status,
+            attempt = restart_attempts,
+            max = MAX_RESTART_ATTEMPTS,
+            backoff_secs = backoff.as_secs(),
+            "VictoriaLogs exited unexpectedly; restarting after backoff"
+        );
+        tokio::time::sleep(backoff).await;
+
+        let mut command = Command::new(&cfg.binary_path);
+        command
+            .arg(format!("--storageDataPath={}", cfg.storage_data_path))
+            .arg(format!("--httpListenAddr={}", cfg.listen_addr))
+            .arg(format!("--retentionPeriod={}", cfg.retention_period))
+            .arg(format!(
+                "--retention.maxDiskSpaceUsageBytes={}",
+                cfg.max_disk_space_bytes
+            ))
+            .arg(format!("--storage.minFreeDiskSpaceBytes={}", cfg.min_free_disk_bytes))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(false);
+
+        match command.spawn() {
+            Ok(mut new_child) => {
+                if let Some(stdout) = new_child.stdout.take() {
+                    tokio::spawn(forward_lines(stdout, false));
+                }
+                if let Some(stderr) = new_child.stderr.take() {
+                    tokio::spawn(forward_lines(stderr, true));
+                }
+                match wait_until_ready(&cfg.listen_addr).await {
+                    Ok(()) => {
+                        info!(attempt = restart_attempts, "VictoriaLogs restarted successfully");
+                        restart_attempts = 0;
+                        current_child = new_child;
+                    }
+                    Err(e) => {
+                        error!(error = %e, attempt = restart_attempts, "Restarted VictoriaLogs did not become healthy");
+                        let _ = new_child.start_kill();
+                    }
+                }
+            }
+            Err(e) => {
+                error!(error = %e, attempt = restart_attempts, "Failed to restart VictoriaLogs");
             }
         }
     }

@@ -38,6 +38,24 @@ services:
     ports:
       - "16379:6379"
 
+  # ── TLS init — generates self-signed cert into waf_tls volume if not present ─
+  tls-init:
+    image: docker.io/library/alpine:latest
+    volumes:
+      - waf_tls:/certs
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache openssl >/dev/null 2>&1
+        if [ ! -f /certs/cert.pem ] || [ ! -f /certs/key.pem ]; then
+          openssl req -x509 -newkey rsa:2048 -keyout /certs/key.pem -out /certs/cert.pem -days 3650 -nodes -subj '/CN=localhost/O=prx-waf/C=VN'
+          chmod 600 /certs/key.pem
+          echo 'TLS certs generated.'
+        else
+          echo 'TLS certs already exist, skipping.'
+        fi
+    restart: "no"
+
   # ── PRX-WAF ──────────────────────────────────────────────────────────────────
   prx-waf:
     build:
@@ -50,6 +68,8 @@ services:
         condition: service_healthy
       valkey:
         condition: service_healthy
+      tls-init:
+        condition: service_completed_successfully
     environment:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-with-a-long-random-secret}
       DATABASE_URL: postgresql://prx_waf:prx_waf@postgres:5432/prx_waf
@@ -64,7 +84,9 @@ services:
     volumes:
       - ./configs:/app/configs      # rw: waf-panel.toml is written by the admin API
       - ./rules:/app/rules:ro
+      - waf_tls:/etc/prx-waf/tls:ro               # TLS cert/key — populated by tls-init service
       - waf_certs:/app/certs
+      - waf_data:/app/data                          # geoip xdb + auto-generated self-signed TLS cert
       - vlogs_data:/var/lib/prx-waf/victoria-logs   # binary + log partitions (persistent)
     ports:
       - "16880:80"    # HTTP proxy
@@ -112,7 +134,11 @@ services:
 volumes:
   postgres_data:
     driver: local
+  waf_tls:
+    driver: local
   waf_certs:
+    driver: local
+  waf_data:
     driver: local
   vlogs_data:
     driver: local

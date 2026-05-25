@@ -146,7 +146,9 @@
     "alpnH1Only": "仅 HTTP/1.1",
     "alpnH2Only": "仅 HTTP/2（严格）",
     "skipSslVerify": "跳过 SSL 验证",
-    "skipSslVerifyTooltip": "⚠️ 危险：完全禁用上游 TLS 证书验证，连接将易受中间人攻击。仅在受控的非生产环境中用于自签名证书。切勿在生产环境中启用。"
+    "skipSslVerifyTooltip": "⚠️ 危险：完全禁用上游 TLS 证书验证，连接将易受中间人攻击。仅在受控的非生产环境中用于自签名证书。切勿在生产环境中启用。",
+    "preserveHost": "保留 Host 头",
+    "preserveHostTooltip": "开启（默认）时，客户端的 Host 头原样转发给上游。关闭时，Host 头将被替换为上游主机名——适用于监听域名与上游虚拟主机名不一致的场景（如本地测试域名代理到真实站点）。"
   },
   "security": {
     "title": "实时事件",
