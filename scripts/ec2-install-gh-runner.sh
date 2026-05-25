@@ -120,8 +120,12 @@ set -euo pipefail
 UNPACKED=${1:?"usage: prx-waf-deploy <unpacked-dir> [version]"}
 VERSION=${2:-unknown}
 
-[ -d "$UNPACKED" ]           || { echo "$UNPACKED is not a directory" >&2; exit 1; }
-[ -x "$UNPACKED/prx-waf" ]   || { echo "$UNPACKED/prx-waf missing or not executable" >&2; exit 1; }
+[ -d "$UNPACKED" ]      || { echo "$UNPACKED is not a directory" >&2; exit 1; }
+# Release artifact ships the binary as `waf` (renamed in the workflow); the
+# installed path on disk stays `/usr/local/bin/prx-waf` so the systemd unit,
+# sudoers rules, and operator muscle memory don't churn.
+SRC_BIN="$UNPACKED/waf"
+[ -x "$SRC_BIN" ]       || { echo "$SRC_BIN missing or not executable" >&2; exit 1; }
 
 ENVFILE=/etc/prx-waf/env
 CONF=/etc/prx-waf/config.toml
@@ -161,7 +165,7 @@ rsync -a --delete --exclude='default.toml' "$UNPACKED/configs/" /opt/prx-waf/con
 chown -R prx-waf:prx-waf /opt/prx-waf/rules /opt/prx-waf/configs
 
 # 3. Install binary (atomic via temp + rename), add CAP_NET_BIND_SERVICE
-install -m 0755 "$UNPACKED/prx-waf" /usr/local/bin/prx-waf.new
+install -m 0755 "$SRC_BIN" /usr/local/bin/prx-waf.new
 setcap 'cap_net_bind_service=+ep' /usr/local/bin/prx-waf.new
 mv -f /usr/local/bin/prx-waf.new /usr/local/bin/prx-waf
 
