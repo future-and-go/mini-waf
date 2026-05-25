@@ -600,7 +600,12 @@ impl ProxyHttp for WafProxy {
         // rather than the raw `Host` request header to prevent open-redirect
         // abuse: the resolved host_config is already router-validated, whereas
         // the request Host header is attacker-controlled.
-        if request_ctx.host_config.http_redirect && !request_ctx.is_tls {
+        //
+        // Guard: also require `!host_config.ssl` so that a TLS host record
+        // that accidentally has `http_redirect=true` never triggers a redirect
+        // when the HostRouter resolves it for an HTTP request (bare-key
+        // collision when both :80 and :443 are registered for the same hostname).
+        if request_ctx.host_config.http_redirect && !request_ctx.is_tls && !request_ctx.host_config.ssl {
             let location = format!(
                 "https://{}{}",
                 request_ctx.host_config.host,
