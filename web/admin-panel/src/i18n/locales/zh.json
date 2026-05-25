@@ -146,7 +146,7 @@
     "alpnH1Only": "仅 HTTP/1.1",
     "alpnH2Only": "仅 HTTP/2（严格）",
     "httpRedirect": "HTTP → HTTPS 重定向",
-    "httpRedirectTooltip": "启用后，该主机的 HTTP（80 端口）请求将自动跳转到 HTTPS（301 永久重定向）。建议与同主机的 SSL 配置一起启用。",
+    "httpRedirectTooltip": "将 HTTP 请求重定向到 HTTPS（301）。必须在该主机名的 80 端口记录上启用，而非 443 端口。要求 HTTPS 监听在标准 443 端口。",
     "skipSslVerify": "跳过 SSL 验证",
     "skipSslVerifyTooltip": "⚠️ 危险：完全禁用上游 TLS 证书验证，连接将易受中间人攻击。仅在受控的非生产环境中用于自签名证书。切勿在生产环境中启用。",
     "defenseSection": "防御配置",
