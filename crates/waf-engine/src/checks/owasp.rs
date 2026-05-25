@@ -931,4 +931,54 @@ rules:
             "PL3 rule should be skipped at default paranoia level 1"
         );
     }
+
+    // ── CRS-920350: Host header is a numeric IP address ───────────────────────
+    // Regression: pattern_field "header_host" / "host" must check ctx.host ONLY.
+    // Previously the unknown field fell to the catch-all which scanned ALL
+    // non-routing headers, causing X-Forwarded-For to false-positive trigger.
+
+    fn make_ctx_with_host_and_xff(hostname: &str, xff: &str) -> RequestCtx {
+        let mut ctx = make_ctx("GET", "/", 0);
+        ctx.host = hostname.into();
+        ctx.headers.insert("x-forwarded-for".into(), xff.into());
+        ctx
+    }
+
+    const CRS_920350_YAML: &str = r"kind: custom_rule_v1
+id: CRS-920350
+name: Host header is a numeric IP address
+enabled: true
+action: block
+pattern: '(?:^([\d.]+|\[[\da-f:]+\]|[\da-f:]+)(:[\d]+)?$)'
+pattern_field: host
+category: protocol-attack
+severity: warning
+paranoia: 1
+";
+
+    #[test]
+    fn crs_920350_blocks_numeric_ip_host() {
+        let checker = OWASPCheck::from_yaml(CRS_920350_YAML);
+        let mut ctx = make_ctx_with_host_and_xff("13.214.252.169", "5.5.5.5");
+        ctx.host = "13.214.252.169".into();
+        assert!(checker.check(&ctx).is_some(), "numeric IP in Host header must block");
+    }
+
+    #[test]
+    fn crs_920350_allows_hostname_even_with_ip_in_xff() {
+        let checker = OWASPCheck::from_yaml(CRS_920350_YAML);
+        // Host is a proper domain; X-Forwarded-For contains a numeric IP — must NOT block
+        let ctx = make_ctx_with_host_and_xff("futureandgo.waf-exams.info", "166.88.120.155");
+        assert!(
+            checker.check(&ctx).is_none(),
+            "legitimate hostname with IP in X-Forwarded-For must not block (false-positive regression)"
+        );
+    }
+
+    #[test]
+    fn crs_920350_allows_hostname_no_xff() {
+        let checker = OWASPCheck::from_yaml(CRS_920350_YAML);
+        let ctx = make_ctx_with_host_and_xff("example.com", "");
+        assert!(checker.check(&ctx).is_none(), "example.com must not block");
+    }
 }

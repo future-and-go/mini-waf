@@ -448,6 +448,12 @@ pub struct HostConfig {
     /// No-op when `ssl: false`. Default `false`.
     #[serde(default)]
     pub upstream_skip_ssl_verify: bool,
+    /// Redirect plain-HTTP requests for this virtual host to HTTPS.
+    /// When `true`, any request arriving on a non-TLS listener is answered with
+    /// a `301 Moved Permanently` to `https://<host><request-uri>`.
+    /// Typically combined with `ssl: true` on the same host.  Default `false`.
+    #[serde(default)]
+    pub http_redirect: bool,
 }
 
 const fn default_preserve_host() -> bool {
@@ -575,6 +581,7 @@ impl Default for HostConfig {
             redact_case_insensitive: true,
             upstream_alpn: UpstreamAlpn::H2H1,
             upstream_skip_ssl_verify: false,
+            http_redirect: false,
             upstream_connect_timeout_ms: default_upstream_connect_timeout_ms(),
             upstream_total_connection_timeout_ms: default_upstream_total_connection_timeout_ms(),
             upstream_read_timeout_ms: default_upstream_read_timeout_ms(),
