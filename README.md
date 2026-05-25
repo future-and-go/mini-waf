@@ -289,4 +289,4 @@ cargo run --bin prx-waf -- -c configs/default.toml run
 
 Licensed under Apache License, Version 2.0 or MIT (your choice).
 
-Authors: OpenPRX Community | Repository: [github.com/openprx/prx-waf](https://github.com/openprx/prx-waf) | Version: 0.2.0
+Authors: OpenPRX Community | Repository: [github.com/openprx/prx-waf](https://github.com/openprx/prx-waf) | Version: 1.0.0

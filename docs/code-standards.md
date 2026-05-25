@@ -396,6 +396,125 @@ let val = expensive_operation()?;
 
 ---
 
+## Hot-Reload Patterns (Lock-Free Updates)
+
+### ArcSwap Pattern (Recommended)
+
+Use `ArcSwap` for atomic, lock-free reads of configuration snapshots during request processing.
+
+**Setup**:
+```rust
+use arc_swap::ArcSwap;
+use std::sync::Arc;
+
+pub struct Config { /* ... */ }
+pub struct Router {
+    config: Arc<ArcSwap<Config>>,
+}
+
+impl Router {
+    pub fn new(config: Config) -> Self {
+        Self {
+            config: Arc::new(ArcSwap::new(Arc::new(config))),
+        }
+    }
+    
+    // Hot-reload: atomically swap config, no lock held during reads
+    pub fn reload(&self, new_config: Config) {
+        self.config.store(Arc::new(new_config));
+    }
+    
+    // Request path: cheap load (one atomic read)
+    pub fn classify(&self, req: &Request) -> Decision {
+        let cfg = self.config.load_full();  // Arc clone, no lock
+        cfg.classify(req)
+    }
+}
+```
+
+**Why ArcSwap**:
+- ✓ Zero-copy atomic swap (no garbage collection)
+- ✓ Lock-free reads (no mutex in hot path)
+- ✓ No panics (Arc semantics are infallible)
+- ✓ Supports multi-threaded reload without request interruption
+
+**Typical integration**:
+- File watcher (notify crate) detects file changes
+- Background thread parses new config (≤500ms)
+- On validation success: `router.reload(new_config)` swaps atomically
+- On validation failure: retry or log warn; old config persists
+
+### File Watcher Integration
+
+```rust
+use notify::{Watcher, RecursiveMode, Result as NotifyResult};
+
+pub fn watch_config<F>(path: &str, on_change: F) -> NotifyResult<()>
+where
+    F: Fn(&Path) + Send + 'static,
+{
+    let mut watcher = notify::recommended_watcher(move |event| match event {
+        Ok(notify::Event {
+            kind: notify::EventKind::Modify(_),
+            paths,
+            ..
+        }) => {
+            for path in paths {
+                on_change(&path);
+            }
+        }
+        _ => {}
+    })?;
+    
+    watcher.watch(std::path::Path::new(path), RecursiveMode::NonRecursive)?;
+    std::mem::forget(watcher);  // Keep alive
+    Ok(())
+}
+```
+
+**Debounce pattern** (suppress editor burst saves):
+```rust
+use std::sync::Mutex;
+use std::time::Instant;
+
+pub struct DebouncedReloader {
+    last_reload: Mutex<Instant>,
+    debounce_ms: u64,
+}
+
+impl DebouncedReloader {
+    pub fn maybe_reload(&self, path: &Path) -> bool {
+        let mut last = self.last_reload.lock().unwrap();
+        if last.elapsed().as_millis() > self.debounce_ms as u128 {
+            *last = Instant::now();
+            true  // Proceed with reload
+        } else {
+            false  // Skip (within debounce window)
+        }
+    }
+}
+```
+
+### Data File Hot-Reload (DataFileRegistry)
+
+For `.data` files (external dictionaries, Aho-Corasick patterns):
+
+```rust
+// Load automaton from .data file with caching
+let registry = DataFileRegistry::new();
+let automaton = registry.load_or_get("rules/patterns.data")?;
+// File changed? notify watcher triggers re-cache
+
+// File watcher detects change → registry invalidates cache key
+// Next load_or_get() recompiles from disk
+```
+
+**Size validation**:
+- Soft warn: ≥50k entries (log at WARN level)
+- Hard reject: ≥500k entries (parse error, config rollback)
+
+---
+
 ## Related Documentation
 
 For additional safety patterns, testing strategies, operational conventions, and feature-specific guidance, see:
