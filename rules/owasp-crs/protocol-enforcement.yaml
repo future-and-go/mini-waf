@@ -38,7 +38,7 @@ name: Host header is a numeric IP address
 enabled: true
 action: block
 pattern: (?:^([\d.]+|\[[\da-f:]+\]|[\da-f:]+)(:[\d]+)?$)
-pattern_field: header_host
+pattern_field: host
 category: protocol-attack
 severity: warning
 paranoia: 1

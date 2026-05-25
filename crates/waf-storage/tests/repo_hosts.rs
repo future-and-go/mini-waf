@@ -44,6 +44,7 @@ fn sample_host() -> CreateHost {
         log_only_mode: false,
         upstream_alpn: "h2h1".to_string(),
         upstream_skip_ssl_verify: false,
+        defense_json: None,
     }
 }
 
@@ -98,6 +99,7 @@ async fn update_partial_fields_persists() {
         log_only_mode: Some(true),
         upstream_alpn: None,
         upstream_skip_ssl_verify: None,
+        defense_json: None,
     };
     let updated = fx.db.update_host(host.id, upd).await.unwrap().unwrap();
     assert_eq!(updated.host, "changed.example.com");
@@ -126,6 +128,7 @@ async fn update_missing_returns_none() {
         log_only_mode: None,
         upstream_alpn: None,
         upstream_skip_ssl_verify: None,
+        defense_json: None,
     };
     let res = fx.db.update_host(uuid::Uuid::new_v4(), upd).await.unwrap();
     assert!(res.is_none());

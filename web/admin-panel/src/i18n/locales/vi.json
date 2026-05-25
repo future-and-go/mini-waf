@@ -170,6 +170,8 @@
     "alpnH2H1": "Tự động (h2 + http/1.1)",
     "alpnH1Only": "Chỉ HTTP/1.1",
     "alpnH2Only": "Chỉ HTTP/2 (strict)",
+    "httpRedirect": "Chuyển hướng HTTP → HTTPS",
+    "httpRedirectTooltip": "Khi bật, các request HTTP (cổng 80) đến host này sẽ được tự động chuyển hướng sang HTTPS (301 Moved Permanently). Nên dùng kèm với SSL trên cùng hostname.",
     "skipSslVerify": "Bỏ qua xác minh SSL",
     "skipSslVerifyTooltip": "⚠️ NGUY HIỂM: Tắt hoàn toàn việc xác minh chứng chỉ TLS upstream. Kết nối sẽ dễ bị tấn công man-in-the-middle. Chỉ dùng cho cert tự ký trong môi trường kiểm soát, không phải production. Không bao giờ bật trong production.",
     "defenseSection": "Cấu hình bảo vệ",
