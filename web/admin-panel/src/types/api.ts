@@ -55,6 +55,8 @@ export interface Host {
   remarks?: string;
   upstream_alpn: UpstreamAlpn;
   upstream_skip_ssl_verify: boolean;
+  /** Redirect plain-HTTP requests to HTTPS (301). Requires a corresponding HTTP listener. */
+  http_redirect: boolean;
   defense_json?: DefenseJson | null;
 }
 

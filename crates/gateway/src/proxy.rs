@@ -588,6 +588,31 @@ impl ProxyHttp for WafProxy {
             return Ok(true);
         }
 
+        // HTTP → HTTPS redirect: when the host (or its corresponding port-443
+        // sibling) has `http_redirect: true` and the request arrived on a
+        // plain-text (non-TLS) connection, answer with 301.
+        // The fallback lookup covers the common case where both `host:80` and
+        // `host:443` are registered — the router bare-key resolves to port-80,
+        // but the redirect flag lives on the port-443 config.
+        let effective_http_redirect = request_ctx.host_config.http_redirect
+            || (!request_ctx.is_tls
+                && self
+                    .router
+                    .resolve(&format!("{}:443", request_ctx.host))
+                    .is_some_and(|c| c.http_redirect));
+        if effective_http_redirect && !request_ctx.is_tls {
+            let location = format!(
+                "https://{}{}",
+                request_ctx.host,
+                session.req_header().uri.path_and_query().map_or("/", |pq| pq.as_str()),
+            );
+            let mut resp = pingora_http::ResponseHeader::build(301, Some(2))?;
+            resp.insert_header("Location", &location)?;
+            resp.insert_header("Content-Length", "0")?;
+            session.write_response_header(Box::new(resp), true).await?;
+            return Ok(true);
+        }
+
         // FR-011 phase-02 — record one behavioral sample per request. Skipped
         // when no fingerprint resolved (empty FpKey) or no recorder injected.
         // Phase 4 also forwards `Sec-Purpose: prefetch` so the

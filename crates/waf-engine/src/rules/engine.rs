@@ -1167,6 +1167,9 @@ fn pattern_matches_request(pattern: &Regex, field: &str, ctx: &RequestCtx) -> bo
         "query" => test_with_decode(pattern, &ctx.query),
         "body" => test_with_decode(pattern, &String::from_utf8_lossy(&ctx.body_preview)),
         "method" => pattern.is_match(&ctx.method),
+        // "host" / "header_host" — check only the Host header, never proxy or forwarded headers
+        "host" | "header_host" => pattern.is_match(&ctx.host),
+        "user_agent" => ctx.headers.get("user-agent").is_some_and(|v| test_with_decode(pattern, v)),
         "cookies" => ctx.cookies.iter().any(|(_, v)| test_with_decode(pattern, v)),
         "headers" => ctx
             .headers

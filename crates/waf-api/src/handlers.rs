@@ -82,6 +82,7 @@ pub async fn create_host(State(state): State<Arc<AppState>>, Json(req): Json<Cre
         defense_config,
         upstream_alpn,
         upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
+        http_redirect: host.http_redirect,
         ..HostConfig::default()
     });
     state.router.register(&config);
@@ -144,6 +145,7 @@ pub async fn update_host(
         defense_config,
         upstream_alpn,
         upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
+        http_redirect: host.http_redirect,
         ..HostConfig::default()
     });
     state.router.register(&config);
