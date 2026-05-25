@@ -588,6 +588,36 @@ impl ProxyHttp for WafProxy {
             return Ok(true);
         }
 
+        // HTTP → HTTPS redirect (301).
+        //
+        // Semantics: set `http_redirect = true` on the **port-80** host record
+        // for a given hostname. The flag is meaningless on a TLS (port-443)
+        // host because `is_tls` will be `true` and the condition below never
+        // fires.  Assumes the HTTPS listener is on the standard port 443;
+        // non-standard HTTPS ports are not supported.
+        //
+        // The Location header uses `host_config.host` (the registered hostname)
+        // rather than the raw `Host` request header to prevent open-redirect
+        // abuse: the resolved host_config is already router-validated, whereas
+        // the request Host header is attacker-controlled.
+        //
+        // Guard: also require `!host_config.ssl` so that a TLS host record
+        // that accidentally has `http_redirect=true` never triggers a redirect
+        // when the HostRouter resolves it for an HTTP request (bare-key
+        // collision when both :80 and :443 are registered for the same hostname).
+        if request_ctx.host_config.http_redirect && !request_ctx.is_tls && !request_ctx.host_config.ssl {
+            let location = format!(
+                "https://{}{}",
+                request_ctx.host_config.host,
+                session.req_header().uri.path_and_query().map_or("/", |pq| pq.as_str()),
+            );
+            let mut resp = pingora_http::ResponseHeader::build(301, Some(2))?;
+            resp.insert_header("Location", &location)?;
+            resp.insert_header("Content-Length", "0")?;
+            session.write_response_header(Box::new(resp), true).await?;
+            return Ok(true);
+        }
+
         // FR-011 phase-02 — record one behavioral sample per request. Skipped
         // when no fingerprint resolved (empty FpKey) or no recorder injected.
         // Phase 4 also forwards `Sec-Purpose: prefetch` so the

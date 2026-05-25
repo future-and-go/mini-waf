@@ -1664,6 +1664,7 @@ async fn init_async(
             defense_config,
             upstream_alpn,
             upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
+            http_redirect: host.http_redirect,
             ..HostConfig::default()
         });
         router.register(&cfg);

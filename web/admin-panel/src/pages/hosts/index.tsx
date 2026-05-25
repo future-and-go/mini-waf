@@ -14,13 +14,15 @@ import {
   App,
   Typography,
   Popconfirm,
+  Collapse,
+  Divider,
 } from "antd";
 import { PlusOutlined, ReloadOutlined, EditOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import { useTable, useCreate, useDelete, useUpdate } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
-import type { Host, UpstreamAlpn } from "../../types/api";
+import type { Host, UpstreamAlpn, DefenseJson } from "../../types/api";
 
 interface HostFormShape {
   host: string;
@@ -33,8 +35,27 @@ interface HostFormShape {
   log_only_mode: boolean;
   upstream_alpn: UpstreamAlpn;
   upstream_skip_ssl_verify: boolean;
+  http_redirect: boolean;
   remarks?: string;
+  defense_json: DefenseJson;
 }
+
+const DEFAULT_DEFENSE: DefenseJson = {
+  bot: true,
+  sqli: true,
+  xss: true,
+  scan: true,
+  rce: true,
+  sensitive: true,
+  dir_traversal: true,
+  owasp_set: true,
+  owasp_paranoia: 1,
+  cc: true,
+  cc_rps: 100,
+  cc_burst: 200,
+  cc_ban_threshold: 5,
+  cc_ban_duration_secs: 600,
+};
 
 const DEFAULT_FORM: HostFormShape = {
   host: "",
@@ -47,7 +68,9 @@ const DEFAULT_FORM: HostFormShape = {
   log_only_mode: false,
   upstream_alpn: "h2h1",
   upstream_skip_ssl_verify: false,
+  http_redirect: false,
   remarks: "",
+  defense_json: DEFAULT_DEFENSE,
 };
 
 export const HostsPage: React.FC = () => {
@@ -80,7 +103,7 @@ export const HostsPage: React.FC = () => {
       { resource: "hosts", values: { ...DEFAULT_FORM, ...values }, successNotification: false },
       {
         onSuccess: () => {
-          message.success("OK");
+          message.success(t("hosts.createdAndReloaded"));
           setCreateOpen(false);
           createForm.resetFields();
           tableQuery.refetch();
@@ -104,7 +127,9 @@ export const HostsPage: React.FC = () => {
       log_only_mode: host.log_only_mode ?? false,
       upstream_alpn: host.upstream_alpn ?? "h2h1",
       upstream_skip_ssl_verify: host.upstream_skip_ssl_verify ?? false,
+      http_redirect: host.http_redirect ?? false,
       remarks: host.remarks ?? "",
+      defense_json: { ...DEFAULT_DEFENSE, ...(host.defense_json ?? {}) },
     });
   };
 
@@ -120,7 +145,7 @@ export const HostsPage: React.FC = () => {
       },
       {
         onSuccess: () => {
-          message.success("OK");
+          message.success(t("hosts.savedAndReloaded"));
           setEditingHost(null);
           editForm.resetFields();
           tableQuery.refetch();
@@ -135,7 +160,7 @@ export const HostsPage: React.FC = () => {
       { resource: "hosts", id, successNotification: false },
       {
         onSuccess: () => {
-          message.success("OK");
+          message.success(t("hosts.deletedAndReloaded"));
           tableQuery.refetch();
         },
         onError: (err) => message.error(err.message),
@@ -271,6 +296,78 @@ export const HostsPage: React.FC = () => {
       >
         <Switch disabled={!sslOn} />
       </Form.Item>
+
+      <Form.Item
+        name="http_redirect"
+        valuePropName="checked"
+        label={
+          <span>
+            {t("hosts.httpRedirect")}&nbsp;
+            <Tooltip title={t("hosts.httpRedirectTooltip")}>
+              <InfoCircleOutlined style={{ color: "#8c8c8c" }} />
+            </Tooltip>
+          </span>
+        }
+      >
+        <Switch />
+      </Form.Item>
+
+      <Divider orientation="left" plain style={{ marginBottom: 0 }}>
+        {t("hosts.defenseSection")}
+      </Divider>
+
+      <Collapse ghost>
+        <Collapse.Panel header={t("hosts.defenseToggles")} key="toggles">
+          <Space size="large" wrap>
+            <Form.Item name={["defense_json", "bot"]} label="Bot" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item name={["defense_json", "sqli"]} label="SQLi" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item name={["defense_json", "xss"]} label="XSS" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item name={["defense_json", "rce"]} label="RCE" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item name={["defense_json", "scan"]} label={t("hosts.defenseScan")} valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item name={["defense_json", "sensitive"]} label={t("hosts.defenseSensitive")} valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item name={["defense_json", "dir_traversal"]} label={t("hosts.defenseDirTrav")} valuePropName="checked"><Switch /></Form.Item>
+          </Space>
+        </Collapse.Panel>
+
+        <Collapse.Panel header={t("hosts.defenseOwasp")} key="owasp">
+          <Space size="large" wrap>
+            <Form.Item name={["defense_json", "owasp_set"]} label={t("hosts.defenseOwaspEnable")} valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name={["defense_json", "owasp_paranoia"]} label={t("hosts.defenseOwaspParanoia")}>
+              <Select
+                style={{ width: 180 }}
+                options={[
+                  { value: 1, label: "PL1 — Lenient" },
+                  { value: 2, label: "PL2" },
+                  { value: 3, label: "PL3" },
+                  { value: 4, label: "PL4 — Strict" },
+                ]}
+              />
+            </Form.Item>
+          </Space>
+        </Collapse.Panel>
+
+        <Collapse.Panel header={t("hosts.defenseCc")} key="cc">
+          <Space size="large" wrap>
+            <Form.Item name={["defense_json", "cc"]} label={t("hosts.defenseCcEnable")} valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name={["defense_json", "cc_rps"]} label="RPS" tooltip="Token bucket refill rate (req/sec)">
+              <InputNumber min={0.1} step={1} style={{ width: 130 }} />
+            </Form.Item>
+            <Form.Item name={["defense_json", "cc_burst"]} label="Burst" tooltip="Token bucket burst capacity">
+              <InputNumber min={1} step={10} style={{ width: 130 }} />
+            </Form.Item>
+            <Form.Item name={["defense_json", "cc_ban_threshold"]} label={t("hosts.defenseCcBanThreshold")}>
+              <InputNumber min={1} style={{ width: 130 }} />
+            </Form.Item>
+            <Form.Item name={["defense_json", "cc_ban_duration_secs"]} label={t("hosts.defenseCcBanDuration")}>
+              <InputNumber min={1} step={60} style={{ width: 140 }} addonAfter="s" />
+            </Form.Item>
+          </Space>
+        </Collapse.Panel>
+      </Collapse>
     </Form>
   );
 
