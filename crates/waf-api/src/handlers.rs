@@ -58,6 +58,13 @@ pub async fn create_host(State(state): State<Arc<AppState>>, Json(req): Json<Cre
 
     let host = state.db.create_host(req).await?;
 
+    // Deserialize per-host defense overrides; fall back to defaults if NULL/invalid.
+    let defense_config: waf_common::DefenseConfig = host
+        .defense_json
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
     // Register with router
     let upstream_alpn = UpstreamAlpn::from_db_str(&host.upstream_alpn);
     let config = Arc::new(HostConfig {
@@ -72,6 +79,7 @@ pub async fn create_host(State(state): State<Arc<AppState>>, Json(req): Json<Cre
         cert_file: host.cert_file.clone(),
         key_file: host.key_file.clone(),
         start_status: host.start_status,
+        defense_config,
         upstream_alpn,
         upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
         ..HostConfig::default()
@@ -377,12 +385,39 @@ pub async fn reload_sqli_scan_config(
 
 // ─── Custom Rules ─────────────────────────────────────────────────────────────
 
+/// Normalise a serialised CustomRule so the frontend always sees:
+///   `conditions: Condition[]`  (flat legacy array or `[]`)
+///   `match_tree: ConditionNode | null`  (top-level, never nested inside conditions)
+///
+/// The DB packs a tree into the `conditions` column as `{"match_tree": …}`.
+/// This helper unpacks that so callers never need to inspect the packed shape.
+fn unpack_custom_rule(row: waf_storage::models::CustomRule) -> Value {
+    let mut v = serde_json::to_value(&row).unwrap_or(Value::Null);
+    if let Some(obj) = v.as_object_mut() {
+        let packed = obj.get("conditions").cloned().unwrap_or(Value::Null);
+        if let Some(mt) = packed
+            .as_object()
+            .and_then(|m| m.get("match_tree"))
+            .cloned()
+        {
+            // Packed tree: expose match_tree top-level, conditions → []
+            obj.insert("match_tree".to_string(), mt);
+            obj.insert("conditions".to_string(), json!([]));
+        } else {
+            // Legacy flat array: ensure match_tree key is present
+            obj.entry("match_tree").or_insert(Value::Null);
+        }
+    }
+    v
+}
+
 pub async fn list_custom_rules(
     State(state): State<Arc<AppState>>,
     Query(filter): Query<HostCodeFilter>,
 ) -> ApiResult<Json<Value>> {
     let rows = state.db.list_custom_rules(filter.host_code.as_deref()).await?;
-    Ok(Json(json!({ "success": true, "data": rows })))
+    let data: Vec<Value> = rows.into_iter().map(unpack_custom_rule).collect();
+    Ok(Json(json!({ "success": true, "data": data })))
 }
 
 pub async fn create_custom_rule(
@@ -396,7 +431,7 @@ pub async fn create_custom_rule(
     if let Ok(rule) = from_db_rule(&row) {
         state.engine.custom_rules.add_rule(rule);
     }
-    Ok(Json(json!({ "success": true, "data": row })))
+    Ok(Json(json!({ "success": true, "data": unpack_custom_rule(row) })))
 }
 
 pub async fn delete_custom_rule(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
@@ -454,7 +489,7 @@ pub async fn update_custom_rule(
         state.engine.custom_rules.add_rule(rule);
     }
 
-    Ok(Json(json!({ "success": true, "data": row })))
+    Ok(Json(json!({ "success": true, "data": unpack_custom_rule(row) })))
 }
 
 // ─── Sensitive Patterns ───────────────────────────────────────────────────────

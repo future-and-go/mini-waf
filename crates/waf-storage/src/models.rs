@@ -234,6 +234,11 @@ pub struct CreateHost {
     /// Skip TLS certificate verification for the upstream. Default `false`.
     #[serde(default)]
     pub upstream_skip_ssl_verify: bool,
+    /// Per-host defense overrides (JSONB blob). When `None`, system defaults apply.
+    /// Shape mirrors a partial `waf_common::DefenseConfig`; unknown keys ignored,
+    /// missing keys fall back to defaults at engine load.
+    #[serde(default)]
+    pub defense_json: Option<serde_json::Value>,
 }
 
 fn default_upstream_alpn() -> String {
@@ -257,6 +262,7 @@ pub struct UpdateHost {
     pub log_only_mode: Option<bool>,
     pub upstream_alpn: Option<String>,
     pub upstream_skip_ssl_verify: Option<bool>,
+    pub defense_json: Option<serde_json::Value>,
 }
 
 /// Create IP rule request
