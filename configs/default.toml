@@ -237,3 +237,30 @@ channel_capacity = 10000           # drop-oldest threshold for the buffer
 #                               # jwt | aws_key | google_api_key | slack_token | github_pat
 # extra_patterns    = []        # Custom regexes, compiled at startup. Invalid → startup error.
 # max_scan_bytes    = 8192      # Hard cap on per-value scan length (DoS guard). 0 = no cap.
+
+# ── Issue #60 — Shared audit emitter ────────────────────────────────────────
+# Bridges detection signals (relay, tx_velocity) to `security_events` rows so
+# the admin panel can filter on stable `rule_id` strings.  Default off so the
+# DB stays quiet until operators opt in; flip `enabled = true` in staging /
+# Attack Battle / multi-tenant prod.
+#
+# Layer 1 (per-IP, per-rule-id window)  + Layer 2 (global per-rule-id rate)
+# cap how often a single source / a single rule_id can land rows in the DB.
+# WS broadcasts always fire — live admin-panel subscribers see every
+# detection regardless of the DB throttle.
+# [audit_emitter]
+# enabled               = false  # master switch — hot-reloadable via ArcSwap
+# window_secs           = 60     # layer-1 per-(client_ip, rule_id) window
+# channel_capacity      = 0      # 0 → auto: available_parallelism * 64; floor 4096
+# gc_interval_secs      = 30     # janitor tick for bucket pruning
+# max_keys              = 10000  # LRU cap on layer-1 bucket store
+# global_tokens_per_sec = 100    # default layer-2 cap per rule_id
+#
+# Per-rule_id overrides (3-segment grammar required: ^[A-Z]+-[A-Z]+-\d{3}$).
+# [audit_emitter.global_rate]
+# "BOT-XFF-001"      = 200
+# "BOT-RELAY-001"    = 100
+# "BOT-TOR-001"      = 100
+# "TX-SEQ-001"       = 50
+# "TX-WITHDRAW-001"  = 50
+# "TX-LIMIT-001"     = 50
