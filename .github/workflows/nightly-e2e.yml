@@ -38,7 +38,7 @@ jobs:
 #    runs-on: ubuntu-latest
 #    timeout-minutes: 30
 #    steps:
-#      - uses: actions/checkout@v4
+#      - uses: actions/checkout@v5
 #      - uses: dtolnay/rust-toolchain@stable
 #      - uses: Swatinem/rust-cache@v2
 #        with:
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -110,7 +110,7 @@ jobs:
     timeout-minutes: 30
     if: ${{ inputs.suites == '' || contains(inputs.suites, 'rules-engine') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with: { name: prx-waf-bin, path: target/release }
       - run: chmod +x target/release/prx-waf tests/e2e/*.sh
@@ -172,7 +172,7 @@ jobs:
     timeout-minutes: 30
     if: ${{ inputs.suites == '' || contains(inputs.suites, 'gateway') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with: { name: prx-waf-bin, path: target/release }
       - run: chmod +x target/release/prx-waf tests/e2e/*.sh
@@ -234,7 +234,7 @@ jobs:
     timeout-minutes: 30
     if: ${{ inputs.suites == '' || contains(inputs.suites, 'waf-api') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with: { name: prx-waf-bin, path: target/release }
       - run: chmod +x target/release/prx-waf tests/e2e/*.sh
@@ -296,7 +296,7 @@ jobs:
     timeout-minutes: 45
     if: ${{ inputs.suites == '' || contains(inputs.suites, 'cluster') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with: { name: prx-waf-bin, path: target/release }
       - run: chmod +x target/release/prx-waf tests/e2e/*.sh tests/e2e-cluster.sh
@@ -347,7 +347,7 @@ jobs:
     timeout-minutes: 10
     if: always()
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download all suite artefacts
         uses: actions/download-artifact@v4

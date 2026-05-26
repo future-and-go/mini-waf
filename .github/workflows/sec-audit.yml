@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # Run cargo-audit directly instead of `rustsec/audit-check@v2`. That
       # action publishes findings via the GitHub Checks API, which is NOT
       # available to workflows running on a fork (GitHub returns
@@ -65,7 +65,7 @@ jobs:
     # ignore list in deny.toml. bans/licenses/sources MUST stay green.
     continue-on-error: ${{ matrix.checks == 'advisories' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check ${{ matrix.checks }}
