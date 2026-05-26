@@ -723,16 +723,13 @@ mod tests {
     /// rebuilt off-side and swapped in with a single write lock.
     #[test]
     fn reload_swap_never_exposes_partial_state() {
-        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
         let mut mgr = RuleManager::new(&minimal_config());
         mgr.load_all().expect("initial load");
         let baseline = mgr.registry.read().rules.len();
-        assert!(
-            baseline > 0,
-            "expected at least one builtin rule in the baseline"
-        );
+        assert!(baseline > 0, "expected at least one builtin rule in the baseline");
 
         let handle = Arc::clone(&mgr.registry);
         let min_seen = Arc::new(AtomicUsize::new(usize::MAX));
