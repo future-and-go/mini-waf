@@ -62,6 +62,8 @@ fn appsec_cfg(endpoint: &str) -> AppSecConfig {
         api_key: "test-key".to_string(),
         timeout_ms: 2000,
         failure_action: FallbackAction::Allow,
+        circuit_breaker_threshold: 5,
+        circuit_breaker_reset_secs: 30,
     }
 }
 
