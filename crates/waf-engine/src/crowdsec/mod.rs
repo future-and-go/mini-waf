@@ -1,6 +1,7 @@
 pub mod appsec;
 pub mod cache;
 pub mod checker;
+pub mod circuit_breaker;
 pub mod client;
 pub mod config;
 pub mod models;

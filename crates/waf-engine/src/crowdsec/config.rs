@@ -90,6 +90,12 @@ pub struct AppSecConfig {
     /// Action when `AppSec` is unavailable
     #[serde(default)]
     pub failure_action: FallbackAction,
+    /// Number of consecutive failures before the circuit breaker opens
+    #[serde(default = "default_cb_threshold")]
+    pub circuit_breaker_threshold: u32,
+    /// Seconds the circuit stays open before allowing a probe request
+    #[serde(default = "default_cb_reset_secs")]
+    pub circuit_breaker_reset_secs: u64,
 }
 
 /// Log pusher configuration (machine credentials)
@@ -106,6 +112,12 @@ const fn default_update_frequency() -> u64 {
 }
 const fn default_appsec_timeout() -> u64 {
     500
+}
+const fn default_cb_threshold() -> u32 {
+    5
+}
+const fn default_cb_reset_secs() -> u64 {
+    30
 }
 
 #[cfg(test)]
@@ -157,5 +169,17 @@ mod tests {
             let back: FallbackAction = serde_json::from_str(&s).expect("de");
             assert_eq!(a, back);
         }
+    }
+
+    #[test]
+    fn appsec_config_circuit_breaker_defaults_from_json() {
+        let raw = r#"{
+            "endpoint": "http://localhost:7422",
+            "api_key": "test-key"
+        }"#;
+        let cfg: AppSecConfig = serde_json::from_str(raw).expect("parse");
+        assert_eq!(cfg.circuit_breaker_threshold, 5);
+        assert_eq!(cfg.circuit_breaker_reset_secs, 30);
+        assert_eq!(cfg.timeout_ms, 500);
     }
 }
