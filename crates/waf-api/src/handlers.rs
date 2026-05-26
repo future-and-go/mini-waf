@@ -615,10 +615,71 @@ pub async fn list_certificates(
     Ok(Json(json!({ "success": true, "data": safe })))
 }
 
+/// Maximum byte length accepted for any single PEM field (cert / key / chain).
+///
+/// 64 KiB comfortably covers a leaf certificate, a 4096-bit RSA private key,
+/// and a 4-cert intermediate chain. Larger uploads are rejected before any
+/// parser sees them so a misconfigured admin client cannot fill the
+/// `certificates` row with arbitrary text.
+const MAX_PEM_BYTES: usize = 64 * 1024;
+
+/// Validate a single PEM field: enforce the size cap, then attempt to parse.
+///
+/// `parser` is called only when the field is `Some(non_empty)` — empty or
+/// missing fields are treated as "not supplied" so a caller may upload e.g.
+/// just a leaf certificate while leaving the key to be filled later.
+fn validate_pem_field<F>(field: Option<&str>, label: &str, parser: F) -> ApiResult<()>
+where
+    F: FnOnce(&[u8]) -> Result<(), String>,
+{
+    let Some(pem) = field else {
+        return Ok(());
+    };
+    if pem.len() > MAX_PEM_BYTES {
+        return Err(ApiError::BadRequest(format!(
+            "{label} exceeds {MAX_PEM_BYTES}-byte cap (got {})",
+            pem.len()
+        )));
+    }
+    let trimmed = pem.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    parser(pem.as_bytes()).map_err(|e| ApiError::BadRequest(format!("{label} is not a valid PEM: {e}")))
+}
+
 pub async fn upload_certificate(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateCertificate>,
 ) -> ApiResult<Json<Value>> {
+    use rustls_pki_types::pem::PemObject;
+    use rustls_pki_types::{CertificateDer, PrivateKeyDer};
+
+    // Reject malformed or oversized PEM payloads BEFORE they reach the database
+    // so a `certificates` row with `status = "active"` always corresponds to a
+    // chain the gateway can actually load. Pre-fix, arbitrary text (including
+    // a 100 MiB blob or "GARBAGE not a PEM") was accepted, then the gateway
+    // would fail to load the cert on next reload.
+    validate_pem_field(req.cert_pem.as_deref(), "cert_pem", |bytes| {
+        CertificateDer::from_pem_slice(bytes).map(|_| ()).map_err(|e| e.to_string())
+    })?;
+    validate_pem_field(req.key_pem.as_deref(), "key_pem", |bytes| {
+        PrivateKeyDer::from_pem_slice(bytes).map(|_| ()).map_err(|e| e.to_string())
+    })?;
+    // The chain may carry multiple certificates concatenated; iterate the
+    // PEM stream and require every block to parse as a certificate.
+    validate_pem_field(req.chain_pem.as_deref(), "chain_pem", |bytes| {
+        let mut count = 0usize;
+        for cert in CertificateDer::pem_slice_iter(bytes) {
+            cert.map_err(|e| e.to_string())?;
+            count += 1;
+        }
+        if count == 0 {
+            return Err("no PEM certificate blocks found".to_string());
+        }
+        Ok(())
+    })?;
+
     let row = state.db.create_certificate(req.clone()).await?;
     state.db.update_certificate_status(row.id, "active", None).await?;
     Ok(Json(json!({
@@ -689,5 +750,69 @@ mod tests {
     #[test]
     fn port_validation_i32_max_rejected() {
         assert!(!is_valid_port(i32::MAX));
+    }
+
+    // ── PEM upload validation (issue #72) ─────────────────────────────────────
+
+    use super::{MAX_PEM_BYTES, validate_pem_field};
+
+    fn cert_parser(bytes: &[u8]) -> Result<(), String> {
+        use rustls_pki_types::CertificateDer;
+        use rustls_pki_types::pem::PemObject;
+        CertificateDer::from_pem_slice(bytes).map(|_| ()).map_err(|e| e.to_string())
+    }
+
+    fn key_parser(bytes: &[u8]) -> Result<(), String> {
+        use rustls_pki_types::PrivateKeyDer;
+        use rustls_pki_types::pem::PemObject;
+        PrivateKeyDer::from_pem_slice(bytes).map(|_| ()).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn pem_field_accepts_none() {
+        assert!(validate_pem_field(None, "cert_pem", cert_parser).is_ok());
+    }
+
+    #[test]
+    fn pem_field_accepts_empty_string() {
+        assert!(validate_pem_field(Some(""), "cert_pem", cert_parser).is_ok());
+        assert!(validate_pem_field(Some("   \n  "), "cert_pem", cert_parser).is_ok());
+    }
+
+    #[test]
+    fn pem_field_rejects_garbage_certificate() {
+        let err = validate_pem_field(Some("GARBAGE not a PEM"), "cert_pem", cert_parser).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("cert_pem"), "msg = {msg}");
+        assert!(msg.contains("not a valid PEM"), "msg = {msg}");
+    }
+
+    #[test]
+    fn pem_field_rejects_garbage_key() {
+        let err = validate_pem_field(Some("not a key either"), "key_pem", key_parser).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("key_pem"), "msg = {msg}");
+        assert!(msg.contains("not a valid PEM"), "msg = {msg}");
+    }
+
+    #[test]
+    fn pem_field_rejects_oversized_input() {
+        let big = "a".repeat(MAX_PEM_BYTES + 1);
+        let err = validate_pem_field(Some(big.as_str()), "key_pem", key_parser).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("key_pem"), "msg = {msg}");
+        assert!(msg.contains("exceeds"), "msg = {msg}");
+        assert!(msg.contains("cap"), "msg = {msg}");
+    }
+
+    #[test]
+    fn pem_field_oversize_check_runs_before_parse() {
+        // A 65 KiB payload of dashes: would FAIL the parser AND the cap;
+        // confirm the cap check fires first so the error message identifies
+        // the size violation rather than a parse failure.
+        let big = "-".repeat(MAX_PEM_BYTES + 100);
+        let err = validate_pem_field(Some(big.as_str()), "chain_pem", cert_parser).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("exceeds"), "expected size error, got: {msg}");
     }
 }
