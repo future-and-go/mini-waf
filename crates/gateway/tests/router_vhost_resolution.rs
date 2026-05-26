@@ -129,3 +129,52 @@ fn non_default_port_does_not_register_bare_host() {
     // to splitting host_header by ':'. Check missing host header instead.
     assert!(r.resolve("other.com").is_none());
 }
+
+// ── Case-fold (#87) ─────────────────────────────────────────────────────────
+//
+// DashMap lookup is byte-exact. Without ASCII case-folding the Host header
+// `Example.COM` would miss a route registered as `example.com` and the
+// proxy would 502 — weaponisable as a DoS by spraying random-case Host
+// headers. RFC 9110 §5.4 mandates case-insensitive host comparison; the
+// router now lowercases on both register and resolve so the lookup is
+// symmetric end-to-end.
+
+#[test]
+fn resolve_is_case_insensitive_on_bare_host() {
+    let r = HostRouter::new();
+    r.register(&make_host("c", "example.com", 80));
+    assert!(r.resolve("EXAMPLE.COM").is_some(), "uppercase host header");
+    assert!(r.resolve("Example.com").is_some(), "mixed-case host header");
+    assert!(r.resolve("ExAmPlE.cOm").is_some(), "tordured-case host header");
+}
+
+#[test]
+fn resolve_is_case_insensitive_on_host_with_port() {
+    let r = HostRouter::new();
+    r.register(&make_host("c", "example.com", 8080));
+    assert!(r.resolve("Example.COM:8080").is_some());
+    assert!(r.resolve("EXAMPLE.com:8080").is_some());
+}
+
+#[test]
+fn register_uppercase_host_resolves_via_lowercase_header() {
+    let r = HostRouter::new();
+    // Admin / DB may have stored the host with mixed case — registration
+    // must normalise so canonical lowercase headers still hit the route.
+    r.register(&make_host("c", "Example.COM", 80));
+    assert!(
+        r.resolve("example.com").is_some(),
+        "lowercase header on uppercase registration"
+    );
+    assert!(r.resolve("example.com:80").is_some());
+}
+
+#[test]
+fn unregister_is_case_insensitive() {
+    let r = HostRouter::new();
+    r.register(&make_host("c", "example.com", 80));
+    // Caller passes mixed case — must still find and remove the lowercase entry.
+    r.unregister("Example.COM", 80);
+    assert!(r.resolve("example.com").is_none());
+    assert!(r.resolve("Example.com").is_none());
+}
