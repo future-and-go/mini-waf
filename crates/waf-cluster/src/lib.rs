@@ -124,8 +124,6 @@ impl ClusterNode {
 
         // ── Dial seed peers ──────────────────────────────────────────────────
 
-        let mut peer_senders: Vec<mpsc::Sender<ClusterMessage>> = Vec::with_capacity(self.config.seeds.len());
-
         for seed_str in &self.config.seeds {
             // Resolve hostname+port to SocketAddr (supports DNS names used in docker etc.)
             let Some(seed_addr) = resolve_seed_addr(seed_str).await else {
@@ -139,9 +137,9 @@ impl ClusterNode {
 
             let (tx, rx) = mpsc::channel::<ClusterMessage>(256);
 
-            // Register channel with NodeState so broadcast() reaches this peer.
+            // Register channel with NodeState so broadcast() and the heartbeat
+            // sender both reach this peer.
             node_state.add_peer_channel(tx.clone());
-            peer_senders.push(tx.clone());
 
             // Send JoinRequest as the initial handshake message
             let join_req = ClusterMessage::JoinRequest(crate::protocol::JoinRequest {
@@ -176,12 +174,16 @@ impl ClusterNode {
         }
 
         // ── Heartbeat sender ─────────────────────────────────────────────────
-
-        if !peer_senders.is_empty() {
+        //
+        // Spawned unconditionally: even on a single-node bootstrap with no
+        // seeds, peers may join later via the inbound transport, and the
+        // heartbeat task picks them up by re-snapshotting `peer_channels`
+        // every tick. Ticks with an empty peer set are no-ops.
+        {
             let state_hb = Arc::clone(&node_state);
             let interval_ms = self.config.election.heartbeat_interval_ms;
             tokio::spawn(async move {
-                run_heartbeat_sender(state_hb, interval_ms, peer_senders).await;
+                run_heartbeat_sender(state_hb, interval_ms).await;
             });
         }
 

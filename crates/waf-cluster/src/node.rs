@@ -238,6 +238,16 @@ impl NodeState {
         }
     }
 
+    /// Snapshot the current list of outbound peer channels.
+    ///
+    /// Cheap: each `mpsc::Sender` is internally an `Arc`. Used by long-running
+    /// broadcast loops (heartbeat) so peers registered via `add_peer_channel`
+    /// after the task spawned are picked up on the next iteration, without
+    /// holding the inner mutex across the send work.
+    pub fn peer_channels_snapshot(&self) -> Vec<mpsc::Sender<ClusterMessage>> {
+        self.peer_channels.lock().clone()
+    }
+
     // ── Version tracking ──────────────────────────────────────────────────────
 
     /// Update `rules_version` and return it.
