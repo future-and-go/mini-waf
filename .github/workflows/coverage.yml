@@ -2,9 +2,9 @@ name: Coverage
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, release/stg]
   pull_request:
-    branches: [main]
+    branches: [main, release/stg]
 
 concurrency:
   group: coverage-${{ github.event.pull_request.number || github.ref }}

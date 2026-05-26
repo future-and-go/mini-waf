@@ -150,11 +150,9 @@ async fn delete_existing_and_missing() {
     assert!(listed.is_empty());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn invalid_remote_ip_errors() {
-    let fx = fresh().await;
-    let mut req = sample_host();
-    req.remote_ip = Some("not-an-ip".into());
-    let err = fx.db.create_host(req).await;
-    assert!(err.is_err(), "invalid INET cast must error");
-}
+// `invalid_remote_ip_errors` removed: it asserted that "not-an-ip" round-trips
+// through an INET cast and errors at the SQL layer. Migration 0014 changed the
+// `remote_ip` column from INET to TEXT (model needed `Option<String>` rather
+// than the `IpNetwork`/`IpAddr` types sqlx decodes INET into). With TEXT the
+// insert succeeds for any string and validation belongs in the application
+// layer; the type-system invariant the old test was guarding no longer holds.
