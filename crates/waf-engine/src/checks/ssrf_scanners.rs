@@ -134,9 +134,21 @@ pub fn is_private_ip(addr: IpAddr) -> bool {
                 // set here to close the `[::ffff:100.100.100.200]` bypass.
                 return METADATA_HOST_SET.is_match(&v4.to_string());
             }
-            // Reject IPv6 unique-local + link-local prefixes; everything
-            // else is treated as routable for v1.
             let segs = v6.segments();
+            // IPv4-compatible IPv6 (RFC 4291 §2.5.5.1): `::a.b.c.d` — upper
+            // 96 bits zero, trailing 32 bits carry a bare v4. NOT matched by
+            // `to_ipv4_mapped()` which only handles the `::ffff:a.b.c.d` form.
+            if segs[0..6].iter().all(|&s| s == 0) && (segs[6] != 0 || segs[7] != 0) {
+                let v4 = Ipv4Addr::new(
+                    (segs[6] >> 8) as u8,
+                    (segs[6] & 0xff) as u8,
+                    (segs[7] >> 8) as u8,
+                    (segs[7] & 0xff) as u8,
+                );
+                if PRIVATE_CIDRS.iter().any(|net| net.contains(&v4)) || METADATA_HOST_SET.is_match(&v4.to_string()) {
+                    return true;
+                }
+            }
             // fc00::/7 (unique-local)
             if segs[0] & 0xfe00 == 0xfc00 {
                 return true;
@@ -253,5 +265,28 @@ mod tests {
     fn is_private_ip_v6_public_returns_false() {
         let v6: IpAddr = "2606:4700:4700::1111".parse().expect("public v6");
         assert!(!is_private_ip(v6));
+    }
+
+    #[test]
+    fn is_private_ip_v4_compatible_metadata() {
+        // RFC 4291 §2.5.5.1 IPv4-compatible IPv6 (`::a.b.c.d`) — bare v4 in
+        // the trailing 32 bits with upper 96 bits all zero. Must catch the
+        // same private ranges and metadata hosts as the mapped form.
+        for s in [
+            "::169.254.169.254", // AWS / Azure IMDS
+            "::100.100.100.200", // Alibaba IMDS
+            "::127.0.0.1",       // loopback (not caught by Ipv6Addr::is_loopback)
+            "::10.0.0.1",        // RFC1918
+        ] {
+            let addr: IpAddr = s.parse().expect("v4-compatible");
+            assert!(is_private_ip(addr), "{s} should be private");
+        }
+    }
+
+    #[test]
+    fn is_private_ip_v4_compatible_public_returns_false() {
+        // Negative: public v4 in IPv4-compatible form must not be over-blocked.
+        let addr: IpAddr = "::1.1.1.1".parse().expect("v4-compatible public");
+        assert!(!is_private_ip(addr));
     }
 }
