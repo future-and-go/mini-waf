@@ -137,3 +137,45 @@ fn scheme_only_allows_arbitrary_private_ips() {
     assert!(validate_scheme_only("http://10.0.0.1:8080").is_ok());
     assert!(validate_scheme_only("https://[fe80::1]:8080").is_ok());
 }
+
+// ─── IPv4-compatible IPv6 (RFC 4291 §2.5.5.1) ────────────────────────────────
+// Form `::a.b.c.d` carries an IPv4 address in the trailing 32 bits with the
+// upper 96 bits all zero. `Ipv6Addr::is_loopback` matches only `::1`, so each
+// of these literals would otherwise slip past the IPv6 guard and reach the
+// embedded IPv4 service (cloud metadata, loopback, RFC1918).
+
+#[test]
+fn rejects_ipv4_compatible_aws_imds() {
+    // ::169.254.169.254 — AWS / Azure IMDS via IPv4-compatible form.
+    let err = validate_public_url("http://[::169.254.169.254]/latest/meta-data/").unwrap_err();
+    assert!(matches!(err, UrlValidationError::BlockedHost(_, _)));
+}
+
+#[test]
+fn rejects_ipv4_compatible_alibaba_imds() {
+    // ::100.100.100.200 — Alibaba Cloud IMDS via IPv4-compatible form.
+    let err = validate_public_url("http://[::100.100.100.200]/").unwrap_err();
+    assert!(matches!(err, UrlValidationError::BlockedHost(_, _)));
+}
+
+#[test]
+fn rejects_ipv4_compatible_loopback() {
+    // ::127.0.0.1 — loopback via IPv4-compatible form (not caught by ::1 check).
+    let err = validate_public_url("http://[::127.0.0.1]/").unwrap_err();
+    assert!(matches!(err, UrlValidationError::BlockedHost(_, _)));
+}
+
+#[test]
+fn rejects_ipv4_compatible_rfc1918() {
+    // RFC1918 private ranges via IPv4-compatible form.
+    assert!(validate_public_url("http://[::10.0.0.1]/").is_err());
+    assert!(validate_public_url("http://[::192.168.1.1]/").is_err());
+    assert!(validate_public_url("http://[::172.16.0.1]/").is_err());
+}
+
+#[test]
+fn accepts_public_ipv4_compatible_not_blocked() {
+    // ::1.1.1.1 — Cloudflare DNS via IPv4-compatible form. The trailing v4 is
+    // publicly routable, so the URL must pass (negative case: no over-block).
+    assert!(validate_public_url("http://[::1.1.1.1]/").is_ok());
+}
