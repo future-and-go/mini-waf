@@ -373,8 +373,9 @@ mod tests {
         // one eviction tick fires. Each observe carries a monotonically
         // increasing `ts` so the oldest entries are the smallest-numbered ones.
         let total = max + EVICT_INTERVAL + 100;
-        for i in 0..total as i64 {
-            store.observe(&k(&format!("fp-{i}")), ip, "ua", i).await.unwrap();
+        for i in 0..total {
+            let ts = i64::try_from(i).unwrap_or(i64::MAX);
+            store.observe(&k(&format!("fp-{i}")), ip, "ua", ts).await.unwrap();
         }
 
         // Cap drift is bounded by `EVICT_INTERVAL` — the ticker fires once
