@@ -294,7 +294,7 @@ async fn set_enabled_on_missing_id_returns_false() {
 // `Allow` — so a Block-returning plugin with oversized memory ends up Allowing.
 
 fn wat_memory_pages_block(pages: u32) -> Vec<u8> {
-    wat::parse_str(&format!(
+    wat::parse_str(format!(
         r#"(module
              (memory (export "memory") {pages})
              (func (export "on_request") (result i32) i32.const 1)
