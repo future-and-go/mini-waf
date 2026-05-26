@@ -17,6 +17,12 @@ use parking_lot::Mutex;
 
 use crate::device_fp::capture::parsed::{H2Capture, ParsedClientHello, PriorityFrame, RawCapture};
 
+/// Per-field cap on h2 frame entries retained in a `ConnCtx`. Akamai
+/// fingerprinting only needs the first handful of frames; later frames carry
+/// no additional signal but would let a peer grow the underlying `Vec`
+/// without bound. Drop-newest once the cap is hit.
+const MAX_H2_FRAME_ENTRIES: usize = 256;
+
 /// Connection identifier handed in by the gateway. Opaque to this module —
 /// pingora's `ConnectionDigest` or any monotonic counter works.
 pub type ConnId = u64;
@@ -41,15 +47,28 @@ impl ConnCtx {
 
     /// Append a SETTINGS payload (vector of `(id, value)` in wire order).
     pub fn push_h2_settings(&self, pairs: Vec<(u16, u32)>) {
-        self.inner.lock().h2.settings.extend(pairs);
+        let mut g = self.inner.lock();
+        let remaining = MAX_H2_FRAME_ENTRIES.saturating_sub(g.h2.settings.len());
+        if remaining == 0 {
+            return;
+        }
+        g.h2.settings.extend(pairs.into_iter().take(remaining));
     }
 
     pub fn push_h2_window_update(&self, stream_id: u32, increment: u32) {
-        self.inner.lock().h2.window_updates.push((stream_id, increment));
+        let mut g = self.inner.lock();
+        if g.h2.window_updates.len() >= MAX_H2_FRAME_ENTRIES {
+            return;
+        }
+        g.h2.window_updates.push((stream_id, increment));
     }
 
     pub fn push_h2_priority(&self, frame: PriorityFrame) {
-        self.inner.lock().h2.priority.push(frame);
+        let mut g = self.inner.lock();
+        if g.h2.priority.len() >= MAX_H2_FRAME_ENTRIES {
+            return;
+        }
+        g.h2.priority.push(frame);
     }
 
     /// Record the pseudo-header order observed on the first HEADERS frame
@@ -206,5 +225,90 @@ mod tests {
         // Held context still usable — inspector keeps writing until it drops.
         ctx.push_h2_window_update(0, 1);
         assert_eq!(ctx.snapshot().h2.window_updates.len(), 1);
+    }
+
+    #[test]
+    fn settings_capped_at_max_entries() {
+        let ctx = ConnCtx::new();
+        // First batch fills past the cap in one call — extend must clamp.
+        let total = MAX_H2_FRAME_ENTRIES + 50;
+        let batch: Vec<(u16, u32)> = (0..total)
+            .map(|i| {
+                let v = u16::try_from(i).unwrap_or(u16::MAX);
+                (v, u32::from(v))
+            })
+            .collect();
+        ctx.push_h2_settings(batch);
+        assert_eq!(ctx.snapshot().h2.settings.len(), MAX_H2_FRAME_ENTRIES);
+
+        // Subsequent calls past the cap are no-ops.
+        ctx.push_h2_settings(vec![(9999, 9999)]);
+        let snap = ctx.snapshot();
+        assert_eq!(snap.h2.settings.len(), MAX_H2_FRAME_ENTRIES);
+        assert_ne!(snap.h2.settings.last(), Some(&(9999u16, 9999u32)));
+    }
+
+    #[test]
+    fn window_updates_capped_at_max_entries() {
+        let ctx = ConnCtx::new();
+        for i in 0..(MAX_H2_FRAME_ENTRIES + 100) {
+            ctx.push_h2_window_update(u32::try_from(i).unwrap_or(u32::MAX), 1);
+        }
+        let snap = ctx.snapshot();
+        assert_eq!(snap.h2.window_updates.len(), MAX_H2_FRAME_ENTRIES);
+        // First-write-wins: cap drops newest, so the final entry must be
+        // from before the cap kicked in.
+        assert_eq!(
+            snap.h2.window_updates.last().map(|&(sid, _)| sid),
+            Some(u32::try_from(MAX_H2_FRAME_ENTRIES - 1).unwrap_or(u32::MAX))
+        );
+    }
+
+    #[test]
+    fn priority_capped_at_max_entries() {
+        let ctx = ConnCtx::new();
+        for i in 0..(MAX_H2_FRAME_ENTRIES + 25) {
+            ctx.push_h2_priority(PriorityFrame {
+                stream_id: u32::try_from(i).unwrap_or(u32::MAX),
+                depends_on: 0,
+                weight: 16,
+                exclusive: false,
+            });
+        }
+        assert_eq!(ctx.snapshot().h2.priority.len(), MAX_H2_FRAME_ENTRIES);
+    }
+
+    #[test]
+    fn settings_partial_fill_then_clamp() {
+        let ctx = ConnCtx::new();
+        // Fill MAX-2 entries first.
+        let initial_n = MAX_H2_FRAME_ENTRIES - 2;
+        let initial: Vec<(u16, u32)> = (0..initial_n)
+            .map(|i| {
+                let v = u16::try_from(i).unwrap_or(u16::MAX);
+                (v, u32::from(v))
+            })
+            .collect();
+        ctx.push_h2_settings(initial);
+        assert_eq!(ctx.snapshot().h2.settings.len(), MAX_H2_FRAME_ENTRIES - 2);
+
+        // Next call brings 10 — only 2 fit.
+        ctx.push_h2_settings(vec![
+            (1000, 0),
+            (1001, 1),
+            (1002, 2),
+            (1003, 3),
+            (1004, 4),
+            (1005, 5),
+            (1006, 6),
+            (1007, 7),
+            (1008, 8),
+            (1009, 9),
+        ]);
+        let snap = ctx.snapshot();
+        assert_eq!(snap.h2.settings.len(), MAX_H2_FRAME_ENTRIES);
+        // The last two appended must be the first two of the batch (drop-newest).
+        assert_eq!(snap.h2.settings.get(MAX_H2_FRAME_ENTRIES - 2), Some(&(1000u16, 0u32)));
+        assert_eq!(snap.h2.settings.get(MAX_H2_FRAME_ENTRIES - 1), Some(&(1001u16, 1u32)));
     }
 }
