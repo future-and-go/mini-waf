@@ -16,6 +16,56 @@ use waf_storage::models::CreateWasmPlugin;
 
 use crate::state::AppState;
 
+/// Maximum byte size accepted for the raw `.wasm` field on upload.
+///
+/// 16 MiB comfortably covers real WAF plugins (observed in-house plugins
+/// run 50 KiB – 4 MiB after wasm-opt). Larger uploads are rejected so an
+/// authenticated admin (or a compromised admin credential) cannot bloat the
+/// `wasm_plugins.wasm_binary` bytea column or OOM the API process.
+pub const MAX_WASM_BYTES: usize = 16 * 1024 * 1024;
+
+/// Maximum allowed plugin name length and character set.
+const MAX_NAME_LEN: usize = 64;
+
+/// Maximum allowed length for free-form text fields (version / description /
+/// author). 256 bytes is plenty for SemVer + a short description.
+const MAX_TEXT_LEN: usize = 256;
+
+/// Total per-request body limit applied to `POST /api/plugins`. The 64 KiB
+/// headroom over [`MAX_WASM_BYTES`] absorbs the multipart envelope plus the
+/// bounded text fields.
+pub const MAX_TOTAL_BODY: usize = MAX_WASM_BYTES + 64 * 1024;
+
+/// Validate a plugin name: non-empty, ≤ [`MAX_NAME_LEN`], only
+/// `[A-Za-z0-9_-]`. Rejects path-traversal-style names (`..`, `/`),
+/// whitespace, and Unicode oddities up front.
+fn validate_plugin_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("plugin name is required".to_string());
+    }
+    if name.len() > MAX_NAME_LEN {
+        return Err(format!(
+            "plugin name exceeds {MAX_NAME_LEN} chars (got {})",
+            name.len()
+        ));
+    }
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Err("plugin name must contain only [A-Za-z0-9_-]".to_string());
+    }
+    Ok(())
+}
+
+/// Cap a free-form text field at [`MAX_TEXT_LEN`].
+fn validate_text_field(label: &str, value: &str) -> Result<(), String> {
+    if value.len() > MAX_TEXT_LEN {
+        return Err(format!(
+            "{label} exceeds {MAX_TEXT_LEN} chars (got {})",
+            value.len()
+        ));
+    }
+    Ok(())
+}
+
 /// GET /api/plugins — list all plugins
 pub async fn list_plugins(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.db.list_wasm_plugins().await {
@@ -91,12 +141,23 @@ pub async fn upload_plugin(State(state): State<Arc<AppState>>, mut multipart: Mu
         }
     }
 
-    if name.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "plugin name is required" })),
-        )
-            .into_response();
+    if let Err(msg) = validate_plugin_name(&name) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))).into_response();
+    }
+    if let Some(v) = &version
+        && let Err(msg) = validate_text_field("version", v)
+    {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))).into_response();
+    }
+    if let Some(v) = &description
+        && let Err(msg) = validate_text_field("description", v)
+    {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))).into_response();
+    }
+    if let Some(v) = &author
+        && let Err(msg) = validate_text_field("author", v)
+    {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))).into_response();
     }
 
     let Some(bytes) = wasm_bytes else {
@@ -106,6 +167,20 @@ pub async fn upload_plugin(State(state): State<Arc<AppState>>, mut multipart: Mu
         )
             .into_response();
     };
+
+    // Defense in depth: the router-level `DefaultBodyLimit::max(MAX_TOTAL_BODY)`
+    // already rejects oversized requests before they reach this handler, but
+    // a future router refactor that drops or widens that layer must not
+    // silently lift the cap.
+    if bytes.len() > MAX_WASM_BYTES {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": format!("WASM file exceeds {MAX_WASM_BYTES}-byte cap (got {})", bytes.len()),
+            })),
+        )
+            .into_response();
+    }
 
     // Validate WASM magic bytes (\0asm)
     if bytes.get(..4) != Some(b"\0asm".as_slice()) {
@@ -203,5 +278,68 @@ async fn set_plugin_enabled(state: Arc<AppState>, id: Uuid, enabled: bool) -> im
             Json(json!({ "error": e.to_string() })),
         )
             .into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_NAME_LEN, MAX_TEXT_LEN, validate_plugin_name, validate_text_field};
+
+    #[test]
+    fn plugin_name_accepts_alphanumeric_and_separators() {
+        assert!(validate_plugin_name("my_plugin").is_ok());
+        assert!(validate_plugin_name("MyPlugin-v2").is_ok());
+        assert!(validate_plugin_name("waf_rate_limit_42").is_ok());
+        assert!(validate_plugin_name("A").is_ok());
+    }
+
+    #[test]
+    fn plugin_name_rejects_empty() {
+        let err = validate_plugin_name("").unwrap_err();
+        assert!(err.contains("required"), "msg = {err}");
+    }
+
+    #[test]
+    fn plugin_name_rejects_path_traversal_characters() {
+        assert!(validate_plugin_name("../etc/passwd").is_err());
+        assert!(validate_plugin_name("plugin/../secret").is_err());
+        assert!(validate_plugin_name("\\\\admin\\share").is_err());
+    }
+
+    #[test]
+    fn plugin_name_rejects_whitespace_and_unicode() {
+        assert!(validate_plugin_name("my plugin").is_err());
+        assert!(validate_plugin_name("plugin\n").is_err());
+        assert!(validate_plugin_name("plügin").is_err());
+    }
+
+    #[test]
+    fn plugin_name_rejects_oversize() {
+        let big = "a".repeat(MAX_NAME_LEN + 1);
+        let err = validate_plugin_name(&big).unwrap_err();
+        assert!(err.contains("exceeds"), "msg = {err}");
+        assert!(err.contains(&MAX_NAME_LEN.to_string()), "msg = {err}");
+    }
+
+    #[test]
+    fn plugin_name_boundary_max_length_accepted() {
+        let exact = "a".repeat(MAX_NAME_LEN);
+        assert!(validate_plugin_name(&exact).is_ok());
+    }
+
+    #[test]
+    fn text_field_accepts_empty_and_short() {
+        assert!(validate_text_field("version", "").is_ok());
+        assert!(validate_text_field("version", "1.2.3-rc.4").is_ok());
+        let exact = "x".repeat(MAX_TEXT_LEN);
+        assert!(validate_text_field("description", &exact).is_ok());
+    }
+
+    #[test]
+    fn text_field_rejects_oversize() {
+        let big = "x".repeat(MAX_TEXT_LEN + 1);
+        let err = validate_text_field("description", &big).unwrap_err();
+        assert!(err.contains("description"), "msg = {err}");
+        assert!(err.contains("exceeds"), "msg = {err}");
     }
 }
