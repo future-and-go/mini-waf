@@ -37,7 +37,7 @@ const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 /// Initial backoff delay before restarting after an unexpected exit.
 const RESTART_BACKOFF_BASE: Duration = Duration::from_secs(1);
 /// Maximum backoff delay between restart attempts.
-const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(120);
+const RESTART_BACKOFF_MAX: Duration = Duration::from_mins(2);
 /// Max consecutive failures before the restart loop gives up entirely.
 const RESTART_MAX_CONSECUTIVE_FAILURES: u32 = 50;
 
@@ -92,7 +92,7 @@ impl VictoriaLogsSidecar {
                 return;
             }
             warn!("VictoriaLogs exited unexpectedly; entering restart loop");
-            if let Err(e) = VictoriaLogsSidecar::spawn_with_restart(&cfg).await {
+            if let Err(e) = Self::spawn_with_restart(&cfg).await {
                 error!(error = %e, "VictoriaLogs restart loop failed");
             }
         });
@@ -479,7 +479,7 @@ mod tests {
         }
     }
 
-    /// After a stable run (>= RESTART_BACKOFF_MAX), backoff resets to base.
+    /// After a stable run (>= `RESTART_BACKOFF_MAX`), backoff resets to base.
     #[test]
     fn backoff_resets_after_stable_run() {
         let mut backoff = Duration::from_secs(64);
@@ -492,7 +492,7 @@ mod tests {
         assert_eq!(backoff, RESTART_BACKOFF_BASE);
     }
 
-    /// Consecutive failure counter caps at RESTART_MAX_CONSECUTIVE_FAILURES.
+    /// Consecutive failure counter caps at `RESTART_MAX_CONSECUTIVE_FAILURES`.
     #[test]
     fn max_consecutive_failures_cap() {
         let mut consecutive: u32 = 0;
@@ -508,7 +508,7 @@ mod tests {
         assert_eq!(consecutive, RESTART_MAX_CONSECUTIVE_FAILURES);
     }
 
-    /// spawn_with_restart returns None when the sidecar is disabled.
+    /// `spawn_with_restart` returns None when the sidecar is disabled.
     #[tokio::test]
     async fn spawn_with_restart_disabled_returns_none() {
         let cfg = VictoriaLogsConfig {

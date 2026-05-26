@@ -14,7 +14,7 @@ enum CircuitState {
     HalfOpen,
 }
 
-/// Circuit breaker for CrowdSec AppSec HTTP checks.
+/// Circuit breaker for `CrowdSec` `AppSec` HTTP checks.
 ///
 /// Tracks consecutive failures and opens the circuit after `threshold`
 /// failures. After `reset_duration` elapses the circuit enters half-open
@@ -42,27 +42,29 @@ impl AppSecCircuitBreaker {
 
     /// Returns `true` if the request should proceed, `false` to short-circuit.
     ///
-    /// When the circuit is Open and the cooldown has elapsed, transitions to
-    /// HalfOpen and allows one probe request through.
+    /// When the circuit is `Open` and the cooldown has elapsed, transitions to
+    /// `HalfOpen` and allows one probe request through.
     pub fn check_allow(&self) -> bool {
+        let mut transitioned_half_open = false;
         let mut state = self.state.lock();
-        match *state {
+        let allowed = match *state {
             CircuitState::Closed { .. } => true,
             CircuitState::Open { opened_at } => {
                 if opened_at.elapsed() >= self.reset_duration {
                     *state = CircuitState::HalfOpen;
-                    info!("AppSec circuit breaker transitioning to HalfOpen");
+                    transitioned_half_open = true;
                     true
                 } else {
                     false
                 }
             }
-            CircuitState::HalfOpen => {
-                // Only one probe is allowed; subsequent calls while still
-                // HalfOpen are blocked until the probe completes.
-                false
-            }
+            CircuitState::HalfOpen => false,
+        };
+        drop(state);
+        if transitioned_half_open {
+            info!("AppSec circuit breaker transitioning to HalfOpen");
         }
+        allowed
     }
 
     /// Record a successful request. Resets failure count / closes the circuit.
@@ -70,6 +72,7 @@ impl AppSecCircuitBreaker {
         let mut state = self.state.lock();
         let was_half_open = matches!(*state, CircuitState::HalfOpen);
         *state = CircuitState::Closed { failure_count: 0 };
+        drop(state);
         if was_half_open {
             info!("AppSec circuit breaker closed after successful probe");
         }
@@ -78,33 +81,41 @@ impl AppSecCircuitBreaker {
     /// Record a failed request. Increments failure count and may open the circuit.
     pub fn on_failure(&self) {
         let mut state = self.state.lock();
-        match *state {
+        let log_action = match *state {
             CircuitState::Closed { failure_count } => {
                 let new_count = failure_count + 1;
                 if new_count >= self.threshold {
                     *state = CircuitState::Open {
                         opened_at: Instant::now(),
                     };
-                    info!(
-                        threshold = self.threshold,
-                        "AppSec circuit breaker OPENED after {} consecutive failures", new_count,
-                    );
+                    Some(("opened", new_count))
                 } else {
                     *state = CircuitState::Closed {
                         failure_count: new_count,
                     };
+                    None
                 }
             }
             CircuitState::HalfOpen => {
-                // Probe failed — reopen.
                 *state = CircuitState::Open {
                     opened_at: Instant::now(),
                 };
+                Some(("reopened", 0))
+            }
+            CircuitState::Open { .. } => None,
+        };
+        drop(state);
+        match log_action {
+            Some(("opened", count)) => {
+                info!(
+                    threshold = self.threshold,
+                    "AppSec circuit breaker OPENED after {count} consecutive failures",
+                );
+            }
+            Some(("reopened", _)) => {
                 info!("AppSec circuit breaker re-opened after failed probe");
             }
-            CircuitState::Open { .. } => {
-                // Already open; nothing to do.
-            }
+            _ => {}
         }
     }
 }

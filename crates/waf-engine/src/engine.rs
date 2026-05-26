@@ -124,7 +124,7 @@ pub struct WafEngine {
     /// from `inspect()` is mirrored into `VictoriaLogs` as an audit record.
     audit_sender: OnceLock<Arc<AuditSender>>,
     // ── Phase 03: Batched DB log writer ──────────────────────────────────────
-    /// Bounded MPSC batch writer for attack_logs and security_events tables.
+    /// Bounded MPSC batch writer for `attack_logs` and `security_events` tables.
     /// Replaces per-detection `tokio::spawn` with a single `try_send`.
     db_batch_writer: OnceLock<DbBatchWriter>,
 }
