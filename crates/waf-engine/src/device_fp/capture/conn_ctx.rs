@@ -308,7 +308,7 @@ mod tests {
         let snap = ctx.snapshot();
         assert_eq!(snap.h2.settings.len(), MAX_H2_FRAME_ENTRIES);
         // The last two appended must be the first two of the batch (drop-newest).
-        assert_eq!(snap.h2.settings[MAX_H2_FRAME_ENTRIES - 2], (1000, 0));
-        assert_eq!(snap.h2.settings[MAX_H2_FRAME_ENTRIES - 1], (1001, 1));
+        assert_eq!(snap.h2.settings.get(MAX_H2_FRAME_ENTRIES - 2), Some(&(1000u16, 0u32)));
+        assert_eq!(snap.h2.settings.get(MAX_H2_FRAME_ENTRIES - 1), Some(&(1001u16, 1u32)));
     }
 }
