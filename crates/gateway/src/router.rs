@@ -26,7 +26,7 @@ impl HostRouter {
     /// that lookups remain case-insensitive (RFC 9110 §5.4 — host names are
     /// case-insensitive). Without this a client sending `Host: Example.COM`
     /// against a registered `example.com` would miss the route and the
-    /// router would return 502, which an attacker can weaponise into a DoS
+    /// router would return 502, which an attacker can weaponise into a `DoS`
     /// by spraying random-case Host headers.
     pub fn register(&self, config: &Arc<HostConfig>) {
         let host_lc = config.host.to_ascii_lowercase();
