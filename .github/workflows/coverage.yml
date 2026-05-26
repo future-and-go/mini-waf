@@ -12,6 +12,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Make panics and `?`-chains print full backtraces in coverage logs so a
+  # CI failure surfaces enough context to debug without having to re-run with
+  # a separate trigger commit.
+  RUST_BACKTRACE: full
 
 jobs:
   coverage:
@@ -49,9 +53,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The ubuntu-latest runner ships with ~14 GB free on /. cargo llvm-cov
+      # compiles the vendored pingora workspace into target/llvm-cov-target
+      # for every crate, and waf-engine + waf-api have repeatedly hit
+      # "No space left on device" mid-run. Free ~20 GB by removing toolchains
+      # we never touch (.NET, Android SDK, Haskell GHC, Boost) before any
+      # cargo step grows target/.
+      - name: Free disk space (avoid llvm-cov "No space left on device")
+        run: |
+          set -euxo pipefail
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo rm -rf "${AGENT_TOOLSDIRECTORY:-}" || true
+          df -h /
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo --version
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -61,3 +84,7 @@ jobs:
 
       - name: Enforce coverage floor
         run: bash .github/scripts/coverage-check.sh ${{ matrix.crate }} ${{ matrix.floor }}
+
+      - name: Disk usage after coverage
+        if: always()
+        run: df -h /

@@ -16,6 +16,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # Full backtraces on test panics + `?`-chain unwraps so CI failures are
+  # debuggable from the run log alone, no re-run needed.
+  RUST_BACKTRACE: full
 
 jobs:
   lint:
@@ -48,9 +51,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo --version
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo test --workspace --all-features
+        # `--nocapture` surfaces println!/dbg! output from a failing test
+        # directly in the CI log so contributors do not have to re-run
+        # locally just to see diagnostic output.
+        run: cargo test --workspace --all-features -- --nocapture
 
   build:
     name: Build
@@ -60,6 +70,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo --version
       - uses: Swatinem/rust-cache@v2
       - name: Build release
         run: cargo build --workspace --release
