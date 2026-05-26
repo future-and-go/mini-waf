@@ -41,7 +41,7 @@ use waf_cluster::{
     ClusterMessage, NodeState, RuleReloader, StorageMode,
     crypto::{ca::CertificateAuthority, node_cert::NodeCertificate},
     node::PeerInfo,
-    protocol::{ChangeOp, RuleSyncRequest, SyncType},
+    protocol::{ChangeOp, RuleSyncRequest, RuleSyncResponse, SyncType},
     sync::rules::{RuleChangelog, apply_sync_response, handle_sync_request},
     transport::{client::ClusterClient, server::ClusterServer},
 };
@@ -383,4 +383,82 @@ async fn rule_sync_falls_back_to_full_when_worker_too_far_behind() {
 
     assert_eq!(registry.rules.len(), 3, "all 3 rules should be in worker registry");
     assert_eq!(registry.version, changelog.current_version());
+}
+
+/// Out-of-order delivery (retransmit, stale post-failover main, multi-stream
+/// reorder) can re-deliver an older `RuleSyncResponse` after a newer one has
+/// already advanced the worker. The guard at the top of `apply_sync_response`
+/// must reject the stale frame so the registry never silently rolls back.
+#[tokio::test]
+async fn stale_sync_response_does_not_regress_registry() {
+    // Seed a worker with two rules at version 5.
+    let mut registry = RuleRegistry::new();
+    let rule_a = make_test_rule("rule-current-a");
+    let rule_b = make_test_rule("rule-current-b");
+    registry.insert(rule_a);
+    registry.insert(rule_b);
+    registry.version = 5;
+    let pre_len = registry.rules.len();
+
+    // Construct a stale Full snapshot at version 3 carrying only one (different)
+    // rule. Without the guard this would clear the registry and replace it.
+    let stale_rule = make_test_rule("rule-stale-only");
+    let stale_payload =
+        waf_cluster::sync::rules::snapshot_rules(std::slice::from_ref(&stale_rule)).expect("snapshot stale rule");
+    let stale_response = RuleSyncResponse {
+        version: 3,
+        sync_type: SyncType::Full,
+        changes: Vec::new(),
+        snapshot_lz4: stale_payload,
+    };
+
+    let reloader = NoopReloader;
+    apply_sync_response(stale_response, &mut registry, &reloader)
+        .await
+        .expect("stale sync must return Ok (skipped)");
+
+    assert_eq!(registry.version, 5, "registry version must not regress");
+    assert_eq!(registry.rules.len(), pre_len, "registry rules must not be wiped");
+    assert!(
+        registry.rules.contains_key("rule-current-a"),
+        "pre-existing rule-a must survive stale sync"
+    );
+    assert!(
+        !registry.rules.contains_key("rule-stale-only"),
+        "stale rule must NOT have been applied"
+    );
+}
+
+/// A response carrying the worker's current version is a duplicate — same
+/// guard branch as stale, must be a no-op rather than re-applying.
+#[tokio::test]
+async fn duplicate_version_sync_is_skipped() {
+    let mut registry = RuleRegistry::new();
+    registry.insert(make_test_rule("rule-only"));
+    registry.version = 7;
+
+    // Construct an Incremental response at the same version with a delete
+    // change. Without the guard this delete would land and the rule would
+    // disappear.
+    let dup_response = RuleSyncResponse {
+        version: 7,
+        sync_type: SyncType::Incremental,
+        changes: vec![waf_cluster::protocol::RuleChange {
+            op: ChangeOp::Delete,
+            rule_id: "rule-only".to_string(),
+            rule_json: None,
+        }],
+        snapshot_lz4: Vec::new(),
+    };
+
+    let reloader = NoopReloader;
+    apply_sync_response(dup_response, &mut registry, &reloader)
+        .await
+        .expect("duplicate sync must return Ok (skipped)");
+
+    assert_eq!(registry.version, 7, "registry version unchanged");
+    assert!(
+        registry.rules.contains_key("rule-only"),
+        "duplicate sync must NOT have re-applied the delete"
+    );
 }
