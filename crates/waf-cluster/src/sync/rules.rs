@@ -99,7 +99,7 @@ impl RuleChangelog {
 
 /// Upper bound on the decompressed size of an lz4 snapshot. The wire format
 /// (`lz4_flex::compress_prepend_size`) carries an attacker-controlled 4-byte
-/// little-endian size prefix that lz4_flex uses to pre-allocate the output
+/// little-endian size prefix that `lz4_flex` uses to pre-allocate the output
 /// buffer. Without this cap, a malicious or compromised peer (mTLS only
 /// authenticates the transport, not the payload) could ship a tiny envelope
 /// claiming `u32::MAX` bytes and OOM the worker.
