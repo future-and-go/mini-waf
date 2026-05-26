@@ -78,7 +78,11 @@ const fn compute_confidence(phase: Phase) -> f64 {
     match phase {
         Phase::SqlInjection | Phase::Rce => 0.95,
         Phase::Xss | Phase::Ssrf => 0.90,
-        Phase::DirTraversal | Phase::Owasp | Phase::HeaderInjection | Phase::RequestBodyAbuse => 0.85,
+        Phase::DirTraversal
+        | Phase::Owasp
+        | Phase::HeaderInjection
+        | Phase::RequestBodyAbuse
+        | Phase::UnsupportedCharset => 0.85,
         Phase::CustomRule | Phase::IpBlacklist | Phase::UrlBlacklist => 0.80,
         Phase::Sensitive | Phase::Scanner | Phase::Bot | Phase::BruteForce => 0.70,
         // DDoS detection based on observed traffic patterns — moderate confidence
