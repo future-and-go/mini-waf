@@ -751,7 +751,11 @@ impl CustomRulesEngine {
             (Operator::NotContains, ConditionValue::Str(v)) => !fstr.contains(v.as_str()),
             (Operator::StartsWith, ConditionValue::Str(v)) => fstr.starts_with(v.as_str()),
             (Operator::EndsWith, ConditionValue::Str(v)) => fstr.ends_with(v.as_str()),
-            (Operator::Regex, ConditionValue::Str(v)) => Regex::new(v).ok().is_some_and(|r| r.is_match(fstr)),
+            (Operator::Regex, ConditionValue::Str(v)) => regex::RegexBuilder::new(v)
+                .size_limit(1 << 20) // 1 MB compiled DFA limit — guards against regex DoS
+                .build()
+                .ok()
+                .is_some_and(|r| r.is_match(fstr)),
             (Operator::InList, ConditionValue::List(l)) => l.iter().any(|v| v == fstr),
             (Operator::NotInList, ConditionValue::List(l)) => !l.iter().any(|v| v == fstr),
             (Operator::CidrMatch, ConditionValue::Str(cidr)) => cidr

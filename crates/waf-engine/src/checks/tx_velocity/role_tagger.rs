@@ -6,7 +6,7 @@
 //! tagger via `ArcSwap<TxVelocityConfig>` — no per-request recompile.
 
 use anyhow::{Context, Result};
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 
 use super::EndpointRole;
 use super::config::RoleRule;
@@ -36,7 +36,9 @@ impl RoleTagger {
     pub fn compile(rules: &[RoleRule]) -> Result<Self> {
         let mut compiled = Vec::with_capacity(rules.len());
         for (idx, rule) in rules.iter().enumerate() {
-            let re = Regex::new(&rule.path)
+            let re = RegexBuilder::new(&rule.path)
+                .size_limit(1 << 20) // 1 MB compiled DFA limit — guards against regex DoS
+                .build()
                 .with_context(|| format!("endpoint_roles[{idx}] regex compile: {}", rule.path))?;
             compiled.push(CompiledRule { role: rule.role, re });
         }
@@ -111,6 +113,8 @@ mod tests {
 
     #[test]
     fn invalid_regex_reports_index() {
+        // Covers the new RegexBuilder::new(..).size_limit(..).build() path:
+        // syntactically invalid patterns still surface the index-tagged error.
         let err = RoleTagger::compile(&[
             rule(EndpointRole::Login, r"^/ok$"),
             rule(EndpointRole::Otp, r"[invalid("),
