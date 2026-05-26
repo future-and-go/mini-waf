@@ -21,13 +21,30 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use wasmtime::{Config, Engine, Linker, Module, Store};
+use wasmtime::{Config, Engine, Linker, Module, ResourceLimiter, Store};
 
 /// Maximum WASM linear memory (64 MiB)
 const MAX_MEMORY_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Fuel granted per-invocation (≈ 10 million instructions)
 const FUEL_PER_CALL: u64 = 10_000_000;
+
+/// Per-`Store` resource limiter that caps linear-memory growth at
+/// `MAX_MEMORY_BYTES`. Without this, a hostile plugin declaring
+/// `(memory N)` for large N would request `N * 64 KiB` at instantiation
+/// and OOM the host process — fuel only meters instructions, not allocation.
+struct PluginLimits;
+
+impl ResourceLimiter for PluginLimits {
+    fn memory_growing(&mut self, _current: usize, desired: usize, _maximum: Option<usize>) -> wasmtime::Result<bool> {
+        let cap = usize::try_from(MAX_MEMORY_BYTES).unwrap_or(usize::MAX);
+        Ok(desired <= cap)
+    }
+
+    fn table_growing(&mut self, _current: usize, _desired: usize, _maximum: Option<usize>) -> wasmtime::Result<bool> {
+        Ok(true)
+    }
+}
 
 // ─── Plugin action ────────────────────────────────────────────────────────────
 
@@ -128,7 +145,8 @@ impl WasmPlugin {
     }
 
     fn run_request(&self, method: &str, path: &str, client_ip: &str) -> anyhow::Result<PluginAction> {
-        let mut store = Store::new(&self.engine, ());
+        let mut store = Store::new(&self.engine, PluginLimits);
+        store.limiter(|state| state);
         store.set_fuel(FUEL_PER_CALL)?;
 
         let linker = Linker::new(&self.engine);
@@ -158,7 +176,8 @@ impl WasmPlugin {
 
     /// Read a plugin name/version string from WASM memory exports.
     pub fn read_string_export(&self, ptr_export: &str, len_export: &str) -> Option<String> {
-        let mut store = Store::new(&self.engine, ());
+        let mut store = Store::new(&self.engine, PluginLimits);
+        store.limiter(|state| state);
         store.set_fuel(1_000_000).ok()?;
         let linker = Linker::new(&self.engine);
         let instance = linker.instantiate(&mut store, &self.module).ok()?;
