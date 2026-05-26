@@ -14,7 +14,19 @@ floor="$2"
 
 # llvm-cov writes the summary table; we want the TOTAL row's "Lines" cover %.
 # Output format (column "Cover" for Lines is the second-to-last %).
+# Capture exit code separately so cargo panics (exit 101) surface their output
+# instead of vanishing into $out — without this branch `set -e` aborts the
+# script before the diagnostic print below can run.
+set +e
 out=$(cargo llvm-cov -p "$crate" --summary-only --ignore-filename-regex 'vendor/' 2>&1)
+rc=$?
+set -e
+
+if [[ $rc -ne 0 ]]; then
+  echo "::error::cargo llvm-cov exited $rc for crate $crate" >&2
+  printf '%s\n' "$out" >&2
+  exit "$rc"
+fi
 
 # The TOTAL line looks like:
 #  TOTAL  N  N  XX.XX%  N  N  YY.YY%  N  N  ZZ.ZZ%  N  N  WW.WW%
