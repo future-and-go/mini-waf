@@ -1,3 +1,4 @@
+use sqlx::QueryBuilder;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -444,6 +445,66 @@ impl Database {
             self.broadcast_event(event_json);
         }
 
+        Ok(())
+    }
+
+    // ─── Batch Inserts (used by DbBatchWriter for high-throughput logging) ────
+
+    pub async fn create_attack_log_batch(&self, logs: &[AttackLog]) -> Result<(), StorageError> {
+        if logs.is_empty() {
+            return Ok(());
+        }
+        for chunk in logs.chunks(1000) {
+            let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+                "INSERT INTO attack_logs (id, host_code, host, client_ip, method, path, query, \
+                 rule_id, rule_name, action, phase, detail, request_headers, geo_info, created_at) ",
+            );
+            qb.push_values(chunk, |mut b, log| {
+                b.push_bind(log.id)
+                    .push_bind(&log.host_code)
+                    .push_bind(&log.host)
+                    .push_bind(&log.client_ip)
+                    .push_bind(&log.method)
+                    .push_bind(&log.path)
+                    .push_bind(&log.query)
+                    .push_bind(&log.rule_id)
+                    .push_bind(&log.rule_name)
+                    .push_bind(&log.action)
+                    .push_bind(&log.phase)
+                    .push_bind(&log.detail)
+                    .push_bind(&log.request_headers)
+                    .push_bind(&log.geo_info)
+                    .push_bind(log.created_at);
+            });
+            qb.push(" ON CONFLICT DO NOTHING");
+            qb.build().execute(&self.pool).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn create_security_event_batch(&self, events: &[CreateSecurityEvent]) -> Result<(), StorageError> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        for chunk in events.chunks(1000) {
+            let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+                "INSERT INTO security_events (host_code, client_ip, method, path, \
+                 rule_id, rule_name, action, detail, geo_info) ",
+            );
+            qb.push_values(chunk, |mut b, ev| {
+                b.push_bind(&ev.host_code)
+                    .push_bind(&ev.client_ip)
+                    .push_bind(&ev.method)
+                    .push_bind(&ev.path)
+                    .push_bind(&ev.rule_id)
+                    .push_bind(&ev.rule_name)
+                    .push_bind(&ev.action)
+                    .push_bind(&ev.detail)
+                    .push_bind(&ev.geo_info);
+            });
+            qb.push(" ON CONFLICT DO NOTHING");
+            qb.build().execute(&self.pool).await?;
+        }
         Ok(())
     }
 
