@@ -98,47 +98,50 @@ impl RuleManager {
     }
 
     /// Load all rules from all configured sources.
+    ///
+    /// Builds a fresh `RuleRegistry` in a local variable and substitutes it
+    /// into `self.registry` with a single write-lock swap at the end. Readers
+    /// holding `self.registry.read()` therefore observe either the previous
+    /// fully-loaded snapshot or the new fully-loaded snapshot — never a
+    /// partial state. The previous implementation took the write lock once
+    /// per source (built-ins → dir → each configured source → `mark_loaded`),
+    /// leaving a 10–100 ms bypass window per hot-reload where requests slipped
+    /// past rules from sources that had not yet been re-inserted.
     pub fn load_all(&mut self) -> Result<RuleLoadReport> {
         let mut report = RuleLoadReport::default();
+        let mut new_reg = RuleRegistry::new();
 
-        // Load built-in rules
+        // Built-in rules.
         let builtin = all_builtin_rules(
             self.enable_builtin_owasp,
             self.enable_builtin_bot,
             self.enable_builtin_scanner,
         );
         let builtin_count = builtin.len();
-
-        {
-            let mut reg = self.registry.write();
-            reg.clear();
-            for rule in builtin {
-                reg.insert(rule);
-            }
+        for rule in builtin {
+            new_reg.insert(rule);
         }
         report.rules_loaded += builtin_count;
         report.sources_loaded += 1;
 
-        // Load from rules directory
+        // Top-level rules directory.
         if self.rules_dir.is_dir() {
-            match self.load_from_dir(&self.rules_dir.clone()) {
+            let dir = self.rules_dir.clone();
+            match Self::load_dir_into(&mut new_reg, &dir) {
                 Ok(sub) => report.merge(sub),
                 Err(e) => report.errors.push(format!("rules dir: {e}")),
             }
         }
 
-        // Load from configured sources
+        // Configured sources.
         let sources = self.sources.clone();
         for source in &sources {
             match source {
                 RuleSource::LocalFile { path, format, name } => match load_file(path, *format) {
                     Ok(rules) => {
                         let count = rules.len();
-                        {
-                            let mut reg = self.registry.write();
-                            for rule in rules {
-                                reg.insert(rule);
-                            }
+                        for rule in rules {
+                            new_reg.insert(rule);
                         }
                         info!(source = %name, rules = count, "Loaded rules from file");
                         report.rules_loaded += count;
@@ -146,7 +149,7 @@ impl RuleManager {
                     }
                     Err(e) => report.errors.push(format!("{name}: {e}")),
                 },
-                RuleSource::LocalDir { path, name, .. } => match self.load_from_dir(path) {
+                RuleSource::LocalDir { path, name, .. } => match Self::load_dir_into(&mut new_reg, path) {
                     Ok(sub) => {
                         info!(source = %name, rules = sub.rules_loaded, "Loaded rules from dir");
                         report.merge(sub);
@@ -163,10 +166,11 @@ impl RuleManager {
             }
         }
 
-        {
-            let mut reg = self.registry.write();
-            reg.mark_loaded();
-        }
+        new_reg.mark_loaded();
+
+        // Single atomic swap. Readers blocked on the write lock wake up
+        // observing the fully-loaded `new_reg`, never any intermediate state.
+        *self.registry.write() = new_reg;
 
         info!(
             rules_loaded = report.rules_loaded,
@@ -359,7 +363,12 @@ impl RuleManager {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    fn load_from_dir(&self, dir: &Path) -> Result<RuleLoadReport> {
+    /// Read every rule file in `dir` and insert them into `reg`.
+    ///
+    /// Static helper — takes `&mut RuleRegistry` directly so callers can pour
+    /// rules into a local registry built off-side. Used by [`Self::load_all`]
+    /// to keep the entire hot-reload behind a single write-lock swap.
+    fn load_dir_into(reg: &mut RuleRegistry, dir: &Path) -> Result<RuleLoadReport> {
         let mut report = RuleLoadReport::default();
         if !dir.is_dir() {
             return Ok(report);
@@ -378,11 +387,8 @@ impl RuleManager {
             match load_file(&path, format) {
                 Ok(rules) => {
                     let count = rules.len();
-                    {
-                        let mut reg = self.registry.write();
-                        for rule in rules {
-                            reg.insert(rule);
-                        }
+                    for rule in rules {
+                        reg.insert(rule);
                     }
                     report.rules_loaded += count;
                     report.sources_loaded += 1;
@@ -708,5 +714,50 @@ mod tests {
         let mut mgr = RuleManager::new(&minimal_config());
         let results = mgr.load_remote_sources().await;
         assert!(results.is_empty());
+    }
+
+    /// Regression: a concurrent reader must never observe fewer rules than
+    /// the post-load baseline while a reload is running. Pre-fix `load_all`
+    /// took the write lock once per source, leaving a window where readers
+    /// saw builtins-only or partial source data. Post-fix the registry is
+    /// rebuilt off-side and swapped in with a single write lock.
+    #[test]
+    fn reload_swap_never_exposes_partial_state() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        let mut mgr = RuleManager::new(&minimal_config());
+        mgr.load_all().expect("initial load");
+        let baseline = mgr.registry.read().rules.len();
+        assert!(baseline > 0, "expected at least one builtin rule in the baseline");
+
+        let handle = Arc::clone(&mgr.registry);
+        let min_seen = Arc::new(AtomicUsize::new(usize::MAX));
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let reader_min = Arc::clone(&min_seen);
+        let reader_stop = Arc::clone(&stop);
+        let reader = std::thread::spawn(move || {
+            while !reader_stop.load(Ordering::SeqCst) {
+                let n = handle.read().rules.len();
+                reader_min.fetch_min(n, Ordering::SeqCst);
+            }
+        });
+
+        // Several reloads to maximise the chance of catching a pre-fix
+        // window. Post-fix the swap is structurally atomic so the loop
+        // count is not load-bearing for correctness.
+        for _ in 0..20 {
+            mgr.reload().expect("reload");
+        }
+
+        stop.store(true, Ordering::SeqCst);
+        reader.join().expect("reader thread join");
+
+        let observed = min_seen.load(Ordering::SeqCst);
+        assert!(
+            observed >= baseline,
+            "reader observed partial reload: min={observed} < baseline={baseline}"
+        );
     }
 }
