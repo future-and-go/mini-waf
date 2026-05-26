@@ -282,3 +282,57 @@ async fn set_enabled_on_missing_id_returns_false() {
     let mgr = PluginManager::new();
     assert!(!mgr.set_enabled(Uuid::new_v4(), true).await);
 }
+
+// ── Memory limiter (#78) ─────────────────────────────────────────────────────
+//
+// `MAX_MEMORY_BYTES` is 64 MiB = 1024 WASM pages. A hostile plugin declaring
+// `(memory N)` for large N would otherwise allocate `N * 64 KiB` at
+// instantiation and OOM the host (fuel meters instructions only). The
+// `ResourceLimiter` wired onto every `Store` caps `memory_growing` at
+// `MAX_MEMORY_BYTES`. Instantiation that would exceed the cap fails inside
+// `run_request`, which then swallows the error and returns the safe-default
+// `Allow` — so a Block-returning plugin with oversized memory ends up Allowing.
+
+fn wat_memory_pages_block(pages: u32) -> Vec<u8> {
+    wat::parse_str(&format!(
+        r#"(module
+             (memory (export "memory") {pages})
+             (func (export "on_request") (result i32) i32.const 1)
+           )"#,
+    ))
+    .expect("valid WAT")
+}
+
+#[tokio::test]
+async fn memory_within_cap_block_plugin_still_blocks() {
+    let mgr = PluginManager::new();
+    let id = Uuid::new_v4();
+    // 1024 pages × 64 KiB = exactly 64 MiB; limiter permits `desired <= cap`.
+    mgr.load(params(id, "within-cap", &wat_memory_pages_block(1024)))
+        .await
+        .expect("load");
+
+    let action = mgr.run_request("GET", "/", "1.2.3.4").await;
+    assert_eq!(action, PluginAction::Block, "plugin at the cap must still run");
+}
+
+#[tokio::test]
+async fn memory_over_cap_blocks_instantiation_and_returns_allow() {
+    let mgr = PluginManager::new();
+    let id = Uuid::new_v4();
+    // 2048 pages × 64 KiB = 128 MiB, double the cap. WasmPlugin::new only
+    // compiles the module, so `load` succeeds. The limiter rejects the
+    // memory growth at instantiation inside `run_request`, the error
+    // propagates, `on_request` swallows it and returns Allow — so the
+    // module's i32.const 1 (Block) is never observed.
+    mgr.load(params(id, "over-cap", &wat_memory_pages_block(2048)))
+        .await
+        .expect("load (compile only)");
+
+    let action = mgr.run_request("GET", "/", "1.2.3.4").await;
+    assert_eq!(
+        action,
+        PluginAction::Allow,
+        "memory cap must reject instantiation; safe-default to Allow"
+    );
+}
