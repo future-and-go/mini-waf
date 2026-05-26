@@ -240,6 +240,7 @@ impl std::fmt::Display for Phase {
             Self::HeaderInjection => write!(f, "Header Injection"),
             Self::BruteForce => write!(f, "Brute Force"),
             Self::RequestBodyAbuse => write!(f, "Request Body Abuse"),
+            Self::UnsupportedCharset => write!(f, "Unsupported Charset"),
         }
     }
 }
