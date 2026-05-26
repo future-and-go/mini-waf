@@ -13,18 +13,20 @@ use tracing::{debug, warn};
 use crate::node::NodeState;
 use crate::protocol::{ClusterMessage, Heartbeat};
 
-/// Broadcast periodic heartbeats to all connected peer channels.
+/// Broadcast periodic heartbeats to all currently connected peer channels.
 ///
-/// Sends a [`ClusterMessage::Heartbeat`] to every sender in `peer_senders` on
-/// each `interval_ms` tick.  Full channels and closed channels are handled
-/// gracefully without stopping the loop.
+/// On each `interval_ms` tick the function takes a fresh snapshot of
+/// `node_state.peer_channels` via [`NodeState::peer_channels_snapshot`] and
+/// `try_send`s a [`ClusterMessage::Heartbeat`] to every sender. Channels added
+/// by `NodeState::add_peer_channel` AFTER this task spawned (late-joining
+/// peers) are picked up on the next iteration — pre-fix, the snapshot was
+/// captured once at spawn time, so late joiners never received heartbeats and
+/// the peer-side phi-accrual detector would falsely declare this node dead,
+/// driving spurious eviction / split-brain.
 ///
-/// Runs until the process exits (tokio task cancellation).
-pub async fn run_heartbeat_sender(
-    node_state: Arc<NodeState>,
-    interval_ms: u64,
-    peer_senders: Vec<mpsc::Sender<ClusterMessage>>,
-) {
+/// Full channels and closed channels are handled gracefully without stopping
+/// the loop. Runs until the process exits (tokio task cancellation).
+pub async fn run_heartbeat_sender(node_state: Arc<NodeState>, interval_ms: u64) {
     let mut ticker = tokio::time::interval(tokio::time::Duration::from_millis(interval_ms.max(1)));
     let mut sequence: u64 = 0;
     let start_ms = now_unix_ms();
@@ -54,7 +56,12 @@ pub async fn run_heartbeat_sender(
 
         let msg = ClusterMessage::Heartbeat(hb);
 
-        for sender in &peer_senders {
+        let senders = node_state.peer_channels_snapshot();
+        if senders.is_empty() {
+            continue;
+        }
+
+        for sender in &senders {
             match sender.try_send(msg.clone()) {
                 Ok(()) => {}
                 Err(mpsc::error::TrySendError::Full(_)) => {

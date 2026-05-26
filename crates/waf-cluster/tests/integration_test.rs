@@ -158,6 +158,11 @@ async fn two_node_heartbeat_exchange() {
     // NodeState needed by the heartbeat sender to populate the Heartbeat fields
     let node_state = Arc::new(NodeState::new(ClusterConfig::default(), StorageMode::ForwardOnly).unwrap());
 
+    // Register the outbound channel on NodeState BEFORE spawning the heartbeat
+    // task. The heartbeat sender reads `peer_channels` per tick, so the
+    // channel must be present (either pre- or post-spawn) for delivery.
+    node_state.add_peer_channel(msg_tx);
+
     // Spawn client connection task (auto-reconnects; will stop when msg_rx closes)
     let state_clone = Arc::clone(&node_state);
     tokio::spawn(async move {
@@ -165,10 +170,11 @@ async fn two_node_heartbeat_exchange() {
         let _ = client.run_with_reconnect(state_clone, msg_rx).await;
     });
 
-    // Heartbeat sender at 50 ms interval — broadcasts to the single peer channel
+    // Heartbeat sender at 50 ms interval — broadcasts to every channel
+    // currently registered on `node_state`.
     let state_hb = Arc::clone(&node_state);
     tokio::spawn(async move {
-        run_heartbeat_sender(state_hb, 50, vec![msg_tx]).await;
+        run_heartbeat_sender(state_hb, 50).await;
     });
 
     // ── Assert ────────────────────────────────────────────────────────────────
@@ -241,5 +247,42 @@ async fn mtls_rejects_unknown_cert() {
         // expected: connection error or timeout while retrying — both acceptable
         Ok(Err(_)) | Err(_) => {}
         Ok(Ok(())) => panic!("rogue client should not connect cleanly"),
+    }
+}
+
+/// Regression test: heartbeat sender must service peer channels registered
+/// AFTER the task has been spawned.
+///
+/// Pre-fix the heartbeat task took a `Vec<Sender>` by value at spawn time,
+/// so a late-joining peer was invisible to the sender — peer-side phi-accrual
+/// would falsely declare this node dead, driving spurious eviction. With the
+/// `peer_channels_snapshot()` per-tick re-read, the new channel must observe
+/// at least one heartbeat within a few ticks.
+#[tokio::test]
+async fn heartbeat_sender_services_late_joining_peer() {
+    let node_state = Arc::new(NodeState::new(ClusterConfig::default(), StorageMode::ForwardOnly).unwrap());
+
+    // Spawn the heartbeat task FIRST, on an empty peer set.
+    let state_hb = Arc::clone(&node_state);
+    tokio::spawn(async move {
+        run_heartbeat_sender(state_hb, 20).await;
+    });
+
+    // Let several ticks elapse with no peers registered. The task must remain
+    // alive (no panic, no early return) and simply emit no traffic.
+    tokio::time::sleep(Duration::from_millis(80)).await;
+
+    // Now register a peer channel — simulates a worker joining after the main
+    // node's heartbeat task has been running for a while.
+    let (tx, mut rx) = mpsc::channel::<ClusterMessage>(8);
+    node_state.add_peer_channel(tx);
+
+    // Within a few ticks the new channel must receive at least one heartbeat.
+    let recv = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await;
+    match recv {
+        Ok(Some(ClusterMessage::Heartbeat(_))) => {}
+        Ok(Some(other)) => panic!("expected Heartbeat for late-joiner, got {other:?}"),
+        Ok(None) => panic!("late-joiner channel closed before first heartbeat"),
+        Err(elapsed) => panic!("late-joiner received no heartbeat within 300 ms: {elapsed}"),
     }
 }
