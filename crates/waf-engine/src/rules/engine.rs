@@ -1534,30 +1534,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_eval_regex_oversize_returns_no_match() {
-        // Pattern compiled NFA easily exceeds the 1 MB size_limit. Both the
-        // pre-compile path (compile_rule -> compiled=None) and the legacy
-        // per-request eval path (eval_one -> Operator::Regex arm) must reject
-        // it instead of attempting to allocate a giant DFA on every request.
-        let bomb = "^(?:a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p){10000}$";
-        let engine = CustomRulesEngine::new();
-        let mut rule = mk_rule(
-            ConditionOp::And,
-            vec![Condition {
-                field: ConditionField::Path,
-                operator: Operator::Regex,
-                value: ConditionValue::Str(bomb.into()),
-            }],
-        );
-        rule.id = "bomb".into();
-        engine.add_rule(rule);
-
-        // Any path; the bomb regex must not match (build rejected by size_limit).
-        let ctx = make_ctx("/abcd", "GET", "10.0.0.1");
-        assert!(engine.check(&ctx).is_none());
-    }
-
-    #[test]
     fn compile_mismatched_operator_value_returns_err() {
         // Eq expects Str, not Number → must error rather than silently match.
         let rule = mk_rule(

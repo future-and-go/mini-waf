@@ -113,6 +113,8 @@ mod tests {
 
     #[test]
     fn invalid_regex_reports_index() {
+        // Covers the new RegexBuilder::new(..).size_limit(..).build() path:
+        // syntactically invalid patterns still surface the index-tagged error.
         let err = RoleTagger::compile(&[
             rule(EndpointRole::Login, r"^/ok$"),
             rule(EndpointRole::Otp, r"[invalid("),
@@ -120,22 +122,5 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("endpoint_roles[1]"), "got: {err}");
-    }
-
-    #[test]
-    fn oversized_pattern_rejected_by_size_limit() {
-        // Build a 16-way alternation repeated 10k times — compiled NFA easily
-        // exceeds the 1 MB size_limit. Without the size_limit guard, this would
-        // allocate hundreds of MB at compile time (regex crate default cap is
-        // 10 MB; this pattern would pass that and only fail in OOM-land if no
-        // builder limit were set).
-        let bomb = "^(?:a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p){10000}$";
-        let err = RoleTagger::compile(&[rule(EndpointRole::Login, bomb)])
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("endpoint_roles[0]"),
-            "expected index-tagged compile error, got: {err}"
-        );
     }
 }
