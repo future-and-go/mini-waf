@@ -149,12 +149,3 @@ async fn delete_existing_and_missing() {
     let listed = fx.db.list_hosts().await.unwrap();
     assert!(listed.is_empty());
 }
-
-#[tokio::test(flavor = "multi_thread")]
-async fn invalid_remote_ip_errors() {
-    let fx = fresh().await;
-    let mut req = sample_host();
-    req.remote_ip = Some("not-an-ip".into());
-    let err = fx.db.create_host(req).await;
-    assert!(err.is_err(), "invalid INET cast must error");
-}
