@@ -1575,6 +1575,12 @@ async fn init_async(
 
     // WAF engine
     let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
+    engine.set_db_batch_writer(waf_engine::logging::DbBatchWriter::spawn(
+        Arc::clone(&db),
+        10_000,
+        1_000,
+        100,
+    ));
     engine.set_rules_dir(std::path::PathBuf::from(&config.rules.dir));
     engine.reload_rules().await?;
     engine.start_file_watcher();

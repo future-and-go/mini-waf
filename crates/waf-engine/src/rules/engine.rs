@@ -18,7 +18,7 @@ use parking_lot::Mutex;
 use regex::Regex;
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use tracing::{error, warn};
 
 use super::load_status::{self, RuleLoadFailure};
 
@@ -331,23 +331,23 @@ struct RuleEntry {
 }
 
 impl RuleEntry {
-    fn from_rule(rule: CustomRule) -> Self {
+    fn from_rule(rule: CustomRule) -> Option<Self> {
         Self::from_rule_with_source(rule, RuleSource::Db)
     }
 
-    fn from_rule_with_source(rule: CustomRule, source: RuleSource) -> Self {
+    fn from_rule_with_source(rule: CustomRule, source: RuleSource) -> Option<Self> {
         let compiled = match compile_rule(&rule) {
             Ok(c) => c,
             Err(e) => {
-                warn!(rule_id = %rule.id, error = %e, "Failed to compile rule; skipping");
-                None
+                error!(rule_id = %rule.id, error = %e, "Rule rejected: compile failed");
+                return None;
             }
         };
-        Self {
+        Some(Self {
             raw: rule,
             compiled,
             source,
-        }
+        })
     }
 }
 
@@ -412,7 +412,7 @@ impl CustomRulesEngine {
         let mut entries: Vec<RuleEntry> = rules
             .into_iter()
             .filter(|r| r.enabled)
-            .map(RuleEntry::from_rule)
+            .filter_map(RuleEntry::from_rule)
             .collect();
         entries.sort_by_key(|e| e.raw.priority);
         self.rules.insert(host_code.to_string(), entries);
@@ -433,7 +433,10 @@ impl CustomRulesEngine {
 
     fn insert_rule(&self, rule: CustomRule, source: RuleSource) {
         let host_code = rule.host_code.clone();
-        let entry = RuleEntry::from_rule_with_source(rule, source);
+        let entry = match RuleEntry::from_rule_with_source(rule, source) {
+            Some(e) => e,
+            None => return,
+        };
         let mut bucket = self.rules.entry(host_code).or_default();
         bucket.push(entry);
         bucket.sort_by_key(|e| e.raw.priority);
@@ -456,7 +459,7 @@ impl CustomRulesEngine {
             }
             Err(e) => {
                 let reason = load_status::classify_error(&e);
-                tracing::error!(
+                error!(
                     rule_id = %rule_id,
                     reason = reason,
                     error = %e,
@@ -469,11 +472,7 @@ impl CustomRulesEngine {
                         file: std::path::PathBuf::from(&rule_id),
                         reason: reason.to_string(),
                     }));
-                RuleEntry {
-                    raw: rule,
-                    compiled: None,
-                    source,
-                }
+                return;
             }
         };
         let mut bucket = self.rules.entry(host_code).or_default();
@@ -751,13 +750,16 @@ impl CustomRulesEngine {
             (Operator::NotContains, ConditionValue::Str(v)) => !fstr.contains(v.as_str()),
             (Operator::StartsWith, ConditionValue::Str(v)) => fstr.starts_with(v.as_str()),
             (Operator::EndsWith, ConditionValue::Str(v)) => fstr.ends_with(v.as_str()),
-            (Operator::Regex, ConditionValue::Str(v)) => Regex::new(v).ok().is_some_and(|r| r.is_match(fstr)),
+            (Operator::Regex, _) => {
+                error!("BUG: regex condition reached uncompiled eval_one");
+                false
+            }
             (Operator::InList, ConditionValue::List(l)) => l.iter().any(|v| v == fstr),
             (Operator::NotInList, ConditionValue::List(l)) => !l.iter().any(|v| v == fstr),
-            (Operator::CidrMatch, ConditionValue::Str(cidr)) => cidr
-                .parse::<ipnet::IpNet>()
-                .ok()
-                .is_some_and(|net| net.contains(&ctx.client_ip)),
+            (Operator::CidrMatch, _) => {
+                error!("BUG: cidr condition reached uncompiled eval_one");
+                false
+            }
             (Operator::Gt, ConditionValue::Number(n)) => fstr.parse::<i64>().ok().is_some_and(|v| v > *n),
             (Operator::Lt, ConditionValue::Number(n)) => fstr.parse::<i64>().ok().is_some_and(|v| v < *n),
             (Operator::Gte, ConditionValue::Number(n)) => fstr.parse::<i64>().ok().is_some_and(|v| v >= *n),
@@ -2251,5 +2253,114 @@ mod tests {
         ctx.body_preview = bytes::Bytes::from("secret data");
         // Even though body contains "secret", field="response_body" must not match
         assert!(!pattern_matches_request(&pattern, "response_body", &ctx));
+    }
+
+    // ── Phase 1: Regex pre-compilation guarantee ────────────────────────
+
+    #[test]
+    fn invalid_regex_rejects_rule_at_load() {
+        let engine = CustomRulesEngine::new();
+        engine.add_rule(CustomRule {
+            id: "bad-re".into(),
+            host_code: "test".into(),
+            name: "bad regex".into(),
+            priority: 1,
+            enabled: true,
+            condition_op: ConditionOp::And,
+            conditions: vec![Condition {
+                field: ConditionField::Path,
+                operator: Operator::Regex,
+                value: ConditionValue::Str("[invalid".into()),
+            }],
+            action: RuleAction::Block,
+            action_status: 403,
+            action_msg: None,
+            script: None,
+            match_tree: None,
+            risk_delta: None,
+            risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
+        });
+        assert!(engine.is_empty(), "rule with invalid regex must be rejected at load");
+    }
+
+    #[test]
+    fn eval_one_regex_arm_returns_false_fail_closed() {
+        let engine = CustomRulesEngine::new();
+        let cond = Condition {
+            field: ConditionField::Path,
+            operator: Operator::Regex,
+            value: ConditionValue::Str("^admin.*".into()),
+        };
+        let ctx = make_ctx("/admin/login", "GET", "1.2.3.4");
+        assert!(
+            !engine.eval_one(&ctx, &cond),
+            "uncompiled regex eval_one must return false (fail-closed)"
+        );
+    }
+
+    #[test]
+    fn valid_regex_compiles_and_matches_at_eval() {
+        let engine = CustomRulesEngine::new();
+        engine.add_rule(CustomRule {
+            id: "good-re".into(),
+            host_code: "test".into(),
+            name: "regex match".into(),
+            priority: 1,
+            enabled: true,
+            condition_op: ConditionOp::And,
+            conditions: vec![Condition {
+                field: ConditionField::Path,
+                operator: Operator::Regex,
+                value: ConditionValue::Str("^/admin.*".into()),
+            }],
+            action: RuleAction::Block,
+            action_status: 403,
+            action_msg: None,
+            script: None,
+            match_tree: None,
+            risk_delta: None,
+            risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
+        });
+        assert_eq!(engine.len(), 1, "valid regex rule must be loaded");
+
+        let ctx_match = make_ctx("/admin/login", "GET", "1.2.3.4");
+        assert!(engine.check(&ctx_match).is_some(), "regex should match /admin/login");
+
+        let ctx_miss = make_ctx("/user/profile", "GET", "1.2.3.4");
+        assert!(
+            engine.check(&ctx_miss).is_none(),
+            "regex should not match /user/profile"
+        );
+    }
+
+    #[test]
+    fn eval_one_cidr_arm_returns_false_fail_closed() {
+        let engine = CustomRulesEngine::new();
+        let cond = Condition {
+            field: ConditionField::Ip,
+            operator: Operator::CidrMatch,
+            value: ConditionValue::Str("10.0.0.0/8".into()),
+        };
+        let ctx = make_ctx("/", "GET", "10.0.1.5");
+        assert!(
+            !engine.eval_one(&ctx, &cond),
+            "uncompiled cidr eval_one must return false (fail-closed)"
+        );
     }
 }
