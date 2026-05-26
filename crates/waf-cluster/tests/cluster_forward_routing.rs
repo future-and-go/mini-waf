@@ -151,12 +151,13 @@ async fn forward_write_round_trip() {
 #[tokio::test(start_paused = true)]
 async fn forward_write_times_out_when_no_response() {
     let pending = PendingForwards::new();
+    let pending_clone = pending.clone();
     let (tx, _rx) = mpsc::channel::<ClusterMessage>(8);
 
     let h = tokio::spawn(async move {
         forward_write(
             &tx,
-            &pending,
+            &pending_clone,
             "req-timeout".to_string(),
             "PUT".to_string(),
             "/x".to_string(),
@@ -170,6 +171,12 @@ async fn forward_write_times_out_when_no_response() {
     tokio::time::advance(Duration::from_millis(100)).await;
     let res = h.await.expect("join");
     assert!(res.is_err(), "must time out");
+    // Regression: pre-fix the timeout path leaked the oneshot::Sender forever.
+    assert_eq!(
+        pending.pending_count().await,
+        0,
+        "timeout must drop the pending entry to avoid unbounded HashMap growth"
+    );
 }
 
 #[tokio::test]
@@ -193,4 +200,22 @@ async fn forward_write_errors_when_outbound_closed() {
     let err = res.expect_err("must fail when channel closed");
     let msg = format!("{err}");
     assert!(msg.contains("outbound channel closed"), "msg = {msg}");
+    // Regression: pre-fix a send-failure also leaked the registered entry.
+    assert_eq!(
+        pending.pending_count().await,
+        0,
+        "send failure must drop the pending entry"
+    );
+}
+
+#[tokio::test]
+async fn pending_forwards_remove_drops_entry() {
+    let p = PendingForwards::new();
+    let _rx = p.register("explicit".to_string()).await;
+    assert_eq!(p.pending_count().await, 1);
+    p.remove("explicit").await;
+    assert_eq!(p.pending_count().await, 0);
+    // Removing a missing key is a no-op (not an error).
+    p.remove("ghost").await;
+    assert_eq!(p.pending_count().await, 0);
 }

@@ -70,6 +70,16 @@ impl PendingForwards {
         }
     }
 
+    /// Drop a pending entry without delivering a response.
+    ///
+    /// Used by [`forward_write`] error paths (send failure, timeout, receiver
+    /// drop) to release the registered `oneshot::Sender` so that the entry
+    /// does not accumulate as garbage in the `HashMap` when no response will
+    /// ever arrive.
+    pub async fn remove(&self, request_id: &str) {
+        self.inner.lock().await.remove(request_id);
+    }
+
     /// Cancel all pending requests (e.g., when the QUIC connection drops).
     ///
     /// Dropping the senders causes each waiting `Receiver` to return an error,
@@ -119,16 +129,31 @@ pub async fn forward_write(
         headers,
     });
 
-    sender
-        .send(msg)
-        .await
-        .context("failed to queue ApiForward message; outbound channel closed")?;
+    let result = async {
+        sender
+            .send(msg)
+            .await
+            .context("failed to queue ApiForward message; outbound channel closed")?;
 
-    let timeout = tokio::time::Duration::from_millis(timeout_ms.max(1));
-    tokio::time::timeout(timeout, rx)
-        .await
-        .context("API forward timed out waiting for response from main")?
-        .context("API forward response channel dropped")
+        let timeout = tokio::time::Duration::from_millis(timeout_ms.max(1));
+        tokio::time::timeout(timeout, rx)
+            .await
+            .context("API forward timed out waiting for response from main")?
+            .context("API forward response channel dropped")
+    }
+    .await;
+
+    // `resolve()` and `cancel_all()` already strip the pending entry on their
+    // happy paths, but the send-failure / timeout / receiver-drop branches
+    // never re-enter the registry — without an explicit cleanup the
+    // `oneshot::Sender` would live in the `HashMap` forever, leaking memory
+    // proportional to retried admin writes whenever the main is unreachable.
+    // Defensive removal: no-op when the entry was already taken by either
+    // `resolve()` or `cancel_all()`.
+    if result.is_err() {
+        pending.remove(&request_id).await;
+    }
+    result
 }
 
 // ─── Main-side handler ────────────────────────────────────────────────────────
