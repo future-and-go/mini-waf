@@ -28,7 +28,7 @@ pub const MAX_WASM_BYTES: usize = 16 * 1024 * 1024;
 const MAX_NAME_LEN: usize = 64;
 
 /// Maximum allowed length for free-form text fields (version / description /
-/// author). 256 bytes is plenty for SemVer + a short description.
+/// author). 256 bytes is plenty for `SemVer` + a short description.
 const MAX_TEXT_LEN: usize = 256;
 
 /// Total per-request body limit applied to `POST /api/plugins`. The 64 KiB
