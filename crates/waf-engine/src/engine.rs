@@ -29,9 +29,9 @@ use crate::checks::tx_velocity::{
     TxStore, TxVelocityCheck, TxVelocityConfig, TxVelocityFileConfig, TxVelocityReloader,
 };
 use crate::checks::{
-    AntiHotlinkCheck, BotCheck, BruteForceCheck, CharsetCheck, Check, DirTraversalCheck, GeoCheck, HeaderInjectionCheck,
-    OWASPCheck, RateLimitCheck, RateLimitConfig, RceCheck, RequestBodyAbuseCheck, ScannerCheck, SensitiveCheck,
-    SqlInjectionCheck, SsrfCheck, XssCheck,
+    AntiHotlinkCheck, BotCheck, BruteForceCheck, CharsetCheck, Check, DirTraversalCheck, GeoCheck,
+    HeaderInjectionCheck, OWASPCheck, RateLimitCheck, RateLimitConfig, RceCheck, RequestBodyAbuseCheck, ScannerCheck,
+    SensitiveCheck, SqlInjectionCheck, SsrfCheck, XssCheck,
 };
 use crate::community::{CommunityChecker, CommunityReporter, RequestInfo};
 use crate::crowdsec::{AppSecClient, AppSecResult, CrowdSecChecker, appsec_to_detection};

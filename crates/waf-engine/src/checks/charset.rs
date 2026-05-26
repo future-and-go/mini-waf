@@ -135,7 +135,10 @@ mod tests {
 
     #[test]
     fn parse_is_case_insensitive_on_parameter_name() {
-        assert_eq!(parse_charset("text/html; CHARSET=ISO-8859-1"), Some("iso-8859-1".into()));
+        assert_eq!(
+            parse_charset("text/html; CHARSET=ISO-8859-1"),
+            Some("iso-8859-1".into())
+        );
         assert_eq!(parse_charset("text/html; ChArSet=utf-8"), Some("utf-8".into()));
     }
 
