@@ -120,9 +120,7 @@ fn decompress_with_cap(data: &[u8]) -> Result<Vec<u8>> {
         .ok_or_else(|| anyhow::anyhow!("lz4 snapshot too short to contain size prefix"))?;
     let size = u32::from_le_bytes(size_bytes);
     if size > MAX_SNAPSHOT_BYTES {
-        anyhow::bail!(
-            "lz4 snapshot decompressed size {size} exceeds {MAX_SNAPSHOT_BYTES} byte cap"
-        );
+        anyhow::bail!("lz4 snapshot decompressed size {size} exceeds {MAX_SNAPSHOT_BYTES} byte cap");
     }
     lz4_flex::decompress_size_prepended(data).map_err(|e| anyhow::anyhow!("lz4 decompress failed: {e}"))
 }
