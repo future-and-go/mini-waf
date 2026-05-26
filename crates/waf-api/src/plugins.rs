@@ -44,10 +44,7 @@ fn validate_plugin_name(name: &str) -> Result<(), String> {
         return Err("plugin name is required".to_string());
     }
     if name.len() > MAX_NAME_LEN {
-        return Err(format!(
-            "plugin name exceeds {MAX_NAME_LEN} chars (got {})",
-            name.len()
-        ));
+        return Err(format!("plugin name exceeds {MAX_NAME_LEN} chars (got {})", name.len()));
     }
     if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
         return Err("plugin name must contain only [A-Za-z0-9_-]".to_string());
@@ -58,10 +55,7 @@ fn validate_plugin_name(name: &str) -> Result<(), String> {
 /// Cap a free-form text field at [`MAX_TEXT_LEN`].
 fn validate_text_field(label: &str, value: &str) -> Result<(), String> {
     if value.len() > MAX_TEXT_LEN {
-        return Err(format!(
-            "{label} exceeds {MAX_TEXT_LEN} chars (got {})",
-            value.len()
-        ));
+        return Err(format!("{label} exceeds {MAX_TEXT_LEN} chars (got {})", value.len()));
     }
     Ok(())
 }
