@@ -145,9 +145,7 @@ pub fn is_private_ip(addr: IpAddr) -> bool {
                     (segs[7] >> 8) as u8,
                     (segs[7] & 0xff) as u8,
                 );
-                if PRIVATE_CIDRS.iter().any(|net| net.contains(&v4))
-                    || METADATA_HOST_SET.is_match(&v4.to_string())
-                {
+                if PRIVATE_CIDRS.iter().any(|net| net.contains(&v4)) || METADATA_HOST_SET.is_match(&v4.to_string()) {
                     return true;
                 }
             }
