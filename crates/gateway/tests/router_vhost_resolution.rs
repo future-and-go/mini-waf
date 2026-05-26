@@ -162,7 +162,10 @@ fn register_uppercase_host_resolves_via_lowercase_header() {
     // Admin / DB may have stored the host with mixed case — registration
     // must normalise so canonical lowercase headers still hit the route.
     r.register(&make_host("c", "Example.COM", 80));
-    assert!(r.resolve("example.com").is_some(), "lowercase header on uppercase registration");
+    assert!(
+        r.resolve("example.com").is_some(),
+        "lowercase header on uppercase registration"
+    );
     assert!(r.resolve("example.com:80").is_some());
 }
 
