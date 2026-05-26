@@ -283,6 +283,6 @@ async fn heartbeat_sender_services_late_joining_peer() {
         Ok(Some(ClusterMessage::Heartbeat(_))) => {}
         Ok(Some(other)) => panic!("expected Heartbeat for late-joiner, got {other:?}"),
         Ok(None) => panic!("late-joiner channel closed before first heartbeat"),
-        Err(_) => panic!("late-joiner received no heartbeat within 300 ms"),
+        Err(elapsed) => panic!("late-joiner received no heartbeat within 300 ms: {elapsed}"),
     }
 }
