@@ -36,22 +36,12 @@ const FUEL_PER_CALL: u64 = 10_000_000;
 struct PluginLimits;
 
 impl ResourceLimiter for PluginLimits {
-    fn memory_growing(
-        &mut self,
-        _current: usize,
-        desired: usize,
-        _maximum: Option<usize>,
-    ) -> anyhow::Result<bool> {
+    fn memory_growing(&mut self, _current: usize, desired: usize, _maximum: Option<usize>) -> wasmtime::Result<bool> {
         let cap = usize::try_from(MAX_MEMORY_BYTES).unwrap_or(usize::MAX);
         Ok(desired <= cap)
     }
 
-    fn table_growing(
-        &mut self,
-        _current: usize,
-        _desired: usize,
-        _maximum: Option<usize>,
-    ) -> anyhow::Result<bool> {
+    fn table_growing(&mut self, _current: usize, _desired: usize, _maximum: Option<usize>) -> wasmtime::Result<bool> {
         Ok(true)
     }
 }
