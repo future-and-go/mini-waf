@@ -13,4 +13,7 @@ pub enum StorageError {
 
     #[error("Migration error: {0}")]
     Migration(#[from] sqlx::migrate::MigrateError),
+
+    #[error("Connection failed: {0}")]
+    ConnectionFailed(String),
 }

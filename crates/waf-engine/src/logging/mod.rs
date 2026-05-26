@@ -24,8 +24,10 @@
 
 pub mod audit_sender;
 pub mod batch_buffer;
+pub mod db_batch_writer;
 pub mod vlogs_layer;
 
 pub use audit_sender::{AuditEvent, AuditEventType, AuditSender};
 pub use batch_buffer::{BatchConfig, BatchSender, spawn_batch_flusher};
+pub use db_batch_writer::{DbBatchWriter, DbLogEvent};
 pub use vlogs_layer::{LayerSlot, VictoriaLogsLayer};
