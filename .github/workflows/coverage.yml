@@ -51,7 +51,7 @@ jobs:
           - { crate: prx-waf,     floor: 5 }
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The ubuntu-latest runner ships with ~14 GB free on /. cargo llvm-cov
       # compiles the vendored pingora workspace into target/llvm-cov-target
