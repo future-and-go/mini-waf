@@ -661,10 +661,14 @@ pub async fn upload_certificate(
     // a 100 MiB blob or "GARBAGE not a PEM") was accepted, then the gateway
     // would fail to load the cert on next reload.
     validate_pem_field(req.cert_pem.as_deref(), "cert_pem", |bytes| {
-        CertificateDer::from_pem_slice(bytes).map(|_| ()).map_err(|e| e.to_string())
+        CertificateDer::from_pem_slice(bytes)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     })?;
     validate_pem_field(req.key_pem.as_deref(), "key_pem", |bytes| {
-        PrivateKeyDer::from_pem_slice(bytes).map(|_| ()).map_err(|e| e.to_string())
+        PrivateKeyDer::from_pem_slice(bytes)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     })?;
     // The chain may carry multiple certificates concatenated; iterate the
     // PEM stream and require every block to parse as a certificate.
@@ -759,13 +763,17 @@ mod tests {
     fn cert_parser(bytes: &[u8]) -> Result<(), String> {
         use rustls_pki_types::CertificateDer;
         use rustls_pki_types::pem::PemObject;
-        CertificateDer::from_pem_slice(bytes).map(|_| ()).map_err(|e| e.to_string())
+        CertificateDer::from_pem_slice(bytes)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     fn key_parser(bytes: &[u8]) -> Result<(), String> {
         use rustls_pki_types::PrivateKeyDer;
         use rustls_pki_types::pem::PemObject;
-        PrivateKeyDer::from_pem_slice(bytes).map(|_| ()).map_err(|e| e.to_string())
+        PrivateKeyDer::from_pem_slice(bytes)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     #[test]
