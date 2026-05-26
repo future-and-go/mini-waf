@@ -205,6 +205,18 @@ const fn is_private_or_reserved(ip: &IpAddr) -> bool {
                 || (seg[0] == 0x2001 && seg[1] == 0x0db8)
                 // 64:ff9b::/96 — IPv4/IPv6 translation (RFC 6052)
                 || (seg[0] == 0x0064 && seg[1] == 0xff9b)
+                // ::a.b.c.d — IPv4-compatible (RFC 4291 §2.5.5.1, deprecated
+                // but still parseable). Upper 96 bits zero, trailing 32 bits
+                // carry a bare v4 that must be re-checked against v4 rules.
+                // `Ipv6Addr::is_loopback` only matches `::1`, so without this
+                // branch `::127.0.0.1`, `::169.254.169.254` etc. slip through.
+                || (seg[0] == 0 && seg[1] == 0 && seg[2] == 0
+                    && seg[3] == 0 && seg[4] == 0 && seg[5] == 0
+                    && (seg[6] != 0 || seg[7] != 0)
+                    && is_private_or_reserved(&IpAddr::V4(std::net::Ipv4Addr::new(
+                        (seg[6] >> 8) as u8, (seg[6] & 0xff) as u8,
+                        (seg[7] >> 8) as u8, (seg[7] & 0xff) as u8,
+                    ))))
             }
         }
     }
