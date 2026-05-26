@@ -220,8 +220,7 @@ mod tests {
         // much faster than the 200ms timeout.
         assert!(
             elapsed < Duration::from_millis(50),
-            "expected fast short-circuit, took {:?}",
-            elapsed
+            "expected fast short-circuit, took {elapsed:?}",
         );
     }
 }

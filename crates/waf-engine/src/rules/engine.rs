@@ -433,9 +433,8 @@ impl CustomRulesEngine {
 
     fn insert_rule(&self, rule: CustomRule, source: RuleSource) {
         let host_code = rule.host_code.clone();
-        let entry = match RuleEntry::from_rule_with_source(rule, source) {
-            Some(e) => e,
-            None => return,
+        let Some(entry) = RuleEntry::from_rule_with_source(rule, source) else {
+            return;
         };
         let mut bucket = self.rules.entry(host_code).or_default();
         bucket.push(entry);
