@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use anyhow::{Context, Result};
+use tracing::warn;
 use waf_engine::{Rule, RuleRegistry, RuleReloader};
 
 use crate::protocol::{ChangeOp, RuleChange, RuleSyncRequest, RuleSyncResponse, SyncType};
@@ -208,6 +209,19 @@ pub async fn apply_sync_response(
     registry: &mut RuleRegistry,
     reloader: &dyn RuleReloader,
 ) -> Result<()> {
+    // Reject stale / duplicate responses before mutating registry state.
+    // Out-of-order delivery (retransmit, multi-stream reorder, stale post-
+    // failover main) would otherwise wipe a newer registry with an older
+    // snapshot.
+    if response.version <= registry.version {
+        warn!(
+            stale_version = response.version,
+            current = registry.version,
+            sync_type = ?response.sync_type,
+            "stale rule sync ignored",
+        );
+        return Ok(());
+    }
     match response.sync_type {
         SyncType::Incremental => {
             apply_rule_changes(registry, response.changes)?;
