@@ -6,7 +6,7 @@
 //! tagger via `ArcSwap<TxVelocityConfig>` — no per-request recompile.
 
 use anyhow::{Context, Result};
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 
 use super::EndpointRole;
 use super::config::RoleRule;
@@ -36,7 +36,9 @@ impl RoleTagger {
     pub fn compile(rules: &[RoleRule]) -> Result<Self> {
         let mut compiled = Vec::with_capacity(rules.len());
         for (idx, rule) in rules.iter().enumerate() {
-            let re = Regex::new(&rule.path)
+            let re = RegexBuilder::new(&rule.path)
+                .size_limit(1 << 20) // 1 MB compiled DFA limit — guards against regex DoS
+                .build()
                 .with_context(|| format!("endpoint_roles[{idx}] regex compile: {}", rule.path))?;
             compiled.push(CompiledRule { role: rule.role, re });
         }
@@ -118,5 +120,22 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("endpoint_roles[1]"), "got: {err}");
+    }
+
+    #[test]
+    fn oversized_pattern_rejected_by_size_limit() {
+        // Build a 16-way alternation repeated 10k times — compiled NFA easily
+        // exceeds the 1 MB size_limit. Without the size_limit guard, this would
+        // allocate hundreds of MB at compile time (regex crate default cap is
+        // 10 MB; this pattern would pass that and only fail in OOM-land if no
+        // builder limit were set).
+        let bomb = "^(?:a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p){10000}$";
+        let err = RoleTagger::compile(&[rule(EndpointRole::Login, bomb)])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("endpoint_roles[0]"),
+            "expected index-tagged compile error, got: {err}"
+        );
     }
 }

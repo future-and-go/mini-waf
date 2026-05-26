@@ -751,7 +751,11 @@ impl CustomRulesEngine {
             (Operator::NotContains, ConditionValue::Str(v)) => !fstr.contains(v.as_str()),
             (Operator::StartsWith, ConditionValue::Str(v)) => fstr.starts_with(v.as_str()),
             (Operator::EndsWith, ConditionValue::Str(v)) => fstr.ends_with(v.as_str()),
-            (Operator::Regex, ConditionValue::Str(v)) => Regex::new(v).ok().is_some_and(|r| r.is_match(fstr)),
+            (Operator::Regex, ConditionValue::Str(v)) => regex::RegexBuilder::new(v)
+                .size_limit(1 << 20) // 1 MB compiled DFA limit — guards against regex DoS
+                .build()
+                .ok()
+                .is_some_and(|r| r.is_match(fstr)),
             (Operator::InList, ConditionValue::List(l)) => l.iter().any(|v| v == fstr),
             (Operator::NotInList, ConditionValue::List(l)) => !l.iter().any(|v| v == fstr),
             (Operator::CidrMatch, ConditionValue::Str(cidr)) => cidr
@@ -1527,6 +1531,30 @@ mod tests {
             }],
         );
         assert!(compile_rule(&rule).is_err());
+    }
+
+    #[test]
+    fn legacy_eval_regex_oversize_returns_no_match() {
+        // Pattern compiled NFA easily exceeds the 1 MB size_limit. Both the
+        // pre-compile path (compile_rule -> compiled=None) and the legacy
+        // per-request eval path (eval_one -> Operator::Regex arm) must reject
+        // it instead of attempting to allocate a giant DFA on every request.
+        let bomb = "^(?:a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p){10000}$";
+        let engine = CustomRulesEngine::new();
+        let mut rule = mk_rule(
+            ConditionOp::And,
+            vec![Condition {
+                field: ConditionField::Path,
+                operator: Operator::Regex,
+                value: ConditionValue::Str(bomb.into()),
+            }],
+        );
+        rule.id = "bomb".into();
+        engine.add_rule(rule);
+
+        // Any path; the bomb regex must not match (build rejected by size_limit).
+        let ctx = make_ctx("/abcd", "GET", "10.0.0.1");
+        assert!(engine.check(&ctx).is_none());
     }
 
     #[test]
