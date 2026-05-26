@@ -207,6 +207,10 @@ pub enum Phase {
     BruteForce = 23,
     /// Oversized / deeply-nested request body abuse (FR-020)
     RequestBodyAbuse = 24,
+    /// Request declares a body charset the WAF cannot reason about
+    /// (UTF-16, ISO-8859-*, etc.) — pattern matchers operate on UTF-8 bytes,
+    /// so a non-UTF-8 charset is a bypass primitive.
+    UnsupportedCharset = 25,
 }
 
 impl std::fmt::Display for Phase {

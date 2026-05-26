@@ -29,9 +29,9 @@ use crate::checks::tx_velocity::{
     TxStore, TxVelocityCheck, TxVelocityConfig, TxVelocityFileConfig, TxVelocityReloader,
 };
 use crate::checks::{
-    AntiHotlinkCheck, BotCheck, BruteForceCheck, Check, DirTraversalCheck, GeoCheck, HeaderInjectionCheck, OWASPCheck,
-    RateLimitCheck, RateLimitConfig, RceCheck, RequestBodyAbuseCheck, ScannerCheck, SensitiveCheck, SqlInjectionCheck,
-    SsrfCheck, XssCheck,
+    AntiHotlinkCheck, BotCheck, BruteForceCheck, CharsetCheck, Check, DirTraversalCheck, GeoCheck, HeaderInjectionCheck,
+    OWASPCheck, RateLimitCheck, RateLimitConfig, RceCheck, RequestBodyAbuseCheck, ScannerCheck, SensitiveCheck,
+    SqlInjectionCheck, SsrfCheck, XssCheck,
 };
 use crate::community::{CommunityChecker, CommunityReporter, RequestInfo};
 use crate::crowdsec::{AppSecClient, AppSecResult, CrowdSecChecker, appsec_to_detection};
@@ -189,6 +189,11 @@ impl WafEngine {
                 Arc::clone(&tx_velocity_cfg),
                 Arc::clone(&tx_velocity_store),
             )),
+            // CharsetCheck runs early — if the request body declares an
+            // unsupported charset (UTF-16, ISO-8859-*) every downstream
+            // body-side scanner is blind, so reject up front rather than
+            // let the request slip past pattern matchers.
+            Box::new(CharsetCheck::new()),
             Box::new(ScannerCheck::new()),
             Box::new(BotCheck::new()),
             Box::new(XssCheck::new()),
