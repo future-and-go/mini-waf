@@ -65,6 +65,9 @@ pub struct AppState {
     /// distinct-value enumeration is expensive on `VictoriaLogs` and the FE
     /// only needs it to populate filter dropdowns.
     pub logs_streams_cache: Arc<crate::logs::StreamsCache>,
+    /// Closure to change the global tracing filter at runtime.
+    /// `None` when the dynamic reload layer is not wired (e.g. CLI sub-commands).
+    pub log_level_setter: Option<Arc<dyn Fn(&str) -> anyhow::Result<()> + Send + Sync>>,
 }
 
 impl AppState {
@@ -113,6 +116,7 @@ impl AppState {
             main_config_file: None,
             victoria_logs_base_url: None,
             logs_streams_cache: crate::logs::new_streams_cache(),
+            log_level_setter: None,
         })
     }
 

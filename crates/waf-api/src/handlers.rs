@@ -639,6 +639,29 @@ pub async fn delete_certificate(State(state): State<Arc<AppState>>, Path(id): Pa
     Ok(Json(json!({ "success": true, "data": null })))
 }
 
+// ─── Log level ───────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct SetLogLevelRequest {
+    pub filter: String,
+}
+
+pub async fn set_log_level(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SetLogLevelRequest>,
+) -> ApiResult<Json<Value>> {
+    if req.filter.len() > 256 {
+        return Err(ApiError::BadRequest("filter string exceeds 256 character limit".into()));
+    }
+    let setter = state
+        .log_level_setter
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("log level control not initialized")))?;
+    setter(&req.filter).map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    tracing::info!("Log filter updated to: {}", req.filter);
+    Ok(Json(json!({ "success": true, "data": { "filter": req.filter } })))
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -689,5 +712,18 @@ mod tests {
     #[test]
     fn port_validation_i32_max_rejected() {
         assert!(!is_valid_port(i32::MAX));
+    }
+
+    #[test]
+    fn set_log_level_request_deserializes() {
+        let json = r#"{"filter": "info,waf_engine=debug"}"#;
+        let req: super::SetLogLevelRequest = serde_json::from_str(json).expect("parse");
+        assert_eq!(req.filter, "info,waf_engine=debug");
+    }
+
+    #[test]
+    fn set_log_level_filter_length_limit() {
+        let long_filter = "a".repeat(257);
+        assert!(long_filter.len() > 256, "test expects > 256 chars");
     }
 }

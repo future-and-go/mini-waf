@@ -5,6 +5,7 @@ use tracing::{debug, warn};
 
 use waf_common::{DetectionResult, Phase, RequestCtx};
 
+use super::circuit_breaker::AppSecCircuitBreaker;
 use super::config::AppSecConfig;
 use super::models::AppSecResponse;
 
@@ -23,9 +24,11 @@ pub enum AppSecResult {
 ///
 /// Implements the `CrowdSec` `AppSec` protocol: forward each request to the
 /// `AppSec` HTTP endpoint using special headers, then act on the response.
+/// A circuit breaker prevents cascade failures when the endpoint is down.
 pub struct AppSecClient {
     client: Client,
     config: AppSecConfig,
+    circuit_breaker: AppSecCircuitBreaker,
 }
 
 impl AppSecClient {
@@ -34,18 +37,39 @@ impl AppSecClient {
             .timeout(Duration::from_millis(config.timeout_ms))
             .build()
             .context("failed to build AppSec HTTP client")?;
-        Ok(Self { client, config })
+        let circuit_breaker =
+            AppSecCircuitBreaker::new(config.circuit_breaker_threshold, config.circuit_breaker_reset_secs);
+        Ok(Self {
+            client,
+            config,
+            circuit_breaker,
+        })
     }
 
     /// Check a request against the `CrowdSec` `AppSec` engine.
     ///
-    /// Returns `AppSecResult::Unavailable` on network/timeout errors so that
-    /// the caller can apply the configured `failure_action`.
+    /// Returns `AppSecResult::Unavailable` when the circuit breaker is open
+    /// or on network/timeout errors so that the caller can apply the
+    /// configured `failure_action`.
     pub async fn check_request(&self, ctx: &RequestCtx) -> AppSecResult {
+        if !self.circuit_breaker.check_allow() {
+            warn!("AppSec circuit breaker OPEN; returning fallback");
+            return AppSecResult::Unavailable;
+        }
         match self.check_request_inner(ctx).await {
-            Ok(r) => r,
+            Ok(AppSecResult::Unavailable) => {
+                // HTTP 401/500/bad-status returns Ok(Unavailable) — treat as failure
+                // so persistent server errors trip the circuit.
+                self.circuit_breaker.on_failure();
+                AppSecResult::Unavailable
+            }
+            Ok(result) => {
+                self.circuit_breaker.on_success();
+                result
+            }
             Err(e) => {
                 warn!("AppSec check error: {}", e);
+                self.circuit_breaker.on_failure();
                 AppSecResult::Unavailable
             }
         }
@@ -124,6 +148,8 @@ mod tests {
             api_key: "k".to_string(),
             timeout_ms: 200,
             failure_action: FallbackAction::Allow,
+            circuit_breaker_threshold: 5,
+            circuit_breaker_reset_secs: 30,
         }
     }
 
@@ -173,5 +199,29 @@ mod tests {
         // Endpoint is unreachable — we just exercise the body branch.
         let result = client.check_request(&c).await;
         assert!(matches!(result, AppSecResult::Unavailable));
+    }
+
+    #[tokio::test]
+    async fn circuit_breaker_opens_after_repeated_failures() {
+        let mut config = cfg();
+        config.circuit_breaker_threshold = 2;
+        let client = AppSecClient::new(config).expect("client");
+        let c = ctx();
+        // First 2 requests hit the unreachable endpoint and fail.
+        let _ = client.check_request(&c).await;
+        let _ = client.check_request(&c).await;
+        // Third request should be short-circuited by the circuit breaker
+        // (no HTTP call, immediate Unavailable).
+        let start = std::time::Instant::now();
+        let result = client.check_request(&c).await;
+        let elapsed = start.elapsed();
+        assert!(matches!(result, AppSecResult::Unavailable));
+        // Circuit-breaker short-circuit should be near-instant (< 5ms),
+        // much faster than the 200ms timeout.
+        assert!(
+            elapsed < Duration::from_millis(50),
+            "expected fast short-circuit, took {:?}",
+            elapsed
+        );
     }
 }
