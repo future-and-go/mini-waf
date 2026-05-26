@@ -36,7 +36,7 @@ use crate::checks::{
 use crate::community::{CommunityChecker, CommunityReporter, RequestInfo};
 use crate::crowdsec::{AppSecClient, AppSecResult, CrowdSecChecker, appsec_to_detection};
 use crate::geoip::GeoIpService;
-use crate::logging::{AuditEvent, AuditEventType, AuditSender};
+use crate::logging::{AuditEvent, AuditEventType, AuditSender, DbBatchWriter, DbLogEvent};
 use crate::rules::custom_file_loader::CustomRuleFileWatcher;
 use crate::rules::engine::{CustomRulesEngine, from_db_rule};
 
@@ -123,6 +123,10 @@ pub struct WafEngine {
     /// called by the binary boot path.  When set, every non-Allow decision
     /// from `inspect()` is mirrored into `VictoriaLogs` as an audit record.
     audit_sender: OnceLock<Arc<AuditSender>>,
+    // ── Phase 03: Batched DB log writer ──────────────────────────────────────
+    /// Bounded MPSC batch writer for attack_logs and security_events tables.
+    /// Replaces per-detection `tokio::spawn` with a single `try_send`.
+    db_batch_writer: OnceLock<DbBatchWriter>,
 }
 
 impl WafEngine {
@@ -232,6 +236,7 @@ impl WafEngine {
             ddos_check,
             ddos_reloader: OnceLock::new(),
             audit_sender: OnceLock::new(),
+            db_batch_writer: OnceLock::new(),
         }
     }
 
@@ -402,6 +407,14 @@ impl WafEngine {
     /// after init when `[victoria_logs] enabled = true`).
     pub fn set_audit_sender(&self, sender: Arc<AuditSender>) {
         let _ = self.audit_sender.set(sender);
+    }
+
+    /// Plug the batched DB log writer into the engine (called once after init).
+    ///
+    /// After this call, `log_attack` and `log_security_event` use bounded
+    /// `try_send` instead of per-event `tokio::spawn`.
+    pub fn set_db_batch_writer(&self, writer: DbBatchWriter) {
+        let _ = self.db_batch_writer.set(writer);
     }
 
     /// Return a reference to the `GeoCheck` so callers can load rules.
@@ -831,12 +844,16 @@ impl WafEngine {
             created_at: chrono::Utc::now(),
         };
 
-        let db = Arc::clone(&self.db);
-        tokio::spawn(async move {
-            if let Err(e) = db.create_attack_log(log).await {
-                warn!("Failed to log attack event: {}", e);
-            }
-        });
+        if let Some(writer) = self.db_batch_writer.get() {
+            writer.try_send(DbLogEvent::Attack(log));
+        } else {
+            let db = Arc::clone(&self.db);
+            tokio::spawn(async move {
+                if let Err(e) = db.create_attack_log(log).await {
+                    warn!("Failed to log attack event: {}", e);
+                }
+            });
+        }
     }
 
     /// Log a Phase 2+ security event to the `security_events` table (fire-and-forget).
@@ -873,12 +890,16 @@ impl WafEngine {
             }),
         };
 
-        let db = Arc::clone(&self.db);
-        tokio::spawn(async move {
-            if let Err(e) = db.create_security_event(event).await {
-                warn!("Failed to log security event: {}", e);
-            }
-        });
+        if let Some(writer) = self.db_batch_writer.get() {
+            writer.try_send(DbLogEvent::Security(event));
+        } else {
+            let db = Arc::clone(&self.db);
+            tokio::spawn(async move {
+                if let Err(e) = db.create_security_event(event).await {
+                    warn!("Failed to log security event: {}", e);
+                }
+            });
+        }
     }
 
     /// Mirror a non-Allow decision into the `VictoriaLogs` audit stream.
