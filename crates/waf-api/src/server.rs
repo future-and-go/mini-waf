@@ -6,7 +6,9 @@ use axum::http::{
     header::{AUTHORIZATION, CONTENT_TYPE},
 };
 use axum::{
-    Router, middleware,
+    Router,
+    extract::DefaultBodyLimit,
+    middleware,
     response::Redirect,
     routing::{delete, get, patch, post},
 };
@@ -176,7 +178,17 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/notifications/log", get(notification_log))
         .route("/api/notifications/{id}/test", post(test_notification))
         // Phase 5: WASM Plugins
-        .route("/api/plugins", get(list_plugins).post(upload_plugin))
+        //
+        // The plugin upload route caps the request body at
+        // `MAX_TOTAL_BODY` (≈ 16 MiB + envelope) so a compromised admin
+        // credential cannot OOM the API process or bloat the
+        // `wasm_plugins.wasm_binary` column with a multi-GB upload.
+        .route(
+            "/api/plugins",
+            get(list_plugins)
+                .post(upload_plugin)
+                .layer(DefaultBodyLimit::max(crate::plugins::MAX_TOTAL_BODY)),
+        )
         .route("/api/plugins/{id}", delete(delete_plugin))
         .route("/api/plugins/{id}/enable", post(enable_plugin))
         .route("/api/plugins/{id}/disable", post(disable_plugin))
