@@ -97,6 +97,34 @@ impl RuleChangelog {
 
 // ─── Snapshot helpers ──────────────────────────────────────────────────────────
 
+/// Upper bound on the decompressed size of an lz4 snapshot. The wire format
+/// (`lz4_flex::compress_prepend_size`) carries an attacker-controlled 4-byte
+/// little-endian size prefix that `lz4_flex` uses to pre-allocate the output
+/// buffer. Without this cap, a malicious or compromised peer (mTLS only
+/// authenticates the transport, not the payload) could ship a tiny envelope
+/// claiming `u32::MAX` bytes and OOM the worker.
+///
+/// 32 MiB covers worst-case real rule sets (~10 MiB observed) with headroom
+/// while keeping the worst-case allocation bounded.
+const MAX_SNAPSHOT_BYTES: u32 = 32 * 1024 * 1024;
+
+/// Validate the size prefix of an lz4 envelope and decompress under the cap.
+///
+/// Returns Err *without* touching `lz4_flex::decompress_size_prepended` when
+/// the prefix is missing or claims more than [`MAX_SNAPSHOT_BYTES`], so the
+/// underlying allocator never sees the attacker-supplied size.
+fn decompress_with_cap(data: &[u8]) -> Result<Vec<u8>> {
+    let size_bytes: [u8; 4] = data
+        .get(..4)
+        .and_then(|s| s.try_into().ok())
+        .ok_or_else(|| anyhow::anyhow!("lz4 snapshot too short to contain size prefix"))?;
+    let size = u32::from_le_bytes(size_bytes);
+    if size > MAX_SNAPSHOT_BYTES {
+        anyhow::bail!("lz4 snapshot decompressed size {size} exceeds {MAX_SNAPSHOT_BYTES} byte cap");
+    }
+    lz4_flex::decompress_size_prepended(data).map_err(|e| anyhow::anyhow!("lz4 decompress failed: {e}"))
+}
+
 /// Serialize and lz4-compress a rule slice for transmission as a full snapshot.
 pub fn snapshot_rules(rules: &[Rule]) -> Result<Vec<u8>> {
     let json = serde_json::to_vec(rules).context("failed to serialize rules to JSON")?;
@@ -105,7 +133,7 @@ pub fn snapshot_rules(rules: &[Rule]) -> Result<Vec<u8>> {
 
 /// Decompress and deserialize a full snapshot produced by [`snapshot_rules`].
 pub fn restore_snapshot(data: &[u8]) -> Result<Vec<Rule>> {
-    let json = lz4_flex::decompress_size_prepended(data).map_err(|e| anyhow::anyhow!("lz4 decompress failed: {e}"))?;
+    let json = decompress_with_cap(data)?;
     serde_json::from_slice(&json).context("failed to deserialize rules from snapshot")
 }
 
@@ -202,6 +230,10 @@ pub fn compress_snapshot(data: &[u8]) -> Vec<u8> {
 }
 
 /// Decompress an lz4-compressed blob produced by [`compress_snapshot`].
+///
+/// Subject to the same [`MAX_SNAPSHOT_BYTES`] cap as [`restore_snapshot`] so
+/// untrusted peers cannot weaponise the wire size prefix into an allocator
+/// bomb.
 pub fn decompress_snapshot(data: &[u8]) -> Result<Vec<u8>> {
-    lz4_flex::decompress_size_prepended(data).map_err(|e| anyhow::anyhow!("lz4 decompress failed: {e}"))
+    decompress_with_cap(data)
 }

@@ -177,3 +177,35 @@ fn lz4_decompress_garbage_errors() {
     let res = decompress_snapshot(&bogus);
     assert!(res.is_err(), "garbage must fail to decompress");
 }
+
+#[test]
+fn lz4_decompress_rejects_truncated_size_prefix() {
+    // < 4 bytes of envelope cannot even hold the size prefix.
+    let short = vec![0u8; 3];
+    let err = decompress_snapshot(&short).expect_err("must reject truncated prefix");
+    assert!(
+        err.to_string().contains("too short"),
+        "expected truncation error, got: {err}"
+    );
+}
+
+#[test]
+fn lz4_decompress_rejects_oversize_prefix() {
+    // Forge an envelope claiming u32::MAX (~4 GiB) of decompressed output.
+    // Cap rejects before lz4_flex sees the request, so no allocator pressure.
+    let mut bomb = u32::MAX.to_le_bytes().to_vec();
+    bomb.extend_from_slice(&[0u8; 8]); // arbitrary suffix; must not be read
+    let err = decompress_snapshot(&bomb).expect_err("must reject oversize prefix");
+    let msg = err.to_string();
+    assert!(msg.contains("exceeds"), "expected cap error, got: {msg}");
+    assert!(msg.contains("byte cap"), "expected cap error, got: {msg}");
+}
+
+#[test]
+fn lz4_decompress_accepts_well_formed_under_cap() {
+    // Boundary check: ensure the cap doesn't reject legitimately-sized payloads.
+    let payload: Vec<u8> = (0..100_000u32).flat_map(u32::to_be_bytes).collect();
+    let compressed = compress_snapshot(&payload);
+    let decompressed = decompress_snapshot(&compressed).expect("under-cap snapshot must decompress");
+    assert_eq!(decompressed, payload);
+}
