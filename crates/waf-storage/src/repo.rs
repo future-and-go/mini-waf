@@ -1528,6 +1528,10 @@ impl Database {
         // per-row compute of the previous CROSS JOIN LATERAL form, which
         // evaluated the function before the WHERE clause excluded null rows.
         //
+        // All three CTEs filter rule_id IS NOT NULL — keeps non-WAF events
+        // (health probes, infra noise) from out-ranking real attack paths
+        // into the LIMIT-20 path set before the per-cell join even runs.
+        //
         // GROUP BY / ORDER BY use SELECT positions (1, 2, 3) — fully
         // unambiguous between column aliases and underlying table columns.
         let rows = sqlx::query(
@@ -1538,6 +1542,7 @@ impl Database {
               WHERE created_at >= NOW() - make_interval(hours => $1::int)
                 AND ($2::text IS NULL OR host_code = $2)
                 AND ($3::text IS NULL OR action    = $3)
+                AND rule_id IS NOT NULL
               GROUP BY LEFT(path, 256)
               ORDER BY total_events DESC
               LIMIT 20
