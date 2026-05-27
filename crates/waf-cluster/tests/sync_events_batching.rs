@@ -147,15 +147,16 @@ fn stats_collector_counts_and_flushes() {
 #[test]
 fn config_syncer_apply_and_build() {
     use waf_cluster::sync::config::SyncableConfig;
+    use waf_common::config::{ApiConfig, CacheConfig, ProxyConfig, RulesConfig};
 
     let mut s = ConfigSyncer::new("n1".to_string());
     assert_eq!(s.current_version(), 0);
 
     let syncable = SyncableConfig {
-        proxy: Default::default(),
-        rules: Default::default(),
-        cache: Default::default(),
-        api: Default::default(),
+        proxy: ProxyConfig::default(),
+        rules: RulesConfig::default(),
+        cache: CacheConfig::default(),
+        api: ApiConfig::default(),
     };
     let built = s.build_sync(&syncable).expect("build_sync");
     assert_eq!(built.version, 1, "build_sync increments without applying");

@@ -1,7 +1,8 @@
-//! Exhaustive dispatch coverage for all 13 ClusterMessage variants.
+//! Exhaustive dispatch coverage for all 13 `ClusterMessage` variants.
 //!
 //! Tests verify serialize → deserialize round-trip and that both server and
 //! client dispatch handle every variant without panicking.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::default_trait_access)]
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -79,11 +80,11 @@ fn make_node_leave() -> ClusterMessage {
     }
 }
 
-fn make_rule_sync_request() -> ClusterMessage {
+const fn make_rule_sync_request() -> ClusterMessage {
     ClusterMessage::RuleSyncRequest(RuleSyncRequest { current_version: 0 })
 }
 
-fn make_rule_sync_response() -> ClusterMessage {
+const fn make_rule_sync_response() -> ClusterMessage {
     ClusterMessage::RuleSyncResponse(RuleSyncResponse {
         version: 1,
         sync_type: SyncType::Incremental,

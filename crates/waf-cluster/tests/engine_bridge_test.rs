@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::default_trait_access)]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -12,7 +14,7 @@ struct MockReloader {
 }
 
 impl MockReloader {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             last_version: AtomicU64::new(0),
             reload_count: AtomicU64::new(0),

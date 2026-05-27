@@ -1,4 +1,5 @@
 //! Event batcher tests — batching, timer flush, and backpressure.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use tokio::sync::mpsc;
 use waf_cluster::protocol::{EventBatch, SecurityEvent};

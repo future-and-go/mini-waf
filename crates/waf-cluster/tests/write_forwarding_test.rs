@@ -1,4 +1,5 @@
 //! Write forwarding tests — forward flow, timeout, pending resolution.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::HashMap;
 
@@ -100,7 +101,7 @@ async fn forward_write_sends_api_forward_message() {
             assert_eq!(fwd.path, "/api/rules");
             assert_eq!(fwd.body, b"{}");
         }
-        other => panic!("Expected ApiForward, got {:?}", other),
+        other => panic!("Expected ApiForward, got {other:?}"),
     }
 
     // Handle will time out since we never send a response

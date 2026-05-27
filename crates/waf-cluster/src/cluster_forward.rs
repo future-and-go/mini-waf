@@ -168,7 +168,6 @@ pub async fn replay_request(fwd: &ApiForward) -> ApiForwardResponse {
 
     let method = match fwd.method.to_ascii_uppercase().as_str() {
         "GET" => reqwest::Method::GET,
-        "POST" => reqwest::Method::POST,
         "PUT" => reqwest::Method::PUT,
         "DELETE" => reqwest::Method::DELETE,
         "PATCH" => reqwest::Method::PATCH,
