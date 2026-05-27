@@ -187,7 +187,7 @@ async fn recv_loop(recv: &mut quinn::RecvStream, node_state: &Arc<NodeState>) ->
 }
 
 /// Route an inbound message received from a peer.
-async fn dispatch_incoming(msg: ClusterMessage, node_state: &NodeState) {
+pub async fn dispatch_incoming(msg: ClusterMessage, node_state: &NodeState) {
     match msg {
         ClusterMessage::Heartbeat(hb) => {
             let now_ms = unix_ms();
@@ -292,11 +292,78 @@ async fn dispatch_incoming(msg: ClusterMessage, node_state: &NodeState) {
             Err(e) => warn!("process_result error: {e}"),
         },
 
-        other => {
+        ClusterMessage::JoinRequest(_) => {
+            debug!("Ignoring JoinRequest on client path (server-only message)");
+        }
+
+        ClusterMessage::NodeLeave { ref node_id } => {
+            info!(node_id = %node_id, "NodeLeave received from peer");
+            node_state.remove_peer(node_id).await;
+        }
+
+        ClusterMessage::RuleSyncRequest(_) => {
+            debug!("Ignoring RuleSyncRequest on client path (server-only message)");
+        }
+
+        ClusterMessage::RuleSyncResponse(resp) => {
+            let version = resp.version;
             debug!(
-                msg_type = ?std::mem::discriminant(&other),
-                "Unhandled cluster message from peer"
+                version,
+                sync_type = ?resp.sync_type,
+                "RuleSyncResponse received — applying"
             );
+            {
+                let mut registry = node_state.rule_registry.write();
+                if let Err(e) = crate::sync::rules::apply_sync_response_sync(resp, &mut registry) {
+                    warn!("Failed to apply RuleSyncResponse: {e}");
+                    return;
+                }
+            }
+            if let Err(e) = node_state.notify_rules_updated(version).await {
+                warn!("Failed to notify rules updated: {e}");
+            }
+        }
+
+        ClusterMessage::ConfigSync(cfg) => {
+            let current_term = node_state.current_term().await;
+            debug!(version = cfg.version, "ConfigSync received — applying");
+            let mut syncer = crate::sync::config::ConfigSyncer::new(node_state.node_id.clone());
+            if let Some(_syncable) = syncer.apply_sync(&cfg, current_term) {
+                node_state.set_config_version(cfg.version).await;
+                debug!(version = cfg.version, "Config sync applied");
+            }
+        }
+
+        ClusterMessage::EventBatch(batch) => {
+            warn!(
+                node_id = %batch.node_id,
+                "Unexpected EventBatch on client path (workers should not receive)"
+            );
+        }
+
+        ClusterMessage::StatsBatch(batch) => {
+            warn!(
+                node_id = %batch.node_id,
+                "Unexpected StatsBatch on client path (workers should not receive)"
+            );
+        }
+
+        ClusterMessage::ApiForward(fwd) => {
+            debug!(
+                request_id = %fwd.request_id,
+                "Ignoring ApiForward on client path (server-only message)"
+            );
+        }
+
+        ClusterMessage::ApiForwardResponse(resp) => {
+            debug!(
+                request_id = %resp.request_id,
+                status = resp.status,
+                "ApiForwardResponse received — resolving pending forward"
+            );
+            if let Some(pending) = node_state.pending_forwards() {
+                pending.resolve(resp).await;
+            }
         }
     }
 }

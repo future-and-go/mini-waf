@@ -327,6 +327,13 @@ pub async fn toggle_rule(
     .await
     .map_err(|e| ApiError::Internal(anyhow!(e)))?;
 
+    if let Some(ref cluster) = state.cluster_state {
+        cluster
+            .rule_changelog
+            .write()
+            .record_change(waf_cluster::protocol::ChangeOp::Upsert, rule_id.clone(), None);
+    }
+
     Ok(Json(json!({
         "success": true,
         "data": { "rule_id": rule_id, "enabled": req.enabled }
@@ -336,6 +343,15 @@ pub async fn toggle_rule(
 /// POST /api/rules/reload — reload engine rules
 pub async fn reload_rule_registry(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
     state.engine.reload_rules().await.map_err(ApiError::Internal)?;
+
+    if let Some(ref cluster) = state.cluster_state {
+        cluster.rule_changelog.write().record_change(
+            waf_cluster::protocol::ChangeOp::Upsert,
+            "bulk-reload".to_string(),
+            None,
+        );
+    }
+
     Ok(Json(json!({ "success": true, "data": "Rules reloaded" })))
 }
 

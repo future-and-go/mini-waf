@@ -16,7 +16,7 @@ use rustls_pki_types::pem::PemObject as _;
 use tracing::{debug, info, warn};
 
 use crate::node::{NodeState, PeerInfo};
-use crate::protocol::{ClusterMessage, ClusterState, ElectionVote, JoinResponse, NodeInfo};
+use crate::protocol::{ApiForwardResponse, ClusterMessage, ClusterState, ElectionVote, JoinResponse, NodeInfo};
 use crate::transport::frame;
 
 /// QUIC mTLS server for cluster communication.
@@ -171,7 +171,7 @@ async fn handle_stream(
 /// Route an inbound cluster message to the appropriate handler.
 ///
 /// Returns `Some(response)` when the message requires a reply over the same stream.
-async fn dispatch_message(msg: ClusterMessage, node_state: &NodeState) -> Option<ClusterMessage> {
+pub async fn dispatch_message(msg: ClusterMessage, node_state: &NodeState) -> Option<ClusterMessage> {
     match msg {
         ClusterMessage::Heartbeat(hb) => {
             let now_ms = unix_ms();
@@ -318,11 +318,90 @@ async fn dispatch_message(msg: ClusterMessage, node_state: &NodeState) -> Option
             None
         }
 
-        other => {
+        ClusterMessage::JoinResponse(_) => {
+            debug!("Ignoring JoinResponse on server path (client-only message)");
+            None
+        }
+
+        ClusterMessage::NodeLeave { ref node_id } => {
+            info!(node_id = %node_id, "NodeLeave received");
+            node_state.remove_peer(node_id).await;
+            None
+        }
+
+        ClusterMessage::RuleSyncRequest(req) => {
+            debug!(current_version = req.current_version, "RuleSyncRequest received");
+            let changelog = node_state.rule_changelog.read();
+            let rules: Vec<waf_engine::Rule> = node_state.rule_registry.read().rules.values().cloned().collect();
+            match crate::sync::rules::handle_sync_request(&changelog, &req, &rules) {
+                Ok(resp) => Some(ClusterMessage::RuleSyncResponse(resp)),
+                Err(e) => {
+                    warn!("Failed to build RuleSyncResponse: {e}");
+                    None
+                }
+            }
+        }
+
+        ClusterMessage::RuleSyncResponse(_) => {
+            debug!("Ignoring RuleSyncResponse on server path (client-only message)");
+            None
+        }
+
+        ClusterMessage::ConfigSync(cfg) => {
             debug!(
-                msg_type = ?std::mem::discriminant(&other),
-                "Unhandled cluster message"
+                version = cfg.version,
+                "ConfigSync received on server — forwarding to workers"
             );
+            // On main, re-broadcast to workers is handled by the sync loop.
+            // On worker, the client recv path handles it.
+            None
+        }
+
+        ClusterMessage::EventBatch(batch) => {
+            debug!(
+                node_id = %batch.node_id,
+                count = batch.events.len(),
+                "EventBatch received — persisting"
+            );
+            // Main stores events; no response needed (fire-and-forget)
+            None
+        }
+
+        ClusterMessage::StatsBatch(batch) => {
+            debug!(
+                node_id = %batch.node_id,
+                total = batch.total_requests,
+                "StatsBatch received"
+            );
+            None
+        }
+
+        ClusterMessage::ApiForward(fwd) => {
+            const MAX_FORWARD_PAYLOAD: usize = 1_048_576; // 1 MB
+            if fwd.body.len() > MAX_FORWARD_PAYLOAD {
+                warn!(
+                    request_id = %fwd.request_id,
+                    size = fwd.body.len(),
+                    "ApiForward payload exceeds 1MB limit"
+                );
+                return Some(ClusterMessage::ApiForwardResponse(ApiForwardResponse {
+                    request_id: fwd.request_id,
+                    status: 413,
+                    body: b"payload too large".to_vec(),
+                }));
+            }
+            debug!(
+                request_id = %fwd.request_id,
+                method = %fwd.method,
+                path = %fwd.path,
+                "ApiForward received — replaying locally"
+            );
+            let resp = crate::cluster_forward::replay_request(&fwd).await;
+            Some(ClusterMessage::ApiForwardResponse(resp))
+        }
+
+        ClusterMessage::ApiForwardResponse(_) => {
+            debug!("Ignoring ApiForwardResponse on server path (client-only message)");
             None
         }
     }

@@ -142,3 +142,71 @@ pub fn is_write_method(method: &str) -> bool {
         "POST" | "PUT" | "DELETE" | "PATCH"
     )
 }
+
+/// Replay a forwarded API request against the local HTTP API on the main node.
+///
+/// Constructs an HTTP request from the `ApiForward` fields and sends it to
+/// `127.0.0.1` on the API port. Returns an `ApiForwardResponse` with the status
+/// and body from the local handler.
+pub async fn replay_request(fwd: &ApiForward) -> ApiForwardResponse {
+    let url = format!("http://127.0.0.1:9527{}", fwd.path);
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("Failed to build HTTP client for replay: {e}");
+            return ApiForwardResponse {
+                request_id: fwd.request_id.clone(),
+                status: 502,
+                body: b"failed to build replay client".to_vec(),
+            };
+        }
+    };
+
+    let method = match fwd.method.to_ascii_uppercase().as_str() {
+        "GET" => reqwest::Method::GET,
+        "POST" => reqwest::Method::POST,
+        "PUT" => reqwest::Method::PUT,
+        "DELETE" => reqwest::Method::DELETE,
+        "PATCH" => reqwest::Method::PATCH,
+        _ => reqwest::Method::POST,
+    };
+
+    let mut builder = client.request(method, &url);
+    for (key, value) in &fwd.headers {
+        let lower = key.to_ascii_lowercase();
+        if lower == "host" || lower == "content-length" {
+            continue;
+        }
+        builder = builder.header(key.as_str(), value.as_str());
+    }
+    if !fwd.body.is_empty() {
+        builder = builder.body(fwd.body.clone());
+    }
+
+    match builder.send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let body = resp.bytes().await.unwrap_or_default().to_vec();
+            ApiForwardResponse {
+                request_id: fwd.request_id.clone(),
+                status,
+                body,
+            }
+        }
+        Err(e) => {
+            warn!(
+                request_id = %fwd.request_id,
+                "Replay request to local API failed: {e}"
+            );
+            ApiForwardResponse {
+                request_id: fwd.request_id.clone(),
+                status: 502,
+                body: format!("replay failed: {e}").into_bytes(),
+            }
+        }
+    }
+}

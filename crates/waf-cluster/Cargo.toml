@@ -43,6 +43,15 @@ parking_lot = { workspace = true }
 # Compression — only genuinely new workspace dep
 lz4_flex = { workspace = true }
 
+# Async trait — used for RuleReloader NoopReloader
+async-trait = { workspace = true }
+
+# TOML serialization — used for config sync
+toml = { workspace = true }
+
+# HTTP client — used for replaying forwarded API requests on main
+reqwest = { workspace = true }
+
 [lints]
 workspace = true
 

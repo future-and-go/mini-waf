@@ -48,11 +48,22 @@ pub trait RuleReloader: Send + Sync {
     /// sync operation.  `version` is the authoritative version received from
     /// the main node.
     async fn on_rules_updated(&self, version: u64) -> anyhow::Result<()>;
+
+    /// Reload engine state from an in-memory registry instead of the database.
+    ///
+    /// Workers without a DB connection use this path: the cluster sync layer
+    /// populates `NodeState::rule_registry` and then calls this method so the
+    /// engine can rebuild its pattern matchers from the registry contents.
+    async fn reload_from_registry(&self, registry: &RuleRegistry) -> anyhow::Result<()>;
 }
 
 #[async_trait::async_trait]
 impl RuleReloader for WafEngine {
     async fn on_rules_updated(&self, _version: u64) -> anyhow::Result<()> {
+        self.reload_rules().await
+    }
+
+    async fn reload_from_registry(&self, _registry: &RuleRegistry) -> anyhow::Result<()> {
         self.reload_rules().await
     }
 }
