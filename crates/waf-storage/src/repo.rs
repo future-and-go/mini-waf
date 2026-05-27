@@ -1352,49 +1352,20 @@ impl Database {
         host_code: Option<&str>,
         hours: i64,
     ) -> Result<Vec<CategoryTimeSeriesPoint>, StorageError> {
+        // Inline CASE replaced by category_of(rule_id) (DRY refactor).
+        // The category_of() Postgres function is defined in
+        // 0011_category_function.sql and is the single source of truth shared
+        // with get_stats_overview, get_attack_logs, and get_endpoint_heatmap.
         let rows: Vec<CategoryTimeSeriesPoint> = sqlx::query(
             "SELECT \
                 date_trunc('hour', created_at) AS ts, \
-                CASE \
-                    WHEN rule_id LIKE 'SQLI-%'        THEN 'sqli' \
-                    WHEN rule_id LIKE 'XSS-%'         THEN 'xss' \
-                    WHEN rule_id LIKE 'RCE-%'         THEN 'rce' \
-                    WHEN rule_id LIKE 'TRAV-%'        THEN 'path-traversal' \
-                    WHEN rule_id LIKE 'SCAN-%'        THEN 'scanner' \
-                    WHEN rule_id LIKE 'BOT-%'         THEN 'bot' \
-                    WHEN rule_id LIKE 'CC-%'          THEN 'cc-ddos' \
-                    WHEN rule_id LIKE 'SSRF-%'        THEN 'ssrf' \
-                    WHEN rule_id LIKE 'ADV-SSRF%'     THEN 'ssrf' \
-                    WHEN rule_id LIKE 'ADV-SSTI%'     THEN 'ssti' \
-                    WHEN rule_id LIKE 'ADV-%'         THEN 'advanced' \
-                    WHEN rule_id LIKE 'CRS-RESP%'     THEN 'data-leakage' \
-                    WHEN rule_id LIKE 'CRS-%'         THEN 'owasp-crs' \
-                    WHEN rule_id LIKE 'API-MASS%'     THEN 'mass-assignment' \
-                    WHEN rule_id LIKE 'API-%'         THEN 'api-security' \
-                    WHEN rule_id LIKE 'MODSEC-RESP%'  THEN 'web-shell' \
-                    WHEN rule_id LIKE 'MODSEC-%'      THEN 'modsecurity' \
-                    WHEN rule_id LIKE 'CVE-%'         THEN 'cve' \
-                    WHEN rule_id LIKE 'GEO-%'         THEN 'geo-blocking' \
-                    WHEN rule_id LIKE 'CUSTOM-%'      THEN 'custom' \
-                    WHEN rule_id LIKE 'IP-%'          THEN 'ip-rule' \
-                    WHEN rule_id LIKE 'URL-%'         THEN 'url-rule' \
-                    WHEN rule_id LIKE 'SENS-%'        THEN 'sensitive-data' \
-                    WHEN rule_id LIKE 'HOTLINK-%'     THEN 'anti-hotlink' \
-                    WHEN rule_id LIKE 'OWASP-942%'    THEN 'sqli' \
-                    WHEN rule_id LIKE 'OWASP-941%'    THEN 'xss' \
-                    WHEN rule_id LIKE 'OWASP-930%'    THEN 'lfi' \
-                    WHEN rule_id LIKE 'OWASP-931%'    THEN 'rfi' \
-                    WHEN rule_id LIKE 'OWASP-932%'    THEN 'rce' \
-                    WHEN rule_id LIKE 'OWASP-933%'    THEN 'php-injection' \
-                    WHEN rule_id LIKE 'OWASP-913%'    THEN 'scanner' \
-                    ELSE 'other' \
-                END AS category, \
+                category_of(rule_id) AS category, \
                 COUNT(*)::bigint AS cnt \
              FROM security_events \
              WHERE created_at >= NOW() - make_interval(hours => $1::int) \
                AND ($2::text IS NULL OR host_code = $2) \
                AND rule_id IS NOT NULL \
-             GROUP BY date_trunc('hour', created_at), category \
+             GROUP BY date_trunc('hour', created_at), category_of(rule_id) \
              ORDER BY ts ASC, category ASC",
         )
         .bind(i32::try_from(hours).unwrap_or(i32::MAX))
