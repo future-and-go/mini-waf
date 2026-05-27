@@ -378,3 +378,46 @@ async fn heatmap_window_uses_make_interval_smoke() {
     assert_eq!(result.cells.len(), 1);
     assert_eq!(result.cells[0].path, "/boundary");
 }
+
+// ── 14 ─────────────────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread")]
+async fn heatmap_path_ranks_excludes_null_rule_id_paths() {
+    // path_ranks must filter NULL rule_id BEFORE the LIMIT 20 ranking,
+    // otherwise noisy non-WAF paths (e.g. health probes that produce
+    // security_events with NULL rule_id) push real attack paths out of
+    // the top-20 set entirely.
+    let fx = start_postgres().await;
+
+    // 21 distinct paths × 5 events each, all with NULL rule_id.
+    // Without the filter on path_ranks, these saturate the LIMIT 20.
+    for i in 0..21_u32 {
+        for _ in 0..5_u32 {
+            insert_event(fx.db.pool(), "h1", &format!("/noise/{i:02}"), None, "block", 1).await;
+        }
+    }
+    // One real attack path with a non-null rule_id — only 1 event.
+    insert_event(fx.db.pool(), "h1", "/api/attack", Some("SQLI-1"), "block", 1).await;
+
+    let result = fx
+        .db
+        .get_endpoint_heatmap(&HeatmapFilter {
+            hours: 24,
+            host_code: None,
+            action: None,
+        })
+        .await
+        .expect("query");
+
+    // With the filter on path_ranks, /noise/* paths never enter the LIMIT 20,
+    // so /api/attack survives. Without the filter, /api/attack ranks at #22
+    // (1 event vs. 5 each for the 21 noise paths) and disappears entirely.
+    assert_eq!(
+        result.cells.len(),
+        1,
+        "expected /api/attack to survive path_ranks; got cells {:?}",
+        result.cells.iter().map(|c| c.path.clone()).collect::<Vec<_>>()
+    );
+    assert_eq!(result.cells[0].path, "/api/attack");
+    assert_eq!(result.cells[0].category, "sqli");
+}
