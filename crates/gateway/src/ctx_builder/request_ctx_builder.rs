@@ -194,8 +194,8 @@ pub fn build_from_parts(
 /// Resolve the effective client IP from session state.
 ///
 /// Honours `X-Forwarded-For` only when `trust_proxy_headers` is `true` **and**
-/// the TCP peer falls within `trusted_proxies` (or the list is empty, which
-/// means "trust any peer" for backwards compatibility).
+/// the TCP peer falls within `trusted_proxies`. An empty `trusted_proxies`
+/// list means no peer is trusted and XFF is ignored (fail-secure).
 fn extract_client_ip_from_session(
     session: &Session,
     peer_ip: IpAddr,
@@ -209,8 +209,8 @@ fn extract_client_ip_from_session(
 /// Pure helper that mirrors `extract_client_ip_from_session` for unit testing.
 ///
 /// Returns `peer_ip` unchanged unless `trust_proxy_headers` is `true`, the peer
-/// is within (or list is empty) `trusted_proxies`, and the first XFF token
-/// parses as an IP.
+/// is within `trusted_proxies` (non-empty), and the first XFF token parses
+/// as an IP.
 pub(crate) fn resolve_client_ip(
     peer_ip: IpAddr,
     trust_proxy_headers: bool,
@@ -220,7 +220,7 @@ pub(crate) fn resolve_client_ip(
     if !trust_proxy_headers {
         return peer_ip;
     }
-    let peer_trusted = trusted_proxies.is_empty() || trusted_proxies.iter().any(|net| net.contains(&peer_ip));
+    let peer_trusted = trusted_proxies.iter().any(|net| net.contains(&peer_ip));
     if !peer_trusted {
         return peer_ip;
     }
@@ -404,10 +404,11 @@ mod tests {
     }
 
     #[test]
-    fn resolve_client_ip_uses_xff_when_trusted_and_list_empty() {
+    fn resolve_client_ip_returns_peer_when_trusted_list_empty() {
         let peer = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        // Fail-secure: trust_proxy_headers=true with empty trusted_proxies must NOT honour XFF.
         let got = resolve_client_ip(peer, true, &[], Some(b"203.0.113.7, 10.0.0.1"));
-        assert_eq!(got, IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)));
+        assert_eq!(got, peer);
     }
 
     #[test]
@@ -429,28 +430,32 @@ mod tests {
     #[test]
     fn resolve_client_ip_returns_peer_when_xff_missing() {
         let peer = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
-        let got = resolve_client_ip(peer, true, &[], None);
+        let trusted: Vec<ipnet::IpNet> = vec!["10.0.0.0/8".parse().unwrap()];
+        let got = resolve_client_ip(peer, true, &trusted, None);
         assert_eq!(got, peer);
     }
 
     #[test]
     fn resolve_client_ip_returns_peer_when_xff_unparseable() {
         let peer = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
-        let got = resolve_client_ip(peer, true, &[], Some(b"not-an-ip, also-junk"));
+        let trusted: Vec<ipnet::IpNet> = vec!["10.0.0.0/8".parse().unwrap()];
+        let got = resolve_client_ip(peer, true, &trusted, Some(b"not-an-ip, also-junk"));
         assert_eq!(got, peer);
     }
 
     #[test]
     fn resolve_client_ip_returns_peer_when_xff_invalid_utf8() {
         let peer = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
-        let got = resolve_client_ip(peer, true, &[], Some(&[0xff, 0xfe, 0xfd]));
+        let trusted: Vec<ipnet::IpNet> = vec!["10.0.0.0/8".parse().unwrap()];
+        let got = resolve_client_ip(peer, true, &trusted, Some(&[0xff, 0xfe, 0xfd]));
         assert_eq!(got, peer);
     }
 
     #[test]
     fn resolve_client_ip_picks_first_xff_token_trimmed() {
         let peer = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
-        let got = resolve_client_ip(peer, true, &[], Some(b"   192.0.2.50   , 10.0.0.5"));
+        let trusted: Vec<ipnet::IpNet> = vec!["10.0.0.0/8".parse().unwrap()];
+        let got = resolve_client_ip(peer, true, &trusted, Some(b"   192.0.2.50   , 10.0.0.5"));
         assert_eq!(got, IpAddr::V4(Ipv4Addr::new(192, 0, 2, 50)));
     }
 
