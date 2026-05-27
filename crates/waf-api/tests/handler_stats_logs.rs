@@ -181,7 +181,47 @@ async fn stats_timeseries_by_category_buckets_seeded_event() {
     let body: serde_json::Value = resp.json().await.expect("json");
     let data = body["data"].as_array().expect("array");
     assert!(!data.is_empty(), "seeded SQLI-007 event must surface, got: {body}");
-    // The CASE expression maps `SQLI-%` rule_id to category `sqli`.
+    // `category_of(rule_id)` maps SQLI-* prefixes to category `sqli`.
     assert_eq!(data[0]["category"].as_str().expect("category"), "sqli");
     assert!(data[0]["count"].as_i64().unwrap_or(0) >= 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stats_timeseries_by_category_honours_category_of_prefix_priority() {
+    // Locks in the DRY refactor that replaced this query's inline CASE with
+    // `category_of(rule_id)`. The function gives `ADV-SSRF-*` priority over
+    // the generic `ADV-*` fallback — if a future change re-introduces a
+    // hand-rolled CASE that orders branches incorrectly (`ADV-%` before
+    // `ADV-SSRF%`), this test fails because the category surfaces as
+    // `advanced` instead of `ssrf`.
+    let s = start_test_server().await;
+    s.db.create_security_event(CreateSecurityEvent {
+        host_code: "h1".into(),
+        client_ip: "1.2.3.4".into(),
+        method: "GET".into(),
+        path: "/x".into(),
+        rule_id: Some("ADV-SSRF-001".into()),
+        rule_name: "x".into(),
+        action: "block".into(),
+        detail: None,
+        geo_info: None,
+    })
+    .await
+    .expect("seed event");
+
+    let resp = client()
+        .get(url_for(s.addr, "/api/stats/timeseries-by-category?hours=1"))
+        .bearer_auth(&s.admin_token)
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.expect("json");
+    let data = body["data"].as_array().expect("array");
+    assert!(!data.is_empty(), "seeded ADV-SSRF-001 event must surface, got: {body}");
+    assert_eq!(
+        data[0]["category"].as_str().expect("category"),
+        "ssrf",
+        "ADV-SSRF-* must map to 'ssrf' (longer-prefix priority over ADV-* fallback)"
+    );
 }
