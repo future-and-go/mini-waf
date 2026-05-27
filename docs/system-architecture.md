@@ -479,3 +479,42 @@ Rule Load Operation
 
 **Integration**: Rule reload (via file watcher or API) invokes `classify_error()` to emit consistent metrics.
 
+### Cluster Mode (Optional 3-Node HA)
+
+QUIC mTLS mesh with automatic leader election, rule sync, event forwarding, config sync, and write forwarding.
+
+```
+Main Node (control plane)
+├── PostgreSQL storage (authoritative)
+├── RuleRegistry + RuleChangelog
+├── Admin API (read-write)
+└── QUIC server
+    ├── handles RuleSyncRequest → returns incremental/snapshot
+    ├── receives EventBatch → batch INSERT to DB
+    ├── broadcasts ConfigSync (TOML, version-gated, term-fenced)
+    └── replays ApiForward → returns ApiForwardResponse
+
+Worker Nodes (data plane)
+├── In-memory RuleRegistry (synced from main)
+├── Admin API (read-only; writes forwarded via QUIC)
+├── EventBatcher → forwards SecurityEvents to main
+└── QUIC client
+    ├── periodic RuleSyncRequest (pull model)
+    ├── receives ConfigSync → apply (proxy/rules/cache/api sections)
+    └── ApiForward for write requests (1MB payload limit, 10s timeout)
+```
+
+**Key flows:**
+
+1. **Rule sync** — Workers poll main every `rules_interval_secs`. Main responds with incremental delta (from `RuleChangelog` ring buffer) or lz4-compressed full snapshot. Workers apply to in-memory `RuleRegistry` and call `RuleReloader::reload_from_registry()` (no DB needed on workers).
+
+2. **Event forwarding** — Workers batch `SecurityEvent`s (configurable size/interval) via `EventBatcher`. Main persists with batch INSERT, tags `source_node_id` to prevent double-counting.
+
+3. **Config sync** — Main broadcasts `ConfigSync` with TOML-serialized `SyncableConfig` (proxy, rules, cache, api sections only — never overwrites cluster/storage). Includes election `term` for stale-main rejection.
+
+4. **Write forwarding** — Worker API middleware intercepts POST/PUT/DELETE/PATCH, serializes to `ApiForward`, sends via QUIC. Main replays via HTTP, returns `ApiForwardResponse`. Workers return 503 if main unreachable.
+
+5. **Transport dispatch** — All 13 `ClusterMessage` variants dispatched exhaustively (no catch-all) in both server and client. `NodeState` bridges to `WafEngine` via `Arc<dyn RuleReloader>`.
+
+**Module:** `crates/waf-cluster/` (transport/, sync/, node.rs, cluster_forward.rs, lib.rs).
+
