@@ -146,18 +146,27 @@ fn stats_collector_counts_and_flushes() {
 
 #[test]
 fn config_syncer_apply_and_build() {
+    use waf_cluster::sync::config::SyncableConfig;
+
     let mut s = ConfigSyncer::new("n1".to_string());
     assert_eq!(s.current_version(), 0);
 
-    let built = s.build_sync("toml=1".to_string());
+    let syncable = SyncableConfig {
+        proxy: Default::default(),
+        rules: Default::default(),
+        cache: Default::default(),
+        api: Default::default(),
+    };
+    let built = s.build_sync(&syncable).expect("build_sync");
     assert_eq!(built.version, 1, "build_sync increments without applying");
-    assert_eq!(built.config_toml, "toml=1");
+    assert!(!built.config_toml.is_empty());
 
     let incoming = ConfigSync {
         version: 7,
-        config_toml: "x".to_string(),
+        config_toml: toml::to_string(&syncable).unwrap(),
     };
-    s.apply_sync(&incoming).expect("apply");
+    let result = s.apply_sync(&incoming, 1);
+    assert!(result.is_some());
     assert_eq!(s.current_version(), 7);
 }
 
