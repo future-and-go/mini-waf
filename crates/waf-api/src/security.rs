@@ -206,10 +206,7 @@ pub async fn list_audit_log(
 /// allowlist preserves the legacy "allow all" semantics for both branches.
 #[must_use]
 pub fn evaluate_admin_ip(peer_ip: Option<IpAddr>, allowlist: &[String]) -> bool {
-    match peer_ip {
-        Some(addr) => is_admin_ip_allowed(&addr, allowlist),
-        None => allowlist.is_empty(),
-    }
+    peer_ip.map_or(allowlist.is_empty(), |addr| is_admin_ip_allowed(&addr, allowlist))
 }
 
 /// Rejects requests from IPs not in the admin allowlist.
@@ -620,16 +617,16 @@ mod tests {
         assert!(!evaluate_admin_ip(ip, &allowlist));
     }
 
-    /// Fail-closed: missing ConnectInfo + non-empty allowlist must deny so a
+    /// Fail-closed: missing `ConnectInfo` + non-empty allowlist must deny so a
     /// missing trust signal cannot bypass the operator's network gate
-    /// (axum routing without ConnectInfo, oneshot integration paths).
+    /// (axum routing without `ConnectInfo`, `oneshot` integration paths).
     #[test]
     fn evaluate_admin_ip_missing_with_allowlist_denies() {
         let allowlist = vec!["10.0.0.0/8".to_owned()];
         assert!(!evaluate_admin_ip(None, &allowlist));
     }
 
-    /// Empty allowlist preserves allow-all even when ConnectInfo missing.
+    /// Empty allowlist preserves allow-all even when `ConnectInfo` missing.
     #[test]
     fn evaluate_admin_ip_missing_with_empty_allowlist_allows() {
         assert!(evaluate_admin_ip(None, &[]));
