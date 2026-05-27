@@ -78,6 +78,33 @@ fn clamp_hours_optional(opt: Option<i64>) -> Option<i64> {
 }
 
 // ---------------------------------------------------------------------------
+// Overview-totals helper
+// ---------------------------------------------------------------------------
+
+/// Pick `(total_requests, total_blocked)` for the overview endpoint.
+///
+/// Uses the live atomic counters when the query is unfiltered AND the proxy
+/// has handled at least one request this session; otherwise falls back to
+/// the DB aggregates. Filtered queries (`host_code` / `action`) always read
+/// from the DB because the live counters are global and cannot honour those
+/// predicates — returning the global figure for a filtered request would
+/// over-report (and the block-rate would be wrong) for every host/action
+/// dashboard view.
+const fn select_overview_totals(
+    live_requests: u64,
+    live_blocked: u64,
+    db_requests: u64,
+    db_blocked: u64,
+    is_filtered: bool,
+) -> (u64, u64) {
+    if !is_filtered && live_requests > 0 {
+        (live_requests, live_blocked)
+    } else {
+        (db_requests, db_blocked)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
@@ -98,6 +125,7 @@ pub async fn stats_overview(
         host_code: q.host_code,
         action: q.action,
     };
+    let is_filtered = filter.host_code.is_some() || filter.action.is_some();
     let overview = state.db.get_stats_overview(&filter).await?;
     let total_requests_live = state.total_requests();
     let total_blocked_live = state.total_blocked();
@@ -108,22 +136,21 @@ pub async fn stats_overview(
     // hits).  Return the live counter as the primary metric whenever the
     // proxy has processed at least one request this session; otherwise fall
     // back to the DB aggregate so the UI still shows useful data immediately
-    // after a restart.
+    // after a restart. Filtered queries (host_code / action) must always
+    // use the DB aggregates because the live counter is global and cannot
+    // honour those predicates.
     #[allow(clippy::cast_sign_loss)] // DB counts are non-negative by construction
     let db_requests = overview.total_requests.max(0) as u64;
     #[allow(clippy::cast_sign_loss)]
     let db_blocked = overview.total_blocked.max(0) as u64;
 
-    let total_requests = if total_requests_live > 0 {
-        total_requests_live
-    } else {
-        db_requests
-    };
-    let total_blocked = if total_requests_live > 0 {
-        total_blocked_live
-    } else {
-        db_blocked
-    };
+    let (total_requests, total_blocked) = select_overview_totals(
+        total_requests_live,
+        total_blocked_live,
+        db_requests,
+        db_blocked,
+        is_filtered,
+    );
     let total_allowed = total_requests.saturating_sub(total_blocked);
 
     let block_rate = if total_requests == 0 {
@@ -353,5 +380,44 @@ mod tests {
         assert_eq!(q.host_code, None);
         assert_eq!(q.action, None);
         assert_eq!(q.hours, None);
+    }
+
+    // ── select_overview_totals (live vs DB selection) ─────────────────────
+
+    /// Unfiltered query with live traffic this session prefers the live counters.
+    #[test]
+    fn select_overview_totals_unfiltered_prefers_live() {
+        let (req, blk) = select_overview_totals(100, 20, 5_000, 1_000, false);
+        assert_eq!((req, blk), (100, 20));
+    }
+
+    /// Unfiltered query with no live traffic falls back to DB aggregates.
+    #[test]
+    fn select_overview_totals_unfiltered_no_live_uses_db() {
+        let (req, blk) = select_overview_totals(0, 0, 5_000, 1_000, false);
+        assert_eq!((req, blk), (5_000, 1_000));
+    }
+
+    /// Filtered query must always use DB even when live counters are non-zero —
+    /// the live counter is global and cannot honour `host_code` / `action`.
+    #[test]
+    fn select_overview_totals_filtered_ignores_live() {
+        let (req, blk) = select_overview_totals(100, 20, 5_000, 1_000, true);
+        assert_eq!((req, blk), (5_000, 1_000));
+    }
+
+    /// Filtered query with no live traffic uses DB — same as unfiltered fallback.
+    #[test]
+    fn select_overview_totals_filtered_no_live_uses_db() {
+        let (req, blk) = select_overview_totals(0, 0, 5_000, 1_000, true);
+        assert_eq!((req, blk), (5_000, 1_000));
+    }
+
+    /// Empty DB AND no live traffic → zeroes; the handler's block-rate path
+    /// must still be safe (division-by-zero guard lives in the caller).
+    #[test]
+    fn select_overview_totals_all_zero_returns_zero() {
+        let (req, blk) = select_overview_totals(0, 0, 0, 0, false);
+        assert_eq!((req, blk), (0, 0));
     }
 }
