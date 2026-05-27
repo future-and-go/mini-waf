@@ -78,6 +78,34 @@ jobs:
       - name: Build release
         run: cargo build --workspace --release
 
+  # Admin panel currently has no CI gate; type-check + build catches
+  # the bulk of regressions (broken imports, stale prop types, refine
+  # data-provider drift). Runs in parallel with the Rust jobs.
+  admin-panel:
+    name: Admin Panel (type-check + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web/admin-panel
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/admin-panel/package-lock.json
+      - name: Tool versions
+        run: |
+          node --version
+          npm --version
+      - name: Install
+        run: npm ci
+      - name: Type check
+        run: npm run type-check
+      - name: Build
+        run: npm run build
+
   # FR-009 phase-05: 95% line coverage gate scoped to the cache module.
   # Workspace-aggregate coverage would mask gaps inside cache/**, so we
   # measure only files under crates/gateway/src/cache/**.

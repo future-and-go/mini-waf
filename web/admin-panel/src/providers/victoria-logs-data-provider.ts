@@ -22,6 +22,13 @@ import { httpClient } from "../utils/axios";
 
 const LOGS_QUERY_URL = "/api/v1/logs/query";
 
+// Default LogsQL when the filter sidebar is empty. We restrict to the WAF
+// audit stream so the Security Logs table always shows rows that carry
+// `rule_name` / `rule_id` / `event_type`. Operators who want raw traffic
+// (proxy `waf_tracing`, etc.) opt in via the Advanced toggle which sends
+// `{ field: "raw", value: "*" }`.
+const DEFAULT_LOGSQL = "stream:waf_audit";
+
 const LOGSQL_RESERVED = /[\s"\\:|]/;
 
 /** Quote a LogsQL value when it contains reserved characters. */
@@ -79,14 +86,12 @@ const filterToLogsQL = (filter: CrudFilter): string | null => {
  */
 const buildLogsQL = (filters: CrudFilter[] | undefined): string => {
   if (!filters || filters.length === 0) {
-    // Empty query is rejected by the proxy; fall back to a wildcard so
-    // the empty-state on the FE just shows the most recent rows.
-    return "*";
+    return DEFAULT_LOGSQL;
   }
   const parts = filters
     .map((f) => filterToLogsQL(f))
     .filter((p): p is string => p !== null && p.length > 0);
-  return parts.length === 0 ? "*" : parts.join(" ");
+  return parts.length === 0 ? DEFAULT_LOGSQL : parts.join(" ");
 };
 
 const toHttpError = (err: unknown): HttpError => {
@@ -183,4 +188,4 @@ export const victoriaLogsDataProvider: DataProvider = {
 };
 
 // Re-exports useful for tests and downstream tooling.
-export { buildLogsQL, escapeValue, filterToLogsQL, parseNdjson };
+export { DEFAULT_LOGSQL, buildLogsQL, escapeValue, filterToLogsQL, parseNdjson };
