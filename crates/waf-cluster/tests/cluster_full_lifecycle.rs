@@ -22,6 +22,8 @@
     clippy::err_expect,
     clippy::needless_pass_by_value,
     clippy::needless_raw_string_hashes,
+    clippy::default_trait_access,
+    clippy::await_holding_lock,
     unused_imports
 )]
 
@@ -456,7 +458,7 @@ async fn write_forwarding_roundtrip() {
                 })
                 .await;
         }
-        other => panic!("Expected ApiForward, got {:?}", other),
+        other => panic!("Expected ApiForward, got {other:?}"),
     }
 
     let result = handle.await.unwrap();

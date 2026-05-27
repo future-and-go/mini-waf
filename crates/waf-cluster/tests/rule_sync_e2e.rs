@@ -1,4 +1,11 @@
 //! End-to-end rule sync tests covering full snapshot, incremental, and no-op cases.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::default_trait_access,
+    clippy::await_holding_lock,
+    clippy::significant_drop_tightening
+)]
 
 use std::sync::Arc;
 

@@ -1,4 +1,5 @@
 //! Config sync tests — build, apply, version skip, and partial config.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use waf_cluster::protocol::ConfigSync;
 use waf_cluster::sync::config::{ConfigSyncer, SyncableConfig};

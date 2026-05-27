@@ -72,7 +72,7 @@ pub struct NodeState {
     pub rule_changelog: Arc<ParkingRwLock<RuleChangelog>>,
     /// Sender for feeding security events into the cluster event pipeline.
     pub event_tx: mpsc::Sender<SecurityEvent>,
-    /// Receiver consumed by the EventBatcher (taken once at startup).
+    /// Receiver consumed by the `EventBatcher` (taken once at startup).
     event_rx: ParkingMutex<Option<mpsc::Receiver<SecurityEvent>>>,
     /// Registry of in-flight API forward requests (worker → main).
     pending_forwards: Option<PendingForwards>,
@@ -288,7 +288,7 @@ impl NodeState {
     }
 
     /// Access the pending forwards registry (worker nodes only).
-    pub fn pending_forwards(&self) -> Option<&PendingForwards> {
+    pub const fn pending_forwards(&self) -> Option<&PendingForwards> {
         self.pending_forwards.as_ref()
     }
 
@@ -335,9 +335,9 @@ mod tests {
                 timeout_max_ms: 300,
                 phi_suspect: 5.0,
                 phi_dead: 8.0,
-                ..Default::default()
+                ..ClusterElectionConfig::default()
             },
-            ..Default::default()
+            ..ClusterConfig::default()
         }
     }
 

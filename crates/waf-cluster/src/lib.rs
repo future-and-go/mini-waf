@@ -228,18 +228,19 @@ impl ClusterNode {
                         continue;
                     }
                     let config_version = *state_cfg.config_version.read().await;
-                    if config_version > last_broadcast_version {
-                        let syncable = crate::sync::config::SyncableConfig {
-                            proxy: Default::default(),
-                            rules: Default::default(),
-                            cache: Default::default(),
-                            api: Default::default(),
-                        };
-                        let mut syncer = crate::sync::config::ConfigSyncer::new(state_cfg.node_id.clone());
-                        if let Ok(msg) = syncer.build_sync(&syncable) {
-                            state_cfg.broadcast(&ClusterMessage::ConfigSync(msg));
-                            last_broadcast_version = config_version;
-                        }
+                    if config_version <= last_broadcast_version {
+                        continue;
+                    }
+                    let syncable = crate::sync::config::SyncableConfig {
+                        proxy: waf_common::config::ProxyConfig::default(),
+                        rules: waf_common::config::RulesConfig::default(),
+                        cache: waf_common::config::CacheConfig::default(),
+                        api: waf_common::config::ApiConfig::default(),
+                    };
+                    let mut syncer = crate::sync::config::ConfigSyncer::new(state_cfg.node_id.clone());
+                    if let Ok(msg) = syncer.build_sync(&syncable) {
+                        state_cfg.broadcast(&ClusterMessage::ConfigSync(msg));
+                        last_broadcast_version = config_version;
                     }
                 }
             });
