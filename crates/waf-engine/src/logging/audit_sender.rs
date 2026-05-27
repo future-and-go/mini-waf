@@ -90,48 +90,83 @@ impl AuditSender {
         if !self.inner.buffer.is_active() {
             return;
         }
-
-        let path = if event.path.len() > PATH_TRUNCATE_AT {
-            // Slice on a UTF-8 char boundary to stay safe for non-ASCII URIs.
-            let mut end = PATH_TRUNCATE_AT;
-            while end > 0 && !event.path.is_char_boundary(end) {
-                end -= 1;
-            }
-            format!("{}…", &event.path[..end])
-        } else {
-            event.path
-        };
-
-        let payload = json!({
-            "_time": event.timestamp.to_rfc3339(),
-            "_msg": format!(
-                "{} {} {} → {} (rule={})",
-                event.event_type.as_str(),
-                event.method,
-                path,
-                event.client_ip,
-                event.rule_name,
-            ),
-            "event_type": event.event_type.as_str(),
-            "rule_name": event.rule_name,
-            "rule_id": event.rule_id,
-            "phase": event.phase,
-            "client_ip": event.client_ip,
-            "host": event.host,
-            "method": event.method,
-            "path": path,
-            "tier": event.tier,
-            "detail": event.detail,
-            "req_id": event.req_id,
-            "stream": "waf_audit",
-        });
-        self.inner.buffer.try_send(payload);
+        self.inner.buffer.try_send(build_payload(event));
     }
+}
+
+/// Truncate `path` on a UTF-8 char boundary so non-ASCII URIs stay valid.
+fn truncate_path(path: String) -> String {
+    if path.len() <= PATH_TRUNCATE_AT {
+        return path;
+    }
+    let mut end = PATH_TRUNCATE_AT;
+    while end > 0 && !path.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &path[..end])
+}
+
+/// Build the NDJSON payload shipped to `VictoriaLogs`. Extracted from `send`
+/// so the wire-format contract relied on by the admin panel (`stream`,
+/// `rule_name`, `rule_id`, `event_type`, `phase`) is unit-testable without
+/// spinning up a `BatchSender`.
+fn build_payload(event: AuditEvent) -> serde_json::Value {
+    let path = truncate_path(event.path);
+    json!({
+        "_time": event.timestamp.to_rfc3339(),
+        "_msg": format!(
+            "{} {} {} → {} (rule={})",
+            event.event_type.as_str(),
+            event.method,
+            path,
+            event.client_ip,
+            event.rule_name,
+        ),
+        "event_type": event.event_type.as_str(),
+        "rule_name": event.rule_name,
+        "rule_id": event.rule_id,
+        "phase": event.phase,
+        "client_ip": event.client_ip,
+        "host": event.host,
+        "method": event.method,
+        "path": path,
+        "tier": event.tier,
+        "detail": event.detail,
+        "req_id": event.req_id,
+        "stream": "waf_audit",
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use serde_json::Value;
+
     use super::*;
+
+    fn sample_block_event() -> AuditEvent {
+        AuditEvent {
+            timestamp: chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0).unwrap_or_default(),
+            event_type: AuditEventType::Block,
+            rule_name: "SQLi: classic UNION-based".to_string(),
+            rule_id: Some("OWASP-942100".to_string()),
+            phase: Some("request_body".to_string()),
+            client_ip: "203.0.113.7".to_string(),
+            host: "api.example.com".to_string(),
+            method: "POST".to_string(),
+            path: "/api/login".to_string(),
+            tier: Some("critical".to_string()),
+            detail: Some("UNION SELECT detected".to_string()),
+            req_id: Some("req-abc".to_string()),
+        }
+    }
+
+    fn field_str<'a>(payload: &'a Value, key: &str) -> Option<&'a str> {
+        payload.get(key).and_then(Value::as_str)
+    }
+
+    fn field_is_null(payload: &Value, key: &str) -> bool {
+        payload.get(key).is_some_and(Value::is_null)
+    }
 
     #[test]
     fn event_type_string_round_trip() {
@@ -151,13 +186,94 @@ mod tests {
             p.push('é');
         }
         assert!(p.len() > PATH_TRUNCATE_AT);
-        // Use the same logic as `send` for the boundary calculation.
-        let mut end = PATH_TRUNCATE_AT;
-        while end > 0 && !p.is_char_boundary(end) {
-            end -= 1;
+        let truncated = truncate_path(p);
+        // Ellipsis is appended after the truncation, so the byte length
+        // is bounded by PATH_TRUNCATE_AT plus the ellipsis encoding.
+        assert!(truncated.ends_with('…'));
+        assert!(truncated.len() <= PATH_TRUNCATE_AT + '…'.len_utf8());
+    }
+
+    /// Locks the wire-format contract relied on by the admin panel Security
+    /// Logs page. The `Rule` column reads `rule_name`, the default `LogsQL`
+    /// filters on `stream:waf_audit`, and operators slice further by
+    /// `rule_id` / `event_type` / `phase` — every block event must carry
+    /// all of them.
+    #[test]
+    fn block_payload_contains_all_admin_panel_fields() {
+        let payload = build_payload(sample_block_event());
+
+        assert_eq!(field_str(&payload, "stream"), Some("waf_audit"));
+        assert_eq!(field_str(&payload, "event_type"), Some("block"));
+        assert_eq!(field_str(&payload, "rule_name"), Some("SQLi: classic UNION-based"));
+        assert_eq!(field_str(&payload, "rule_id"), Some("OWASP-942100"));
+        assert_eq!(field_str(&payload, "phase"), Some("request_body"));
+        assert_eq!(field_str(&payload, "client_ip"), Some("203.0.113.7"));
+        assert_eq!(field_str(&payload, "host"), Some("api.example.com"));
+        assert_eq!(field_str(&payload, "method"), Some("POST"));
+        assert_eq!(field_str(&payload, "path"), Some("/api/login"));
+        assert_eq!(field_str(&payload, "tier"), Some("critical"));
+        assert_eq!(field_str(&payload, "req_id"), Some("req-abc"));
+        // `_time` and `_msg` are required by VictoriaLogs' ingest schema.
+        assert!(field_str(&payload, "_time").is_some());
+        assert!(field_str(&payload, "_msg").is_some());
+    }
+
+    /// When a rule fires without a stable identifier (e.g. a runtime
+    /// heuristic) `rule_id` serializes as JSON null. `LogsQL` `rule_id:*`
+    /// can still distinguish present-vs-absent so the FE stays consistent.
+    #[test]
+    fn missing_optional_fields_serialize_as_null() {
+        let mut ev = sample_block_event();
+        ev.rule_id = None;
+        ev.phase = None;
+        ev.tier = None;
+        ev.detail = None;
+        ev.req_id = None;
+
+        let payload = build_payload(ev);
+
+        assert!(field_is_null(&payload, "rule_id"));
+        assert!(field_is_null(&payload, "phase"));
+        assert!(field_is_null(&payload, "tier"));
+        assert!(field_is_null(&payload, "detail"));
+        assert!(field_is_null(&payload, "req_id"));
+        // Required identifiers stay populated.
+        assert_eq!(field_str(&payload, "stream"), Some("waf_audit"));
+        assert_eq!(field_str(&payload, "event_type"), Some("block"));
+        assert_eq!(field_str(&payload, "rule_name"), Some("SQLi: classic UNION-based"));
+    }
+
+    /// Long paths are truncated with an ellipsis, but the payload field
+    /// is still a non-empty string so the admin panel's `Path` column
+    /// never renders blank.
+    #[test]
+    fn build_payload_truncates_long_path() {
+        let mut ev = sample_block_event();
+        ev.path = format!("/api/{}", "a".repeat(PATH_TRUNCATE_AT * 2));
+
+        let payload = build_payload(ev);
+
+        let path = field_str(&payload, "path").unwrap_or_default();
+        assert!(path.ends_with('…'));
+        assert!(path.len() <= PATH_TRUNCATE_AT + '…'.len_utf8());
+    }
+
+    /// Non-block events (`allow`, `challenge`, `rate_limit`, `log_only`)
+    /// share the same schema so a single `LogsQL` preset filters everything
+    /// in `stream:waf_audit`.
+    #[test]
+    fn all_event_types_share_the_audit_stream() {
+        for ty in [
+            AuditEventType::Allow,
+            AuditEventType::Challenge,
+            AuditEventType::RateLimit,
+            AuditEventType::LogOnly,
+        ] {
+            let mut ev = sample_block_event();
+            ev.event_type = ty;
+            let payload = build_payload(ev);
+            assert_eq!(field_str(&payload, "stream"), Some("waf_audit"));
+            assert_eq!(field_str(&payload, "event_type"), Some(ty.as_str()));
         }
-        let truncated = &p[..end];
-        assert!(truncated.is_char_boundary(0));
-        assert!(truncated.len() <= PATH_TRUNCATE_AT);
     }
 }
