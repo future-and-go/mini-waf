@@ -140,9 +140,9 @@ log ""
 
 log "Step 5: Testing rule sync (create rule on main, verify on workers)..."
 
-# Login to get a JWT token from node-a
+# Login to get a JWT token from node-a (route: POST /api/auth/login)
 TOKEN=$(curl -sf --max-time 10 \
-    -X POST "$NODE_A_API/api/v1/auth/login" \
+    -X POST "$NODE_A_API/api/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"username":"admin","password":"admin123"}' 2>/dev/null \
     | grep -o '"token":"[^"]*"' | cut -d'"' -f4 || echo "")
@@ -151,10 +151,10 @@ if [ -z "$TOKEN" ]; then
     log "  Note: Could not get auth token (admin user may not be seeded yet)"
     log "  Skipping rule sync test — verify manually via Admin UI at $NODE_A_API/ui/"
 else
-    # Create a test rule via the main node API
+    # Create a custom rule via the main node API (route: POST /api/custom-rules)
     RULE_ID="E2E-TEST-$(date +%s)"
     CREATE_RESP=$(curl -sf --max-time 10 \
-        -X POST "$NODE_A_API/api/v1/rules" \
+        -X POST "$NODE_A_API/api/custom-rules" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $TOKEN" \
         -d "{\"id\":\"$RULE_ID\",\"name\":\"E2E Test Rule\",\"category\":\"custom\",\"action\":\"log\",\"pattern\":\"e2e-test-pattern\"}" \
@@ -167,20 +167,20 @@ else
         log "  Waiting 15s for rule sync to propagate to workers..."
         sleep 15
 
-        # Check rule exists on node-b
+        # Check rule exists on node-b (route: GET /api/custom-rules)
         RULES_B=$(curl -sf --max-time 10 \
             -H "Authorization: Bearer $TOKEN" \
-            "$NODE_B_API/api/v1/rules" 2>/dev/null || echo "[]")
+            "$NODE_B_API/api/custom-rules" 2>/dev/null || echo "[]")
         if echo "$RULES_B" | grep -q "$RULE_ID"; then
             pass "Rule '$RULE_ID' synced to node-b"
         else
             fail "Rule '$RULE_ID' NOT found on node-b after 15s"
         fi
 
-        # Check rule exists on node-c
+        # Check rule exists on node-c (route: GET /api/custom-rules)
         RULES_C=$(curl -sf --max-time 10 \
             -H "Authorization: Bearer $TOKEN" \
-            "$NODE_C_API/api/v1/rules" 2>/dev/null || echo "[]")
+            "$NODE_C_API/api/custom-rules" 2>/dev/null || echo "[]")
         if echo "$RULES_C" | grep -q "$RULE_ID"; then
             pass "Rule '$RULE_ID' synced to node-c"
         else
