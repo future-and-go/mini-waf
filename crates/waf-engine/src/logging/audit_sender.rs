@@ -194,7 +194,7 @@ mod tests {
     }
 
     /// Locks the wire-format contract relied on by the admin panel Security
-    /// Logs page. The `Rule` column reads `rule_name`, the default LogsQL
+    /// Logs page. The `Rule` column reads `rule_name`, the default `LogsQL`
     /// filters on `stream:waf_audit`, and operators slice further by
     /// `rule_id` / `event_type` / `phase` — every block event must carry
     /// all of them.
@@ -219,7 +219,7 @@ mod tests {
     }
 
     /// When a rule fires without a stable identifier (e.g. a runtime
-    /// heuristic) `rule_id` serializes as JSON null. LogsQL `rule_id:*`
+    /// heuristic) `rule_id` serializes as JSON null. `LogsQL` `rule_id:*`
     /// can still distinguish present-vs-absent so the FE stays consistent.
     #[test]
     fn missing_optional_fields_serialize_as_null() {
@@ -259,7 +259,7 @@ mod tests {
     }
 
     /// Non-block events (`allow`, `challenge`, `rate_limit`, `log_only`)
-    /// share the same schema so a single LogsQL preset filters everything
+    /// share the same schema so a single `LogsQL` preset filters everything
     /// in `stream:waf_audit`.
     #[test]
     fn all_event_types_share_the_audit_stream() {
