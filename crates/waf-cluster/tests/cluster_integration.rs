@@ -58,6 +58,10 @@ impl RuleReloader for NoopReloader {
     async fn on_rules_updated(&self, _version: u64) -> anyhow::Result<()> {
         Ok(())
     }
+
+    async fn reload_from_registry(&self, _registry: &waf_engine::RuleRegistry) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 /// Build a minimal [`Rule`] with the given id for use in tests.
