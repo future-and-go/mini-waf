@@ -209,10 +209,8 @@ async fn build_detects_tls_when_ssl_digest_present_on_session_digest() {
 }
 
 #[tokio::test]
-async fn build_honours_xff_only_when_trust_proxy_headers_enabled() {
-    // Mock has no real peer IP → peer = UNSPECIFIED. Trusted-proxies list
-    // is empty so any peer counts as trusted. Builder should pick the first
-    // XFF token.
+async fn build_honours_xff_only_when_trust_enabled_and_peer_trusted() {
+    // Mock has no real peer IP → peer = UNSPECIFIED.
     let req = b"GET / HTTP/1.1\r\nHost: ex.com\r\nX-Forwarded-For: 198.51.100.7, 10.0.0.1\r\n\r\n";
     let session = session_for(req).await;
 
@@ -223,8 +221,16 @@ async fn build_honours_xff_only_when_trust_proxy_headers_enabled() {
         "XFF must not be honoured when trust=false"
     );
 
-    // trust_proxy_headers = true with empty trusted_proxies (= trust any peer).
+    // trust_proxy_headers = true with EMPTY trusted_proxies → fail-secure: XFF dropped.
     let ctx = RequestCtxBuilder::new(&session, true, &[]).build();
+    assert!(
+        ctx.client_ip.is_unspecified(),
+        "XFF must not be honoured when trusted_proxies is empty (fail-secure)"
+    );
+
+    // trust_proxy_headers = true and peer covered by trusted CIDR → XFF honoured.
+    let trusted: Vec<IpNet> = vec!["0.0.0.0/0".parse().expect("cidr")];
+    let ctx = RequestCtxBuilder::new(&session, true, &trusted).build();
     assert_eq!(ctx.client_ip.to_string(), "198.51.100.7");
 }
 

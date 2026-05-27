@@ -1366,13 +1366,14 @@ fn run_server(config: &AppConfig, config_file_path: &str, vlogs_layer_slot: Laye
         }
     });
 
-    // Warn when XFF trust is enabled but no trusted proxy CIDRs are configured,
-    // meaning XFF headers from ANY source will be honoured (fail-open).
+    // Warn when XFF trust is enabled but no trusted proxy CIDRs are configured.
+    // Fail-secure: XFF headers will NOT be honoured because no peer is in the
+    // trust list. Operators must enumerate `trusted_proxies` to enable XFF.
     if proxy.trust_proxy_headers && proxy.trusted_proxies.is_empty() {
         tracing::warn!(
             "trust_proxy_headers is enabled but trusted_proxies is empty — \
-             XFF headers from ANY source will be trusted. \
-             Consider adding trusted proxy CIDRs for production use."
+             XFF headers will NOT be honoured (fail-secure). \
+             Add trusted proxy CIDRs to trusted_proxies to enable XFF parsing."
         );
     }
 
