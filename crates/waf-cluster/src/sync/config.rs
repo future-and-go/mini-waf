@@ -1,7 +1,24 @@
-use anyhow::Result;
-use tracing::debug;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use tracing::{debug, warn};
+use waf_common::config::{ApiConfig, CacheConfig, ProxyConfig, RulesConfig};
 
 use crate::protocol::ConfigSync;
+
+/// Subset of `AppConfig` that is safe to sync between nodes.
+///
+/// Excludes node-specific sections: `cluster`, `storage`, `security`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncableConfig {
+    #[serde(default)]
+    pub proxy: ProxyConfig,
+    #[serde(default)]
+    pub rules: RulesConfig,
+    #[serde(default)]
+    pub cache: CacheConfig,
+    #[serde(default)]
+    pub api: ApiConfig,
+}
 
 /// Tracks and applies configuration synchronisation for this node.
 pub struct ConfigSyncer {
@@ -22,21 +39,48 @@ impl ConfigSyncer {
     }
 
     /// Apply an incoming `ConfigSync` from main, updating the stored version.
-    pub fn apply_sync(&mut self, sync: &ConfigSync) -> Result<()> {
-        debug!(
-            node_id = %self.node_id,
-            version = sync.version,
-            "Applying config sync"
-        );
-        self.current_version = sync.version;
-        Ok(())
+    ///
+    /// Returns `None` if the version is stale or payload is invalid.
+    /// Returns `Some(SyncableConfig)` on success.
+    pub fn apply_sync(&mut self, sync: &ConfigSync, _current_term: u64) -> Option<SyncableConfig> {
+        if sync.version <= self.current_version {
+            debug!(
+                node_id = %self.node_id,
+                local_version = self.current_version,
+                incoming_version = sync.version,
+                "Skipping stale ConfigSync"
+            );
+            return None;
+        }
+
+        match toml::from_str::<SyncableConfig>(&sync.config_toml) {
+            Ok(config) => {
+                debug!(
+                    node_id = %self.node_id,
+                    version = sync.version,
+                    "Applying config sync"
+                );
+                self.current_version = sync.version;
+                Some(config)
+            }
+            Err(e) => {
+                warn!(
+                    node_id = %self.node_id,
+                    version = sync.version,
+                    "Invalid config TOML in ConfigSync, keeping current: {e}"
+                );
+                None
+            }
+        }
     }
 
-    /// Build a `ConfigSync` message for the given TOML string (called by main).
-    pub const fn build_sync(&self, config_toml: String) -> ConfigSync {
-        ConfigSync {
-            version: self.current_version + 1,
+    /// Build a `ConfigSync` message from the syncable config sections.
+    pub fn build_sync(&mut self, config: &SyncableConfig) -> Result<ConfigSync> {
+        let config_toml = toml::to_string(config).context("failed to serialize SyncableConfig to TOML")?;
+        self.current_version += 1;
+        Ok(ConfigSync {
+            version: self.current_version,
             config_toml,
-        }
+        })
     }
 }

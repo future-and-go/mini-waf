@@ -1326,6 +1326,12 @@ fn run_server(
         });
     }
 
+    // Wire the engine as the cluster's rule-reloader so rule sync updates
+    // propagate to the WAF engine's pattern matchers.
+    if let Some(ref node) = cluster_node {
+        node.set_rule_reloader(Arc::clone(&engine) as Arc<dyn waf_engine::RuleReloader>);
+    }
+
     // Spawn the cluster node we built earlier (its NodeState is already wired
     // into AppState above).
     if let Some(node) = cluster_node {

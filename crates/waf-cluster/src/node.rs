@@ -9,14 +9,18 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use parking_lot::Mutex as ParkingMutex;
+use parking_lot::RwLock as ParkingRwLock;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use waf_common::config::{ClusterConfig, NodeRole};
+use waf_engine::{RuleRegistry, RuleReloader};
 
+use crate::cluster_forward::PendingForwards;
 use crate::election::ElectionManager;
 use crate::health::HeartbeatTracker;
-use crate::protocol::ClusterMessage;
+use crate::protocol::{ClusterMessage, SecurityEvent};
+use crate::sync::rules::RuleChangelog;
 
 /// Whether this node has a live database connection or must forward writes.
 #[derive(Debug, Clone)]
@@ -59,6 +63,19 @@ pub struct NodeState {
     pub ca_key_pem: ParkingMutex<Option<String>>,
     /// AES-GCM encrypted CA private key stored by worker nodes for failover.
     pub ca_key_encrypted: ParkingMutex<Option<Vec<u8>>>,
+    // ── Engine bridge ────────────────────────────────────────────────────────
+    /// Callback to notify the WAF engine when rules are updated via cluster sync.
+    rule_reloader: ParkingMutex<Option<Arc<dyn RuleReloader>>>,
+    /// In-memory rule registry shared between cluster sync and the engine.
+    pub rule_registry: Arc<ParkingRwLock<RuleRegistry>>,
+    /// Ring-buffer of recent rule changes (main node only).
+    pub rule_changelog: Arc<ParkingRwLock<RuleChangelog>>,
+    /// Sender for feeding security events into the cluster event pipeline.
+    pub event_tx: mpsc::Sender<SecurityEvent>,
+    /// Receiver consumed by the EventBatcher (taken once at startup).
+    event_rx: ParkingMutex<Option<mpsc::Receiver<SecurityEvent>>>,
+    /// Registry of in-flight API forward requests (worker → main).
+    pending_forwards: Option<PendingForwards>,
 }
 
 impl NodeState {
@@ -89,6 +106,9 @@ impl NodeState {
             config.election.phi_dead,
         ));
 
+        let events_queue_size = config.sync.events_queue_size;
+        let (event_tx, event_rx) = mpsc::channel::<SecurityEvent>(events_queue_size);
+
         info!(node_id = %node_id, role = ?initial_role, "Cluster node initialized");
 
         Ok(Self {
@@ -105,6 +125,12 @@ impl NodeState {
             peer_channels: ParkingMutex::new(Vec::new()),
             ca_key_pem: ParkingMutex::new(None),
             ca_key_encrypted: ParkingMutex::new(None),
+            rule_reloader: ParkingMutex::new(None),
+            rule_registry: Arc::new(ParkingRwLock::new(RuleRegistry::default())),
+            rule_changelog: Arc::new(ParkingRwLock::new(RuleChangelog::new(500))),
+            event_tx,
+            event_rx: ParkingMutex::new(Some(event_rx)),
+            pending_forwards: Some(PendingForwards::new()),
         })
     }
 
@@ -252,6 +278,41 @@ impl NodeState {
         let mut cv = self.config_version.write().await;
         *cv = version;
         version
+    }
+
+    // ── Engine bridge ─────────────────────────────────────────────────────────
+
+    /// Take the event receiver (can only be called once — used by the batcher).
+    pub fn take_event_rx(&self) -> Option<mpsc::Receiver<SecurityEvent>> {
+        self.event_rx.lock().take()
+    }
+
+    /// Access the pending forwards registry (worker nodes only).
+    pub fn pending_forwards(&self) -> Option<&PendingForwards> {
+        self.pending_forwards.as_ref()
+    }
+
+    /// Register a `RuleReloader` callback (typically the `WafEngine`).
+    pub fn set_rule_reloader(&self, reloader: Arc<dyn RuleReloader>) {
+        *self.rule_reloader.lock() = Some(reloader);
+    }
+
+    /// Notify the engine that rules have been updated via cluster sync.
+    ///
+    /// Clones the reloader `Arc` before awaiting to avoid holding the
+    /// `ParkingMutex` across an await point.
+    pub async fn notify_rules_updated(&self, version: u64) -> Result<()> {
+        let reloader = self.rule_reloader.lock().clone();
+        if let Some(r) = reloader {
+            let snapshot: Vec<waf_engine::Rule> = self.rule_registry.read().rules.values().cloned().collect();
+            let mut tmp_registry = RuleRegistry::default();
+            for rule in snapshot {
+                tmp_registry.insert(rule);
+            }
+            r.reload_from_registry(&tmp_registry).await?;
+        }
+        *self.rules_version.write().await = version;
+        Ok(())
     }
 }
 

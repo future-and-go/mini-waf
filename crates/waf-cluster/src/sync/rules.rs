@@ -1,9 +1,15 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+use tokio::sync::mpsc;
+use tracing::debug;
+use waf_common::config::NodeRole;
 use waf_engine::{Rule, RuleRegistry, RuleReloader};
 
-use crate::protocol::{ChangeOp, RuleChange, RuleSyncRequest, RuleSyncResponse, SyncType};
+use crate::node::NodeState;
+use crate::protocol::{ChangeOp, ClusterMessage, RuleChange, RuleSyncRequest, RuleSyncResponse, SyncType};
 
 /// Ring-buffer of recent rule changes maintained by the main node.
 ///
@@ -180,6 +186,15 @@ pub async fn apply_sync_response(
     registry: &mut RuleRegistry,
     reloader: &dyn RuleReloader,
 ) -> Result<()> {
+    apply_sync_response_sync(response, registry)?;
+    reloader.on_rules_updated(registry.version).await
+}
+
+/// Synchronous variant of [`apply_sync_response`] that mutates the registry
+/// without calling the reloader. Callers must trigger engine notification
+/// separately (e.g. via `NodeState::notify_rules_updated`).
+pub fn apply_sync_response_sync(response: RuleSyncResponse, registry: &mut RuleRegistry) -> Result<()> {
+    let version = response.version;
     match response.sync_type {
         SyncType::Incremental => {
             apply_rule_changes(registry, response.changes)?;
@@ -188,10 +203,8 @@ pub async fn apply_sync_response(
             apply_full_snapshot(registry, &response.snapshot_lz4)?;
         }
     }
-    // Override the version accumulated by individual insert/remove calls with
-    // the single authoritative version stamped by the main node.
-    registry.version = response.version;
-    reloader.on_rules_updated(response.version).await
+    registry.version = version;
+    Ok(())
 }
 
 // ─── Low-level compression helpers (kept for compatibility) ───────────────────
@@ -204,4 +217,42 @@ pub fn compress_snapshot(data: &[u8]) -> Vec<u8> {
 /// Decompress an lz4-compressed blob produced by [`compress_snapshot`].
 pub fn decompress_snapshot(data: &[u8]) -> Result<Vec<u8>> {
     lz4_flex::decompress_size_prepended(data).map_err(|e| anyhow::anyhow!("lz4 decompress failed: {e}"))
+}
+
+// ─── Rule sync loop (worker → main) ─────────────────────────────────────────
+
+/// Periodically send `RuleSyncRequest` to the main node and apply responses.
+///
+/// Only active when the node's role is `Worker`. Exits when `main_tx` is closed.
+pub async fn run_rule_sync_loop(state: Arc<NodeState>, interval_secs: u64, main_tx: mpsc::Sender<ClusterMessage>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(interval_secs.max(1)));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        interval.tick().await;
+        if state.current_role().await != NodeRole::Worker {
+            continue;
+        }
+        let version = *state.rules_version.read().await;
+        let req = ClusterMessage::RuleSyncRequest(RuleSyncRequest {
+            current_version: version,
+        });
+        if main_tx.send(req).await.is_err() {
+            debug!("Rule sync loop: main channel closed, stopping");
+            return;
+        }
+    }
+}
+
+/// No-op reloader for contexts where the engine is not available.
+pub struct NoopReloader;
+
+#[async_trait::async_trait]
+impl RuleReloader for NoopReloader {
+    async fn on_rules_updated(&self, _version: u64) -> Result<()> {
+        Ok(())
+    }
+    async fn reload_from_registry(&self, _registry: &RuleRegistry) -> Result<()> {
+        Ok(())
+    }
 }

@@ -61,6 +61,12 @@ impl ClusterNode {
         Arc::clone(&self.node_state)
     }
 
+    /// Register a `RuleReloader` callback (typically the `WafEngine`) so the
+    /// cluster sync layer can notify the engine when rules are replicated.
+    pub fn set_rule_reloader(&self, reloader: Arc<dyn RuleReloader>) {
+        self.node_state.set_rule_reloader(reloader);
+    }
+
     /// Start the cluster node: generate or load certificates, launch QUIC server,
     /// dial seed peers, and run the heartbeat and election loops.
     ///
@@ -171,6 +177,70 @@ impl ClusterNode {
             tokio::spawn(async move {
                 if let Err(e) = client.run_with_reconnect(state_clone, rx).await {
                     tracing::error!("Cluster client for {seed_addr} failed: {e}");
+                }
+            });
+        }
+
+        // ── Event batcher (worker → main) ────────────────────────────────────
+
+        if let Some(event_rx) = node_state.take_event_rx() {
+            let batch_size = self.config.sync.events_batch_size;
+            let flush_interval_ms = self.config.sync.events_flush_interval_secs.saturating_mul(1000);
+            let batcher =
+                crate::sync::events::EventBatcher::new(node_state.node_id.clone(), batch_size, flush_interval_ms);
+            let (batch_tx, mut batch_rx) = mpsc::channel::<crate::protocol::EventBatch>(64);
+            tokio::spawn(async move {
+                crate::sync::events::run_event_batcher(batcher, event_rx, batch_tx).await;
+            });
+
+            // Forward completed batches to all peer channels
+            let state_ev = Arc::clone(&node_state);
+            tokio::spawn(async move {
+                while let Some(batch) = batch_rx.recv().await {
+                    state_ev.broadcast(&ClusterMessage::EventBatch(batch));
+                }
+            });
+        }
+
+        // ── Rule sync loop (workers poll main) ────────────────────────────────
+
+        let rules_interval = self.config.sync.rules_interval_secs;
+        for tx in &peer_senders {
+            let state_rs = Arc::clone(&node_state);
+            let tx_clone = tx.clone();
+            tokio::spawn(async move {
+                crate::sync::rules::run_rule_sync_loop(state_rs, rules_interval, tx_clone).await;
+            });
+        }
+
+        // ── Config sync broadcast (main → workers) ─────────────────────────
+
+        {
+            let config_interval = self.config.sync.config_interval_secs;
+            let state_cfg = Arc::clone(&node_state);
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(config_interval.max(1)));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                let mut last_broadcast_version: u64 = 0;
+                loop {
+                    interval.tick().await;
+                    if state_cfg.current_role().await != NodeRole::Main {
+                        continue;
+                    }
+                    let config_version = *state_cfg.config_version.read().await;
+                    if config_version > last_broadcast_version {
+                        let syncable = crate::sync::config::SyncableConfig {
+                            proxy: Default::default(),
+                            rules: Default::default(),
+                            cache: Default::default(),
+                            api: Default::default(),
+                        };
+                        let mut syncer = crate::sync::config::ConfigSyncer::new(state_cfg.node_id.clone());
+                        if let Ok(msg) = syncer.build_sync(&syncable) {
+                            state_cfg.broadcast(&ClusterMessage::ConfigSync(msg));
+                            last_broadcast_version = config_version;
+                        }
+                    }
                 }
             });
         }
