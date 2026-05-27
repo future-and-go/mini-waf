@@ -197,19 +197,45 @@ pub async fn list_audit_log(
 
 // ─── Admin IP allowlist middleware ────────────────────────────────────────────
 
+/// Pure helper that decides whether a request must be forwarded by the admin
+/// IP middleware. Returns `true` to allow, `false` to deny.
+///
+/// Fail-closed: when `peer_ip` is `None` (axum did not populate the
+/// `ConnectInfo` extension) **and** `allowlist` is non-empty, the request is
+/// denied so a missing trust signal cannot bypass the allowlist. An empty
+/// allowlist preserves the legacy "allow all" semantics for both branches.
+#[must_use]
+pub fn evaluate_admin_ip(peer_ip: Option<IpAddr>, allowlist: &[String]) -> bool {
+    match peer_ip {
+        Some(addr) => is_admin_ip_allowed(&addr, allowlist),
+        None => allowlist.is_empty(),
+    }
+}
+
 /// Rejects requests from IPs not in the admin allowlist.
 /// If the allowlist is empty, all IPs are allowed.
+///
+/// When the `ConnectInfo` extension is missing and the allowlist is configured,
+/// the request is denied (fail-closed) to prevent the allowlist being silently
+/// bypassed via an unresolved peer IP.
 pub async fn admin_ip_check_middleware(
     State(state): State<Arc<AppState>>,
     req: Request<Body>,
     next: Next,
 ) -> impl IntoResponse {
-    let ip = req
+    let peer_ip = req
         .extensions()
         .get::<axum::extract::connect_info::ConnectInfo<std::net::SocketAddr>>()
-        .map_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), |ci| ci.0.ip());
+        .map(|ci| ci.0.ip());
 
-    if !is_admin_ip_allowed(&ip, &state.security_config.admin_ip_allowlist) {
+    let allowlist = &state.security_config.admin_ip_allowlist;
+    if !evaluate_admin_ip(peer_ip, allowlist) {
+        if peer_ip.is_none() {
+            tracing::warn!(
+                "admin_ip_check_middleware: ConnectInfo extension missing — denying request \
+                 (allowlist non-empty)"
+            );
+        }
         return (
             StatusCode::FORBIDDEN,
             Json(json!({ "error": "IP address not allowed" })),
@@ -574,5 +600,45 @@ mod tests {
             !is_admin_ip_allowed(&ipv4_mapped, &allowlist),
             "IPv4-mapped IPv6 ::ffff:192.168.1.1 should NOT match plain IPv4 entry"
         );
+    }
+
+    // ── evaluate_admin_ip (middleware decision helper) ────────────────────────
+
+    /// Peer IP inside the configured allowlist is permitted.
+    #[test]
+    fn evaluate_admin_ip_present_in_allowlist_passes() {
+        let ip = Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+        let allowlist = vec!["10.0.0.0/8".to_owned()];
+        assert!(evaluate_admin_ip(ip, &allowlist));
+    }
+
+    /// Peer IP outside the configured allowlist is denied.
+    #[test]
+    fn evaluate_admin_ip_present_not_in_allowlist_denied() {
+        let ip = Some(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)));
+        let allowlist = vec!["10.0.0.0/8".to_owned()];
+        assert!(!evaluate_admin_ip(ip, &allowlist));
+    }
+
+    /// Fail-closed: missing ConnectInfo + non-empty allowlist must deny so a
+    /// missing trust signal cannot bypass the operator's network gate
+    /// (axum routing without ConnectInfo, oneshot integration paths).
+    #[test]
+    fn evaluate_admin_ip_missing_with_allowlist_denies() {
+        let allowlist = vec!["10.0.0.0/8".to_owned()];
+        assert!(!evaluate_admin_ip(None, &allowlist));
+    }
+
+    /// Empty allowlist preserves allow-all even when ConnectInfo missing.
+    #[test]
+    fn evaluate_admin_ip_missing_with_empty_allowlist_allows() {
+        assert!(evaluate_admin_ip(None, &[]));
+    }
+
+    /// Empty allowlist still allows every present IP.
+    #[test]
+    fn evaluate_admin_ip_present_with_empty_allowlist_allows() {
+        let ip = Some(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)));
+        assert!(evaluate_admin_ip(ip, &[]));
     }
 }
