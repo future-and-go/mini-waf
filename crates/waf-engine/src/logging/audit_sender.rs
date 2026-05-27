@@ -145,8 +145,7 @@ mod tests {
 
     fn sample_block_event() -> AuditEvent {
         AuditEvent {
-            timestamp: chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0)
-                .unwrap_or_default(),
+            timestamp: chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0).unwrap_or_default(),
             event_type: AuditEventType::Block,
             rule_name: "SQLi: classic UNION-based".to_string(),
             rule_id: Some("OWASP-942100".to_string()),
@@ -250,7 +249,7 @@ mod tests {
     #[test]
     fn build_payload_truncates_long_path() {
         let mut ev = sample_block_event();
-        ev.path = "/api/".to_string() + &"a".repeat(PATH_TRUNCATE_AT * 2);
+        ev.path = format!("/api/{}", "a".repeat(PATH_TRUNCATE_AT * 2));
 
         let payload = build_payload(ev);
 
