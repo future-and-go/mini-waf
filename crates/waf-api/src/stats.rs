@@ -90,7 +90,7 @@ fn clamp_hours_optional(opt: Option<i64>) -> Option<i64> {
 /// predicates — returning the global figure for a filtered request would
 /// over-report (and the block-rate would be wrong) for every host/action
 /// dashboard view.
-fn select_overview_totals(
+const fn select_overview_totals(
     live_requests: u64,
     live_blocked: u64,
     db_requests: u64,
@@ -399,7 +399,7 @@ mod tests {
     }
 
     /// Filtered query must always use DB even when live counters are non-zero —
-    /// the live counter is global and cannot honour host_code / action.
+    /// the live counter is global and cannot honour `host_code` / `action`.
     #[test]
     fn select_overview_totals_filtered_ignores_live() {
         let (req, blk) = select_overview_totals(100, 20, 5_000, 1_000, true);
