@@ -173,7 +173,10 @@ mod tests {
         // return None immediately, which is the signal flush_loop uses to exit.
         let (tx, mut rx) = mpsc::channel::<DbLogEvent>(2);
         drop(tx);
-        assert!(rx.recv().await.is_none(), "closed sender must cause recv to return None");
+        assert!(
+            rx.recv().await.is_none(),
+            "closed sender must cause recv to return None"
+        );
     }
 
     #[tokio::test]

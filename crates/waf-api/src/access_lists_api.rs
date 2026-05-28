@@ -20,7 +20,10 @@ fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
         || std::path::PathBuf::from(relative),
         |main| {
             let p = std::path::Path::new(main.as_str());
-            let root = p.parent().and_then(|c| c.parent()).unwrap_or_else(|| std::path::Path::new("."));
+            let root = p
+                .parent()
+                .and_then(|c| c.parent())
+                .unwrap_or_else(|| std::path::Path::new("."));
             root.join(relative)
         },
     )
@@ -91,7 +94,9 @@ fn yaml_to_fe(v: &Value) -> Value {
 
 pub async fn get_access_lists(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "rules/access-lists.yaml");
-    let cfg = read_yaml_opt(&path).await.map_or_else(default_access_config, |v| yaml_to_fe(&v));
+    let cfg = read_yaml_opt(&path)
+        .await
+        .map_or_else(default_access_config, |v| yaml_to_fe(&v));
     Ok(Json(json!({ "success": true, "data": cfg })))
 }
 
@@ -117,7 +122,9 @@ pub async fn test_access_lists(
     Query(q): Query<TestQuery>,
 ) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "rules/access-lists.yaml");
-    let cfg = read_yaml_opt(&path).await.map_or_else(default_access_config, |v| yaml_to_fe(&v));
+    let cfg = read_yaml_opt(&path)
+        .await
+        .map_or_else(default_access_config, |v| yaml_to_fe(&v));
 
     let ip = q.ip.as_deref().unwrap_or("");
     let host = q.host.as_deref().unwrap_or("");

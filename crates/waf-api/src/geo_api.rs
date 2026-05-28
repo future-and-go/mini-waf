@@ -22,7 +22,10 @@ fn rules_path(state: &AppState) -> std::path::PathBuf {
         || std::path::PathBuf::from("configs/geo-rules.yaml"),
         |main| {
             let p = std::path::Path::new(main.as_str());
-            let root = p.parent().and_then(|c| c.parent()).unwrap_or_else(|| std::path::Path::new("."));
+            let root = p
+                .parent()
+                .and_then(|c| c.parent())
+                .unwrap_or_else(|| std::path::Path::new("."));
             root.join("configs/geo-rules.yaml")
         },
     )

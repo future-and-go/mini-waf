@@ -16,7 +16,10 @@ fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
         || std::path::PathBuf::from(relative),
         |main| {
             let p = std::path::Path::new(main.as_str());
-            let root = p.parent().and_then(|c| c.parent()).unwrap_or_else(|| std::path::Path::new("."));
+            let root = p
+                .parent()
+                .and_then(|c| c.parent())
+                .unwrap_or_else(|| std::path::Path::new("."));
             root.join(relative)
         },
     )
@@ -79,7 +82,10 @@ pub async fn put_tier_policies(State(state): State<Arc<AppState>>, Json(body): J
         if policies.is_none_or(Value::is_null) {
             return Err(ApiError::BadRequest(format!("missing tier: {tier}")));
         }
-        let thresh = policies.and_then(|p| p.get("risk_thresholds")).cloned().unwrap_or(Value::Null);
+        let thresh = policies
+            .and_then(|p| p.get("risk_thresholds"))
+            .cloned()
+            .unwrap_or(Value::Null);
         let allow = thresh.get("allow").and_then(Value::as_i64).unwrap_or(0);
         let challenge = thresh.get("challenge").and_then(Value::as_i64).unwrap_or(0);
         let block = thresh.get("block").and_then(Value::as_i64).unwrap_or(0);
@@ -113,13 +119,10 @@ pub async fn dry_run_tier(State(state): State<Arc<AppState>>, Json(body): Json<V
 
         for rule in &sorted {
             let tier = rule.get("tier").and_then(Value::as_str).unwrap_or("catch_all");
-            let method_match = rule
-                .get("methods")
-                .and_then(Value::as_array)
-                .map_or(true, |ms| {
-                    ms.iter()
-                        .any(|m| m.as_str().is_some_and(|s| s.eq_ignore_ascii_case(method)))
-                });
+            let method_match = rule.get("methods").and_then(Value::as_array).map_or(true, |ms| {
+                ms.iter()
+                    .any(|m| m.as_str().is_some_and(|s| s.eq_ignore_ascii_case(method)))
+            });
             let path_match = rule
                 .get("path_match")
                 .and_then(Value::as_str)

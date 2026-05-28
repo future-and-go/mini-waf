@@ -17,7 +17,10 @@ fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
         || std::path::PathBuf::from(relative),
         |main| {
             let p = std::path::Path::new(main.as_str());
-            let root = p.parent().and_then(|c| c.parent()).unwrap_or_else(|| std::path::Path::new("."));
+            let root = p
+                .parent()
+                .and_then(|c| c.parent())
+                .unwrap_or_else(|| std::path::Path::new("."));
             root.join(relative)
         },
     )
