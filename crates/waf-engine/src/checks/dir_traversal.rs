@@ -12,7 +12,7 @@ static TRAVERSAL_DESCS: &[&str] = &[
     "Unicode / overlong UTF-8 traversal",
     "Windows backslash traversal (..\\)",
     "null byte injection (%00)",
-    "absolute path to sensitive Unix directory",
+    "traversal into sensitive Unix directory (../etc, ../home, …)",
     "Windows drive-letter path (C:\\)",
     "Linux sensitive file (/etc/passwd, /etc/shadow, …)",
     "Linux /proc inspection (/proc/self/environ, /proc/version, …)",
@@ -38,8 +38,13 @@ static TRAVERSAL_SET: LazyLock<RegexSet> = LazyLock::new(|| {
         r"\.\.\\",
         // Null byte
         r"%00",
-        // Absolute path to broadly sensitive Unix directories
-        r"(?i)/(etc|proc|var/log|usr/local|root|home|tmp|dev|sys)(/|$)",
+        // Traversal into a broadly sensitive Unix directory — requires a
+        // preceding `../` (or its decoded variants resolved upstream via
+        // `request_targets`) so legitimate routes like `/home/user/profile`,
+        // `/dev/community`, `/sys/admin/login`, `/tmp/upload` cannot trip
+        // this arm. Specific high-value targets are caught separately by
+        // TRAV-009 (`/etc/passwd` etc.) and TRAV-010 (`/proc/<pid>/...`).
+        r"(?i)\.\./(etc|proc|var/log|usr/local|root|home|tmp|dev|sys)(/|$)",
         // Windows drive-letter path (e.g. `C:\`)
         r"(?i)[A-Za-z]:\\",
         // Linux sensitive file targets — anchored on `/etc/` so a benign
@@ -317,5 +322,47 @@ mod tests {
         assert_eq!(det.phase, Phase::DirTraversal);
         assert_eq!(det.rule_name, "Directory Traversal");
         assert!(det.rule_id.as_deref().unwrap_or("").starts_with("TRAV-"));
+    }
+
+    // ─── TRAV-007 anchor: sensitive-dir match requires `../` precondition ──
+
+    #[test]
+    fn allows_benign_home_user_route() {
+        // `/home/<user>/<page>` is the canonical personal-page namespace on
+        // many sites; must NOT trigger the sensitive-dir arm.
+        let checker = DirTraversalCheck::new();
+        let ctx = make_ctx("/home/alice/profile", "");
+        assert!(checker.check(&ctx).is_none());
+    }
+
+    #[test]
+    fn allows_benign_dev_community_route() {
+        let checker = DirTraversalCheck::new();
+        let ctx = make_ctx("/dev/community", "");
+        assert!(checker.check(&ctx).is_none());
+    }
+
+    #[test]
+    fn allows_benign_sys_admin_login_route() {
+        let checker = DirTraversalCheck::new();
+        let ctx = make_ctx("/sys/admin/login", "");
+        assert!(checker.check(&ctx).is_none());
+    }
+
+    #[test]
+    fn allows_benign_tmp_upload_route() {
+        let checker = DirTraversalCheck::new();
+        let ctx = make_ctx("/tmp/upload", "");
+        assert!(checker.check(&ctx).is_none());
+    }
+
+    #[test]
+    fn detects_traversal_into_home_dir() {
+        // Adversary reaching for an SSH key via `../home/<user>/.ssh/id_rsa`
+        // must still trigger — the `../home/` precondition is satisfied.
+        let checker = DirTraversalCheck::new();
+        let ctx = make_ctx("/static/../../home/admin/.ssh/id_rsa", "");
+        let det = checker.check(&ctx).expect("hit");
+        assert_eq!(det.phase, Phase::DirTraversal);
     }
 }
