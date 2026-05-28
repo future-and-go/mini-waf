@@ -79,7 +79,7 @@ To pull the latest CRS and re-convert:
 python tools/sync.py \
   --source owasp-crs \
   --output rules/owasp-crs/ \
-  --tag v4.10.0
+  --tag v4.26.0
 ```
 
 Or use a local clone:

@@ -13,8 +13,8 @@ tags:
 - rfi
 - attack-rfi
 metadata:
-  crs_id: '931100'
   source: OWASP CRS v4.25.0
+  crs_id: '931100'
 ---
 kind: custom_rule_v1
 id: CRS-931110
@@ -48,8 +48,8 @@ tags:
 - rfi
 - attack-rfi
 metadata:
-  crs_id: '931120'
   source: OWASP CRS v4.25.0
+  crs_id: '931120'
 ---
 kind: custom_rule_v1
 id: CRS-931130
@@ -84,5 +84,5 @@ tags:
 - rfi
 - attack-rfi
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '931131'
+  source: OWASP CRS v4.25.0

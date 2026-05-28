@@ -12,8 +12,8 @@ tags:
 - lfi
 - attack-lfi
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '930100'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-930110
@@ -29,8 +29,8 @@ tags:
 - lfi
 - attack-lfi
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '930110'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-930120
@@ -47,8 +47,8 @@ tags:
 - lfi
 - attack-lfi
 metadata:
-  crs_id: '930120'
   source: OWASP CRS v4.25.0
+  crs_id: '930120'
 ---
 kind: custom_rule_v1
 id: CRS-930130
