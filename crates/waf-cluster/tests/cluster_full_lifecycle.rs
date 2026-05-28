@@ -309,33 +309,34 @@ async fn config_sync_version_gating() {
         },
     };
 
-    // Build version 1 on main
+    // Build first sync on main — version uses a monotonic timestamp, so it is
+    // always > 0 but the exact value is not predictable.
     let msg_v1 = main_syncer.build_sync(&config).unwrap();
-    assert_eq!(msg_v1.version, 1);
+    assert!(msg_v1.version > 0, "first version must be positive");
 
-    // Worker applies version 1
+    // Worker applies the first version
     let applied = worker_syncer.apply_sync(&msg_v1, 1);
     assert!(applied.is_some());
-    assert_eq!(worker_syncer.current_version(), 1);
+    assert_eq!(worker_syncer.current_version(), msg_v1.version);
 
-    // Duplicate version 1 is skipped
+    // Duplicate is skipped (same version)
     let skipped = worker_syncer.apply_sync(&msg_v1, 1);
     assert!(skipped.is_none());
 
-    // Build version 2 on main
+    // Build second sync — version must strictly advance
     let msg_v2 = main_syncer.build_sync(&config).unwrap();
-    assert_eq!(msg_v2.version, 2);
+    assert!(msg_v2.version > msg_v1.version, "second version must exceed first");
 
-    // Worker applies version 2
+    // Worker applies the second version
     let applied_v2 = worker_syncer.apply_sync(&msg_v2, 1);
     assert!(applied_v2.is_some());
-    assert_eq!(worker_syncer.current_version(), 2);
+    assert_eq!(worker_syncer.current_version(), msg_v2.version);
 
     // Config version tracking on NodeState
     let node = make_node("main-1", "main");
-    node.set_config_version(2).await;
+    node.set_config_version(msg_v2.version).await;
     let cv = *node.config_version.read().await;
-    assert_eq!(cv, 2);
+    assert_eq!(cv, msg_v2.version);
 }
 
 // ─── Test 5: Election after main death ───────────────────────────────────────
@@ -563,7 +564,7 @@ async fn full_lifecycle_join_sync_events_config_election() {
     let cfg_msg = main_syncer.build_sync(&syncable_config).unwrap();
     let applied = worker_syncer.apply_sync(&cfg_msg, 1);
     assert!(applied.is_some());
-    assert_eq!(worker_syncer.current_version(), 1);
+    assert_eq!(worker_syncer.current_version(), cfg_msg.version);
 
     // ── Phase 5: Election after main death ────────────────────────────────
     // Main dies — remove from peer list
