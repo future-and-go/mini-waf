@@ -209,36 +209,46 @@ pub fn redactor_config_hash(hc: &HostConfig) -> u64 {
     h.finish()
 }
 
-/// Recursive walker. Replaces values whose KEYS match `fields` with
-/// `mask` (as a JSON string). Walks nested objects and arrays.
-fn walk(v: &mut serde_json::Value, fields: &HashSet<String>, mask: &str, case_insensitive: bool, hits: &mut usize) {
+/// Hard depth ceiling for the iterative walker. `serde_json`'s default
+/// parser limit is 128 today, so the parse step already rejects bodies
+/// deeper than that; this explicit guard ensures any future relaxation of
+/// that limit cannot let an attacker drive the walker arbitrarily deep.
+const MAX_REDACT_DEPTH: usize = 128;
+
+/// Iterative walker. Replaces values whose KEYS match `fields` with
+/// `mask` (as a JSON string). Walks nested objects and arrays via an
+/// explicit `Vec` stack — no recursion, so deep-but-legitimate bodies
+/// cannot blow the call stack.
+fn walk(root: &mut serde_json::Value, fields: &HashSet<String>, mask: &str, case_insensitive: bool, hits: &mut usize) {
     use serde_json::Value::{Array, Object};
-    match v {
-        Object(map) => {
-            // Collect keys first to avoid double-borrowing during mutation.
-            let keys: Vec<String> = map.keys().cloned().collect();
-            for k in keys {
-                let lookup = if case_insensitive {
-                    k.to_ascii_lowercase()
-                } else {
-                    k.clone()
-                };
-                if fields.contains(&lookup) {
-                    if let Some(slot) = map.get_mut(&k) {
-                        *slot = serde_json::Value::String(mask.to_string());
+    let mut stack: Vec<(&mut serde_json::Value, usize)> = vec![(root, 0)];
+    while let Some((node, depth)) = stack.pop() {
+        if depth > MAX_REDACT_DEPTH {
+            continue;
+        }
+        match node {
+            Object(map) => {
+                for (k, child) in map.iter_mut() {
+                    let lookup = if case_insensitive {
+                        k.to_ascii_lowercase()
+                    } else {
+                        k.clone()
+                    };
+                    if fields.contains(&lookup) {
+                        *child = serde_json::Value::String(mask.to_string());
                         *hits += 1;
+                    } else {
+                        stack.push((child, depth + 1));
                     }
-                } else if let Some(child) = map.get_mut(&k) {
-                    walk(child, fields, mask, case_insensitive, hits);
                 }
             }
-        }
-        Array(arr) => {
-            for item in arr {
-                walk(item, fields, mask, case_insensitive, hits);
+            Array(arr) => {
+                for item in arr.iter_mut() {
+                    stack.push((item, depth + 1));
+                }
             }
+            _ => {}
         }
-        _ => {}
     }
 }
 
@@ -624,5 +634,29 @@ mod tests {
 
         // Identical inputs must collide.
         assert_eq!(h0, redactor_config_hash(&HostConfig::default()));
+    }
+
+    #[test]
+    fn deep_nesting_iterative_walker_redacts_leaf() {
+        // 100 layers of `{"a": ...}` around a sensitive leaf. Confirms the
+        // iterative walker traverses deep-but-legitimate bodies without
+        // exhausting the call stack, and that the redaction still fires
+        // at the innermost matching key.
+        let c = compile(&host(true, false, &[]));
+        let mut body = String::new();
+        for _ in 0..100 {
+            body.push_str(r#"{"a":"#);
+        }
+        body.push_str(r#"{"card_number":"4111111111111111"}"#);
+        for _ in 0..100 {
+            body.push('}');
+        }
+
+        let out = c.redact_bytes(body.as_bytes()).expect("redaction must surface");
+        let mut v: serde_json::Value = serde_json::from_slice(&out).expect("valid json out");
+        for _ in 0..100 {
+            v = v["a"].take();
+        }
+        assert_eq!(v["card_number"], "***REDACTED***");
     }
 }
