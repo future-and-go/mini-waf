@@ -206,8 +206,7 @@ mod tests {
         // A token signed with one secret must fail validation under another —
         // this is the path a rotated jwt_secret takes when a long-lived WS
         // session is still streaming.
-        let token = generate_access_token(Uuid::new_v4(), "admin", "admin", "old-secret")
-            .expect("issue token");
+        let token = generate_access_token(Uuid::new_v4(), "admin", "admin", "old-secret").expect("issue token");
         assert!(jwt_requires_close(&token, "new-secret"));
     }
 
@@ -216,8 +215,7 @@ mod tests {
         // A token signed with the same secret and not yet expired must keep
         // the heartbeat path open.
         let secret = "shared-secret";
-        let token = generate_access_token(Uuid::new_v4(), "admin", "admin", secret)
-            .expect("issue token");
+        let token = generate_access_token(Uuid::new_v4(), "admin", "admin", secret).expect("issue token");
         assert!(!jwt_requires_close(&token, secret));
     }
 }
