@@ -552,11 +552,11 @@ pub async fn patch_sensitive_pattern(
     } else {
         let pattern = obj.get("pattern").and_then(|v| v.as_str());
         let pattern_type = obj.get("pattern_type").and_then(|v| v.as_str());
-        let check_request = obj.get("check_request").and_then(|v| v.as_bool());
-        let check_response = obj.get("check_response").and_then(|v| v.as_bool());
+        let check_request = obj.get("check_request").and_then(Value::as_bool);
+        let check_response = obj.get("check_response").and_then(Value::as_bool);
         let action = obj.get("action").and_then(|v| v.as_str());
         let remarks = obj.get("remarks").and_then(|v| v.as_str());
-        let enabled = obj.get("enabled").and_then(|v| v.as_bool());
+        let enabled = obj.get("enabled").and_then(Value::as_bool);
 
         let updated = state
             .db

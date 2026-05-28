@@ -13,13 +13,14 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
-    if let Some(main) = &state.main_config_file {
-        let p = std::path::Path::new(main.as_str());
-        let root = p.parent().and_then(|c| c.parent()).unwrap_or(std::path::Path::new("."));
-        root.join(relative)
-    } else {
-        std::path::PathBuf::from(relative)
-    }
+    state.main_config_file.as_ref().map_or_else(
+        || std::path::PathBuf::from(relative),
+        |main| {
+            let p = std::path::Path::new(main.as_str());
+            let root = p.parent().and_then(|c| c.parent()).unwrap_or_else(|| std::path::Path::new("."));
+            root.join(relative)
+        },
+    )
 }
 
 async fn read_yaml_opt(path: &std::path::Path) -> Option<Value> {
@@ -118,14 +119,16 @@ fn default_device_fp_fe() -> Value {
 pub async fn get_device_fp_config(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "configs/device-fp.yaml");
     let mut cfg = match read_yaml_opt(&path).await {
-        Some(v) if !v["device_fp"].is_null() => v["device_fp"].clone(),
+        Some(v) if v.get("device_fp").is_some_and(|fp| !fp.is_null()) => {
+            v.get("device_fp").cloned().unwrap_or(Value::Null)
+        }
         _ => default_device_fp_fe(),
     };
     // YAML stores providers as an array; the FE form expects an object keyed by name.
-    if let Some(obj) = cfg.as_object_mut() {
-        if let Some(providers) = obj.get("providers").cloned() {
-            obj.insert("providers".to_owned(), providers_to_obj(&providers));
-        }
+    if let Some(obj) = cfg.as_object_mut()
+        && let Some(providers) = obj.get("providers").cloned()
+    {
+        obj.insert("providers".to_owned(), providers_to_obj(&providers));
     }
     Ok(Json(json!({ "success": true, "data": cfg })))
 }
@@ -137,10 +140,10 @@ pub async fn put_device_fp_config(
     let path = resolve_path(&state, "configs/device-fp.yaml");
     // The FE sends providers as an object; convert back to array for YAML storage.
     let mut yaml_body = body.clone();
-    if let Some(obj) = yaml_body.as_object_mut() {
-        if let Some(providers) = obj.get("providers").cloned() {
-            obj.insert("providers".to_owned(), providers_to_array(&providers));
-        }
+    if let Some(obj) = yaml_body.as_object_mut()
+        && let Some(providers) = obj.get("providers").cloned()
+    {
+        obj.insert("providers".to_owned(), providers_to_array(&providers));
     }
     write_yaml(&path, &json!({ "device_fp": yaml_body })).await?;
     Ok(Json(json!({ "success": true, "data": body })))

@@ -13,13 +13,14 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
-    if let Some(main) = &state.main_config_file {
-        let p = std::path::Path::new(main.as_str());
-        let root = p.parent().and_then(|c| c.parent()).unwrap_or(std::path::Path::new("."));
-        root.join(relative)
-    } else {
-        std::path::PathBuf::from(relative)
-    }
+    state.main_config_file.as_ref().map_or_else(
+        || std::path::PathBuf::from(relative),
+        |main| {
+            let p = std::path::Path::new(main.as_str());
+            let root = p.parent().and_then(|c| c.parent()).unwrap_or_else(|| std::path::Path::new("."));
+            root.join(relative)
+        },
+    )
 }
 
 async fn read_yaml_opt(path: &std::path::Path) -> Option<Value> {
@@ -97,7 +98,7 @@ pub async fn refresh_relay_intel(_: State<Arc<AppState>>) -> ApiResult<Json<Valu
 }
 
 pub async fn test_relay(_: State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult<Json<Value>> {
-    let client_ip = body["client_ip"].as_str().unwrap_or("unknown");
+    let client_ip = body.get("client_ip").and_then(Value::as_str).unwrap_or("unknown");
     Ok(Json(json!({
         "success": true,
         "data": {

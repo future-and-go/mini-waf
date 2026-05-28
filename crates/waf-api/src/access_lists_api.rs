@@ -16,13 +16,14 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
-    if let Some(main) = &state.main_config_file {
-        let p = std::path::Path::new(main.as_str());
-        let root = p.parent().and_then(|c| c.parent()).unwrap_or(std::path::Path::new("."));
-        root.join(relative)
-    } else {
-        std::path::PathBuf::from(relative)
-    }
+    state.main_config_file.as_ref().map_or_else(
+        || std::path::PathBuf::from(relative),
+        |main| {
+            let p = std::path::Path::new(main.as_str());
+            let root = p.parent().and_then(|c| c.parent()).unwrap_or_else(|| std::path::Path::new("."));
+            root.join(relative)
+        },
+    )
 }
 
 async fn read_yaml_opt(path: &std::path::Path) -> Option<Value> {
@@ -90,10 +91,7 @@ fn yaml_to_fe(v: &Value) -> Value {
 
 pub async fn get_access_lists(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "rules/access-lists.yaml");
-    let cfg = match read_yaml_opt(&path).await {
-        Some(v) => yaml_to_fe(&v),
-        None => default_access_config(),
-    };
+    let cfg = read_yaml_opt(&path).await.map_or_else(default_access_config, |v| yaml_to_fe(&v));
     Ok(Json(json!({ "success": true, "data": cfg })))
 }
 
@@ -119,20 +117,17 @@ pub async fn test_access_lists(
     Query(q): Query<TestQuery>,
 ) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "rules/access-lists.yaml");
-    let cfg = match read_yaml_opt(&path).await {
-        Some(v) => yaml_to_fe(&v),
-        None => default_access_config(),
-    };
+    let cfg = read_yaml_opt(&path).await.map_or_else(default_access_config, |v| yaml_to_fe(&v));
 
     let ip = q.ip.as_deref().unwrap_or("");
     let host = q.host.as_deref().unwrap_or("");
     let tier = q.tier.as_deref().unwrap_or("catch_all");
 
     // Check IP blacklist first
-    let blacklist = cfg["ip_blacklist"]
-        .as_array()
-        .map(|a| a.iter().any(|v| v.as_str().map_or(false, |s| s == ip)))
-        .unwrap_or(false);
+    let blacklist = cfg
+        .get("ip_blacklist")
+        .and_then(Value::as_array)
+        .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(ip)));
     if blacklist {
         return Ok(Json(json!({
             "success": true,
@@ -141,10 +136,10 @@ pub async fn test_access_lists(
     }
 
     // Check IP whitelist
-    let whitelist = cfg["ip_whitelist"]
-        .as_array()
-        .map(|a| a.iter().any(|v| v.as_str().map_or(false, |s| s == ip)))
-        .unwrap_or(false);
+    let whitelist = cfg
+        .get("ip_whitelist")
+        .and_then(Value::as_array)
+        .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(ip)));
     if whitelist {
         return Ok(Json(json!({
             "success": true,
@@ -154,12 +149,17 @@ pub async fn test_access_lists(
 
     // Check host whitelist for the tier
     let host_listed = !host.is_empty()
-        && cfg["host_whitelist"][tier]
-            .as_array()
-            .map(|a| a.iter().any(|v| v.as_str().map_or(false, |s| s == host)))
-            .unwrap_or(false);
+        && cfg
+            .get("host_whitelist")
+            .and_then(|hw| hw.get(tier))
+            .and_then(Value::as_array)
+            .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(host)));
     if host_listed {
-        let mode = cfg["tier_whitelist_mode"][tier].as_str().unwrap_or("blacklist_only");
+        let mode = cfg
+            .get("tier_whitelist_mode")
+            .and_then(|m| m.get(tier))
+            .and_then(Value::as_str)
+            .unwrap_or("blacklist_only");
         let verdict = if mode == "full_bypass" { "bypass" } else { "allow" };
         return Ok(Json(json!({
             "success": true,

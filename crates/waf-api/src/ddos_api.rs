@@ -1,4 +1,4 @@
-//! DDoS protection API — GET/PUT /api/ddos/config, GET /api/ddos/metrics,
+//! `DDoS` protection API — GET/PUT /api/ddos/config, GET /api/ddos/metrics,
 //! GET /api/ddos/ban-table, DELETE /api/ddos/ban-table/:ip.
 //!
 //! Config source: `configs/ddos.yaml`. Ban-table is in-memory only (no persistence yet).
@@ -17,13 +17,14 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
-    if let Some(main) = &state.main_config_file {
-        let p = std::path::Path::new(main.as_str());
-        let root = p.parent().and_then(|c| c.parent()).unwrap_or(std::path::Path::new("."));
-        root.join(relative)
-    } else {
-        std::path::PathBuf::from(relative)
-    }
+    state.main_config_file.as_ref().map_or_else(
+        || std::path::PathBuf::from(relative),
+        |main| {
+            let p = std::path::Path::new(main.as_str());
+            let root = p.parent().and_then(|c| c.parent()).unwrap_or_else(|| std::path::Path::new("."));
+            root.join(relative)
+        },
+    )
 }
 
 async fn read_yaml_opt(path: &std::path::Path) -> Option<Value> {
@@ -49,27 +50,26 @@ async fn write_yaml(path: &std::path::Path, value: &Value) -> Result<(), ApiErro
 }
 
 fn yaml_to_fe(v: &Value) -> Value {
-    let per_ip = &v["per_ip"];
-    let per_fingerprint = &v["per_fingerprint"];
-    let store = &v["store"];
-    let bans = v["ban_durations_secs"]
-        .as_array()
-        .map(|a| a.iter().filter_map(|x| x.as_i64()).collect::<Vec<_>>())
-        .unwrap_or_else(|| vec![60, 300, 3600]);
+    let per_ip = v.get("per_ip").cloned().unwrap_or(Value::Null);
+    let per_fp = v.get("per_fingerprint").cloned().unwrap_or(Value::Null);
+    let store = v.get("store").cloned().unwrap_or(Value::Null);
+    let bans = v.get("ban_durations_secs")
+        .and_then(Value::as_array)
+        .map_or_else(|| vec![60, 300, 3600], |a| a.iter().filter_map(Value::as_i64).collect::<Vec<_>>());
     json!({
-        "enabled": v["enabled"].as_bool().unwrap_or(true),
+        "enabled": v.get("enabled").and_then(Value::as_bool).unwrap_or(true),
         "per_ip": {
-            "threshold_rps": per_ip["threshold_rps"].as_i64().unwrap_or(100),
-            "window_secs": per_ip["window_secs"].as_i64().unwrap_or(10)
+            "threshold_rps": per_ip.get("threshold_rps").and_then(Value::as_i64).unwrap_or(100),
+            "window_secs": per_ip.get("window_secs").and_then(Value::as_i64).unwrap_or(10)
         },
         "per_fingerprint": {
-            "threshold_rps": per_fingerprint["threshold_rps"].as_i64().unwrap_or(200),
-            "window_secs": per_fingerprint["window_secs"].as_i64().unwrap_or(10)
+            "threshold_rps": per_fp.get("threshold_rps").and_then(Value::as_i64).unwrap_or(200),
+            "window_secs": per_fp.get("window_secs").and_then(Value::as_i64).unwrap_or(10)
         },
         "ban_durations_secs": bans,
         "store": {
-            "backend": store["backend"].as_str().unwrap_or("memory"),
-            "redis_url": store.get("redis_url").and_then(|v| v.as_str()).unwrap_or("")
+            "backend": store.get("backend").and_then(Value::as_str).unwrap_or("memory"),
+            "redis_url": store.get("redis_url").and_then(Value::as_str).unwrap_or("")
         }
     })
 }
@@ -88,23 +88,20 @@ fn default_ddos_fe() -> Value {
 
 pub async fn get_ddos_config(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "configs/ddos.yaml");
-    let cfg = match read_yaml_opt(&path).await {
-        Some(v) => yaml_to_fe(&v),
-        None => default_ddos_fe(),
-    };
+    let cfg = read_yaml_opt(&path).await.map_or_else(default_ddos_fe, |v| yaml_to_fe(&v));
     Ok(Json(json!({ "success": true, "data": cfg })))
 }
 
 pub async fn put_ddos_config(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "configs/ddos.yaml");
-    let store = &body["store"];
+    let store = body.get("store").cloned().unwrap_or(Value::Null);
     let yaml_val = json!({
-        "enabled": body["enabled"],
-        "per_ip": body["per_ip"],
-        "per_fingerprint": body["per_fingerprint"],
-        "ban_durations_secs": body["ban_durations_secs"],
+        "enabled": body.get("enabled"),
+        "per_ip": body.get("per_ip"),
+        "per_fingerprint": body.get("per_fingerprint"),
+        "ban_durations_secs": body.get("ban_durations_secs"),
         "store": {
-            "backend": store["backend"],
+            "backend": store.get("backend"),
             "redis_url": store.get("redis_url")
         }
     });

@@ -19,13 +19,14 @@ use crate::state::AppState;
 // ─── Path helper (shared pattern) ────────────────────────────────────────────
 
 fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
-    if let Some(main) = &state.main_config_file {
-        let p = std::path::Path::new(main.as_str());
-        let root = p.parent().and_then(|c| c.parent()).unwrap_or(std::path::Path::new("."));
-        root.join(relative)
-    } else {
-        std::path::PathBuf::from(relative)
-    }
+    state.main_config_file.as_ref().map_or_else(
+        || std::path::PathBuf::from(relative),
+        |main| {
+            let p = std::path::Path::new(main.as_str());
+            let root = p.parent().and_then(|c| c.parent()).unwrap_or_else(|| std::path::Path::new("."));
+            root.join(relative)
+        },
+    )
 }
 
 async fn read_yaml_opt(path: &std::path::Path) -> Option<Value> {
@@ -52,39 +53,39 @@ async fn write_yaml(path: &std::path::Path, value: &Value) -> Result<(), ApiErro
 
 // ─── Mapping helpers ──────────────────────────────────────────────────────────
 
-/// Map risk.yaml `risk:` block → FE RiskConfig
+/// Map risk.yaml `risk:` block → FE `RiskConfig`
 fn yaml_to_fe(r: &Value) -> Value {
-    let decay = &r["decay"];
-    let canary = &r["canary"];
-    let store = &r["store"];
-    let seed = &r["seed"];
+    let decay = r.get("decay").cloned().unwrap_or(Value::Null);
+    let canary = r.get("canary").cloned().unwrap_or(Value::Null);
+    let store = r.get("store").cloned().unwrap_or(Value::Null);
+    let seed = r.get("seed").cloned().unwrap_or(Value::Null);
     json!({
-        "enabled": r["enabled"].as_bool().unwrap_or(false),
-        "ttl_secs": r["ttl_secs"].as_i64().unwrap_or(1800),
-        "gc_interval_secs": r["gc_interval_secs"].as_i64().unwrap_or(60),
-        "header_name": r["header_name"].as_str().unwrap_or("X-WAF-Risk-Score"),
-        "emit_header": r["emit_header"].as_bool().unwrap_or(true),
+        "enabled": r.get("enabled").and_then(Value::as_bool).unwrap_or(false),
+        "ttl_secs": r.get("ttl_secs").and_then(Value::as_i64).unwrap_or(1800),
+        "gc_interval_secs": r.get("gc_interval_secs").and_then(Value::as_i64).unwrap_or(60),
+        "header_name": r.get("header_name").and_then(Value::as_str).unwrap_or("X-WAF-Risk-Score"),
+        "emit_header": r.get("emit_header").and_then(Value::as_bool).unwrap_or(true),
         "decay": {
-            "min_clean_streak": decay["min_clean_streak"].as_i64().unwrap_or(10),
-            "decay_rate": decay["decay_rate"].as_i64().unwrap_or(1),
-            "max_decay": decay["max_decay"].as_i64().unwrap_or(50)
+            "min_clean_streak": decay.get("min_clean_streak").and_then(Value::as_i64).unwrap_or(10),
+            "decay_rate": decay.get("decay_rate").and_then(Value::as_i64).unwrap_or(1),
+            "max_decay": decay.get("max_decay").and_then(Value::as_i64).unwrap_or(50)
         },
         "canary": {
-            "enabled": canary["enabled"].as_bool().unwrap_or(false),
-            "paths": canary["paths"].as_array().map(|a| {
-                a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()
+            "enabled": canary.get("enabled").and_then(Value::as_bool).unwrap_or(false),
+            "paths": canary.get("paths").and_then(Value::as_array).map(|a| {
+                a.iter().filter_map(Value::as_str).collect::<Vec<_>>()
             }).unwrap_or_default(),
-            "ban_ttl_secs": canary["ban_ttl_secs"].as_i64().unwrap_or(3600)
+            "ban_ttl_secs": canary.get("ban_ttl_secs").and_then(Value::as_i64).unwrap_or(3600)
         },
         "store": {
-            "backend": store["backend"].as_str().unwrap_or("memory"),
+            "backend": store.get("backend").and_then(Value::as_str).unwrap_or("memory"),
             "redis": store.get("redis").cloned().unwrap_or(Value::Null)
         },
         "seed": {
-            "enabled": seed["enabled"].as_bool().unwrap_or(true),
-            "tor_delta": seed["tor_delta"].as_i64().unwrap_or(30),
-            "datacenter_delta": seed["datacenter_delta"].as_i64().unwrap_or(15),
-            "bad_asn_delta": seed["bad_asn_delta"].as_i64().unwrap_or(25)
+            "enabled": seed.get("enabled").and_then(Value::as_bool).unwrap_or(true),
+            "tor_delta": seed.get("tor_delta").and_then(Value::as_i64).unwrap_or(30),
+            "datacenter_delta": seed.get("datacenter_delta").and_then(Value::as_i64).unwrap_or(15),
+            "bad_asn_delta": seed.get("bad_asn_delta").and_then(Value::as_i64).unwrap_or(25)
         }
     })
 }
@@ -103,25 +104,26 @@ fn default_risk_fe() -> Value {
     })
 }
 
-/// FE RiskConfig → risk.yaml wrapped with `risk:` key
+/// FE `RiskConfig` → risk.yaml wrapped with `risk:` key
 fn fe_to_yaml(body: &Value) -> Value {
+    let seed = body.get("seed").cloned().unwrap_or(Value::Null);
     json!({
         "risk": {
             "schema_version": 1,
-            "enabled": body["enabled"],
-            "ttl_secs": body["ttl_secs"],
-            "gc_interval_secs": body["gc_interval_secs"],
-            "header_name": body["header_name"],
-            "emit_header": body["emit_header"],
-            "store": body["store"],
-            "decay": body["decay"],
+            "enabled": body.get("enabled"),
+            "ttl_secs": body.get("ttl_secs"),
+            "gc_interval_secs": body.get("gc_interval_secs"),
+            "header_name": body.get("header_name"),
+            "emit_header": body.get("emit_header"),
+            "store": body.get("store"),
+            "decay": body.get("decay"),
             "seed": {
-                "enabled": body["seed"]["enabled"],
-                "tor_delta": body["seed"]["tor_delta"],
-                "datacenter_delta": body["seed"]["datacenter_delta"],
-                "bad_asn_delta": body["seed"]["bad_asn_delta"]
+                "enabled": seed.get("enabled"),
+                "tor_delta": seed.get("tor_delta"),
+                "datacenter_delta": seed.get("datacenter_delta"),
+                "bad_asn_delta": seed.get("bad_asn_delta")
             },
-            "canary": body["canary"]
+            "canary": body.get("canary")
         }
     })
 }
@@ -131,7 +133,9 @@ fn fe_to_yaml(body: &Value) -> Value {
 pub async fn get_risk_config(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "configs/risk.yaml");
     let cfg = match read_yaml_opt(&path).await {
-        Some(v) if !v["risk"].is_null() => yaml_to_fe(&v["risk"]),
+        Some(v) if v.get("risk").is_some_and(|r| !r.is_null()) => {
+            yaml_to_fe(v.get("risk").unwrap_or(&Value::Null))
+        }
         _ => default_risk_fe(),
     };
     Ok(Json(json!({ "success": true, "data": cfg })))

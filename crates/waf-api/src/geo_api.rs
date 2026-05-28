@@ -1,7 +1,7 @@
 //! Geo restriction API — CRUD for country-based allow/block rules.
 //!
 //! Rules are persisted in `rules/geo-rules.yaml` (relative to the main config
-//! directory).  The lookup endpoint returns a stub response because GeoIP xdb
+//! directory).  The lookup endpoint returns a stub response because `GeoIP` xdb
 //! files may not be installed in every deployment.
 
 use std::sync::Arc;
@@ -18,13 +18,14 @@ use crate::state::AppState;
 // ─── Path helpers ──────────────────────────────────────────────────────────────
 
 fn rules_path(state: &AppState) -> std::path::PathBuf {
-    if let Some(main) = &state.main_config_file {
-        let p = std::path::Path::new(main.as_str());
-        let root = p.parent().and_then(|c| c.parent()).unwrap_or(std::path::Path::new("."));
-        root.join("configs/geo-rules.yaml")
-    } else {
-        std::path::PathBuf::from("configs/geo-rules.yaml")
-    }
+    state.main_config_file.as_ref().map_or_else(
+        || std::path::PathBuf::from("configs/geo-rules.yaml"),
+        |main| {
+            let p = std::path::Path::new(main.as_str());
+            let root = p.parent().and_then(|c| c.parent()).unwrap_or_else(|| std::path::Path::new("."));
+            root.join("configs/geo-rules.yaml")
+        },
+    )
 }
 
 // ─── YAML helpers ─────────────────────────────────────────────────────────────
@@ -60,7 +61,7 @@ async fn write_rules(path: &std::path::Path, rules: &[Value]) -> Result<(), ApiE
 fn next_id(rules: &[Value]) -> i64 {
     rules
         .iter()
-        .filter_map(|r| r.get("id").and_then(|v| v.as_i64()))
+        .filter_map(|r| r.get("id").and_then(Value::as_i64))
         .max()
         .unwrap_or(0)
         + 1
@@ -110,10 +111,10 @@ pub async fn patch_geo_rule(
 
     let idx = rules
         .iter()
-        .position(|r| r.get("id").and_then(|v| v.as_i64()) == Some(id))
+        .position(|r| r.get("id").and_then(Value::as_i64) == Some(id))
         .ok_or_else(|| ApiError::NotFound(format!("geo rule {id} not found")))?;
 
-    if let Some(obj) = rules[idx].as_object_mut() {
+    if let Some(obj) = rules.get_mut(idx).and_then(Value::as_object_mut) {
         for field in &["enabled", "action", "scope"] {
             if let Some(v) = body.get(*field) {
                 obj.insert((*field).to_owned(), v.clone());
@@ -121,7 +122,7 @@ pub async fn patch_geo_rule(
         }
     }
 
-    let updated = rules[idx].clone();
+    let updated = rules.get(idx).cloned().unwrap_or(Value::Null);
     write_rules(&path, &rules).await?;
     Ok(Json(json!({ "success": true, "data": updated })))
 }
@@ -130,7 +131,7 @@ pub async fn delete_geo_rule(State(state): State<Arc<AppState>>, Path(id): Path<
     let path = rules_path(&state);
     let mut rules = read_rules(&path).await;
     let before = rules.len();
-    rules.retain(|r| r.get("id").and_then(|v| v.as_i64()) != Some(id));
+    rules.retain(|r| r.get("id").and_then(Value::as_i64) != Some(id));
     if rules.len() == before {
         return Err(ApiError::NotFound(format!("geo rule {id} not found")));
     }
@@ -139,7 +140,7 @@ pub async fn delete_geo_rule(State(state): State<Arc<AppState>>, Path(id): Path<
 }
 
 /// POST /api/geoip/lookup — IP → country lookup.
-/// Returns a stub response; GeoIP xdb database must be installed for real data.
+/// Returns a stub response; `GeoIP` xdb database must be installed for real data.
 pub async fn lookup_ip(_state: State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult<Json<Value>> {
     let ip_str = body.get("ip").and_then(|v| v.as_str()).unwrap_or("").to_owned();
 
