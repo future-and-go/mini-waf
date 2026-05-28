@@ -167,13 +167,14 @@ fn config_syncer_apply_and_build() {
     );
     assert!(!built.config_toml.is_empty());
 
+    let next_version = built.version + 1;
     let incoming = ConfigSync {
-        version: 7,
+        version: next_version,
         config_toml: toml::to_string(&syncable).unwrap(),
     };
     let result = s.apply_sync(&incoming, 1);
     assert!(result.is_some());
-    assert_eq!(s.current_version(), 7);
+    assert_eq!(s.current_version(), next_version);
 }
 
 // ─── lz4 snapshot helpers ─────────────────────────────────────────────────────
