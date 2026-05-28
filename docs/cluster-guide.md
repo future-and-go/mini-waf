@@ -266,15 +266,17 @@ prx-waf cluster cert-init \
 
 ## Network & Port Reference
 
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| 80 | TCP | HTTP proxy |
-| 443 | TCP | HTTPS proxy |
-| 9527 | TCP | Management API + Admin UI |
-| **16851** | **UDP** | **QUIC cluster communication (inter-node only)** |
+| Port | Protocol | Service | Container Port | Docker Host Port |
+|------|----------|---------|-----------------|------------------|
+| 80 | TCP | HTTP proxy | 80 | 16880 |
+| 443 | TCP | HTTPS proxy | 443 | 16843 |
+| 9527 | TCP | Management API + Admin UI | 9527 | 16827 (node-a), 16828 (node-b), 16829 (node-c) |
+| **16851** | **UDP** | **QUIC cluster communication (inter-node only)** | 16851 | internal only |
 
-The cluster port (16851) should only be reachable between cluster nodes. Use a
-firewall or private network to prevent external access.
+**Note:** Container ports (80, 443, 9527, 16851) are internal to the Docker network.
+The Docker Host Port column shows the external mapping for docker-compose deployments.
+The cluster port (16851) should only be reachable between cluster nodes via a private
+network or firewall rules.
 
 ---
 
