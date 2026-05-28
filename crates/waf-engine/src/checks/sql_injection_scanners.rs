@@ -10,13 +10,19 @@ use waf_common::config::SqliScanConfig;
 
 use super::url_decode_recursive;
 
+/// Hard depth cap for `walk_json`. Defence-in-depth: serde_json's default
+/// parser limit is 128 today, so any body deeper than that fails at parse
+/// time before we walk; this guard ensures a future relaxation of that
+/// limit cannot let an attacker drive the walker arbitrarily deep.
+const MAX_JSON_DEPTH: usize = 128;
+
 /// Scan JSON body for `SQLi` patterns, returning (`json_path`, `pattern_index`) on first hit.
 pub fn scan_json_body(body: &[u8], patterns: &RegexSet, json_parse_cap: usize) -> Option<(String, usize)> {
     if body.len() > json_parse_cap {
         return None;
     }
     let v: Value = serde_json::from_slice(body).ok()?;
-    walk_json(&v, &mut String::from("body"), patterns)
+    walk_json(&v, "body", patterns)
 }
 
 /// Scan HTTP headers for `SQLi` patterns, respecting allowlist/denylist and cap.
@@ -55,38 +61,46 @@ pub fn scan_headers(
     None
 }
 
-fn walk_json(v: &Value, path: &mut String, set: &RegexSet) -> Option<(String, usize)> {
-    match v {
-        Value::String(s) => {
-            let decoded = url_decode_recursive(s);
-            let m = set.matches(&decoded);
-            m.iter().next().map(|idx| (path.clone(), idx))
+/// Iterative DFS over a parsed `serde_json::Value` looking for `SQLi` hits.
+///
+/// Uses an explicit `Vec` stack instead of recursion so a deeply-nested body
+/// cannot blow the call stack even if the body-abuse pre-check is disabled,
+/// and respects [`MAX_JSON_DEPTH`] as an explicit defence-in-depth ceiling.
+/// Children are pushed in reverse order so the pop order matches the natural
+/// left-to-right / sorted-key traversal of the previous recursive form.
+fn walk_json(root: &Value, root_path: &str, set: &RegexSet) -> Option<(String, usize)> {
+    let mut stack: Vec<(&Value, String, usize)> = Vec::new();
+    stack.push((root, root_path.to_owned(), 0));
+    while let Some((node, path, depth)) = stack.pop() {
+        if depth > MAX_JSON_DEPTH {
+            return None;
         }
-        Value::Object(map) => {
-            for (k, child) in map {
-                let restore = path.len();
-                path.push('.');
-                path.push_str(k);
-                if let Some(hit) = walk_json(child, path, set) {
-                    return Some(hit);
+        match node {
+            Value::String(s) => {
+                let decoded = url_decode_recursive(s);
+                if let Some(idx) = set.matches(&decoded).iter().next() {
+                    return Some((path, idx));
                 }
-                path.truncate(restore);
             }
-            None
-        }
-        Value::Array(arr) => {
-            for (i, child) in arr.iter().enumerate() {
-                let restore = path.len();
-                let _ = write!(path, "[{i}]");
-                if let Some(hit) = walk_json(child, path, set) {
-                    return Some(hit);
+            Value::Object(map) => {
+                for (k, child) in map.iter().rev() {
+                    let mut child_path = path.clone();
+                    child_path.push('.');
+                    child_path.push_str(k);
+                    stack.push((child, child_path, depth + 1));
                 }
-                path.truncate(restore);
             }
-            None
+            Value::Array(arr) => {
+                for (i, child) in arr.iter().enumerate().rev() {
+                    let mut child_path = path.clone();
+                    let _ = write!(child_path, "[{i}]");
+                    stack.push((child, child_path, depth + 1));
+                }
+            }
+            _ => {}
         }
-        _ => None,
     }
+    None
 }
 
 /// Scan query parameters for `SQLi`, returning (`param_name`, `pattern_index`) on first hit.
@@ -199,6 +213,46 @@ mod tests {
         let body = br#"{"cmd": "1 AND %53%4C%45%45%50%28%35%29"}"#;
         let result = scan_json_body(body, &SQLI_SET, TEST_JSON_CAP);
         assert!(result.is_some(), "Should detect URL-encoded SLEEP in JSON");
+    }
+
+    #[test]
+    fn json_deep_nesting_iterative_walker_finds_hit() {
+        // 100 layers of `{"a": ...}` wrapping a SQLi-bearing leaf string.
+        // The recursive walker consumed one stack frame per layer; the
+        // iterative replacement walks via a heap-allocated Vec instead.
+        // This case is well under serde_json's default 128-deep parse limit.
+        let mut body = String::new();
+        for _ in 0..100 {
+            body.push_str(r#"{"a":"#);
+        }
+        body.push_str(r#""' OR '1'='1'""#);
+        for _ in 0..100 {
+            body.push('}');
+        }
+
+        let result = scan_json_body(body.as_bytes(), &SQLI_SET, TEST_JSON_CAP);
+        assert!(result.is_some(), "deep-nested SQLi must surface via iterative walker");
+        let (path, _) = result.unwrap();
+        assert!(path.starts_with("body.a.a.a"), "path={path}");
+        assert!(path.ends_with(".a"), "path={path}");
+    }
+
+    #[test]
+    fn json_beyond_serde_default_depth_returns_none() {
+        // 200 layers exceeds serde_json's default RECURSION_LIMIT (128); the
+        // parse fails and `scan_json_body` short-circuits to None before the
+        // walker runs. Documents the outer guard that complements the
+        // walker's own MAX_JSON_DEPTH ceiling.
+        let mut body = String::new();
+        for _ in 0..200 {
+            body.push_str(r#"{"a":"#);
+        }
+        body.push_str(r#""hit""#);
+        for _ in 0..200 {
+            body.push('}');
+        }
+        let result = scan_json_body(body.as_bytes(), &SQLI_SET, TEST_JSON_CAP);
+        assert!(result.is_none(), "serde_json parse must refuse 200-deep body");
     }
 
     #[test]
