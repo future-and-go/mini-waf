@@ -103,7 +103,7 @@ fn default_challenge_fe() -> Value {
         "same_site": "Strict",
         "http_only": false,
         "branding": { "title": "Security Check", "message": "Please wait while we verify your browser..." },
-        "nonce_store": { "capacity": 100000, "gc_interval_secs": 60 }
+        "nonce_store": { "capacity": 100_000, "gc_interval_secs": 60 }
     })
 }
 

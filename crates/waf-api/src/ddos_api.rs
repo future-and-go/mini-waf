@@ -50,7 +50,7 @@ async fn write_yaml(path: &std::path::Path, value: &Value) -> Result<(), ApiErro
 
 fn yaml_to_fe(v: &Value) -> Value {
     let per_ip = &v["per_ip"];
-    let per_fp = &v["per_fingerprint"];
+    let per_fingerprint = &v["per_fingerprint"];
     let store = &v["store"];
     let bans = v["ban_durations_secs"]
         .as_array()
@@ -63,8 +63,8 @@ fn yaml_to_fe(v: &Value) -> Value {
             "window_secs": per_ip["window_secs"].as_i64().unwrap_or(10)
         },
         "per_fingerprint": {
-            "threshold_rps": per_fp["threshold_rps"].as_i64().unwrap_or(200),
-            "window_secs": per_fp["window_secs"].as_i64().unwrap_or(10)
+            "threshold_rps": per_fingerprint["threshold_rps"].as_i64().unwrap_or(200),
+            "window_secs": per_fingerprint["window_secs"].as_i64().unwrap_or(10)
         },
         "ban_durations_secs": bans,
         "store": {
