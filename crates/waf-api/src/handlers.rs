@@ -716,10 +716,12 @@ pub async fn set_log_level(
         return Err(ApiError::BadRequest("filter string exceeds 256 character limit".into()));
     }
 
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0) as u64;
+    let now_ms = u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis()),
+    )
+    .unwrap_or(u64::MAX);
     let last = LAST_LOG_LEVEL_CHANGE_MS.load(Ordering::Relaxed);
     if last > 0 && now_ms.saturating_sub(last) < LOG_LEVEL_COOLDOWN_MS {
         let remaining_ms = LOG_LEVEL_COOLDOWN_MS - now_ms.saturating_sub(last);

@@ -122,10 +122,12 @@ pub async fn get_ddos_metrics(_: State<Arc<AppState>>) -> ApiResult<Json<Value>>
     })))
 }
 
-/// **STUB — v1 placeholder.**  Returns an empty ban table; in-memory DDoS ban
-/// tracking is not yet wired into the API layer.  Frontend should treat `data: []`
-/// as "no data available" rather than "no active bans".  Will be backed by the
-/// live ban store in a future release.
+/// **STUB — v1 placeholder.**
+///
+/// Returns an empty ban table; in-memory `DDoS` ban tracking is not yet wired
+/// into the API layer. Frontend should treat `data: []` as "no data available"
+/// rather than "no active bans". Will be backed by the live ban store in a
+/// future release.
 pub async fn list_ban_table(_: State<Arc<AppState>>) -> ApiResult<Json<Value>> {
     Ok(Json(json!({ "success": true, "data": [], "total": 0 })))
 }
