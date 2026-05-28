@@ -2,10 +2,10 @@ use axum::{
     Json,
     extract::{Path, Query, State},
 };
-use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
 
 use waf_storage::models::{

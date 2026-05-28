@@ -160,7 +160,11 @@ fn config_syncer_apply_and_build() {
     };
     let built = s.build_sync(&syncable).expect("build_sync");
     // Version is a monotonic Unix-timestamp-based value, always > 0.
-    assert!(built.version > 0, "build_sync must produce a positive version, got {}", built.version);
+    assert!(
+        built.version > 0,
+        "build_sync must produce a positive version, got {}",
+        built.version
+    );
     assert!(!built.config_toml.is_empty());
 
     let incoming = ConfigSync {

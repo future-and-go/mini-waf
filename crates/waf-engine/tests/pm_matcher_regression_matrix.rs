@@ -530,6 +530,21 @@ fn encoding_bypass_double_encode_behavior() {
     // Intentionally no assertion — this test documents behavior
 }
 
+#[test]
+fn pm_from_file_java_classes_blocks_isolated() {
+    let engine = engine_from_crs_file("java-injection.yaml");
+    // java-classes.data: dangerous Java class names used in RCE/deserialization attacks (CVE-2017-5638, Log4Shell, etc.)
+    let patterns = ["java.lang.Runtime", "java.lang.ProcessBuilder", "com.opensymphony.xwork2"];
+    for p in &patterns {
+        let body = format!("data={p}");
+        let ctx = ctx_p4("POST", "/api/invoke", "", body.as_bytes(), &[]);
+        assert!(
+            engine.check(&ctx).is_some(),
+            "CRS-944130: java-classes pattern '{p}' in body should be blocked"
+        );
+    }
+}
+
 // ── Completeness guard ──────────────────────────────────────────────────────
 // Fails if a new pm_from_file rule is added to CRS without coverage here.
 
@@ -546,6 +561,7 @@ fn known_pm_data_files() -> Vec<&'static str> {
         "scanners-user-agents.data",
         "windows-powershell-commands.data",
         "restricted-upload.data",
+        "java-classes.data",
         // Response-phase data files (tested indirectly — can't inject response body)
         "asp-dotnet-errors.data",
         "iis-errors.data",
