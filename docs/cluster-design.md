@@ -232,21 +232,25 @@ operate without WASM plugins. Explicitly documented as a v1 limitation.
 
 | Dependency | Status | Notes |
 |-----------|--------|-------|
-| `quinn = "0.11"` | ✅ Already in workspace | Used in gateway (HTTP/3) |
-| `rustls = "0.23"` | ✅ Already in workspace | Used in gateway (HTTP/3) |
-| `rcgen = "0.13"` | ✅ Already in workspace | Used in gateway (ACME TLS) |
-| `rustls-pemfile = "2"` | ✅ Already in workspace | Used in gateway |
-| `serde_json` | ✅ Already in workspace | All cluster types use it |
-| `aes-gcm` | ✅ Already in waf-common | Reuse for CA key encryption |
-| `prost = "0.13"` | ❌ Not present | Avoided — use serde_json instead |
-| `prost-build = "0.13"` | ❌ Not present | Avoided — no protobuf |
-| `lz4_flex = "0.11"` | ❌ Not present | **Only genuinely new dep** |
+| `quinn` | ✅ Already in workspace | Used in gateway (HTTP/3) |
+| `rustls` | ✅ Already in workspace | Used in gateway (HTTP/3) |
+| `rcgen` | ✅ Already in workspace | Used in gateway (ACME TLS) |
+| `rustls-pki-types` | ✅ Already in workspace | Used in gateway |
+| `bytes` | ✅ Already in workspace | QUIC frame codec |
+| `serde_json` | ✅ Already in workspace | Wire format (no protobuf) |
+| `aes-gcm` | ✅ Already in workspace | CA key encryption |
+| `sha2`, `hmac`, `hex`, `base64` | ✅ Already in workspace | Join token HMAC + encoding |
+| `time` | ✅ Already in workspace | Timestamp handling |
+| `parking_lot` | ✅ Already in workspace | Sync primitives |
+| `async-trait` | ✅ Already in workspace | RuleReloader trait |
+| `toml` | ✅ Already in workspace | Config sync |
+| `reqwest` | ✅ Already in workspace | API write forwarding |
+| `lz4_flex` | ❌ **Only new dep** | Full rule snapshot compression |
 | SQLite sqlx feature | ❌ Not present | Not needed — in-memory cache |
 
-**Recommendation: Drop protobuf.** Use `serde_json` for wire encoding. All `Rule` and
-cluster message types already implement `Serialize + Deserialize`. JSON is adequate at
-cluster-internal LAN rates and eliminates a build.rs compilation step, prost-build, and
-proto file maintenance.
+**Note:** All crypto and serialization dependencies are already present in the workspace.
+The only genuinely new dependency added for clustering is `lz4_flex` for compressing large
+rule snapshots.
 
 ---
 
@@ -302,19 +306,32 @@ CA key encryption reuses those helpers directly.
 
 ### 5.3 Join Token Flow
 
+**v1 Implementation:** Workers use pre-generated certificates (no CSR signing in v1).
+
 ```
-1. Admin generates join token on main:
+1. Admin pre-generates cluster certificates:
+   $ prx-waf cluster cert-init --nodes node-a,node-b,node-c
+
+2. Certs distributed to each node (cluster-ca.pem to all; node-specific keys to respective nodes)
+
+3. Admin generates join token on main:
    $ prx-waf cluster token generate --ttl 1h
    → abc123-def456-ghi789  (HMAC-SHA256 signed, includes expiry)
 
-2. Worker starts with token:
+4. Worker starts with token:
    $ prx-waf run --cluster-join main.example.com:16851 --token abc123-def456-ghi789
 
-3. Worker connects to main via QUIC (server-only TLS initially — no client cert yet)
-4. Worker sends: JoinRequest { token, csr_pem, node_info }
-5. Main validates token + signs CSR → JoinResponse { node_cert_pem, ca_cert_pem, cluster_state }
-6. Worker reconnects with mTLS (both sides verified by CA)
-7. Main broadcasts: NodeJoined to all peers
+5. Worker connects to main via QUIC with mTLS (both sides have pre-generated certs)
+
+6. Worker sends: JoinRequest { token, csr_pem: "", node_info }
+
+7. Main validates token → JoinResponse { accepted, node_cert_pem, ca_cert_pem, 
+   cluster_state, encrypted_ca_key_b64 (if passphrase configured) }
+
+8. Main broadcasts: NodeJoined to all peers
+
+Note: Full CSR signing is deferred to a future phase. v1 uses pre-generated certificates
+for simplicity and reduced latency.
 ```
 
 ---
@@ -375,6 +392,9 @@ crates/waf-cluster/
 ├── src/
 │   ├── lib.rs              # pub use ClusterNode, ClusterConfig, NodeRole
 │   ├── node.rs             # NodeState, NodeRole enum, role state machine
+│   ├── protocol.rs         # All ClusterMessage types (serde_json, no protobuf)
+│   ├── discovery.rs        # Static peer list from ClusterConfig.seeds (mDNS deferred)
+│   ├── cluster_forward.rs  # API write forwarding (worker → main)
 │   ├── transport/
 │   │   ├── mod.rs          # QUIC connection manager
 │   │   ├── server.rs       # QUIC mTLS listener (reuses gateway/http3.rs patterns)
@@ -384,27 +404,39 @@ crates/waf-cluster/
 │   │   ├── mod.rs
 │   │   ├── ca.rs           # CA generation via rcgen (already in workspace)
 │   │   ├── node_cert.rs    # Node cert signing + CSR validation
-│   │   └── store.rs        # AES-GCM key storage (reuse waf-common::crypto)
-│   ├── discovery/
-│   │   └── static_seeds.rs # Static peer list from ClusterConfig.seeds (mDNS deferred)
-│   ├── sync/
-│   │   ├── mod.rs
-│   │   ├── rules.rs        # Rule sync using RuleRegistry.version + serde_json + lz4
-│   │   ├── config.rs       # Config sync (TOML string)
-│   │   └── events.rs       # Attack log batching + forwarding to main
+│   │   ├── store.rs        # AES-GCM key storage (reuse waf-common::crypto)
+│   │   └── token.rs        # Join token: HMAC-SHA256 generate + validate
 │   ├── election/
-│   │   ├── mod.rs          # Raft-lite leader election (term, vote, timeout)
-│   │   └── state.rs        # Election state machine
+│   │   └── mod.rs          # Raft-lite leader election (term, vote, timeout)
 │   ├── health/
 │   │   ├── mod.rs          # Heartbeat sender/receiver
 │   │   └── detector.rs     # Phi-accrual failure detector
-│   └── protocol/
-│       └── messages.rs     # All ClusterMessage types (serde_json, no protobuf)
+│   └── sync/
+│       ├── mod.rs
+│       ├── rules.rs        # Rule sync using RuleRegistry.version + serde_json + lz4
+│       ├── config.rs       # Config sync (TOML string)
+│       └── events.rs       # Attack log batching + forwarding to main
 │
 └── tests/
-    ├── integration.rs      # 2-node QUIC connect + heartbeat
-    ├── election_test.rs    # State machine edge cases
-    └── sync_test.rs        # Rule version diff + full snapshot
+    ├── cluster_integration.rs        # 2-node QUIC connect + heartbeat
+    ├── cluster_full_lifecycle.rs     # Full cluster bootstrap + rule sync
+    ├── cluster_forward_routing.rs    # API write forwarding
+    ├── election_test.rs              # State machine edge cases
+    ├── election_state_machine.rs     # Election state transitions
+    ├── peer_eviction_test.rs         # Phi-accrual + peer removal
+    ├── config_sync_test.rs           # Config replication
+    ├── rule_sync_e2e.rs              # Rule version diff + full snapshot
+    ├── discovery_static.rs           # Static seed discovery
+    ├── engine_bridge_test.rs         # RuleReloader integration
+    ├── event_forwarding_test.rs      # Event batch forwarding
+    ├── sync_events_batching.rs       # Event batching logic
+    ├── write_forwarding_test.rs      # API write forwarding
+    ├── transport_loopback.rs         # QUIC transport basics
+    ├── transport_dispatch_coverage.rs# Message routing
+    ├── transport_error_paths.rs      # Connection error handling
+    ├── crypto_store_extra.rs         # Crypto key storage
+    ├── integration_test.rs           # Full integration
+    └── lib_reexports_smoke.rs        # Public API smoke test
 ```
 
 ### A.2 Dependency Graph (Corrected)
@@ -417,14 +449,24 @@ prx-waf (binary)
 ├── waf-api        (Axum REST + Admin UI)
 ├── waf-common     (AppConfig extended with ClusterConfig)
 └── waf-cluster    (NEW)
-    ├── quinn          ✅ already workspace dep
-    ├── rustls         ✅ already workspace dep
-    ├── rcgen          ✅ already workspace dep
-    ├── rustls-pemfile ✅ already workspace dep
-    ├── serde_json     ✅ already workspace dep
-    ├── aes-gcm        ✅ already waf-common dep
-    ├── lz4_flex       ❌ ONLY GENUINELY NEW DEP
-    └── waf-common     ✅
+    ├── quinn                ✅ already workspace dep
+    ├── rustls               ✅ already workspace dep
+    ├── rcgen                ✅ already workspace dep
+    ├── rustls-pki-types     ✅ already workspace dep
+    ├── bytes                ✅ already workspace dep
+    ├── serde_json           ✅ already workspace dep
+    ├── aes-gcm              ✅ already workspace dep
+    ├── sha2                 ✅ already workspace dep
+    ├── hmac                 ✅ already workspace dep
+    ├── hex                  ✅ already workspace dep
+    ├── base64               ✅ already workspace dep
+    ├── time                 ✅ already workspace dep
+    ├── parking_lot          ✅ already workspace dep
+    ├── async-trait          ✅ already workspace dep
+    ├── toml                 ✅ already workspace dep
+    ├── reqwest              ✅ already workspace dep
+    ├── lz4_flex             ❌ ONLY GENUINELY NEW WORKSPACE DEP
+    └── waf-common, waf-engine ✅
 ```
 
 ### A.3 Cargo.toml for waf-cluster
@@ -439,24 +481,30 @@ license.workspace = true
 [dependencies]
 waf-common  = { path = "../waf-common" }
 waf-engine  = { path = "../waf-engine" }
-waf-storage = { path = "../waf-storage" }
 
-quinn          = { workspace = true }
-rustls         = { workspace = true }
-rcgen          = { workspace = true }
-rustls-pemfile = { workspace = true }
-tokio          = { workspace = true }
-serde          = { workspace = true }
-serde_json     = { workspace = true }
-tracing        = { workspace = true }
-anyhow         = { workspace = true }
-thiserror      = { workspace = true }
-rand           = { workspace = true }
-aes-gcm        = { workspace = true }
-bytes          = { workspace = true }
-dashmap        = { workspace = true }
+quinn            = { workspace = true }
+rustls           = { workspace = true }
+rcgen            = { workspace = true }
+rustls-pki-types = { workspace = true }
+bytes            = { workspace = true }
+tokio            = { workspace = true }
+serde            = { workspace = true }
+serde_json       = { workspace = true }
+tracing          = { workspace = true }
+anyhow           = { workspace = true }
+aes-gcm          = { workspace = true }
+sha2             = { workspace = true }
+hmac             = { workspace = true }
+hex              = { workspace = true }
+base64           = { workspace = true }
+rand             = { workspace = true }
+time             = { workspace = true }
+parking_lot      = { workspace = true }
+async-trait      = { workspace = true }
+toml             = { workspace = true }
+reqwest          = { workspace = true }
 
-lz4_flex = "0.11"   # Only new dep — used for full rule snapshot compression
+lz4_flex = { workspace = true }   # Only genuinely new dep — used for full rule snapshot compression
 ```
 
 Add to workspace root `Cargo.toml`:
@@ -511,22 +559,22 @@ impl Default for ClusterConfig {
 ```
 
 ```rust
-// crates/waf-common/src/lib.rs
+// crates/waf-common/src/lib.rs (config.rs — appended)
 pub use config::ClusterConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeRole { Main, Worker, Candidate }
+```
 
-pub struct NodeId(pub String);
-impl NodeId {
-    pub fn from_hostname() -> Self {
-        let host = hostname::get()
-            .ok()
-            .and_then(|h| h.into_string().ok())
-            .unwrap_or_else(|| "unknown".to_string());
-        Self(format!("{}-{}", host, &uuid::Uuid::new_v4().to_string()[..8]))
-    }
-}
+Node ID generation is handled in `waf-cluster/src/node.rs`:
+
+```rust
+// crates/waf-cluster/src/node.rs
+let node_id = if config.node_id.is_empty() {
+    format!("node-{}", random_suffix())  // generates "node-xxxxxxxx" (8 random hex chars)
+} else {
+    config.node_id.clone()
+};
 ```
 
 #### waf-engine — Minimal
