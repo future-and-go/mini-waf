@@ -10,7 +10,7 @@ use waf_common::config::SqliScanConfig;
 
 use super::url_decode_recursive;
 
-/// Hard depth cap for `walk_json`. Defence-in-depth: serde_json's default
+/// Hard depth cap for `walk_json`. Defence-in-depth: `serde_json`'s default
 /// parser limit is 128 today, so any body deeper than that fails at parse
 /// time before we walk; this guard ensures a future relaxation of that
 /// limit cannot let an attacker drive the walker arbitrarily deep.
