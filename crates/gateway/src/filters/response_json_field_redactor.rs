@@ -219,13 +219,7 @@ const MAX_REDACT_DEPTH: usize = 128;
 /// `mask` (as a JSON string). Walks nested objects and arrays via an
 /// explicit `Vec` stack — no recursion, so deep-but-legitimate bodies
 /// cannot blow the call stack.
-fn walk(
-    root: &mut serde_json::Value,
-    fields: &HashSet<String>,
-    mask: &str,
-    case_insensitive: bool,
-    hits: &mut usize,
-) {
+fn walk(root: &mut serde_json::Value, fields: &HashSet<String>, mask: &str, case_insensitive: bool, hits: &mut usize) {
     use serde_json::Value::{Array, Object};
     let mut stack: Vec<(&mut serde_json::Value, usize)> = vec![(root, 0)];
     while let Some((node, depth)) = stack.pop() {
