@@ -84,9 +84,10 @@ impl ConfigSyncer {
         let config_toml = toml::to_string(config).context("failed to serialize SyncableConfig to TOML")?;
         let ts_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map_or_else(|_| self.current_version + 1, |d| {
-                u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
-            });
+            .map_or_else(
+                |_| self.current_version + 1,
+                |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX),
+            );
         // Guard against clock skew: ensure version is always strictly increasing.
         self.current_version = ts_ms.max(self.current_version + 1);
         Ok(ConfigSync {
