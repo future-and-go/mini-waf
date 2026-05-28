@@ -534,7 +534,11 @@ fn encoding_bypass_double_encode_behavior() {
 fn pm_from_file_java_classes_blocks_isolated() {
     let engine = engine_from_crs_file("java-injection.yaml");
     // java-classes.data: dangerous Java class names used in RCE/deserialization attacks (CVE-2017-5638, Log4Shell, etc.)
-    let patterns = ["java.lang.Runtime", "java.lang.ProcessBuilder", "com.opensymphony.xwork2"];
+    let patterns = [
+        "java.lang.Runtime",
+        "java.lang.ProcessBuilder",
+        "com.opensymphony.xwork2",
+    ];
     for p in &patterns {
         let body = format!("data={p}");
         let ctx = ctx_p4("POST", "/api/invoke", "", body.as_bytes(), &[]);
