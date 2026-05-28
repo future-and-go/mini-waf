@@ -76,22 +76,7 @@ impl RuleReloader for WafEngine {
             version = registry.version,
             "Reloading engine from cluster registry (skipping DB)"
         );
-        let rules_dir = self
-            .rules_dir
-            .get()
-            .cloned()
-            .unwrap_or_else(|| std::path::PathBuf::from("rules"));
-        self.custom_rules.clear_file_rules();
-        match crate::rules::custom_file_loader::load_dir(&rules_dir) {
-            Ok(file_rules) => {
-                let count = file_rules.len();
-                for rule in file_rules {
-                    self.custom_rules.add_file_rule(rule);
-                }
-                tracing::debug!(count, "File-based rules reloaded from registry sync");
-            }
-            Err(e) => tracing::warn!("File rule reload skipped during registry sync: {e}"),
-        }
+        self.reload_file_rules();
         Ok(())
     }
 }
