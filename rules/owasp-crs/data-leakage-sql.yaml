@@ -46,8 +46,8 @@ tags:
 - owasp-crs
 - data-leakage
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '951130'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-951140
@@ -63,8 +63,8 @@ tags:
 - owasp-crs
 - data-leakage
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '951140'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-951150
@@ -97,8 +97,8 @@ tags:
 - owasp-crs
 - data-leakage
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '951160'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-951170
@@ -114,8 +114,8 @@ tags:
 - owasp-crs
 - data-leakage
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '951170'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-951180
@@ -216,8 +216,8 @@ tags:
 - owasp-crs
 - data-leakage
 metadata:
-  crs_id: '951230'
   source: OWASP CRS v4.25.0
+  crs_id: '951230'
 ---
 kind: custom_rule_v1
 id: CRS-951240

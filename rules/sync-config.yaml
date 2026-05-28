@@ -6,8 +6,8 @@ sources:
     repo: "https://github.com/coreruleset/coreruleset.git"
     branch: "main"
     rules_path: "rules/"
-    output: "rules/owasp-crs/"
-    converter: "tools/modsec2yaml.py"
+    output: "../owasp-crs/"
+    converter: "modsec2yaml.py"
     description: "OWASP ModSecurity Core Rule Set v4 - comprehensive web attack detection"
     license: "Apache-2.0"
     # Sync a specific tag instead of branch tip:

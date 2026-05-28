@@ -45,5 +45,5 @@ tags:
 - owasp-crs
 - session-fixation
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '943120'
+  source: OWASP CRS v4.25.0

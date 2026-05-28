@@ -13,8 +13,8 @@ tags:
 - attack-rce
 - attack-injection-generic
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '934100'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-934110
@@ -65,8 +65,8 @@ tags:
 - attack-rce
 - attack-injection-generic
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '934130'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-934150
@@ -117,7 +117,24 @@ tags:
 - owasp-crs
 - generic-attack
 metadata:
+  source: OWASP CRS v4.25.0
   crs_id: '934170'
+---
+kind: custom_rule_v1
+id: CRS-934200
+name: Server-Side Template Injection (SSTI) Attack
+enabled: true
+action: block
+pattern: (?:\{\{[^\}]*?(?:[\(\*]|__)[^\}]*?\}|#\{[^\}]*?(?:[\(\*]|__)[^\}]*?)\}|<%=?[\s\x0b]*[^%]*?(?:[\(\*]|__)[^%]*?%>
+category: generic-attack
+severity: critical
+paranoia: 1
+tags:
+- owasp-crs
+- generic-attack
+- attack-injection-generic
+metadata:
+  crs_id: '934200'
   source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
@@ -151,8 +168,8 @@ tags:
 - owasp-crs
 - generic-attack
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '934120'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-934140
@@ -186,5 +203,5 @@ tags:
 - generic-attack
 - attack-injection-generic
 metadata:
-  crs_id: '934180'
   source: OWASP CRS v4.25.0
+  crs_id: '934180'

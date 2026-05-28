@@ -12,8 +12,8 @@ tags:
 - protocol-attack
 - attack-protocol
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '921110'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-921120
@@ -29,8 +29,8 @@ tags:
 - protocol-attack
 - attack-protocol
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '921120'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-921130
@@ -82,8 +82,8 @@ tags:
 - protocol-attack
 - attack-protocol
 metadata:
-  crs_id: '921150'
   source: OWASP CRS v4.25.0
+  crs_id: '921150'
 ---
 kind: custom_rule_v1
 id: CRS-921160
@@ -100,8 +100,8 @@ tags:
 - protocol-attack
 - attack-protocol
 metadata:
-  crs_id: '921160'
   source: OWASP CRS v4.25.0
+  crs_id: '921160'
 ---
 kind: custom_rule_v1
 id: CRS-921190
@@ -170,8 +170,8 @@ tags:
 - protocol-attack
 - attack-protocol
 metadata:
-  crs_id: '921240'
   source: OWASP CRS v4.25.0
+  crs_id: '921240'
 ---
 kind: custom_rule_v1
 id: CRS-921250
@@ -207,8 +207,8 @@ tags:
 - protocol-attack
 - attack-protocol
 metadata:
-  crs_id: '921151'
   source: OWASP CRS v4.25.0
+  crs_id: '921151'
 ---
 kind: custom_rule_v1
 id: CRS-921422
@@ -261,8 +261,8 @@ tags:
 - protocol-attack
 - attack-protocol
 metadata:
-  crs_id: '921210'
   source: OWASP CRS v4.25.0
+  crs_id: '921210'
 ---
 kind: custom_rule_v1
 id: CRS-921220
@@ -279,5 +279,5 @@ tags:
 - protocol-attack
 - attack-protocol
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '921220'
+  source: OWASP CRS v4.25.0
