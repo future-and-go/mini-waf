@@ -65,7 +65,7 @@ impl RuleReloader for WafEngine {
 
     /// Reload engine state from the cluster-synced registry without touching
     /// the database.  Called on worker nodes (`StorageMode::ForwardOnly`) that
-    /// have no PostgreSQL connection — `reload_rules()` would panic/error there.
+    /// have no `PostgreSQL` connection — `reload_rules()` would panic/error there.
     ///
     /// Refreshes only the file-based custom rules (local disk, no DB required).
     /// Built-in and DB-sourced rules remain as they were loaded at startup;
