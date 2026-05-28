@@ -54,7 +54,7 @@ async fn write_yaml(path: &std::path::Path, value: &Value) -> Result<(), ApiErro
 
 fn yaml_to_fe(v: &Value) -> Value {
     let per_ip = v.get("per_ip").cloned().unwrap_or(Value::Null);
-    let per_fp = v.get("per_fingerprint").cloned().unwrap_or(Value::Null);
+    let fingerprint_cfg = v.get("per_fingerprint").cloned().unwrap_or(Value::Null);
     let store = v.get("store").cloned().unwrap_or(Value::Null);
     let bans = v.get("ban_durations_secs").and_then(Value::as_array).map_or_else(
         || vec![60, 300, 3600],
@@ -67,8 +67,8 @@ fn yaml_to_fe(v: &Value) -> Value {
             "window_secs": per_ip.get("window_secs").and_then(Value::as_i64).unwrap_or(10)
         },
         "per_fingerprint": {
-            "threshold_rps": per_fp.get("threshold_rps").and_then(Value::as_i64).unwrap_or(200),
-            "window_secs": per_fp.get("window_secs").and_then(Value::as_i64).unwrap_or(10)
+            "threshold_rps": fingerprint_cfg.get("threshold_rps").and_then(Value::as_i64).unwrap_or(200),
+            "window_secs": fingerprint_cfg.get("window_secs").and_then(Value::as_i64).unwrap_or(10)
         },
         "ban_durations_secs": bans,
         "store": {

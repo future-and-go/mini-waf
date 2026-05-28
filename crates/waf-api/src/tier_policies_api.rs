@@ -119,14 +119,14 @@ pub async fn dry_run_tier(State(state): State<Arc<AppState>>, Json(body): Json<V
 
         for rule in &sorted {
             let tier = rule.get("tier").and_then(Value::as_str).unwrap_or("catch_all");
-            let method_match = rule.get("methods").and_then(Value::as_array).map_or(true, |ms| {
+            let method_match = rule.get("methods").and_then(Value::as_array).is_none_or(|ms| {
                 ms.iter()
                     .any(|m| m.as_str().is_some_and(|s| s.eq_ignore_ascii_case(method)))
             });
             let path_match = rule
                 .get("path_match")
                 .and_then(Value::as_str)
-                .map_or(true, |p| path_str.starts_with(p));
+                .is_none_or(|p| path_str.starts_with(p));
 
             if method_match && path_match {
                 tier.clone_into(&mut matched_tier);
