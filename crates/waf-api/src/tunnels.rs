@@ -44,7 +44,11 @@ pub async fn list_tunnels(State(state): State<Arc<AppState>>) -> impl IntoRespon
                 })
                 .collect();
             let total = list.len();
-            (StatusCode::OK, Json(json!({ "success": true, "data": list, "total": total }))).into_response()
+            (
+                StatusCode::OK,
+                Json(json!({ "success": true, "data": list, "total": total })),
+            )
+                .into_response()
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

@@ -17,10 +17,7 @@ use crate::state::AppState;
 fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
     if let Some(main) = &state.main_config_file {
         let p = std::path::Path::new(main.as_str());
-        let root = p
-            .parent()
-            .and_then(|c| c.parent())
-            .unwrap_or(std::path::Path::new("."));
+        let root = p.parent().and_then(|c| c.parent()).unwrap_or(std::path::Path::new("."));
         root.join(relative)
     } else {
         std::path::PathBuf::from(relative)
@@ -29,8 +26,7 @@ fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
 
 async fn read_yaml(path: &std::path::Path) -> Result<Value, ApiError> {
     match tokio::fs::read_to_string(path).await {
-        Ok(raw) => serde_yaml::from_str::<Value>(&raw)
-            .map_err(|e| ApiError::BadRequest(format!("parse YAML: {e}"))),
+        Ok(raw) => serde_yaml::from_str::<Value>(&raw).map_err(|e| ApiError::BadRequest(format!("parse YAML: {e}"))),
         Err(_) => Ok(Value::Null),
     }
 }
@@ -142,10 +138,7 @@ pub async fn get_challenge_stats(_: State<Arc<AppState>>) -> ApiResult<Json<Valu
 }
 
 /// Returns raw HTML (the FE calls `resp.text()` directly).
-pub async fn challenge_preview(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> impl IntoResponse {
+pub async fn challenge_preview(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> impl IntoResponse {
     let path = resolve_path(&state, "configs/challenge.yaml");
     let raw = read_yaml(&path).await.unwrap_or(Value::Null);
     let title = body

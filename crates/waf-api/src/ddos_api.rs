@@ -19,10 +19,7 @@ use crate::state::AppState;
 fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
     if let Some(main) = &state.main_config_file {
         let p = std::path::Path::new(main.as_str());
-        let root = p
-            .parent()
-            .and_then(|c| c.parent())
-            .unwrap_or(std::path::Path::new("."));
+        let root = p.parent().and_then(|c| c.parent()).unwrap_or(std::path::Path::new("."));
         root.join(relative)
     } else {
         std::path::PathBuf::from(relative)
@@ -98,10 +95,7 @@ pub async fn get_ddos_config(State(state): State<Arc<AppState>>) -> ApiResult<Js
     Ok(Json(json!({ "success": true, "data": cfg })))
 }
 
-pub async fn put_ddos_config(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> ApiResult<Json<Value>> {
+pub async fn put_ddos_config(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "configs/ddos.yaml");
     let store = &body["store"];
     let yaml_val = json!({

@@ -15,10 +15,7 @@ use crate::state::AppState;
 fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
     if let Some(main) = &state.main_config_file {
         let p = std::path::Path::new(main.as_str());
-        let root = p
-            .parent()
-            .and_then(|c| c.parent())
-            .unwrap_or(std::path::Path::new("."));
+        let root = p.parent().and_then(|c| c.parent()).unwrap_or(std::path::Path::new("."));
         root.join(relative)
     } else {
         std::path::PathBuf::from(relative)

@@ -6,7 +6,10 @@
 
 use std::sync::Arc;
 
-use axum::{Json, extract::{Path, State}};
+use axum::{
+    Json,
+    extract::{Path, State},
+};
 use serde_json::{Value, json};
 
 use crate::error::{ApiError, ApiResult};
@@ -17,13 +20,10 @@ use crate::state::AppState;
 fn rules_path(state: &AppState) -> std::path::PathBuf {
     if let Some(main) = &state.main_config_file {
         let p = std::path::Path::new(main.as_str());
-        let root = p
-            .parent()
-            .and_then(|c| c.parent())
-            .unwrap_or(std::path::Path::new("."));
-        root.join("rules/geo-rules.yaml")
+        let root = p.parent().and_then(|c| c.parent()).unwrap_or(std::path::Path::new("."));
+        root.join("configs/geo-rules.yaml")
     } else {
-        std::path::PathBuf::from("rules/geo-rules.yaml")
+        std::path::PathBuf::from("configs/geo-rules.yaml")
     }
 }
 
@@ -36,10 +36,7 @@ async fn read_rules(path: &std::path::Path) -> Vec<Value> {
     let Ok(doc) = serde_yaml::from_str::<Value>(&raw) else {
         return vec![];
     };
-    doc.get("rules")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default()
+    doc.get("rules").and_then(|v| v.as_array()).cloned().unwrap_or_default()
 }
 
 async fn write_rules(path: &std::path::Path, rules: &[Value]) -> Result<(), ApiError> {
@@ -49,8 +46,7 @@ async fn write_rules(path: &std::path::Path, rules: &[Value]) -> Result<(), ApiE
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("mkdir: {e}")))?;
     }
     let doc = json!({ "rules": rules });
-    let s = serde_yaml::to_string(&doc)
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("yaml serialize: {e}")))?;
+    let s = serde_yaml::to_string(&doc).map_err(|e| ApiError::Internal(anyhow::anyhow!("yaml serialize: {e}")))?;
     let tmp = path.with_extension("yaml.tmp");
     tokio::fs::write(&tmp, s.as_bytes())
         .await
@@ -79,10 +75,7 @@ pub async fn list_geo_rules(State(state): State<Arc<AppState>>) -> ApiResult<Jso
     Ok(Json(json!({ "success": true, "data": rules, "total": total })))
 }
 
-pub async fn create_geo_rule(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> ApiResult<Json<Value>> {
+pub async fn create_geo_rule(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult<Json<Value>> {
     let path = rules_path(&state);
     let mut rules = read_rules(&path).await;
 
@@ -133,10 +126,7 @@ pub async fn patch_geo_rule(
     Ok(Json(json!({ "success": true, "data": updated })))
 }
 
-pub async fn delete_geo_rule(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<i64>,
-) -> ApiResult<Json<Value>> {
+pub async fn delete_geo_rule(State(state): State<Arc<AppState>>, Path(id): Path<i64>) -> ApiResult<Json<Value>> {
     let path = rules_path(&state);
     let mut rules = read_rules(&path).await;
     let before = rules.len();
@@ -150,15 +140,8 @@ pub async fn delete_geo_rule(
 
 /// POST /api/geoip/lookup — IP → country lookup.
 /// Returns a stub response; GeoIP xdb database must be installed for real data.
-pub async fn lookup_ip(
-    _state: State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> ApiResult<Json<Value>> {
-    let ip_str = body
-        .get("ip")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_owned();
+pub async fn lookup_ip(_state: State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult<Json<Value>> {
+    let ip_str = body.get("ip").and_then(|v| v.as_str()).unwrap_or("").to_owned();
 
     Ok(Json(json!({
         "success": true,

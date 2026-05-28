@@ -14,10 +14,7 @@ use crate::state::AppState;
 fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
     if let Some(main) = &state.main_config_file {
         let p = std::path::Path::new(main.as_str());
-        let root = p
-            .parent()
-            .and_then(|c| c.parent())
-            .unwrap_or(std::path::Path::new("."));
+        let root = p.parent().and_then(|c| c.parent()).unwrap_or(std::path::Path::new("."));
         root.join(relative)
     } else {
         std::path::PathBuf::from(relative)
@@ -74,10 +71,7 @@ pub async fn get_tier_policies(State(state): State<Arc<AppState>>) -> ApiResult<
     Ok(Json(json!({ "success": true, "data": cfg })))
 }
 
-pub async fn put_tier_policies(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> ApiResult<Json<Value>> {
+pub async fn put_tier_policies(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult<Json<Value>> {
     // Basic validation: all four tiers must be present
     for tier in &["critical", "high", "medium", "catch_all"] {
         if body["policies"][tier].is_null() {
@@ -99,10 +93,7 @@ pub async fn put_tier_policies(
     Ok(Json(json!({ "success": true, "data": body })))
 }
 
-pub async fn dry_run_tier(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> ApiResult<Json<Value>> {
+pub async fn dry_run_tier(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "configs/tier-policies.yaml");
     let cfg = read_yaml_opt(&path).await.unwrap_or_else(default_tier_config);
 
@@ -122,7 +113,10 @@ pub async fn dry_run_tier(
             let tier = rule["tier"].as_str().unwrap_or("catch_all");
             let method_match = rule["methods"]
                 .as_array()
-                .map(|ms| ms.iter().any(|m| m.as_str().map_or(false, |s| s.eq_ignore_ascii_case(method))))
+                .map(|ms| {
+                    ms.iter()
+                        .any(|m| m.as_str().map_or(false, |s| s.eq_ignore_ascii_case(method)))
+                })
                 .unwrap_or(true);
             let path_match = rule["path_match"]
                 .as_str()

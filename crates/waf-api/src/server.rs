@@ -15,24 +15,21 @@ use tower_http::trace::TraceLayer;
 use tracing::info;
 
 use crate::access_lists_api::{get_access_lists, put_access_lists, test_access_lists};
-use crate::geo_api::{create_geo_rule, delete_geo_rule, list_geo_rules, lookup_ip, patch_geo_rule};
 use crate::auth::{login, logout, refresh_token};
-use crate::challenge_api::{challenge_preview, get_challenge_config, get_challenge_stats, put_challenge_config};
-use crate::ddos_api::{delete_ban_entry, get_ddos_config, get_ddos_metrics, list_ban_table, put_ddos_config};
-use crate::device_fp_api::{get_device_fp_config, list_fp_conflicts, list_recent_fps, put_device_fp_config};
-use crate::relay_api::{get_relay_config, get_relay_intel_status, put_relay_config, refresh_relay_intel, test_relay};
-use crate::risk_api::{clear_risk_actor, credit_risk_actor, get_risk_config, get_risk_metrics, list_risk_actors, put_risk_config};
-use crate::tier_policies_api::{dry_run_tier, get_tier_policies, put_tier_policies};
 use crate::bot_api::{create_bot_pattern, list_bot_patterns, toggle_bot_pattern};
 use crate::cache_api::{
     cache_backend_info, cache_flush, cache_flush_host, cache_flush_key, cache_list_tags, cache_purge_route,
     cache_purge_tag, cache_stats, cache_stats_timeseries, cache_top_routes,
 };
+use crate::challenge_api::{challenge_preview, get_challenge_config, get_challenge_stats, put_challenge_config};
 use crate::cluster::{cluster_status, generate_join_token, get_cluster_node, list_cluster_nodes, remove_cluster_node};
 use crate::crowdsec::{
     crowdsec_stats, crowdsec_status, delete_crowdsec_decision, get_crowdsec_config, list_crowdsec_decisions,
     list_crowdsec_events, test_crowdsec_connection, update_crowdsec_config,
 };
+use crate::ddos_api::{delete_ban_entry, get_ddos_config, get_ddos_metrics, list_ban_table, put_ddos_config};
+use crate::device_fp_api::{get_device_fp_config, list_fp_conflicts, list_recent_fps, put_device_fp_config};
+use crate::geo_api::{create_geo_rule, delete_geo_rule, list_geo_rules, lookup_ip, patch_geo_rule};
 use crate::handlers::{
     create_allow_ip, create_allow_url, create_block_ip, create_block_url, create_custom_rule, create_host,
     create_lb_backend, create_sensitive_pattern, delete_allow_ip, delete_allow_url, delete_block_ip, delete_block_url,
@@ -50,6 +47,10 @@ use crate::notifications::{
 };
 use crate::panel_api::{get_panel_config, put_panel_config};
 use crate::plugins::{delete_plugin, disable_plugin, enable_plugin, list_plugins, upload_plugin};
+use crate::relay_api::{get_relay_config, get_relay_intel_status, put_relay_config, refresh_relay_intel, test_relay};
+use crate::risk_api::{
+    clear_risk_actor, credit_risk_actor, get_risk_config, get_risk_metrics, list_risk_actors, put_risk_config,
+};
 use crate::rule_sources_api::{
     create_rule_source, delete_rule_source, list_rule_sources, sync_all_rule_sources, sync_rule_source,
 };
@@ -60,6 +61,7 @@ use crate::static_files::static_handler;
 use crate::stats::{
     stats_endpoints, stats_geo, stats_overview, stats_timeseries, stats_timeseries_by_category, threat_intel_status,
 };
+use crate::tier_policies_api::{dry_run_tier, get_tier_policies, put_tier_policies};
 use crate::tunnels::{create_tunnel, delete_tunnel, list_tunnels, ws_tunnel};
 use crate::websocket::{ws_events, ws_logs};
 

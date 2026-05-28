@@ -559,7 +559,16 @@ pub async fn patch_sensitive_pattern(
 
         let updated = state
             .db
-            .update_sensitive_pattern(id, pattern, pattern_type, check_request, check_response, action, remarks, enabled)
+            .update_sensitive_pattern(
+                id,
+                pattern,
+                pattern_type,
+                check_request,
+                check_response,
+                action,
+                remarks,
+                enabled,
+            )
             .await?;
         if updated.is_none() {
             return Err(ApiError::NotFound(format!("Pattern {id} not found")));
