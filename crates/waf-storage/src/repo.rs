@@ -12,7 +12,7 @@ use crate::models::{
     EndpointHeatmap, GeoDistEntry, GeoStats, HeatmapCell, HeatmapFilter, Host, HotlinkConfig, LbBackend,
     NotificationConfig, NotificationLog, RecentEvent, RefreshToken, SecurityEvent, SecurityEventQuery,
     SensitivePattern, StatsFilter, StatsOverview, TimeSeriesPoint, TopEntry, TunnelRow, UpdateCertificatePem,
-    UpdateCustomRule, UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
+    UpdateCustomRule, UpdateHost, UpdateSensitivePattern, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
 };
 
 impl Database {
@@ -836,13 +836,7 @@ impl Database {
     pub async fn update_sensitive_pattern(
         &self,
         id: Uuid,
-        pattern: Option<&str>,
-        pattern_type: Option<&str>,
-        check_request: Option<bool>,
-        check_response: Option<bool>,
-        action: Option<&str>,
-        remarks: Option<&str>,
-        enabled: Option<bool>,
+        req: UpdateSensitivePattern<'_>,
     ) -> Result<Option<SensitivePattern>, StorageError> {
         let row = sqlx::query_as::<_, SensitivePattern>(
             r"UPDATE sensitive_patterns SET
@@ -858,13 +852,13 @@ impl Database {
               RETURNING *",
         )
         .bind(id)
-        .bind(pattern)
-        .bind(pattern_type)
-        .bind(check_request)
-        .bind(check_response)
-        .bind(action)
-        .bind(remarks)
-        .bind(enabled)
+        .bind(req.pattern)
+        .bind(req.pattern_type)
+        .bind(req.check_request)
+        .bind(req.check_response)
+        .bind(req.action)
+        .bind(req.remarks)
+        .bind(req.enabled)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row)

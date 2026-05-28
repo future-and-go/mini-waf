@@ -405,6 +405,18 @@ pub struct CreateSensitivePattern {
     pub remarks: Option<String>,
 }
 
+/// Partial-update sensitive pattern request (all fields optional for PATCH)
+#[derive(Debug, Clone, Default)]
+pub struct UpdateSensitivePattern<'a> {
+    pub pattern: Option<&'a str>,
+    pub pattern_type: Option<&'a str>,
+    pub check_request: Option<bool>,
+    pub check_response: Option<bool>,
+    pub action: Option<&'a str>,
+    pub remarks: Option<&'a str>,
+    pub enabled: Option<bool>,
+}
+
 /// Create/update hotlink config request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpsertHotlinkConfig {

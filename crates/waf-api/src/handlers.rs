@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use waf_storage::models::{
     AttackLogQuery, CreateCertificate, CreateCustomRule, CreateHost, CreateIpRule, CreateLbBackend,
-    CreateSensitivePattern, CreateUrlRule, SecurityEventQuery, UpdateCustomRule, UpdateHost, UpsertHotlinkConfig,
+    CreateSensitivePattern, CreateUrlRule, SecurityEventQuery, UpdateCustomRule, UpdateHost, UpdateSensitivePattern,
+    UpsertHotlinkConfig,
 };
 
 use waf_common::{HostConfig, UpstreamAlpn};
@@ -561,13 +562,15 @@ pub async fn patch_sensitive_pattern(
             .db
             .update_sensitive_pattern(
                 id,
-                pattern,
-                pattern_type,
-                check_request,
-                check_response,
-                action,
-                remarks,
-                enabled,
+                UpdateSensitivePattern {
+                    pattern,
+                    pattern_type,
+                    check_request,
+                    check_response,
+                    action,
+                    remarks,
+                    enabled,
+                },
             )
             .await?;
         if updated.is_none() {
