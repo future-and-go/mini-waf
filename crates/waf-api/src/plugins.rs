@@ -31,14 +31,14 @@ pub async fn list_plugins(State(state): State<Arc<AppState>>) -> impl IntoRespon
                         "description": r.description,
                         "author": r.author,
                         "enabled": r.enabled,
-                        "config_json": r.config_json,
+                        "file_size": r.wasm_binary.len(),
                         "created_at": r.created_at,
-                        "updated_at": r.updated_at,
-                        "wasm_size": r.wasm_binary.len(),
+                        "load_error": serde_json::Value::Null,
                     })
                 })
                 .collect();
-            (StatusCode::OK, Json(json!({ "plugins": list }))).into_response()
+            let total = list.len();
+            (StatusCode::OK, Json(json!({ "success": true, "data": list, "total": total }))).into_response()
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

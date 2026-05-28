@@ -117,6 +117,7 @@ export const RiskScoringPage: React.FC = () => {
     url: "/api/risk/metrics",
     method: "get",
     queryOptions: { staleTime: 0, refetchInterval: interval },
+    errorNotification: false,
   });
   const metrics = metricsQuery.result?.data;
   const metricsError = metricsQuery.query.isError;
@@ -143,6 +144,7 @@ export const RiskScoringPage: React.FC = () => {
     method: "get",
     config: { query: { limit: 50, min_score: 0, page } },
     queryOptions: { staleTime: 0, refetchInterval: interval },
+    errorNotification: false,
   });
   const actors: RiskActor[] = Array.isArray(actorsQuery.result?.data?.data)
     ? (actorsQuery.result.data.data as RiskActor[])

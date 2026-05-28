@@ -14,7 +14,15 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
+use crate::access_lists_api::{get_access_lists, put_access_lists, test_access_lists};
+use crate::geo_api::{create_geo_rule, delete_geo_rule, list_geo_rules, lookup_ip, patch_geo_rule};
 use crate::auth::{login, logout, refresh_token};
+use crate::challenge_api::{challenge_preview, get_challenge_config, get_challenge_stats, put_challenge_config};
+use crate::ddos_api::{delete_ban_entry, get_ddos_config, get_ddos_metrics, list_ban_table, put_ddos_config};
+use crate::device_fp_api::{get_device_fp_config, list_fp_conflicts, list_recent_fps, put_device_fp_config};
+use crate::relay_api::{get_relay_config, get_relay_intel_status, put_relay_config, refresh_relay_intel, test_relay};
+use crate::risk_api::{clear_risk_actor, credit_risk_actor, get_risk_config, get_risk_metrics, list_risk_actors, put_risk_config};
+use crate::tier_policies_api::{dry_run_tier, get_tier_policies, put_tier_policies};
 use crate::bot_api::{create_bot_pattern, list_bot_patterns, toggle_bot_pattern};
 use crate::cache_api::{
     cache_backend_info, cache_flush, cache_flush_host, cache_flush_key, cache_list_tags, cache_purge_route,
@@ -31,8 +39,8 @@ use crate::handlers::{
     delete_certificate, delete_custom_rule, delete_host, delete_lb_backend, delete_sensitive_pattern, get_host,
     get_hotlink_config, get_security_event, get_status, list_allow_ips, list_allow_urls, list_attack_logs,
     list_block_ips, list_block_urls, list_certificates, list_custom_rules, list_hosts, list_lb_backends,
-    list_security_events, list_sensitive_patterns, reload_rules, reload_sqli_scan_config, set_log_level,
-    update_custom_rule, update_host, upload_certificate, upsert_hotlink_config,
+    list_security_events, list_sensitive_patterns, patch_sensitive_pattern, reload_rules, reload_sqli_scan_config,
+    set_log_level, update_custom_rule, update_host, upload_certificate, upsert_hotlink_config,
 };
 use crate::health::health_check;
 use crate::logs::{logs_query, logs_stats, logs_streams};
@@ -140,7 +148,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .route(
             "/api/sensitive-patterns/{id}",
-            delete(delete_sensitive_pattern),
+            delete(delete_sensitive_pattern).patch(patch_sensitive_pattern),
         )
         // Phase 3: Hotlink config
         .route(
@@ -239,6 +247,40 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/logs/streams", get(logs_streams))
         // Dynamic log level control
         .route("/api/admin/logs/level", post(set_log_level))
+        // FR-002 Tier Policies
+        .route("/api/tier-policies", get(get_tier_policies).put(put_tier_policies))
+        .route("/api/tier-policies/dry-run", post(dry_run_tier))
+        // FR-008 Access Lists
+        .route("/api/access-lists", get(get_access_lists).put(put_access_lists))
+        .route("/api/access-lists/test", get(test_access_lists))
+        // FR-005 DDoS Protection
+        .route("/api/ddos/config", get(get_ddos_config).put(put_ddos_config))
+        .route("/api/ddos/metrics", get(get_ddos_metrics))
+        .route("/api/ddos/ban-table", get(list_ban_table))
+        .route("/api/ddos/ban-table/{ip}", delete(delete_ban_entry))
+        // FR-006 Challenge Engine
+        .route("/api/challenge/config", get(get_challenge_config).put(put_challenge_config))
+        .route("/api/challenge/stats", get(get_challenge_stats))
+        .route("/api/challenge/preview", post(challenge_preview))
+        // FR-010/011 Device Fingerprinting
+        .route("/api/device-fp/config", get(get_device_fp_config).put(put_device_fp_config))
+        .route("/api/device-fp/recent", get(list_recent_fps))
+        .route("/api/device-fp/conflicts", get(list_fp_conflicts))
+        // FR-007 Relay Intel
+        .route("/api/relay/config", get(get_relay_config).put(put_relay_config))
+        .route("/api/relay/intel/status", get(get_relay_intel_status))
+        .route("/api/relay/intel/refresh", post(refresh_relay_intel))
+        .route("/api/relay/test", post(test_relay))
+        // FR-025 Risk Scoring
+        .route("/api/risk/config", get(get_risk_config).put(put_risk_config))
+        .route("/api/risk/metrics", get(get_risk_metrics))
+        .route("/api/risk/actors", get(list_risk_actors))
+        .route("/api/risk/actors/{id}/credit", post(credit_risk_actor))
+        .route("/api/risk/actors/{id}/clear", post(clear_risk_actor))
+        // FR-041 Geo Restriction
+        .route("/api/geoip/rules", get(list_geo_rules).post(create_geo_rule))
+        .route("/api/geoip/rules/{id}", patch(patch_geo_rule).delete(delete_geo_rule))
+        .route("/api/geoip/lookup", post(lookup_ip))
         .layer(middleware::from_fn_with_state(state.clone(), require_auth))
         .layer(middleware::from_fn_with_state(
             state.clone(),

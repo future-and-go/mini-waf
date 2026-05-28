@@ -529,6 +529,49 @@ pub async fn delete_sensitive_pattern(
     Ok(Json(json!({ "success": true, "data": null })))
 }
 
+pub async fn patch_sensitive_pattern(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> ApiResult<Json<Value>> {
+    let obj = body
+        .as_object()
+        .ok_or_else(|| ApiError::BadRequest("body must be a JSON object".into()))?;
+
+    let is_toggle_only = obj.len() == 1 && obj.contains_key("enabled");
+
+    if is_toggle_only {
+        let enabled = obj["enabled"]
+            .as_bool()
+            .ok_or_else(|| ApiError::BadRequest("enabled must be a boolean".into()))?;
+        let found = state.db.toggle_sensitive_pattern(id, enabled).await?;
+        if !found {
+            return Err(ApiError::NotFound(format!("Pattern {id} not found")));
+        }
+    } else {
+        let pattern = obj.get("pattern").and_then(|v| v.as_str());
+        let pattern_type = obj.get("pattern_type").and_then(|v| v.as_str());
+        let check_request = obj.get("check_request").and_then(|v| v.as_bool());
+        let check_response = obj.get("check_response").and_then(|v| v.as_bool());
+        let action = obj.get("action").and_then(|v| v.as_str());
+        let remarks = obj.get("remarks").and_then(|v| v.as_str());
+        let enabled = obj.get("enabled").and_then(|v| v.as_bool());
+
+        let updated = state
+            .db
+            .update_sensitive_pattern(id, pattern, pattern_type, check_request, check_response, action, remarks, enabled)
+            .await?;
+        if updated.is_none() {
+            return Err(ApiError::NotFound(format!("Pattern {id} not found")));
+        }
+    }
+
+    if let Err(e) = state.engine.reload_rules().await {
+        tracing::warn!("Failed to reload after pattern patch: {}", e);
+    }
+    Ok(Json(json!({ "success": true, "data": { "id": id } })))
+}
+
 // ─── Hotlink Config ───────────────────────────────────────────────────────────
 
 pub async fn get_hotlink_config(

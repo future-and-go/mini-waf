@@ -672,9 +672,17 @@ pub struct TunnelRow {
     pub target_port: i32,
     pub enabled: bool,
     pub status: String,
+    /// Transport protocol: tcp | udp | ws (defaults to "tcp" when column absent)
+    #[serde(default = "default_protocol")]
+    #[sqlx(default)]
+    pub protocol: String,
     pub last_seen: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+fn default_protocol() -> String {
+    "tcp".to_string()
 }
 
 /// Create tunnel request
@@ -686,6 +694,8 @@ pub struct CreateTunnel {
     pub target_host: String,
     pub target_port: i32,
     pub enabled: Option<bool>,
+    /// Transport protocol: tcp | udp | ws. Defaults to "tcp" when absent.
+    pub protocol: Option<String>,
 }
 
 // ─── Phase 5: Audit Log ───────────────────────────────────────────────────────

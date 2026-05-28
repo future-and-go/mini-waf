@@ -97,6 +97,7 @@ export const RelayIntelPage: React.FC = () => {
     if (cfg && cfg.providers !== undefined) {
       form.setFieldsValue(cfg);
       setTrustedCidrs(cfg.trusted_proxies ?? []);
+      setNotAvailable(false);
     } else {
       setNotAvailable(true);
       form.setFieldsValue(DEFAULT_CONFIG);

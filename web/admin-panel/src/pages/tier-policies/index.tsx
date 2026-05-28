@@ -29,7 +29,7 @@ import {
 import { useCustom, useCustomMutation } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
-import { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -95,6 +95,9 @@ const TIER_COLOR: Record<TierKey, string> = {
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 
+// Stable tooltip config — defined outside component to avoid new object on every render.
+const SLIDER_TOOLTIP = { formatter: (v?: number) => `${v ?? 0}` };
+
 // ── SectionCard helper ─────────────────────────────────────────────────────────
 
 interface SectionCardProps {
@@ -129,17 +132,61 @@ interface TierPolicyCardProps {
   t: (key: string) => string;
 }
 
-const TierPolicyCard: React.FC<TierPolicyCardProps> = ({ tierKey, label, policy: policyProp, onChange, t }) => {
+const TierPolicyCard: React.FC<TierPolicyCardProps> = React.memo(({ tierKey, label, policy: policyProp, onChange, t }) => {
   const policy = policyProp ?? DEFAULT_POLICY;
   const color = TIER_COLOR[tierKey];
 
-  const setField = <K extends keyof TierPolicy>(key: K, val: TierPolicy[K]) =>
-    onChange({ ...policy, [key]: val });
+  // Local threshold state: slider drags only update local state (no parent re-render).
+  // Parent is notified via onAfterChange (mouse-up / keyboard-end), which is ~100x
+  // less frequent than onChange during a drag. This eliminates the cascade where
+  // 60+ setConfig calls per second caused the parent to re-render on every pixel.
+  const [localThresh, setLocalThresh] = useState(
+    () => policy.risk_thresholds ?? { allow: 20, challenge: 60, block: 85 },
+  );
 
-  const setThreshold = (field: "allow" | "challenge" | "block", val: number) =>
-    onChange({ ...policy, risk_thresholds: { ...policy.risk_thresholds, [field]: val } });
+  // Keep stable refs so the stable callbacks below always read latest values.
+  const onChangeRef = useRef(onChange);
+  const policyRef = useRef(policy);
+  const localThreshRef = useRef(localThresh);
+  onChangeRef.current = onChange;
+  policyRef.current = policy;
+  localThreshRef.current = localThresh;
 
-  const { allow, challenge, block } = policy.risk_thresholds ?? { allow: 20, challenge: 60, block: 85 };
+  // Sync local thresh when parent policy changes from outside (API load, config
+  // reset). We compare values so we don't clobber a mid-drag local state with the
+  // echo of our own last commit.
+  useEffect(() => {
+    const incoming = policy.risk_thresholds ?? { allow: 20, challenge: 60, block: 85 };
+    const cur = localThreshRef.current;
+    if (
+      incoming.allow !== cur.allow ||
+      incoming.challenge !== cur.challenge ||
+      incoming.block !== cur.block
+    ) {
+      setLocalThresh(incoming);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [policy.risk_thresholds]);
+
+  // For non-slider fields: direct parent update (lightweight, no drag).
+  const setField = useCallback(<K extends keyof TierPolicy>(key: K, val: TierPolicy[K]) =>
+    onChangeRef.current({ ...policyRef.current, [key]: val }), []);
+
+  // During drag: update local state only (fast — no parent involved).
+  const onSliderChange = useCallback((field: "allow" | "challenge" | "block", val: number) => {
+    setLocalThresh((prev) => ({ ...prev, [field]: val }));
+  }, []);
+
+  // On drag end: commit final value to parent.
+  const onSliderCommit = useCallback((field: "allow" | "challenge" | "block", val: number) => {
+    setLocalThresh((prev) => {
+      const next = { ...prev, [field]: val };
+      onChangeRef.current({ ...policyRef.current, risk_thresholds: next });
+      return next;
+    });
+  }, []);
+
+  const { allow, challenge, block } = localThresh;
   const thresholdsValid = allow < challenge && challenge < block;
 
   return (
@@ -198,9 +245,10 @@ const TierPolicyCard: React.FC<TierPolicyCardProps> = ({ tierKey, label, policy:
                 min={0}
                 max={100}
                 value={allow}
-                onChange={(v) => setThreshold("allow", v)}
+                onChange={(v) => onSliderChange("allow", v)}
+                onAfterChange={(v) => onSliderCommit("allow", v)}
                 style={{ flex: 1 }}
-                tooltip={{ formatter: (v) => `${v}` }}
+                tooltip={SLIDER_TOOLTIP}
               />
               <span style={{ width: 28, textAlign: "right", fontSize: 12 }}>{allow}</span>
             </div>
@@ -212,9 +260,10 @@ const TierPolicyCard: React.FC<TierPolicyCardProps> = ({ tierKey, label, policy:
                 min={0}
                 max={100}
                 value={challenge}
-                onChange={(v) => setThreshold("challenge", v)}
+                onChange={(v) => onSliderChange("challenge", v)}
+                onAfterChange={(v) => onSliderCommit("challenge", v)}
                 style={{ flex: 1 }}
-                tooltip={{ formatter: (v) => `${v}` }}
+                tooltip={SLIDER_TOOLTIP}
               />
               <span style={{ width: 28, textAlign: "right", fontSize: 12 }}>{challenge}</span>
             </div>
@@ -226,9 +275,10 @@ const TierPolicyCard: React.FC<TierPolicyCardProps> = ({ tierKey, label, policy:
                 min={0}
                 max={100}
                 value={block}
-                onChange={(v) => setThreshold("block", v)}
+                onChange={(v) => onSliderChange("block", v)}
+                onAfterChange={(v) => onSliderCommit("block", v)}
                 style={{ flex: 1 }}
-                tooltip={{ formatter: (v) => `${v}` }}
+                tooltip={SLIDER_TOOLTIP}
               />
               <span style={{ width: 28, textAlign: "right", fontSize: 12 }}>{block}</span>
             </div>
@@ -237,7 +287,7 @@ const TierPolicyCard: React.FC<TierPolicyCardProps> = ({ tierKey, label, policy:
       </Form>
     </Card>
   );
-};
+});
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
@@ -339,10 +389,22 @@ export const TierPoliciesPage: React.FC = () => {
 
   // ── Policy change helpers ────────────────────────────────────────────────────
 
-  const onPolicyChange = (key: TierKey, p: TierPolicy) => {
+  const onPolicyChange = useCallback((key: TierKey, p: TierPolicy) => {
     isDirty.current = true;
     setConfig((prev) => ({ ...prev, policies: { ...prev.policies, [key]: p } }));
-  };
+  }, []);
+
+  // Pre-create stable per-tier handlers so React.memo on TierPolicyCard works correctly:
+  // only the card whose policy actually changed will re-render.
+  const policyHandlers = useMemo<Record<TierKey, (p: TierPolicy) => void>>(
+    () => ({
+      critical: (p) => onPolicyChange("critical", p),
+      high: (p) => onPolicyChange("high", p),
+      medium: (p) => onPolicyChange("medium", p),
+      catch_all: (p) => onPolicyChange("catch_all", p),
+    }),
+    [onPolicyChange],
+  );
 
   // ── Classifier rules ─────────────────────────────────────────────────────────
 
@@ -493,7 +555,7 @@ export const TierPoliciesPage: React.FC = () => {
                 tierKey={key}
                 label={TIER_LABELS[key]}
                 policy={config?.policies?.[key] ?? DEFAULT_POLICY}
-                onChange={(p) => onPolicyChange(key, p)}
+                onChange={policyHandlers[key]}
                 t={t}
               />
             </Col>

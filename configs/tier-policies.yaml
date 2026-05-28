@@ -1,0 +1,34 @@
+classifier_rules: []
+policies:
+  catch_all:
+    cache_policy: aggressive
+    ddos_threshold_rps: 1000
+    fail_mode: open
+    risk_thresholds:
+      allow: 20
+      block: 85
+      challenge: 60
+  critical:
+    cache_policy: no_cache
+    ddos_threshold_rps: 50
+    fail_mode: close
+    risk_thresholds:
+      allow: 20
+      block: 85
+      challenge: 60
+  high:
+    cache_policy: default
+    ddos_threshold_rps: 200
+    fail_mode: close
+    risk_thresholds:
+      allow: 20
+      block: 85
+      challenge: 60
+  medium:
+    cache_policy: short_ttl
+    ddos_threshold_rps: 500
+    fail_mode: open
+    risk_thresholds:
+      allow: 20
+      block: 85
+      challenge: 60

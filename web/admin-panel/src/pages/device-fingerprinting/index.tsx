@@ -118,6 +118,7 @@ export const DeviceFingerprintingPage: React.FC = () => {
     if (cfg && cfg.enabled !== undefined) {
       form.setFieldsValue(cfg);
       setStoreBackend(cfg.store?.backend ?? "memory");
+      setNotAvailable(false);
     } else {
       setNotAvailable(true);
       form.setFieldsValue(DEFAULT_CONFIG);

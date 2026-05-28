@@ -35,6 +35,7 @@ pub async fn list_tunnels(State(state): State<Arc<AppState>>) -> impl IntoRespon
                         "name": r.name,
                         "target_host": r.target_host,
                         "target_port": r.target_port,
+                        "protocol": r.protocol,
                         "enabled": r.enabled,
                         "connected": connected,
                         "last_seen": r.last_seen,
@@ -42,7 +43,8 @@ pub async fn list_tunnels(State(state): State<Arc<AppState>>) -> impl IntoRespon
                     })
                 })
                 .collect();
-            (StatusCode::OK, Json(json!({ "tunnels": list }))).into_response()
+            let total = list.len();
+            (StatusCode::OK, Json(json!({ "success": true, "data": list, "total": total }))).into_response()
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -95,12 +97,18 @@ pub async fn create_tunnel(
     let token = generate_token();
     let token_hash = hash_token(&token);
 
+    let protocol = body
+        .get("protocol")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string);
+
     let req = CreateTunnel {
         name: name.clone(),
         token: token.clone(),
         target_host: target_host.clone(),
         target_port,
         enabled: body.get("enabled").and_then(serde_json::Value::as_bool),
+        protocol,
     };
 
     let row = match state.db.create_tunnel(&req, &token_hash).await {
@@ -137,6 +145,7 @@ pub async fn create_tunnel(
             "name": row.name,
             "target_host": row.target_host,
             "target_port": row.target_port,
+            "protocol": row.protocol,
             "enabled": row.enabled,
             "token": token,   // shown once — client must save this
         })),
