@@ -127,10 +127,17 @@ async fn auth_and_upgrade(
             .into_response();
     }
 
-    ws.on_upgrade(move |socket| handle_ws(socket, state, stream))
+    ws.on_upgrade(move |socket| handle_ws(socket, state, stream, token))
 }
 
-async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>, stream: &'static str) {
+/// Returns `true` when the heartbeat tick must terminate the connection
+/// because the bound JWT no longer validates (expired, revoked, or signed
+/// with a now-rotated secret). Pure helper extracted for unit-testing.
+fn jwt_requires_close(token: &str, secret: &str) -> bool {
+    validate_access_token(token, secret).is_err()
+}
+
+async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>, stream: &'static str, token: String) {
     // Subscribe to the Database's real-time event broadcast channel
     let mut rx = state.db.subscribe_events();
     let mut ping_interval = interval(Duration::from_secs(30));
@@ -155,8 +162,15 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>, stream: &'static
                 }
             }
 
-            // Heartbeat ping
+            // Heartbeat ping — also re-validates the bound JWT so an expired
+            // or revoked token cannot keep streaming audit data for the rest
+            // of the connection lifetime.
             _ = ping_interval.tick() => {
+                if jwt_requires_close(&token, &state.jwt_secret) {
+                    warn!(stream, "WS JWT no longer valid — closing socket");
+                    let _ = socket.send(Message::Close(None)).await;
+                    break;
+                }
                 if socket.send(Message::Ping(vec![].into())).await.is_err() {
                     break;
                 }
@@ -173,4 +187,37 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>, stream: &'static
     }
 
     state.ws_connections.fetch_sub(1, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::auth::generate_access_token;
+    use uuid::Uuid;
+
+    #[test]
+    fn jwt_requires_close_true_for_garbage_token() {
+        assert!(jwt_requires_close("not-a-jwt", "secret"));
+    }
+
+    #[test]
+    fn jwt_requires_close_true_for_wrong_secret() {
+        // A token signed with one secret must fail validation under another —
+        // this is the path a rotated jwt_secret takes when a long-lived WS
+        // session is still streaming.
+        let token = generate_access_token(Uuid::new_v4(), "admin", "admin", "old-secret")
+            .expect("issue token");
+        assert!(jwt_requires_close(&token, "new-secret"));
+    }
+
+    #[test]
+    fn jwt_requires_close_false_for_fresh_token() {
+        // A token signed with the same secret and not yet expired must keep
+        // the heartbeat path open.
+        let secret = "shared-secret";
+        let token = generate_access_token(Uuid::new_v4(), "admin", "admin", secret)
+            .expect("issue token");
+        assert!(!jwt_requires_close(&token, secret));
+    }
 }
