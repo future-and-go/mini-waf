@@ -28,7 +28,7 @@ use serde_json::json;
 use tokio::time::interval;
 use tracing::warn;
 
-use crate::auth::validate_access_token;
+use crate::auth::validate_admin_token;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -112,7 +112,7 @@ async fn auth_and_upgrade(
             .into_response();
     };
 
-    if validate_access_token(&token, &state.jwt_secret).is_err() {
+    if validate_admin_token(&token, &state.jwt_secret).is_err() {
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "invalid token" }))).into_response();
     }
 
@@ -131,10 +131,11 @@ async fn auth_and_upgrade(
 }
 
 /// Returns `true` when the heartbeat tick must terminate the connection
-/// because the bound JWT no longer validates (expired, revoked, or signed
-/// with a now-rotated secret). Pure helper extracted for unit-testing.
+/// because the bound JWT no longer satisfies the admin gate — expired,
+/// revoked, signed with a now-rotated secret, or role demoted away from
+/// `admin`. Pure helper extracted for unit-testing.
 fn jwt_requires_close(token: &str, secret: &str) -> bool {
-    validate_access_token(token, secret).is_err()
+    validate_admin_token(token, secret).is_err()
 }
 
 async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>, stream: &'static str, token: String) {
@@ -211,11 +212,21 @@ mod tests {
     }
 
     #[test]
-    fn jwt_requires_close_false_for_fresh_token() {
-        // A token signed with the same secret and not yet expired must keep
-        // the heartbeat path open.
+    fn jwt_requires_close_false_for_fresh_admin_token() {
+        // A token signed with the same secret, not yet expired, and carrying
+        // the admin role must keep the heartbeat path open.
         let secret = "shared-secret";
         let token = generate_access_token(Uuid::new_v4(), "admin", "admin", secret).expect("issue token");
         assert!(!jwt_requires_close(&token, secret));
+    }
+
+    #[test]
+    fn jwt_requires_close_true_for_non_admin_role() {
+        // A valid JWT carrying a viewer / read-only role must NOT be allowed
+        // to keep streaming — admin-only is the contract for /ws/events and
+        // /ws/logs because both forward sensitive audit payloads.
+        let secret = "shared-secret";
+        let token = generate_access_token(Uuid::new_v4(), "carol", "viewer", secret).expect("issue token");
+        assert!(jwt_requires_close(&token, secret));
     }
 }

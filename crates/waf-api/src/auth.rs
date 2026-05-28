@@ -60,6 +60,19 @@ pub fn validate_access_token(token: &str, secret: &str) -> anyhow::Result<Claims
     Ok(data.claims)
 }
 
+/// Validate an access token AND require the bearer to carry the `admin` role.
+///
+/// Returns the decoded claims on success. Signature failures, expiry, missing
+/// claims, and any non-`admin` role all map to an error. Callers MUST reject
+/// the request on `Err` — there is no "soft fail" branch.
+pub fn validate_admin_token(token: &str, secret: &str) -> anyhow::Result<Claims> {
+    let claims = validate_access_token(token, secret)?;
+    if claims.role != "admin" {
+        anyhow::bail!("admin role required");
+    }
+    Ok(claims)
+}
+
 pub fn hash_token(token: &str) -> String {
     let mut h = Sha256::new();
     h.update(token.as_bytes());
@@ -316,6 +329,34 @@ mod tests {
         let user_id = uuid::Uuid::new_v4();
         let token = generate_access_token(user_id, "bob", "user", "secret1").unwrap();
         let result = validate_access_token(&token, "secret2");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_admin_token_accepts_admin_role() {
+        let user_id = uuid::Uuid::new_v4();
+        let secret = "admin-gate-secret";
+        let token = generate_access_token(user_id, "alice", "admin", secret).unwrap();
+        let claims = validate_admin_token(&token, secret).expect("admin claims");
+        assert_eq!(claims.role, "admin");
+    }
+
+    #[test]
+    fn validate_admin_token_rejects_non_admin_role() {
+        // viewer / readonly / any future non-admin role must be denied at the
+        // gate even though the signature and expiry are otherwise valid.
+        let user_id = uuid::Uuid::new_v4();
+        let secret = "admin-gate-secret";
+        let token = generate_access_token(user_id, "carol", "viewer", secret).unwrap();
+        let err = validate_admin_token(&token, secret).expect_err("viewer must be denied");
+        assert!(err.to_string().contains("admin role required"));
+    }
+
+    #[test]
+    fn validate_admin_token_rejects_invalid_token() {
+        // Garbage token must fail at the signature check before the role
+        // check ever runs.
+        let result = validate_admin_token("not-a-jwt", "any-secret");
         assert!(result.is_err());
     }
 
