@@ -56,9 +56,10 @@ fn yaml_to_fe(v: &Value) -> Value {
     let per_ip = v.get("per_ip").cloned().unwrap_or(Value::Null);
     let per_fp = v.get("per_fingerprint").cloned().unwrap_or(Value::Null);
     let store = v.get("store").cloned().unwrap_or(Value::Null);
-    let bans = v.get("ban_durations_secs")
-        .and_then(Value::as_array)
-        .map_or_else(|| vec![60, 300, 3600], |a| a.iter().filter_map(Value::as_i64).collect::<Vec<_>>());
+    let bans = v.get("ban_durations_secs").and_then(Value::as_array).map_or_else(
+        || vec![60, 300, 3600],
+        |a| a.iter().filter_map(Value::as_i64).collect::<Vec<_>>(),
+    );
     json!({
         "enabled": v.get("enabled").and_then(Value::as_bool).unwrap_or(true),
         "per_ip": {
@@ -91,7 +92,9 @@ fn default_ddos_fe() -> Value {
 
 pub async fn get_ddos_config(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "configs/ddos.yaml");
-    let cfg = read_yaml_opt(&path).await.map_or_else(default_ddos_fe, |v| yaml_to_fe(&v));
+    let cfg = read_yaml_opt(&path)
+        .await
+        .map_or_else(default_ddos_fe, |v| yaml_to_fe(&v));
     Ok(Json(json!({ "success": true, "data": cfg })))
 }
 

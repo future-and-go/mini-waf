@@ -136,9 +136,7 @@ fn fe_to_yaml(body: &Value) -> Value {
 pub async fn get_risk_config(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "configs/risk.yaml");
     let cfg = match read_yaml_opt(&path).await {
-        Some(v) if v.get("risk").is_some_and(|r| !r.is_null()) => {
-            yaml_to_fe(v.get("risk").unwrap_or(&Value::Null))
-        }
+        Some(v) if v.get("risk").is_some_and(|r| !r.is_null()) => yaml_to_fe(v.get("risk").unwrap_or(&Value::Null)),
         _ => default_risk_fe(),
     };
     Ok(Json(json!({ "success": true, "data": cfg })))
