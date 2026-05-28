@@ -234,7 +234,12 @@ mod tests {
         assert!(result.is_some(), "deep-nested SQLi must surface via iterative walker");
         let (path, _) = result.unwrap();
         assert!(path.starts_with("body.a.a.a"), "path={path}");
-        assert!(path.ends_with(".a"), "path={path}");
+        // Path is "body" then 100 ".a" segments → 101 dot-separated tokens.
+        assert_eq!(
+            path.split('.').count(),
+            101,
+            "expected 100 nested `a` keys after body, got path={path}"
+        );
     }
 
     #[test]
