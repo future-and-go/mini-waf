@@ -165,6 +165,10 @@ pub struct ActorsQuery {
     pub page: Option<i64>,
 }
 
+/// **STUB — v1 placeholder.**  Returns an empty actor list; real-time risk-actor
+/// tracking is not yet implemented.  Frontend should treat `data: []` as "no data
+/// available" rather than "no risky actors".  Will be replaced with a live query
+/// against the risk-score store in a future release.
 pub async fn list_risk_actors(_: State<Arc<AppState>>, Query(_q): Query<ActorsQuery>) -> ApiResult<Json<Value>> {
     Ok(Json(json!({ "success": true, "data": [], "total": 0 })))
 }

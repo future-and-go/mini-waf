@@ -2,6 +2,7 @@ use axum::{
     Json,
     extract::{Path, Query, State},
 };
+use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -696,6 +697,12 @@ pub async fn delete_certificate(State(state): State<Arc<AppState>>, Path(id): Pa
 
 // ─── Log level ───────────────────────────────────────────────────────────────
 
+/// Minimum interval between log-level changes (milliseconds).
+const LOG_LEVEL_COOLDOWN_MS: u64 = 10_000;
+
+/// Tracks the last successful log-level change as Unix millis (0 = never).
+static LAST_LOG_LEVEL_CHANGE_MS: AtomicU64 = AtomicU64::new(0);
+
 #[derive(Deserialize)]
 pub struct SetLogLevelRequest {
     pub filter: String,
@@ -708,11 +715,27 @@ pub async fn set_log_level(
     if req.filter.len() > 256 {
         return Err(ApiError::BadRequest("filter string exceeds 256 character limit".into()));
     }
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0) as u64;
+    let last = LAST_LOG_LEVEL_CHANGE_MS.load(Ordering::Relaxed);
+    if last > 0 && now_ms.saturating_sub(last) < LOG_LEVEL_COOLDOWN_MS {
+        let remaining_ms = LOG_LEVEL_COOLDOWN_MS - now_ms.saturating_sub(last);
+        return Err(ApiError::TooManyRequests(format!(
+            "log level may only change once per {}s; retry in {}ms",
+            LOG_LEVEL_COOLDOWN_MS / 1000,
+            remaining_ms,
+        )));
+    }
+
     let setter = state
         .log_level_setter
         .as_ref()
         .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("log level control not initialized")))?;
     setter(&req.filter).map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    LAST_LOG_LEVEL_CHANGE_MS.store(now_ms, Ordering::Relaxed);
     tracing::info!("Log filter updated to: {}", req.filter);
     Ok(Json(json!({ "success": true, "data": { "filter": req.filter } })))
 }
