@@ -90,13 +90,13 @@ async fn flush_loop(mut rx: mpsc::Receiver<DbLogEvent>, db: Arc<Database>, batch
 
 async fn do_flush(db: &Database, attack_batch: &mut Vec<AttackLog>, security_batch: &mut Vec<CreateSecurityEvent>) {
     if !attack_batch.is_empty() {
-        let logs: Vec<AttackLog> = attack_batch.drain(..).collect();
+        let logs = std::mem::take(attack_batch);
         if let Err(e) = db.create_attack_log_batch(&logs).await {
             warn!(error = %e, count = logs.len(), "Batch attack log insert failed — dropping batch");
         }
     }
     if !security_batch.is_empty() {
-        let events: Vec<CreateSecurityEvent> = security_batch.drain(..).collect();
+        let events = std::mem::take(security_batch);
         if let Err(e) = db.create_security_event_batch(&events).await {
             warn!(error = %e, count = events.len(), "Batch security event insert failed — dropping batch");
         }
