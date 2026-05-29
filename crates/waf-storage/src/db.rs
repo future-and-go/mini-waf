@@ -104,8 +104,7 @@ async fn retry_connect(database_url: &str, max_connections: u32) -> Result<PgPoo
             }
             Err(e) => {
                 return Err(StorageError::ConnectionFailed(format!(
-                    "Failed after {} attempts: {}",
-                    CONNECT_RETRY_ATTEMPTS, e,
+                    "Failed after {CONNECT_RETRY_ATTEMPTS} attempts: {e}",
                 )));
             }
         }
