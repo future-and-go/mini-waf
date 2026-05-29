@@ -27,5 +27,5 @@ tags:
 - owasp-crs
 - multipart-attack
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '922130'
+  source: OWASP CRS v4.25.0
