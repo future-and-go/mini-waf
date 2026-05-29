@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use waf_storage::models::{
     AttackLogQuery, CreateCertificate, CreateCustomRule, CreateHost, CreateIpRule, CreateLbBackend,
-    CreateSensitivePattern, CreateUrlRule, SecurityEventQuery, UpdateCustomRule, UpdateHost, UpsertHotlinkConfig,
+    CreateSensitivePattern, CreateUrlRule, SecurityEventQuery, UpdateCustomRule, UpdateHost, UpdateSensitivePattern,
+    UpsertHotlinkConfig,
 };
 
 use waf_common::{HostConfig, UpstreamAlpn};
@@ -527,6 +528,73 @@ pub async fn delete_sensitive_pattern(
         tracing::warn!("Failed to reload after pattern delete: {}", e);
     }
     Ok(Json(json!({ "success": true, "data": null })))
+}
+
+/// Typed PATCH body for sensitive patterns.
+///
+/// Every field is optional so a caller can supply any subset;
+/// `deny_unknown_fields` rejects typos at the API boundary with a 400 instead
+/// of silently ignoring them.
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct PatchSensitivePattern {
+    pub pattern: Option<String>,
+    pub pattern_type: Option<String>,
+    pub check_request: Option<bool>,
+    pub check_response: Option<bool>,
+    pub action: Option<String>,
+    pub remarks: Option<String>,
+    pub enabled: Option<bool>,
+}
+
+impl PatchSensitivePattern {
+    const fn is_toggle_only(&self) -> bool {
+        self.enabled.is_some()
+            && self.pattern.is_none()
+            && self.pattern_type.is_none()
+            && self.check_request.is_none()
+            && self.check_response.is_none()
+            && self.action.is_none()
+            && self.remarks.is_none()
+    }
+}
+
+pub async fn patch_sensitive_pattern(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<PatchSensitivePattern>,
+) -> ApiResult<Json<Value>> {
+    if body.is_toggle_only() {
+        let enabled = body.enabled.unwrap_or(false);
+        let found = state.db.toggle_sensitive_pattern(id, enabled).await?;
+        if !found {
+            return Err(ApiError::NotFound(format!("Pattern {id} not found")));
+        }
+    } else {
+        let updated = state
+            .db
+            .update_sensitive_pattern(
+                id,
+                UpdateSensitivePattern {
+                    pattern: body.pattern.as_deref(),
+                    pattern_type: body.pattern_type.as_deref(),
+                    check_request: body.check_request,
+                    check_response: body.check_response,
+                    action: body.action.as_deref(),
+                    remarks: body.remarks.as_deref(),
+                    enabled: body.enabled,
+                },
+            )
+            .await?;
+        if updated.is_none() {
+            return Err(ApiError::NotFound(format!("Pattern {id} not found")));
+        }
+    }
+
+    if let Err(e) = state.engine.reload_rules().await {
+        tracing::warn!("Failed to reload after pattern patch: {}", e);
+    }
+    Ok(Json(json!({ "success": true, "data": { "id": id } })))
 }
 
 // ─── Hotlink Config ───────────────────────────────────────────────────────────
