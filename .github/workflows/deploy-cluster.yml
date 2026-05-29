@@ -75,7 +75,7 @@ jobs:
           shared-key: deploy-cluster
 
       - name: Build prx-waf release
-        run: cargo build --release -p prx-waf --locked
+        run: cargo build --release -p prx-waf
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v6
