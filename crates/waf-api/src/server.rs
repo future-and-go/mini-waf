@@ -50,6 +50,7 @@ use crate::notifications::{
 use crate::panel_api::{get_panel_config, put_panel_config};
 use crate::plugins::{delete_plugin, disable_plugin, enable_plugin, list_plugins, upload_plugin};
 use crate::relay_api::{get_relay_config, get_relay_intel_status, put_relay_config, refresh_relay_intel, test_relay};
+use crate::reputation_api::{delete_reputation, list_reputation, update_reputation, upsert_reputation};
 use crate::rule_sources_api::{
     create_rule_source, delete_rule_source, list_rule_sources, sync_all_rule_sources, sync_rule_source,
 };
@@ -337,6 +338,19 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/geoip/lookup",
             post(lookup_ip).layer(DefaultBodyLimit::max(crate::geo_api::MAX_BODY_BYTES)),
+        )
+        // PR-ε: IP reputation editor (FR-042, #60.6)
+        .route(
+            "/api/reputation",
+            get(list_reputation)
+                .post(upsert_reputation)
+                .layer(DefaultBodyLimit::max(crate::reputation_api::MAX_BODY_BYTES)),
+        )
+        .route(
+            "/api/reputation/{id}",
+            axum::routing::put(update_reputation)
+                .delete(delete_reputation)
+                .layer(DefaultBodyLimit::max(crate::reputation_api::MAX_BODY_BYTES)),
         )
         .layer(middleware::from_fn_with_state(state.clone(), require_auth))
         .layer(middleware::from_fn_with_state(
