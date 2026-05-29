@@ -75,11 +75,19 @@ pub struct Heartbeat {
     pub config_version: u64,
 }
 
+/// Vote cast by a candidate during an election, or a vote-grant echo from a peer.
+///
+/// When `voter_id` is `None` → this is a vote **request** from the candidate.
+/// When `voter_id` is `Some(id)` → this is a vote **grant** from `id`, echoed back
+/// to the candidate through the bidirectional stream.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElectionVote {
     pub term: u64,
     pub candidate_id: String,
     pub last_log_index: u64,
+    /// Present only in vote-grant responses; identifies the voter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voter_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +111,11 @@ pub struct JoinResponse {
     pub node_cert_pem: String,
     pub ca_cert_pem: String,
     pub cluster_state: ClusterState,
+    /// AES-GCM encrypted CA private key (base64-encoded), included when the
+    /// main has a `ca_passphrase` configured.  Workers store this so a new
+    /// main can take over CA duties after failover.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encrypted_ca_key_b64: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,7 +250,7 @@ protocol, not Raft entries.
 2. Worker starts election timeout (random 150-300ms)
 3. If no heartbeat from main within timeout → become Candidate
 4. Candidate increments term, votes for self, requests votes from all peers
-5. Node grants vote if: candidate term > current term AND haven't voted this term
+5. Node grants vote if: candidate term >= current term AND (haven't voted this term OR already voted for same candidate)
 6. Candidate wins if: receives majority votes (N/2 + 1)
 7. Winner becomes Main, broadcasts `ElectionResult`
 8. Losers reset to Worker, accept new Main
@@ -267,7 +280,7 @@ every `insert()` or `remove()`. No new versioning infrastructure needed.
 Worker request: RuleSyncRequest { current_version: 42 }
 
 Main logic:
-  registry = rule_manager.registry.read().unwrap()
+  registry = node_state.rule_registry.read().unwrap()
   if registry.version == 42 → send empty RuleSyncResponse (no-op)
   else if changelog covers [42..registry.version] → send incremental
   else (worker too far behind or changelog evicted) → send full snapshot
@@ -277,7 +290,7 @@ Main logic:
 
 ```rust
 // Main: serialize + compress
-let registry = rule_manager.registry.read().unwrap();
+let registry = node_state.rule_registry.read().unwrap();
 let rules: Vec<_> = registry.rules.values().collect();
 let json = serde_json::to_vec(&rules).context("rule snapshot serialize")?;
 let compressed = lz4_flex::compress_prepend_size(&json);
@@ -288,13 +301,13 @@ let json = lz4_flex::decompress_size_prepended(&msg.snapshot_lz4)
     .context("rule snapshot decompress")?;
 let rules: Vec<waf_engine::rules::registry::Rule> = serde_json::from_slice(&json)
     .context("rule snapshot deserialize")?;
-let mut registry = engine.rule_registry.write().unwrap();
+let mut registry = node_state.rule_registry.write().unwrap();
 registry.rules.clear();
 registry.by_category.clear();
 registry.by_source.clear();
 for rule in rules { registry.insert(rule); }
 registry.version = msg.version;
-engine.on_rules_updated(msg.version).await?;
+node_state.on_rules_updated(msg.version).await?;
 ```
 
 ### 3.3 Incremental Change Log
@@ -339,7 +352,26 @@ impl RuleChangelog {
 | Periodic poll (every `sync.rules_interval_secs`) | Worker sends RuleSyncRequest; main responds if version differs |
 | Worker rejoins after disconnect | Full sync (safer than relying on stale changelog) |
 
-### 3.5 WASM Plugin Sync (v1 Limitation)
+### 3.5 Configuration Synchronization
+
+The cluster syncs a safe subset of configuration across all nodes via `ConfigSync` messages.
+Main pushes updates at `sync.config_interval_secs` (default 30s).
+
+**Synced sections:**
+- `proxy` — upstream targets, timeouts, routing rules
+- `rules` — rule management settings (path, auto-reload)
+- `cache` — cache behavior
+- `api` — API server settings
+
+**Excluded (safety):**
+- `cluster` — node role + identity must not be synced (would break cluster topology)
+- `storage` — database URL is node-specific
+- `security` — SSL keys are per-node
+
+Workers apply ConfigSync as a complete TOML replacement (atomic update), allowing
+coordinated policy changes across the cluster without manual node restarts.
+
+### 3.6 WASM Plugin Sync (v1 Limitation)
 
 WASM plugins are binary blobs stored in PostgreSQL. Worker nodes **do not receive WASM
 plugins** in v1. Workers run the WAF engine without plugin support. Add to deployment
@@ -485,11 +517,15 @@ async fn api_write_on_worker_forwarded_to_main() {
 
 ## 6. Implementation Phases
 
-> **Effort estimates use Claude-hours.** Claude AI performs all development 24/7 with no
-> context-switching overhead, roughly 3-5x faster than human-hours for comparable tasks.
-> Estimates assume no blocking external dependencies (network, hardware, vendor APIs).
+> **Status:** Phases 1–3 are fully implemented and tested as of 2026-05-28. Phase 4 (Admin UI)
+> has API endpoints implemented but UI pages are in progress.
 
-### Phase 1: Foundation — QUIC Transport + mTLS (~14 Claude-hours)
+> **Effort estimates (historical):** Claude AI performed all development at roughly 3-5x faster
+> than human-hours for comparable tasks, with minimal context-switching overhead.
+
+### Phase 1: Foundation — QUIC Transport + mTLS
+
+**Status:** ✅ COMPLETE
 
 **Goal:** Two nodes can discover each other, establish mTLS QUIC connection, and exchange heartbeats.
 
@@ -511,7 +547,9 @@ async fn api_write_on_worker_forwarded_to_main() {
 | Integration test: 2-node connect + heartbeat | 2h | waf-cluster/tests | |
 | **Phase 1 subtotal** | **~14h** | | |
 
-### Phase 2: Rule and Config Sync (~14 Claude-hours)
+### Phase 2: Rule and Config Sync
+
+**Status:** ✅ COMPLETE
 
 **Goal:** Workers auto-sync rules from main; attack logs aggregated on main; API writes forwarded.
 
@@ -532,7 +570,9 @@ async fn api_write_on_worker_forwarded_to_main() {
 | Integration test: create rule on main → synced to worker | 1.5h | tests | |
 | **Phase 2 subtotal** | **~14h** | | |
 
-### Phase 3: Election + Failover (~16 Claude-hours)
+### Phase 3: Election + Failover
+
+**Status:** ✅ COMPLETE
 
 **Goal:** Cluster survives main failure with automatic re-election, no manual intervention.
 
@@ -550,7 +590,9 @@ async fn api_write_on_worker_forwarded_to_main() {
 | Concurrent election test: single winner | 0.5h | tests | |
 | **Phase 3 subtotal** | **~16h** | | |
 
-### Phase 4: Admin UI + Polish (~10 Claude-hours)
+### Phase 4: Admin UI + Polish
+
+**Status:** 🔄 IN PROGRESS (API endpoints complete, UI pages pending)
 
 **Goal:** Full cluster management via Admin UI; 3-node cluster deployable with docker-compose.
 
