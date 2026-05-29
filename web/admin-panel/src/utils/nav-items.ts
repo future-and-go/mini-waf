@@ -21,6 +21,9 @@ import {
   RobotOutlined,
   ThunderboltOutlined,
   AuditOutlined,
+  ApartmentOutlined,
+  FireOutlined,
+  UnorderedListOutlined,
 } from "@ant-design/icons";
 import type { ComponentType } from "react";
 
@@ -62,4 +65,8 @@ export const navItems: NavItem[] = [
   { key: "cache", i18nKey: "nav.cacheDashboard", path: "/cache", icon: ThunderboltOutlined, section: "nav.cache" },
 
   { key: "tx-velocity", i18nKey: "nav.txVelocity", path: "/tx-velocity", icon: AuditOutlined, section: "nav.fraud" },
+
+  { key: "tier-policies", i18nKey: "nav.tierPolicies", path: "/tier-policies", icon: ApartmentOutlined, section: "nav.policies" },
+  { key: "ddos-protection", i18nKey: "nav.ddosProtection", path: "/ddos-protection", icon: FireOutlined, section: "nav.policies" },
+  { key: "access-lists", i18nKey: "nav.accessLists", path: "/access-lists", icon: UnorderedListOutlined, section: "nav.policies" },
 ];
