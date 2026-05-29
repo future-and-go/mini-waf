@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Engine log_only Semantic Fix"
-status: pending
+status: done
 priority: P1
 effort: "3h"
 dependencies: [3]

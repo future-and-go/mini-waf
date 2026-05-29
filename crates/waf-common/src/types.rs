@@ -162,12 +162,13 @@ impl RuleAction {
     }
 
     #[must_use]
-    #[allow(deprecated)]
     pub fn to_waf_action(self, status: u16, body: Option<String>) -> WafAction {
         match self {
             Self::Block => WafAction::Block { status, body },
-            Self::Allow => WafAction::Allow,
-            Self::Log => WafAction::LogOnly,
+            // "Log" intent means "allow the request, log the match" — same action
+            // as Allow. Log-only enforcement bypass is carried by
+            // `WafDecision::mode`, not the action.
+            Self::Allow | Self::Log => WafAction::Allow,
             Self::Challenge => WafAction::Challenge,
         }
     }
@@ -1180,10 +1181,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn rule_action_to_waf_action_log() {
+        // "Log" maps to Allow; log-only semantics live on WafDecision::mode.
         let wa = RuleAction::Log.to_waf_action(403, None);
-        assert!(matches!(wa, WafAction::LogOnly));
+        assert!(matches!(wa, WafAction::Allow));
     }
 
     #[test]

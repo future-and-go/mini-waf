@@ -35,7 +35,7 @@ mod common;
 use std::sync::Arc;
 
 use common::{make_ctx, start_engine};
-use waf_common::{HostConfig, WafAction};
+use waf_common::{HostConfig, InteropMode, WafAction};
 use waf_storage::models::{CreateHost, CreateIpRule};
 
 async fn seed_host(db: &waf_storage::Database, log_only: bool) -> String {
@@ -86,14 +86,13 @@ async fn xss_in_log_only_mode_returns_log_only() {
     ctx.query = "q=<script>alert(1)</script>".into();
     let d = fx.engine.inspect(&mut ctx).await;
     assert!(
-        matches!(d.action, WafAction::LogOnly),
-        "XSS LogOnly: got {:?}",
+        matches!(d.action, WafAction::Block { .. }),
+        "XSS must preserve Block action in log_only: got {:?}",
         d.action
     );
-    // Phase 4: replace above assertion with:
-    // assert!(matches!(d.action, WafAction::Block { .. }), "XSS should preserve Block action in log_only: got {:?}", d.action);
-    // assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
-    // assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
+    assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
+    assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
+    assert!(d.result.is_some(), "detection result must be preserved");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -104,14 +103,13 @@ async fn directory_traversal_in_log_only_mode_returns_log_only() {
     let mut ctx = ctx_log_only(&code, "/files/../../etc/passwd", "9.9.9.11");
     let d = fx.engine.inspect(&mut ctx).await;
     assert!(
-        matches!(d.action, WafAction::LogOnly),
-        "traversal LogOnly: got {:?}",
+        matches!(d.action, WafAction::Block { .. }),
+        "traversal must preserve Block action in log_only: got {:?}",
         d.action
     );
-    // Phase 4: replace above assertion with:
-    // assert!(matches!(d.action, WafAction::Block { .. }), "traversal should preserve Block action in log_only: got {:?}", d.action);
-    // assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
-    // assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
+    assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
+    assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
+    assert!(d.result.is_some(), "detection result must be preserved");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -123,14 +121,13 @@ async fn rce_in_log_only_mode_returns_log_only() {
     ctx.query = "cmd=cat%20/etc/passwd;%20id".into();
     let d = fx.engine.inspect(&mut ctx).await;
     assert!(
-        matches!(d.action, WafAction::LogOnly),
-        "RCE LogOnly: got {:?}",
+        matches!(d.action, WafAction::Block { .. }),
+        "RCE must preserve Block action in log_only: got {:?}",
         d.action
     );
-    // Phase 4: replace above assertion with:
-    // assert!(matches!(d.action, WafAction::Block { .. }), "RCE should preserve Block action in log_only: got {:?}", d.action);
-    // assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
-    // assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
+    assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
+    assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
+    assert!(d.result.is_some(), "detection result must be preserved");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -143,14 +140,13 @@ async fn scanner_ua_in_log_only_mode_returns_log_only() {
     ctx.headers.insert("user-agent".into(), "sqlmap/1.5.7".into());
     let d = fx.engine.inspect(&mut ctx).await;
     assert!(
-        matches!(d.action, WafAction::LogOnly),
-        "scanner UA LogOnly: got {:?}",
+        matches!(d.action, WafAction::Block { .. }),
+        "scanner must preserve Block action in log_only: got {:?}",
         d.action
     );
-    // Phase 4: replace above assertion with:
-    // assert!(matches!(d.action, WafAction::Block { .. }), "scanner should preserve Block action in log_only: got {:?}", d.action);
-    // assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
-    // assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
+    assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
+    assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
+    assert!(d.result.is_some(), "detection result must be preserved");
 }
 
 #[tokio::test(flavor = "multi_thread")]
