@@ -235,6 +235,11 @@ impl IdentityStore for MemoryIdentityStore {
         });
         Ok(purged)
     }
+
+    async fn clear_all(&self) -> anyhow::Result<()> {
+        self.map.clear();
+        Ok(())
+    }
 }
 
 /// Spawn a background TTL janitor that calls `purge_expired` every

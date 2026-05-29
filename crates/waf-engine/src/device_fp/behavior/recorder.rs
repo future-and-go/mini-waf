@@ -100,6 +100,10 @@ impl Recorder {
         })
     }
 
+    pub fn clear_all(&self) {
+        self.actors.clear();
+    }
+
     #[must_use]
     pub fn len(&self) -> usize {
         self.actors.len()

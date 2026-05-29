@@ -241,6 +241,10 @@ impl TxStore {
         self.actors.len()
     }
 
+    pub fn clear_all(&self) {
+        self.actors.clear();
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.actors.is_empty()

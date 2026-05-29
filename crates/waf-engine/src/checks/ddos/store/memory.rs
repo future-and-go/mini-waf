@@ -120,6 +120,11 @@ impl CounterStore for MemoryCounterStore {
     async fn purge_expired(&self, now_ms: i64) -> anyhow::Result<usize> {
         Ok(Self::gc(&self.map, now_ms, self.max_keys))
     }
+
+    async fn clear_all(&self) -> anyhow::Result<()> {
+        self.map.clear();
+        Ok(())
+    }
 }
 
 /// Current wall-clock epoch milliseconds, clamped to `i64`.

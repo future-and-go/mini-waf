@@ -6,6 +6,7 @@ pub mod crowdsec;
 pub mod error;
 pub mod handlers;
 pub mod health;
+pub mod interop_control;
 pub mod logs;
 pub mod middleware;
 pub mod notifications;
