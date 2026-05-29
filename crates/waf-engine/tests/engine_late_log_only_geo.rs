@@ -35,7 +35,7 @@ mod common;
 use std::sync::Arc;
 
 use common::{make_ctx, start_engine};
-use waf_common::{DefenseConfig, GeoIpInfo, HostConfig, WafAction};
+use waf_common::{DefenseConfig, GeoIpInfo, HostConfig, InteropMode, WafAction};
 use waf_storage::models::{CreateHost, CreateIpRule, CreateSensitivePattern, UpsertHotlinkConfig};
 
 const BENIGN_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0";
@@ -106,7 +106,13 @@ async fn sensitive_pattern_in_log_only_mode_returns_log_only() {
     fx.engine.reload_rules().await.expect("reload");
     let mut ctx = ctx_log_only(&code, "/api/LOGONLY-SECRET", "9.9.9.30");
     let d = fx.engine.inspect(&mut ctx).await;
-    assert!(matches!(d.action, WafAction::LogOnly), "got {:?}", d.action);
+    assert!(
+        matches!(d.action, WafAction::Block { .. }),
+        "sensitive must preserve Block action in log_only: got {:?}",
+        d.action
+    );
+    assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
+    assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -126,7 +132,13 @@ async fn hotlink_in_log_only_mode_returns_log_only() {
     fx.engine.reload_rules().await.expect("reload");
     let mut ctx = ctx_log_only(&code, "/img/a.png", "9.9.9.31");
     let d = fx.engine.inspect(&mut ctx).await;
-    assert!(matches!(d.action, WafAction::LogOnly), "got {:?}", d.action);
+    assert!(
+        matches!(d.action, WafAction::Block { .. }),
+        "hotlink must preserve Block action in log_only: got {:?}",
+        d.action
+    );
+    assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
+    assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
 }
 
 #[tokio::test(flavor = "multi_thread")]

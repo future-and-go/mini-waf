@@ -5,7 +5,7 @@ use arc_swap::ArcSwap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use waf_common::{InteropMode, RequestCtx, RuleAction, WafAction, WafDecision};
+use waf_common::{DetectionResult, InteropMode, RequestCtx, RuleAction, WafAction, WafDecision};
 use waf_storage::{
     Database,
     models::{AttackLog, CreateSecurityEvent},
@@ -535,7 +535,6 @@ impl WafEngine {
     /// `ctx` is taken as `&mut` so the engine can enrich it with `GeoIP` data
     /// before the checker pipeline runs.  Callers should check
     /// `decision.is_enforcement_allowed()`.
-    #[allow(deprecated)]
     pub async fn inspect(&self, ctx: &mut RequestCtx) -> WafDecision {
         // Skip WAF if guard is disabled for this host
         if !ctx.host_config.guard_status {
@@ -586,18 +585,7 @@ impl WafEngine {
         // Banned IPs are blocked here; burst detection may trigger new bans.
         if let Some(result) = self.ddos_check.check(ctx) {
             let rule_name = result.rule_name.clone();
-            let decision = if ctx.host_config.log_only_mode {
-                WafDecision {
-                    action: WafAction::LogOnly,
-                    result: Some(result),
-                    risk_score: 0,
-                    mode: InteropMode::Enforce,
-                    rule_id: None,
-                }
-            } else {
-                let body = render_block_page(ctx, &rule_name);
-                WafDecision::block(403, Some(body), result)
-            };
+            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             return decision;
@@ -608,18 +596,7 @@ impl WafEngine {
             && let Some(result) = cs.check(ctx)
         {
             let rule_name = result.rule_name.clone();
-            let decision = if ctx.host_config.log_only_mode {
-                WafDecision {
-                    action: WafAction::LogOnly,
-                    result: Some(result),
-                    risk_score: 0,
-                    mode: InteropMode::Enforce,
-                    rule_id: None,
-                }
-            } else {
-                let body = render_block_page(ctx, &rule_name);
-                WafDecision::block(403, Some(body), result)
-            };
+            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             self.send_audit_event(ctx, &decision);
@@ -631,18 +608,7 @@ impl WafEngine {
             && let Some(result) = cc.check(ctx)
         {
             let rule_name = result.rule_name.clone();
-            let decision = if ctx.host_config.log_only_mode {
-                WafDecision {
-                    action: WafAction::LogOnly,
-                    result: Some(result),
-                    risk_score: 0,
-                    mode: InteropMode::Enforce,
-                    rule_id: None,
-                }
-            } else {
-                let body = render_block_page(ctx, &rule_name);
-                WafDecision::block(403, Some(body), result)
-            };
+            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             return decision;
         }
@@ -650,18 +616,7 @@ impl WafEngine {
         // ── Phase 17: GeoIP access control ────────────────────────────────────
         if let Some(result) = self.geo_check.check(ctx) {
             let rule_name = result.rule_name.clone();
-            let decision = if ctx.host_config.log_only_mode {
-                WafDecision {
-                    action: WafAction::LogOnly,
-                    result: Some(result),
-                    risk_score: 0,
-                    mode: InteropMode::Enforce,
-                    rule_id: None,
-                }
-            } else {
-                let body = render_block_page(ctx, &rule_name);
-                WafDecision::block(403, Some(body), result)
-            };
+            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             self.send_audit_event(ctx, &decision);
@@ -673,18 +628,7 @@ impl WafEngine {
             if let Some(result) = checker.check(ctx) {
                 let rule_name = result.rule_name.clone();
 
-                let decision = if ctx.host_config.log_only_mode {
-                    WafDecision {
-                        action: WafAction::LogOnly,
-                        result: Some(result),
-                        risk_score: 0,
-                        mode: InteropMode::Enforce,
-                        rule_id: None,
-                    }
-                } else {
-                    let body = render_block_page(ctx, &rule_name);
-                    WafDecision::block(403, Some(body), result)
-                };
+                let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
 
                 self.log_security_event(ctx, &decision);
                 self.report_community_signal(ctx, &decision);
@@ -696,18 +640,7 @@ impl WafEngine {
         // ── SQLi check (separate for hot-reload support) ─────────────────────
         if let Some(result) = self.sqli_check.check(ctx) {
             let rule_name = result.rule_name.clone();
-            let decision = if ctx.host_config.log_only_mode {
-                WafDecision {
-                    action: WafAction::LogOnly,
-                    result: Some(result),
-                    risk_score: 0,
-                    mode: InteropMode::Enforce,
-                    rule_id: None,
-                }
-            } else {
-                let body = render_block_page(ctx, &rule_name);
-                WafDecision::block(403, Some(body), result)
-            };
+            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             self.send_audit_event(ctx, &decision);
@@ -720,18 +653,7 @@ impl WafEngine {
                 AppSecResult::Block { message } => {
                     let result = appsec_to_detection(message);
                     let rule_name = result.rule_name.clone();
-                    let decision = if ctx.host_config.log_only_mode {
-                        WafDecision {
-                            action: WafAction::LogOnly,
-                            result: Some(result),
-                            risk_score: 0,
-                            mode: InteropMode::Enforce,
-                            rule_id: None,
-                        }
-                    } else {
-                        let body = render_block_page(ctx, &rule_name);
-                        WafDecision::block(403, Some(body), result)
-                    };
+                    let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
                     self.log_security_event(ctx, &decision);
                     self.report_community_signal(ctx, &decision);
                     self.send_audit_event(ctx, &decision);
@@ -744,35 +666,32 @@ impl WafEngine {
         // ── Phase 12: Custom rules engine ─────────────────────────────────────
         if let Some(result) = self.custom_rules.check(ctx) {
             let rule_name = result.rule_name.clone();
-            let decision = if ctx.host_config.log_only_mode {
-                WafDecision {
-                    action: WafAction::LogOnly,
-                    result: Some(result),
-                    risk_score: 0,
-                    mode: InteropMode::Enforce,
-                    rule_id: None,
-                }
+            // Custom rules carry their own action intent/status overrides, so this
+            // branch builds the action directly instead of using make_block_decision.
+            let action_intent = result.rule_action.unwrap_or(RuleAction::Block);
+            let status = result.action_status.unwrap_or(403);
+            let body = if action_intent == RuleAction::Block {
+                Some(render_block_page(ctx, &rule_name))
             } else {
-                let action = result.rule_action.unwrap_or(RuleAction::Block);
-                let status = result.action_status.unwrap_or(403);
-                let body = if action == RuleAction::Block {
-                    Some(render_block_page(ctx, &rule_name))
-                } else {
-                    None
-                };
-                WafDecision {
-                    action: action.to_waf_action(status, body),
-                    result: Some(result),
-                    risk_score: 0,
-                    mode: InteropMode::Enforce,
-                    rule_id: None,
-                }
+                None
             };
+            let rule_id = result.rule_id.clone();
+            let mut decision = WafDecision {
+                action: action_intent.to_waf_action(status, body),
+                result: Some(result),
+                risk_score: 0,
+                mode: InteropMode::Enforce,
+                rule_id,
+            };
+            if ctx.host_config.log_only_mode {
+                decision.mode = InteropMode::LogOnly;
+            }
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             self.send_audit_event(ctx, &decision);
             // Allow/Log: log the match but continue pipeline (phases 13-16 still run)
-            // Block/Challenge: return immediately
+            // Block/Challenge: return immediately. In log-only mode enforcement is
+            // bypassed (mode = LogOnly), so even a Block intent continues the pipeline.
             if !decision.is_enforcement_allowed() {
                 return decision;
             }
@@ -781,18 +700,7 @@ impl WafEngine {
         // ── Phase 13: OWASP CRS ────────────────────────────────────────────────
         if let Some(result) = self.owasp.check(ctx) {
             let rule_name = result.rule_name.clone();
-            let decision = if ctx.host_config.log_only_mode {
-                WafDecision {
-                    action: WafAction::LogOnly,
-                    result: Some(result),
-                    risk_score: 0,
-                    mode: InteropMode::Enforce,
-                    rule_id: None,
-                }
-            } else {
-                let body = render_block_page(ctx, &rule_name);
-                WafDecision::block(403, Some(body), result)
-            };
+            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             self.send_audit_event(ctx, &decision);
@@ -802,18 +710,7 @@ impl WafEngine {
         // ── Phase 14: Sensitive data ───────────────────────────────────────────
         if let Some(result) = self.sensitive.check(ctx) {
             let rule_name = result.rule_name.clone();
-            let decision = if ctx.host_config.log_only_mode {
-                WafDecision {
-                    action: WafAction::LogOnly,
-                    result: Some(result),
-                    risk_score: 0,
-                    mode: InteropMode::Enforce,
-                    rule_id: None,
-                }
-            } else {
-                let body = render_block_page(ctx, &rule_name);
-                WafDecision::block(403, Some(body), result)
-            };
+            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             self.send_audit_event(ctx, &decision);
@@ -823,18 +720,7 @@ impl WafEngine {
         // ── Phase 15: Anti-hotlinking ──────────────────────────────────────────
         if let Some(result) = self.hotlink.check(ctx) {
             let rule_name = result.rule_name.clone();
-            let decision = if ctx.host_config.log_only_mode {
-                WafDecision {
-                    action: WafAction::LogOnly,
-                    result: Some(result),
-                    risk_score: 0,
-                    mode: InteropMode::Enforce,
-                    rule_id: None,
-                }
-            } else {
-                let body = render_block_page(ctx, &rule_name);
-                WafDecision::block(403, Some(body), result)
-            };
+            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             self.send_audit_event(ctx, &decision);
@@ -842,6 +728,21 @@ impl WafEngine {
         }
 
         WafDecision::allow()
+    }
+
+    /// Build a Block decision, honouring per-host log-only mode.
+    ///
+    /// The intended action (`Block { status, body }`) is always preserved so
+    /// logging/audit see the real action. When the host runs in log-only mode
+    /// the enforcement bypass is signalled via `mode = LogOnly`, leaving
+    /// `is_enforcement_allowed()` true so the gateway forwards upstream.
+    fn make_block_decision(ctx: &RequestCtx, rule_name: &str, result: DetectionResult, status: u16) -> WafDecision {
+        let body = render_block_page(ctx, rule_name);
+        let mut decision = WafDecision::block(status, Some(body), result);
+        if ctx.host_config.log_only_mode {
+            decision.mode = InteropMode::LogOnly;
+        }
+        decision
     }
 
     /// Dispatch an upstream response status to every registered `Check`.
