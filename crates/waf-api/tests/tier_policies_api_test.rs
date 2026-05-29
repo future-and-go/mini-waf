@@ -5,6 +5,8 @@
 //! real DB pool.
 
 #![allow(
+    dead_code,
+    unsafe_code,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
@@ -80,20 +82,10 @@ async fn start_local_server() -> LocalServer {
     state_inner.main_config_file = Some(main_cfg.to_string_lossy().into_owned());
     let state = Arc::new(state_inner);
 
-    let admin_token = generate_access_token(
-        uuid::Uuid::new_v4(),
-        "admin",
-        "admin",
-        &state.jwt_secret,
-    )
-    .expect("admin token");
-    let viewer_token = generate_access_token(
-        uuid::Uuid::new_v4(),
-        "viewer",
-        "viewer",
-        &state.jwt_secret,
-    )
-    .expect("viewer token");
+    let admin_token =
+        generate_access_token(uuid::Uuid::new_v4(), "admin", "admin", &state.jwt_secret).expect("admin token");
+    let viewer_token =
+        generate_access_token(uuid::Uuid::new_v4(), "viewer", "viewer", &state.jwt_secret).expect("viewer token");
 
     let app = build_router(Arc::clone(&state));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
