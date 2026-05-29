@@ -24,9 +24,10 @@ use tracing::{debug, info, warn};
 
 use crate::protocol::{ApiForward, ApiForwardResponse, ClusterMessage};
 
-/// Audit header stamped onto every forwarded admin request so the receiving
-/// Main node can attribute the loopback-sourced request to the originating
-/// worker. See `docs/cluster-protocol.md` §7 "Peer Trust Model".
+/// Audit header stamped onto every forwarded admin request.
+///
+/// The receiving Main node can attribute the loopback-sourced request to the
+/// originating worker. See `docs/cluster-protocol.md` §7 "Peer Trust Model".
 pub const X_FORWARDED_BY: &str = "x-forwarded-by";
 
 // ─── PendingForwards ──────────────────────────────────────────────────────────
