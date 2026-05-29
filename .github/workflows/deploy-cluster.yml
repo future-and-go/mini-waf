@@ -34,10 +34,10 @@ jobs:
     timeout-minutes: 45
     environment: cluster-test-deploy
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
@@ -58,7 +58,7 @@ jobs:
         run: cargo build --release -p prx-waf --locked
 
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_DEPLOY_REGION }}
@@ -77,18 +77,25 @@ jobs:
 
       - name: Discover cluster instance IDs by tag
         id: targets
+        env:
+          DISCOVERY_TAGS: ${{ secrets.CLUSTER_DISCOVERY_TAGS }}
         run: |
           set -euo pipefail
+          if [ -z "${DISCOVERY_TAGS}" ]; then
+            echo "::error::secret CLUSTER_DISCOVERY_TAGS is empty"; exit 1
+          fi
+          FILTERS=("Name=instance-state-name,Values=running")
+          IFS=',' read -ra ITEMS <<<"${DISCOVERY_TAGS}"
+          for kv in "${ITEMS[@]}"; do
+            k="${kv%%=*}"; v="${kv#*=}"
+            FILTERS+=("Name=tag:${k},Values=${v}")
+          done
           IDS=$(aws ec2 describe-instances \
-            --filters \
-              "Name=tag:project,Values=other" \
-              "Name=tag:env,Values=dev" \
-              "Name=tag:Name,Values=other-test-cluster-*" \
-              "Name=instance-state-name,Values=running" \
+            --filters "${FILTERS[@]}" \
             --query 'Reservations[].Instances[].InstanceId' \
             --output text)
           if [ -z "$IDS" ]; then
-            echo "::error::No running cluster instances found"; exit 1
+            echo "::error::No running cluster instances matched the discovery filter"; exit 1
           fi
           IDS_CSV=$(echo "$IDS" | tr -s '[:space:]' ',' | sed 's/,$//')
           echo "ids=${IDS_CSV}" >> "$GITHUB_OUTPUT"
@@ -103,24 +110,14 @@ jobs:
         run: |
           set -euo pipefail
           IFS=',' read -ra IDS_ARR <<<"${TARGET_IDS}"
-          SCRIPT=$(cat <<'EOS'
-          set -euo pipefail
-          TMP=$(mktemp)
-          trap 'rm -f "$TMP"' EXIT
-          curl -fSL --max-time 120 --retry 2 "__URL__" -o "$TMP"
-          chmod +x "$TMP"
-          sudo install -o miniwaf -g miniwaf -m 0755 "$TMP" /opt/mini-waf/bin/prx-waf.new
-          sudo mv -f /opt/mini-waf/bin/prx-waf.new /opt/mini-waf/bin/prx-waf
-          sudo systemctl restart mini-waf
-          sleep 6
-          sudo systemctl is-active mini-waf
-          curl -fsS --max-time 5 http://127.0.0.1:9527/healthz \
-            || curl -fsS --max-time 5 http://127.0.0.1:9527/api/health \
-            || { echo "healthz failed"; sudo journalctl -u mini-waf -n 80 --no-pager; exit 1; }
-          echo "deploy OK: __SHA__"
-          EOS
+          SCRIPT_RENDERED=$(python3 - <<'PY'
+          import os, sys
+          body = open(".github/workflows/scripts/deploy-on-vm.sh").read()
+          body = body.replace("__URL__", os.environ["PRESIGNED_URL"])
+          body = body.replace("__SHA__", os.environ["GIT_SHA"])
+          sys.stdout.write(body)
+          PY
           )
-          SCRIPT_RENDERED=$(printf '%s' "$SCRIPT" | sed "s|__URL__|${PRESIGNED_URL}|g; s|__SHA__|${GIT_SHA}|g")
           PARAMS=$(jq -n --arg cmd "$SCRIPT_RENDERED" '{commands:[$cmd], executionTimeout:["300"]}')
           CMD_ID=$(aws ssm send-command \
             --instance-ids "${IDS_ARR[@]}" \
