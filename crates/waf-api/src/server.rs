@@ -23,12 +23,15 @@ use crate::cache_api::{
     cache_backend_info, cache_flush, cache_flush_host, cache_flush_key, cache_list_tags, cache_purge_route,
     cache_purge_tag, cache_stats, cache_stats_timeseries, cache_top_routes,
 };
+use crate::challenge_api::{challenge_preview, get_challenge_config, get_challenge_stats, put_challenge_config};
 use crate::cluster::{cluster_status, generate_join_token, get_cluster_node, list_cluster_nodes, remove_cluster_node};
 use crate::crowdsec::{
     crowdsec_stats, crowdsec_status, delete_crowdsec_decision, get_crowdsec_config, list_crowdsec_decisions,
     list_crowdsec_events, test_crowdsec_connection, update_crowdsec_config,
 };
 use crate::ddos_api::{delete_ban_entry, get_ddos_config, get_ddos_metrics, list_ban_table, put_ddos_config};
+use crate::device_fp_api::{get_device_fp_config, list_fp_conflicts, list_recent_fps, put_device_fp_config};
+use crate::geo_api::{create_geo_rule, delete_geo_rule, list_geo_rules, lookup_ip, patch_geo_rule};
 use crate::handlers::{
     create_allow_ip, create_allow_url, create_block_ip, create_block_url, create_custom_rule, create_host,
     create_lb_backend, create_sensitive_pattern, delete_allow_ip, delete_allow_url, delete_block_ip, delete_block_url,
@@ -46,6 +49,7 @@ use crate::notifications::{
 };
 use crate::panel_api::{get_panel_config, put_panel_config};
 use crate::plugins::{delete_plugin, disable_plugin, enable_plugin, list_plugins, upload_plugin};
+use crate::relay_api::{get_relay_config, get_relay_intel_status, put_relay_config, refresh_relay_intel, test_relay};
 use crate::rule_sources_api::{
     create_rule_source, delete_rule_source, list_rule_sources, sync_all_rule_sources, sync_rule_source,
 };
@@ -283,6 +287,57 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 .layer(DefaultBodyLimit::max(crate::access_lists_api::MAX_BODY_BYTES)),
         )
         .route("/api/access-lists/test", get(test_access_lists))
+        // PR-β1: challenge engine (FR-006)
+        .route(
+            "/api/challenge/config",
+            get(get_challenge_config)
+                .put(put_challenge_config)
+                .layer(DefaultBodyLimit::max(crate::challenge_api::MAX_BODY_BYTES)),
+        )
+        .route("/api/challenge/stats", get(get_challenge_stats))
+        .route(
+            "/api/challenge/preview",
+            post(challenge_preview).layer(DefaultBodyLimit::max(crate::challenge_api::MAX_BODY_BYTES)),
+        )
+        // PR-β1: relay + proxy intel (FR-007)
+        .route(
+            "/api/relay/config",
+            get(get_relay_config)
+                .put(put_relay_config)
+                .layer(DefaultBodyLimit::max(crate::relay_api::MAX_BODY_BYTES)),
+        )
+        .route("/api/relay/intel/status", get(get_relay_intel_status))
+        .route("/api/relay/intel/refresh", post(refresh_relay_intel))
+        .route(
+            "/api/relay/test",
+            post(test_relay).layer(DefaultBodyLimit::max(crate::relay_api::MAX_BODY_BYTES)),
+        )
+        // PR-β1: device fingerprinting (FR-010)
+        .route(
+            "/api/device-fp/config",
+            get(get_device_fp_config)
+                .put(put_device_fp_config)
+                .layer(DefaultBodyLimit::max(crate::device_fp_api::MAX_BODY_BYTES)),
+        )
+        .route("/api/device-fp/recent", get(list_recent_fps))
+        .route("/api/device-fp/conflicts", get(list_fp_conflicts))
+        // PR-β1: geo restrictions (FR-011, FR-041)
+        .route(
+            "/api/geo-rules",
+            get(list_geo_rules)
+                .post(create_geo_rule)
+                .layer(DefaultBodyLimit::max(crate::geo_api::MAX_BODY_BYTES)),
+        )
+        .route(
+            "/api/geo-rules/{id}",
+            patch(patch_geo_rule)
+                .delete(delete_geo_rule)
+                .layer(DefaultBodyLimit::max(crate::geo_api::MAX_BODY_BYTES)),
+        )
+        .route(
+            "/api/geoip/lookup",
+            post(lookup_ip).layer(DefaultBodyLimit::max(crate::geo_api::MAX_BODY_BYTES)),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), require_auth))
         .layer(middleware::from_fn_with_state(
             state.clone(),
