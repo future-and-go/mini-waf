@@ -1,0 +1,19 @@
+# FR-005 DDoS protection — default configuration.
+# Hot-reloaded on file save (~250ms debounce).
+
+enabled: true
+
+per_ip:
+  threshold_rps: 100
+  window_secs: 10
+
+per_fingerprint:
+  threshold_rps: 200
+  window_secs: 10
+
+# Ban escalation ladder: level1 / level2 / level3 durations in seconds.
+ban_durations_secs: [60, 300, 3600]
+
+store:
+  backend: memory
+  # redis_url: "redis://127.0.0.1:6379"

@@ -58,6 +58,17 @@ impl DynamicBanTable {
         before.saturating_sub(self.entries.len())
     }
 
+    /// Remove a single entry. Returns true when an entry was present.
+    pub fn remove(&self, ip: &IpAddr) -> bool {
+        self.entries.remove(ip).is_some()
+    }
+
+    /// Snapshot all `(ip, expires_ms)` pairs for read-only export.
+    #[must_use]
+    pub fn snapshot(&self) -> Vec<(IpAddr, i64)> {
+        self.entries.iter().map(|e| (*e.key(), *e.value())).collect()
+    }
+
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()

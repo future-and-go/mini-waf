@@ -16,6 +16,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
+use crate::access_lists_api::{get_access_lists, put_access_lists, test_access_lists};
 use crate::auth::{login, logout, refresh_token};
 use crate::bot_api::{create_bot_pattern, list_bot_patterns, toggle_bot_pattern};
 use crate::cache_api::{
@@ -27,6 +28,7 @@ use crate::crowdsec::{
     crowdsec_stats, crowdsec_status, delete_crowdsec_decision, get_crowdsec_config, list_crowdsec_decisions,
     list_crowdsec_events, test_crowdsec_connection, update_crowdsec_config,
 };
+use crate::ddos_api::{delete_ban_entry, get_ddos_config, get_ddos_metrics, list_ban_table, put_ddos_config};
 use crate::handlers::{
     create_allow_ip, create_allow_url, create_block_ip, create_block_url, create_custom_rule, create_host,
     create_lb_backend, create_sensitive_pattern, delete_allow_ip, delete_allow_url, delete_block_ip, delete_block_url,
@@ -54,6 +56,7 @@ use crate::static_files::static_handler;
 use crate::stats::{
     stats_endpoints, stats_geo, stats_overview, stats_timeseries, stats_timeseries_by_category, threat_intel_status,
 };
+use crate::tier_policies_api::{dry_run_tier, get_tier_policies, put_tier_policies};
 use crate::tunnels::{create_tunnel, delete_tunnel, list_tunnels, ws_tunnel};
 use crate::websocket::{ws_events, ws_logs};
 
@@ -251,6 +254,35 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/logs/streams", get(logs_streams))
         // Dynamic log level control
         .route("/api/admin/logs/level", post(set_log_level))
+        // PR-α: tier policies (FR-002)
+        .route(
+            "/api/tier-policies",
+            get(get_tier_policies)
+                .put(put_tier_policies)
+                .layer(DefaultBodyLimit::max(crate::tier_policies_api::MAX_BODY_BYTES)),
+        )
+        .route(
+            "/api/tier-policies/dry-run",
+            post(dry_run_tier).layer(DefaultBodyLimit::max(crate::tier_policies_api::MAX_BODY_BYTES)),
+        )
+        // PR-α: DDoS protection (FR-005)
+        .route(
+            "/api/ddos/config",
+            get(get_ddos_config)
+                .put(put_ddos_config)
+                .layer(DefaultBodyLimit::max(crate::ddos_api::MAX_BODY_BYTES)),
+        )
+        .route("/api/ddos/metrics", get(get_ddos_metrics))
+        .route("/api/ddos/ban-table", get(list_ban_table))
+        .route("/api/ddos/ban-table/{ip}", delete(delete_ban_entry))
+        // PR-α: access lists (FR-008, FR-036-038)
+        .route(
+            "/api/access-lists",
+            get(get_access_lists)
+                .put(put_access_lists)
+                .layer(DefaultBodyLimit::max(crate::access_lists_api::MAX_BODY_BYTES)),
+        )
+        .route("/api/access-lists/test", get(test_access_lists))
         .layer(middleware::from_fn_with_state(state.clone(), require_auth))
         .layer(middleware::from_fn_with_state(
             state.clone(),
