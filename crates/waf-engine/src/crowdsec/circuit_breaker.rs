@@ -14,7 +14,7 @@ enum CircuitState {
     HalfOpen,
 }
 
-/// Circuit breaker for CrowdSec AppSec HTTP checks.
+/// Circuit breaker for `CrowdSec` `AppSec` HTTP checks.
 ///
 /// Tracks consecutive failures and opens the circuit after `threshold`
 /// failures. After `reset_duration` elapses the circuit enters half-open
@@ -28,6 +28,10 @@ pub struct AppSecCircuitBreaker {
     reset_duration: Duration,
 }
 
+// The mutex guard lives across each transition match by design — the TOCTOU
+// rationale documented on `state` is the whole point of the breaker. Clippy
+// would have us copy-out / drop-early, which re-opens the race.
+#[allow(clippy::significant_drop_tightening)]
 impl AppSecCircuitBreaker {
     /// Create a new circuit breaker.
     ///
@@ -43,7 +47,7 @@ impl AppSecCircuitBreaker {
     /// Returns `true` if the request should proceed, `false` to short-circuit.
     ///
     /// When the circuit is Open and the cooldown has elapsed, transitions to
-    /// HalfOpen and allows one probe request through.
+    /// `HalfOpen` and allows one probe request through.
     pub fn check_allow(&self) -> bool {
         let mut state = self.state.lock();
         match *state {
