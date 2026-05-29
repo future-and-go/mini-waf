@@ -1,8 +1,11 @@
+pub mod access_lists_api;
 pub mod auth;
 pub mod bot_api;
 pub mod cache_api;
 pub mod cluster;
+pub mod config_paths;
 pub mod crowdsec;
+pub mod ddos_api;
 pub mod error;
 pub mod handlers;
 pub mod health;
@@ -18,6 +21,7 @@ pub mod server;
 pub mod state;
 pub mod static_files;
 pub mod stats;
+pub mod tier_policies_api;
 pub mod tunnels;
 pub mod websocket;
 
