@@ -1,6 +1,10 @@
 name: Deploy Cluster (test)
 
-# Deploys prx-waf binary onto the 2-node test cluster after a merge to main.
+# Deploys the prx-waf binary onto the 2-node test cluster.
+# Triggers: automatic on push to main; manual (workflow_dispatch) from
+# main or release/stg. Only these two branches may deploy to the test
+# VMs — enforced authoritatively by the cluster-test-deploy environment's
+# deployment branch policy, and fail-fast by the guard job below.
 # Auth: GitHub OIDC -> AWS IAM role (no long-lived credentials in repo).
 # Transport: S3 presigned URL + SSM Run Command (no inbound SSH).
 # Target allowlist: instances tagged project=other env=dev Name=other-test-cluster-*.
@@ -28,8 +32,24 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  guard-branch:
+    name: Restrict deploy to main and release/stg
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Reject disallowed branches
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            main|release/stg)
+              echo "branch ${GITHUB_REF_NAME} is allowed to deploy" ;;
+            *)
+              echo "::error::branch ${GITHUB_REF_NAME} is not allowed to deploy to the test cluster (only main, release/stg)"
+              exit 1 ;;
+          esac
+
   deploy:
     name: Build and deploy to test cluster
+    needs: guard-branch
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: cluster-test-deploy
