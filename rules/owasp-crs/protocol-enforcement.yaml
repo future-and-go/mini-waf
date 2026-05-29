@@ -430,7 +430,7 @@ metadata:
 kind: custom_rule_v1
 id: CRS-920450
 name: HTTP header is restricted by policy (%{MATCHED_VAR})
-enabled: true
+enabled: false
 action: block
 pattern: ^.*$
 category: protocol-attack
@@ -614,6 +614,7 @@ name: Attempted multipart/form-data bypass
 enabled: true
 action: block
 pattern: '[''\";=\x5c]'
+pattern_field: header_content_type
 category: protocol-attack
 severity: critical
 paranoia: 2
@@ -628,7 +629,7 @@ metadata:
 kind: custom_rule_v1
 id: CRS-920451
 name: HTTP header is restricted by policy (%{MATCHED_VAR})
-enabled: true
+enabled: false
 action: block
 pattern: ^.*$
 category: protocol-attack

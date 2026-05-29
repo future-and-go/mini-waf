@@ -62,6 +62,7 @@ fn build_test_engine() -> CustomRulesEngine {
 }
 
 /// Load rules from specific subdirectories under `rules/`.
+/// Parses per-document so oversized regexes in one rule don't skip the whole file.
 fn build_engine_from_dirs(subdirs: &[&str]) -> CustomRulesEngine {
     let engine = CustomRulesEngine::new();
     let root = rules_dir();
@@ -69,9 +70,16 @@ fn build_engine_from_dirs(subdirs: &[&str]) -> CustomRulesEngine {
         let dir = root.join(subdir);
         for path in collect_yaml_files(&dir) {
             let content = fs::read_to_string(&path).unwrap_or_default();
-            if let Ok(rules) = custom_rule_yaml::parse(&content) {
-                for rule in rules {
-                    engine.add_rule(rule);
+            for doc_text in content.split("---") {
+                let trimmed = doc_text.trim();
+                if trimmed.is_empty() || !trimmed.contains("kind: custom_rule_v1") {
+                    continue;
+                }
+                let doc = format!("---\n{trimmed}");
+                if let Ok(rules) = custom_rule_yaml::parse(&doc) {
+                    for rule in rules {
+                        engine.add_rule(rule);
+                    }
                 }
             }
         }
@@ -88,6 +96,8 @@ fn default_host_config() -> Arc<HostConfig> {
 }
 
 fn ctx_with_query(query: &str) -> RequestCtx {
+    let mut headers = HashMap::new();
+    headers.insert("accept".into(), "*/*".into());
     RequestCtx {
         req_id: "owasp-eq".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
@@ -97,7 +107,7 @@ fn ctx_with_query(query: &str) -> RequestCtx {
         port: 80,
         path: "/search".into(),
         query: query.into(),
-        headers: HashMap::new(),
+        headers,
         body_preview: Bytes::new(),
         content_length: 0,
         is_tls: false,
@@ -111,6 +121,8 @@ fn ctx_with_query(query: &str) -> RequestCtx {
 
 fn ctx_with_body(body: &str) -> RequestCtx {
     let body_bytes = Bytes::from(body.to_string());
+    let mut headers = HashMap::new();
+    headers.insert("accept".into(), "*/*".into());
     RequestCtx {
         req_id: "owasp-eq".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
@@ -120,7 +132,7 @@ fn ctx_with_body(body: &str) -> RequestCtx {
         port: 80,
         path: "/api/submit".into(),
         query: String::new(),
-        headers: HashMap::new(),
+        headers,
         body_preview: body_bytes.clone(),
         content_length: body_bytes.len() as u64,
         is_tls: false,
@@ -135,6 +147,7 @@ fn ctx_with_body(body: &str) -> RequestCtx {
 fn ctx_with_host_header(host: &str) -> RequestCtx {
     let mut headers = HashMap::new();
     headers.insert("user-agent".into(), "Mozilla/5.0 TestBrowser".into());
+    headers.insert("accept".into(), "*/*".into());
     RequestCtx {
         req_id: "owasp-eq".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
@@ -315,6 +328,7 @@ fn clean_request_without_query_not_blocked() {
     let engine = build_test_engine();
     let mut headers = HashMap::new();
     headers.insert("user-agent".into(), "Mozilla/5.0 TestBrowser".into());
+    headers.insert("accept".into(), "*/*".into());
     let ctx = RequestCtx {
         req_id: "owasp-eq".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
