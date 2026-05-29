@@ -608,3 +608,49 @@ async fn api_write_on_worker_forwarded_to_main() {
 | **Phase 4 subtotal** | **~10h** | | |
 
 **Total: ~54 Claude-hours across 4 phases.**
+
+---
+
+## 7. Peer Trust Model
+
+Any mTLS-authenticated cluster peer is **fully trusted** to forge admin-API
+requests via the API write-forwarding path (`cluster_forward::forward_write`
+on the worker side and `replay_request` on the Main side once wired). When a
+worker forwards an admin write to Main, the `Authorization` and `Cookie`
+headers from the inbound peer request are passed through to the local admin
+API at `127.0.0.1:9527`. Implications:
+
+- A compromised worker keypair = full admin compromise.
+- Operators MUST rotate worker keypairs on suspected compromise.
+- Operators MUST run worker nodes in a network segment trusted at the same
+  level as the Main node.
+- The `X-Forwarded-By: <node_id>` header is injected by the originating
+  worker at forward time so the audit log on Main records the originating
+  worker identity, even though the source IP is loopback.
+
+### 7.1 `X-Forwarded-By` audit header
+
+The originating worker stamps `X-Forwarded-By: <local_node_id>` into the
+`ApiForward.headers` map immediately before sending the message — the last
+write before the QUIC send, so any prior header strip pass cannot remove
+it. The header travels inside the existing forwarded headers map and is
+preserved across the cluster boundary.
+
+When Main-side replay is wired, the replay path MUST:
+
+- Preserve `X-Forwarded-By` through any header strip-list (do NOT strip it).
+- Emit a structured audit log entry that records `peer_node_id`, HTTP
+  method, and path for every forwarded admin request.
+
+Worker-side audit log (already emitted by `forward_write`) uses
+`tracing::info!` with `target: "audit"` and fields `peer_node_id`, `method`,
+`path`, matching the convention in `crates/waf-api/src/security.rs`.
+
+### 7.2 Deferred crypto-grade hardening
+
+Crypto-grade hardening — strip `Authorization` at the cluster boundary and
+re-issue a short-lived service token signed by the cluster CA — is a
+deferred post-Battle improvement. The current trust model is documented
+here as the authoritative answer: mTLS peer = fully trusted admin
+principal, with `X-Forwarded-By` providing audit traceability rather than
+a security boundary.

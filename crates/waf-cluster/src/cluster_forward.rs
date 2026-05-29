@@ -20,9 +20,15 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tokio::sync::{Mutex, oneshot};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::protocol::{ApiForward, ApiForwardResponse, ClusterMessage};
+
+/// Audit header stamped onto every forwarded admin request.
+///
+/// The receiving Main node can attribute the loopback-sourced request to the
+/// originating worker. See `docs/cluster-protocol.md` §7 "Peer Trust Model".
+pub const X_FORWARDED_BY: &str = "x-forwarded-by";
 
 // ─── PendingForwards ──────────────────────────────────────────────────────────
 
@@ -104,22 +110,39 @@ impl PendingForwards {
 ///
 /// # Arguments
 ///
-/// * `sender`     — QUIC outbound channel to the main node.
-/// * `pending`    — Shared registry for correlating responses to requests.
-/// * `request_id` — A unique identifier for this request (e.g., UUID v4).
-/// * `timeout_ms` — Maximum wait time before returning an error.
+/// * `sender`        — QUIC outbound channel to the main node.
+/// * `pending`       — Shared registry for correlating responses to requests.
+/// * `local_node_id` — `NodeState::node_id` of this worker; stamped into the
+///   forwarded headers as `X-Forwarded-By` so Main can attribute the
+///   loopback-sourced replay (see `docs/cluster-protocol.md` §7).
+/// * `request_id`    — A unique identifier for this request (e.g., UUID v4).
+/// * `timeout_ms`    — Maximum wait time before returning an error.
 #[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
 pub async fn forward_write(
     sender: &tokio::sync::mpsc::Sender<ClusterMessage>,
     pending: &PendingForwards,
+    local_node_id: &str,
     request_id: String,
     method: String,
     path: String,
     body: Vec<u8>,
-    headers: HashMap<String, String>,
+    mut headers: HashMap<String, String>,
     timeout_ms: u64,
 ) -> Result<ApiForwardResponse> {
     let rx = pending.register(request_id.clone()).await;
+
+    // Stamp the audit header LAST so no upstream header-mutation pass can
+    // strip or overwrite it; trust-model rationale lives in
+    // docs/cluster-protocol.md §7.
+    headers.insert(X_FORWARDED_BY.to_string(), local_node_id.to_string());
+
+    info!(
+        target: "audit",
+        peer_node_id = %local_node_id,
+        method = %method,
+        path = %path,
+        "cluster peer forwarded admin request"
+    );
 
     let msg = ClusterMessage::ApiForward(ApiForward {
         request_id: request_id.clone(),

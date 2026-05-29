@@ -114,6 +114,7 @@ async fn forward_write_round_trip() {
         forward_write(
             &tx,
             &pending_clone,
+            "node-worker-test",
             "req-42".to_string(),
             "POST".to_string(),
             "/v1/rules".to_string(),
@@ -158,6 +159,7 @@ async fn forward_write_times_out_when_no_response() {
         forward_write(
             &tx,
             &pending_clone,
+            "node-worker-test",
             "req-timeout".to_string(),
             "PUT".to_string(),
             "/x".to_string(),
@@ -188,6 +190,7 @@ async fn forward_write_errors_when_outbound_closed() {
     let res = forward_write(
         &tx,
         &pending,
+        "node-worker-test",
         "req-closed".to_string(),
         "DELETE".to_string(),
         "/y".to_string(),
