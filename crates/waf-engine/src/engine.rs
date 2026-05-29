@@ -5,7 +5,7 @@ use arc_swap::ArcSwap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use waf_common::{RequestCtx, RuleAction, WafAction, WafDecision};
+use waf_common::{InteropMode, RequestCtx, RuleAction, WafAction, WafDecision};
 use waf_storage::{
     Database,
     models::{AttackLog, CreateSecurityEvent},
@@ -534,7 +534,8 @@ impl WafEngine {
     ///
     /// `ctx` is taken as `&mut` so the engine can enrich it with `GeoIP` data
     /// before the checker pipeline runs.  Callers should check
-    /// `decision.is_allowed()`.
+    /// `decision.is_enforcement_allowed()`.
+    #[allow(deprecated)]
     pub async fn inspect(&self, ctx: &mut RequestCtx) -> WafDecision {
         // Skip WAF if guard is disabled for this host
         if !ctx.host_config.guard_status {
@@ -558,7 +559,7 @@ impl WafEngine {
 
         // ── Phase 2: IP Blacklist — block if matched ───────────────────────────
         let ip_blacklist = check_ip_blacklist(ctx, &self.store);
-        if !ip_blacklist.is_allowed() {
+        if !ip_blacklist.is_enforcement_allowed() {
             self.log_attack(ctx, &ip_blacklist);
             self.report_community_signal(ctx, &ip_blacklist);
             self.send_audit_event(ctx, &ip_blacklist);
@@ -573,7 +574,7 @@ impl WafEngine {
 
         // ── Phase 4: URL Blacklist — block if matched ──────────────────────────
         let url_bl = check_url_blacklist(ctx, &self.store);
-        if !url_bl.is_allowed() {
+        if !url_bl.is_enforcement_allowed() {
             self.log_attack(ctx, &url_bl);
             self.report_community_signal(ctx, &url_bl);
             self.send_audit_event(ctx, &url_bl);
@@ -589,6 +590,9 @@ impl WafEngine {
                 WafDecision {
                     action: WafAction::LogOnly,
                     result: Some(result),
+                    risk_score: 0,
+                    mode: InteropMode::Enforce,
+                    rule_id: None,
                 }
             } else {
                 let body = render_block_page(ctx, &rule_name);
@@ -608,6 +612,9 @@ impl WafEngine {
                 WafDecision {
                     action: WafAction::LogOnly,
                     result: Some(result),
+                    risk_score: 0,
+                    mode: InteropMode::Enforce,
+                    rule_id: None,
                 }
             } else {
                 let body = render_block_page(ctx, &rule_name);
@@ -628,6 +635,9 @@ impl WafEngine {
                 WafDecision {
                     action: WafAction::LogOnly,
                     result: Some(result),
+                    risk_score: 0,
+                    mode: InteropMode::Enforce,
+                    rule_id: None,
                 }
             } else {
                 let body = render_block_page(ctx, &rule_name);
@@ -644,6 +654,9 @@ impl WafEngine {
                 WafDecision {
                     action: WafAction::LogOnly,
                     result: Some(result),
+                    risk_score: 0,
+                    mode: InteropMode::Enforce,
+                    rule_id: None,
                 }
             } else {
                 let body = render_block_page(ctx, &rule_name);
@@ -664,6 +677,9 @@ impl WafEngine {
                     WafDecision {
                         action: WafAction::LogOnly,
                         result: Some(result),
+                        risk_score: 0,
+                        mode: InteropMode::Enforce,
+                        rule_id: None,
                     }
                 } else {
                     let body = render_block_page(ctx, &rule_name);
@@ -684,6 +700,9 @@ impl WafEngine {
                 WafDecision {
                     action: WafAction::LogOnly,
                     result: Some(result),
+                    risk_score: 0,
+                    mode: InteropMode::Enforce,
+                    rule_id: None,
                 }
             } else {
                 let body = render_block_page(ctx, &rule_name);
@@ -705,6 +724,9 @@ impl WafEngine {
                         WafDecision {
                             action: WafAction::LogOnly,
                             result: Some(result),
+                            risk_score: 0,
+                            mode: InteropMode::Enforce,
+                            rule_id: None,
                         }
                     } else {
                         let body = render_block_page(ctx, &rule_name);
@@ -726,6 +748,9 @@ impl WafEngine {
                 WafDecision {
                     action: WafAction::LogOnly,
                     result: Some(result),
+                    risk_score: 0,
+                    mode: InteropMode::Enforce,
+                    rule_id: None,
                 }
             } else {
                 let action = result.rule_action.unwrap_or(RuleAction::Block);
@@ -738,6 +763,9 @@ impl WafEngine {
                 WafDecision {
                     action: action.to_waf_action(status, body),
                     result: Some(result),
+                    risk_score: 0,
+                    mode: InteropMode::Enforce,
+                    rule_id: None,
                 }
             };
             self.log_security_event(ctx, &decision);
@@ -745,7 +773,7 @@ impl WafEngine {
             self.send_audit_event(ctx, &decision);
             // Allow/Log: log the match but continue pipeline (phases 13-16 still run)
             // Block/Challenge: return immediately
-            if !decision.is_allowed() {
+            if !decision.is_enforcement_allowed() {
                 return decision;
             }
         }
@@ -757,6 +785,9 @@ impl WafEngine {
                 WafDecision {
                     action: WafAction::LogOnly,
                     result: Some(result),
+                    risk_score: 0,
+                    mode: InteropMode::Enforce,
+                    rule_id: None,
                 }
             } else {
                 let body = render_block_page(ctx, &rule_name);
@@ -775,6 +806,9 @@ impl WafEngine {
                 WafDecision {
                     action: WafAction::LogOnly,
                     result: Some(result),
+                    risk_score: 0,
+                    mode: InteropMode::Enforce,
+                    rule_id: None,
                 }
             } else {
                 let body = render_block_page(ctx, &rule_name);
@@ -793,6 +827,9 @@ impl WafEngine {
                 WafDecision {
                     action: WafAction::LogOnly,
                     result: Some(result),
+                    risk_score: 0,
+                    mode: InteropMode::Enforce,
+                    rule_id: None,
                 }
             } else {
                 let body = render_block_page(ctx, &rule_name);
@@ -832,12 +869,16 @@ impl WafEngine {
             return;
         };
 
+        #[allow(deprecated)]
         let action_str = match &decision.action {
             WafAction::Block { .. } => "block",
             WafAction::Allow => "allow",
             WafAction::LogOnly => "log_only",
             WafAction::Redirect { .. } => "redirect",
             WafAction::Challenge => "challenge",
+            WafAction::RateLimit { .. } => "rate_limit",
+            WafAction::Timeout { .. } => "timeout",
+            WafAction::CircuitBreaker { .. } => "circuit_breaker",
         };
 
         let log = AttackLog {
@@ -888,12 +929,16 @@ impl WafEngine {
             return;
         };
 
+        #[allow(deprecated)]
         let action_str = match &decision.action {
             WafAction::Block { .. } => "block",
             WafAction::Allow => "allow",
             WafAction::LogOnly => "log_only",
             WafAction::Redirect { .. } => "redirect",
             WafAction::Challenge => "challenge",
+            WafAction::RateLimit { .. } => "rate_limit",
+            WafAction::Timeout { .. } => "timeout",
+            WafAction::CircuitBreaker { .. } => "circuit_breaker",
         };
 
         let event = CreateSecurityEvent {
@@ -941,13 +986,14 @@ impl WafEngine {
             return;
         };
 
+        #[allow(deprecated)]
         let event_type = match &decision.action {
-            WafAction::Block { .. } => AuditEventType::Block,
+            WafAction::Block { .. }
+            | WafAction::RateLimit { .. }
+            | WafAction::Timeout { .. }
+            | WafAction::CircuitBreaker { .. } => AuditEventType::Block,
             WafAction::Allow => AuditEventType::Allow,
             WafAction::LogOnly => AuditEventType::LogOnly,
-            // Redirects in this codebase are used as challenge-style
-            // responses (CAPTCHA, soft block). Map to the closest LogsQL
-            // category so analysts can filter them out from hard blocks.
             WafAction::Redirect { .. } | WafAction::Challenge => AuditEventType::Challenge,
         };
 

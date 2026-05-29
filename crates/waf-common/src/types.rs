@@ -98,12 +98,44 @@ pub enum WafAction {
         status: u16,
         body: Option<String>,
     },
-    LogOnly,
+    /// FR-025: challenge the client (CAPTCHA, JS proof-of-work, etc.)
+    Challenge,
+    RateLimit {
+        status: u16,
+        body: Option<String>,
+    },
+    Timeout {
+        status: u16,
+    },
+    CircuitBreaker {
+        status: u16,
+        body: Option<String>,
+    },
     Redirect {
         url: String,
     },
-    /// FR-025: challenge the client (CAPTCHA, JS proof-of-work, etc.)
-    Challenge,
+    #[deprecated(note = "use InteropMode::LogOnly on WafDecision instead")]
+    LogOnly,
+}
+
+impl WafAction {
+    /// Contract-facing string for the interop `X-WAF-Action` header and JSONL
+    /// audit `action` field. Only the 6 contract classes are represented;
+    /// `Redirect` and `LogOnly` are internal variants mapped to `"allow"`.
+    /// Engine DB logging (`log_attack`, `log_security_event`) uses separate
+    /// inline matches with different strings (`"redirect"`, `"log_only"`).
+    #[must_use]
+    #[allow(deprecated)]
+    pub const fn as_contract_str(&self) -> &'static str {
+        match self {
+            Self::Block { .. } => "block",
+            Self::Challenge => "challenge",
+            Self::RateLimit { .. } => "rate_limit",
+            Self::Timeout { .. } => "timeout",
+            Self::CircuitBreaker { .. } => "circuit_breaker",
+            Self::Allow | Self::Redirect { .. } | Self::LogOnly => "allow",
+        }
+    }
 }
 
 /// Rule-level action intent declared by the rule author.
@@ -130,6 +162,7 @@ impl RuleAction {
     }
 
     #[must_use]
+    #[allow(deprecated)]
     pub fn to_waf_action(self, status: u16, body: Option<String>) -> WafAction {
         match self {
             Self::Block => WafAction::Block { status, body },
@@ -140,11 +173,54 @@ impl RuleAction {
     }
 }
 
+/// Enforcement mode applied to a WAF decision.
+///
+/// Shared primitive (contract `mode` field). Lives here in `waf-common` so both
+/// the engine (which produces decisions) and the gateway (which enforces them)
+/// can name it without a circular dependency. `waf-engine::interop` re-exports
+/// it for the `ModeRegistry` consumers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InteropMode {
+    /// Decision is enforced (block/challenge/etc. take effect).
+    #[default]
+    Enforce,
+    /// Decision is observed and logged, but enforcement is bypassed.
+    LogOnly,
+}
+
+impl InteropMode {
+    #[must_use]
+    pub const fn as_contract_str(self) -> &'static str {
+        match self {
+            Self::Enforce => "enforce",
+            Self::LogOnly => "log_only",
+        }
+    }
+
+    #[must_use]
+    pub fn from_contract_str(s: &str) -> Option<Self> {
+        match s {
+            "enforce" => Some(Self::Enforce),
+            "log_only" => Some(Self::LogOnly),
+            _ => None,
+        }
+    }
+}
+
 /// WAF decision with context
 #[derive(Debug, Clone)]
 pub struct WafDecision {
     pub action: WafAction,
     pub result: Option<DetectionResult>,
+    /// Cumulative risk score (0..=100). Defaults to 0 until the risk scorer is
+    /// wired into decision assembly.
+    pub risk_score: u8,
+    /// Enforcement mode for this decision. `Enforce` by default; `LogOnly`
+    /// observes without enforcing.
+    pub mode: InteropMode,
+    /// Originating rule identifier, when the decision came from a matched rule.
+    pub rule_id: Option<String>,
 }
 
 impl WafDecision {
@@ -152,18 +228,83 @@ impl WafDecision {
         Self {
             action: WafAction::Allow,
             result: None,
+            risk_score: 0,
+            mode: InteropMode::Enforce,
+            rule_id: None,
         }
     }
 
-    pub const fn block(status: u16, body: Option<String>, result: DetectionResult) -> Self {
+    pub fn block(status: u16, body: Option<String>, result: DetectionResult) -> Self {
+        let rule_id = result.rule_id.clone();
         Self {
             action: WafAction::Block { status, body },
             result: Some(result),
+            risk_score: 0,
+            mode: InteropMode::Enforce,
+            rule_id,
         }
     }
 
-    pub const fn is_allowed(&self) -> bool {
-        matches!(self.action, WafAction::Allow | WafAction::LogOnly)
+    pub fn rate_limit(status: u16, body: Option<String>, result: DetectionResult) -> Self {
+        let rule_id = result.rule_id.clone();
+        Self {
+            action: WafAction::RateLimit { status, body },
+            result: Some(result),
+            risk_score: 0,
+            mode: InteropMode::Enforce,
+            rule_id,
+        }
+    }
+
+    #[must_use]
+    pub const fn timeout(status: u16) -> Self {
+        Self {
+            action: WafAction::Timeout { status },
+            result: None,
+            risk_score: 0,
+            mode: InteropMode::Enforce,
+            rule_id: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn circuit_breaker(status: u16, body: Option<String>) -> Self {
+        Self {
+            action: WafAction::CircuitBreaker { status, body },
+            result: None,
+            risk_score: 0,
+            mode: InteropMode::Enforce,
+            rule_id: None,
+        }
+    }
+
+    /// Chainable: set the risk score on this decision.
+    #[must_use]
+    pub const fn with_risk_score(mut self, score: u8) -> Self {
+        self.risk_score = score;
+        self
+    }
+
+    /// Chainable: set the enforcement mode on this decision.
+    #[must_use]
+    pub const fn with_mode(mut self, mode: InteropMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Mode-aware enforcement check: a request is allowed through when the
+    /// action is non-blocking (`Allow`/`LogOnly`) OR the decision is in
+    /// `LogOnly` mode (enforcement bypassed regardless of action).
+    #[must_use]
+    #[allow(deprecated)]
+    pub fn is_enforcement_allowed(&self) -> bool {
+        matches!(self.action, WafAction::Allow | WafAction::LogOnly) || self.mode == InteropMode::LogOnly
+    }
+
+    #[deprecated(note = "use is_enforcement_allowed() — mode-aware")]
+    #[must_use]
+    pub fn is_allowed(&self) -> bool {
+        self.is_enforcement_allowed()
     }
 }
 
@@ -1039,6 +1180,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn rule_action_to_waf_action_log() {
         let wa = RuleAction::Log.to_waf_action(403, None);
         assert!(matches!(wa, WafAction::LogOnly));

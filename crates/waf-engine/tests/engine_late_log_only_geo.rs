@@ -6,6 +6,7 @@
 //! OWASP set enabled.
 
 #![allow(
+    deprecated,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,

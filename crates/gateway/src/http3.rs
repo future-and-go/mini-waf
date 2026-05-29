@@ -239,9 +239,11 @@ where
     // ── WAF inspection — same pipeline as HTTP/1.1 ──────────────────────────
     let decision = engine.inspect(&mut request_ctx).await;
 
-    if !decision.is_allowed() {
+    if !decision.is_enforcement_allowed() {
         match &decision.action {
-            WafAction::Block { status, body } => {
+            WafAction::Block { status, body }
+            | WafAction::RateLimit { status, body }
+            | WafAction::CircuitBreaker { status, body } => {
                 warn!(
                     "WAF blocked HTTP/3 request: ip={} path={} host={}",
                     request_ctx.client_ip, request_ctx.path, request_ctx.host,
@@ -257,6 +259,23 @@ where
                     .header("server", "prx-waf/h3")
                     .body(())
                     .map_err(|e| anyhow::anyhow!("failed to build H3 block response: {e}"))?;
+
+                stream.send_response(response).await?;
+                stream.send_data(body_bytes).await?;
+                stream.finish().await?;
+                return Ok(());
+            }
+            WafAction::Timeout { status } => {
+                let status_code = http::StatusCode::from_u16(*status).unwrap_or(http::StatusCode::GATEWAY_TIMEOUT);
+                let body_bytes = Bytes::from("Gateway Timeout");
+
+                let response = http::Response::builder()
+                    .status(status_code)
+                    .header("content-length", body_bytes.len().to_string())
+                    .header("content-type", "text/plain; charset=utf-8")
+                    .header("server", "prx-waf/h3")
+                    .body(())
+                    .map_err(|e| anyhow::anyhow!("failed to build H3 timeout response: {e}"))?;
 
                 stream.send_response(response).await?;
                 stream.send_data(body_bytes).await?;

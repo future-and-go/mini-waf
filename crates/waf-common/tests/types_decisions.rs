@@ -1,14 +1,14 @@
 //! Coverage for `waf_common::types` decisions, defaults, Display, serde.
 
 use waf_common::types::{
-    DefenseConfig, DetectionResult, GeoIpInfo, HostConfig, LoadBalanceStrategy, Phase, RequestCtx, WafAction,
-    WafDecision, parse_cookie_header,
+    DefenseConfig, DetectionResult, GeoIpInfo, HostConfig, InteropMode, LoadBalanceStrategy, Phase, RequestCtx,
+    WafAction, WafDecision, parse_cookie_header,
 };
 
 #[test]
 fn waf_decision_allow_constructor() {
     let d = WafDecision::allow();
-    assert!(d.is_allowed());
+    assert!(d.is_enforcement_allowed());
     assert!(d.result.is_none());
     assert!(matches!(d.action, WafAction::Allow));
 }
@@ -24,7 +24,7 @@ fn waf_decision_block_constructor() {
         action_status: None,
     };
     let d = WafDecision::block(403, Some("denied".into()), r);
-    assert!(!d.is_allowed());
+    assert!(!d.is_enforcement_allowed());
     assert!(d.result.is_some());
     match d.action {
         WafAction::Block { status, body } => {
@@ -36,10 +36,14 @@ fn waf_decision_block_constructor() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn waf_decision_log_only_is_allowed() {
     let d = WafDecision {
         action: WafAction::LogOnly,
         result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
     };
     assert!(d.is_allowed());
 }
@@ -52,11 +56,15 @@ fn waf_decision_block_action_not_allowed() {
             body: None,
         },
         result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
     };
-    assert!(!d.is_allowed());
+    assert!(!d.is_enforcement_allowed());
 }
 
 #[test]
+#[allow(deprecated)]
 fn waf_action_serde_tagged_snake_case() {
     let s = serde_json::to_string(&WafAction::Allow).unwrap();
     assert!(s.contains("\"allow\""));
@@ -184,4 +192,147 @@ fn default_tier_policy_is_shared_arc() {
     let a = RequestCtx::default_tier_policy();
     let b = RequestCtx::default_tier_policy();
     assert!(std::sync::Arc::ptr_eq(&a, &b));
+}
+
+// ── Phase 2: new WafAction variant tests ─────────────────────────────────────
+
+#[test]
+fn waf_action_rate_limit_serde_round_trip() {
+    let action = WafAction::RateLimit {
+        status: 429,
+        body: Some("rate limited".into()),
+    };
+    let json = serde_json::to_string(&action).unwrap();
+    assert!(json.contains("\"rate_limit\""));
+    let back: WafAction = serde_json::from_str(&json).unwrap();
+    assert!(matches!(back, WafAction::RateLimit { status: 429, .. }));
+}
+
+#[test]
+fn waf_action_timeout_serde_round_trip() {
+    let action = WafAction::Timeout { status: 504 };
+    let json = serde_json::to_string(&action).unwrap();
+    assert!(json.contains("\"timeout\""));
+    let back: WafAction = serde_json::from_str(&json).unwrap();
+    assert!(matches!(back, WafAction::Timeout { status: 504 }));
+}
+
+#[test]
+fn waf_action_circuit_breaker_serde_round_trip() {
+    let action = WafAction::CircuitBreaker {
+        status: 503,
+        body: Some("upstream down".into()),
+    };
+    let json = serde_json::to_string(&action).unwrap();
+    assert!(json.contains("\"circuit_breaker\""));
+    let back: WafAction = serde_json::from_str(&json).unwrap();
+    assert!(matches!(back, WafAction::CircuitBreaker { status: 503, .. }));
+}
+
+#[test]
+fn waf_action_existing_variants_serde_unchanged() {
+    let allow_json = serde_json::to_string(&WafAction::Allow).unwrap();
+    assert_eq!(allow_json, r#"{"type":"allow"}"#);
+    let block_json = serde_json::to_string(&WafAction::Block {
+        status: 403,
+        body: None,
+    })
+    .unwrap();
+    assert!(block_json.contains("\"block\""));
+    let challenge_json = serde_json::to_string(&WafAction::Challenge).unwrap();
+    assert!(challenge_json.contains("\"challenge\""));
+}
+
+#[test]
+#[allow(deprecated)]
+fn waf_action_as_contract_str_covers_all_variants() {
+    assert_eq!(WafAction::Allow.as_contract_str(), "allow");
+    assert_eq!(
+        WafAction::Block {
+            status: 403,
+            body: None
+        }
+        .as_contract_str(),
+        "block"
+    );
+    assert_eq!(WafAction::Challenge.as_contract_str(), "challenge");
+    assert_eq!(
+        WafAction::RateLimit {
+            status: 429,
+            body: None
+        }
+        .as_contract_str(),
+        "rate_limit"
+    );
+    assert_eq!(WafAction::Timeout { status: 504 }.as_contract_str(), "timeout");
+    assert_eq!(
+        WafAction::CircuitBreaker {
+            status: 503,
+            body: None
+        }
+        .as_contract_str(),
+        "circuit_breaker"
+    );
+    assert_eq!(WafAction::Redirect { url: "/x".into() }.as_contract_str(), "allow");
+    assert_eq!(WafAction::LogOnly.as_contract_str(), "allow");
+}
+
+// ── WafDecision enrichment tests ───────────────────────────────────────────
+
+#[test]
+fn waf_decision_allow_has_default_metadata() {
+    let d = WafDecision::allow();
+    assert_eq!(d.risk_score, 0);
+    assert_eq!(d.mode, InteropMode::Enforce);
+    assert!(d.rule_id.is_none());
+}
+
+#[test]
+fn waf_decision_block_has_enforce_mode() {
+    let r = DetectionResult {
+        rule_id: Some("R1".into()),
+        rule_name: "test".into(),
+        phase: Phase::SqlInjection,
+        detail: "found".into(),
+        rule_action: None,
+        action_status: None,
+    };
+    let d = WafDecision::block(403, Some("denied".into()), r);
+    assert_eq!(d.mode, InteropMode::Enforce);
+    assert_eq!(d.rule_id.as_deref(), Some("R1"));
+}
+
+#[test]
+fn waf_decision_with_risk_score_builder() {
+    let d = WafDecision::allow().with_risk_score(42);
+    assert_eq!(d.risk_score, 42);
+}
+
+#[test]
+fn waf_decision_with_mode_builder() {
+    let d = WafDecision::allow().with_mode(InteropMode::LogOnly);
+    assert_eq!(d.mode, InteropMode::LogOnly);
+}
+
+#[test]
+fn is_enforcement_allowed_mode_aware() {
+    // Allow + Enforce → allowed
+    let d = WafDecision::allow();
+    assert!(d.is_enforcement_allowed());
+
+    // Block + Enforce → NOT allowed
+    let r = DetectionResult {
+        rule_id: None,
+        rule_name: "t".into(),
+        phase: Phase::SqlInjection,
+        detail: String::new(),
+        rule_action: None,
+        action_status: None,
+    };
+    let d = WafDecision::block(403, None, r.clone());
+    assert!(!d.is_enforcement_allowed());
+
+    // Block + LogOnly → allowed (mode overrides)
+    let d = WafDecision::block(403, None, r).with_mode(InteropMode::LogOnly);
+    assert!(d.is_enforcement_allowed());
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tracing::{debug, info};
 
-use waf_common::{DetectionResult, Phase, RequestCtx, WafAction, WafDecision};
+use waf_common::{DetectionResult, InteropMode, Phase, RequestCtx, WafAction, WafDecision};
 use waf_storage::Database;
 
 use crate::rules::{IpRuleSet, UrlMatchType, UrlRule, UrlRuleSet};
@@ -210,6 +210,9 @@ pub fn check_ip_whitelist(ctx: &RequestCtx, store: &RuleStore) -> WafDecision {
                 rule_action: None,
                 action_status: None,
             }),
+            risk_score: 0,
+            mode: InteropMode::Enforce,
+            rule_id: None,
         };
     }
 
@@ -249,13 +252,16 @@ pub fn check_url_whitelist(ctx: &RequestCtx, store: &RuleStore) -> Option<WafDec
         return Some(WafDecision {
             action: WafAction::Allow,
             result: Some(DetectionResult {
-                rule_id: Some(rule_id),
+                rule_id: Some(rule_id.clone()),
                 rule_name: "URL Whitelist".to_string(),
                 phase: Phase::UrlWhitelist,
                 detail: format!("Path {} matched URL whitelist", ctx.path),
                 rule_action: None,
                 action_status: None,
             }),
+            risk_score: 0,
+            mode: InteropMode::Enforce,
+            rule_id: Some(rule_id),
         });
     }
 

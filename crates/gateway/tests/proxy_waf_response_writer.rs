@@ -5,6 +5,7 @@
 //! real Pingora server.
 
 #![allow(
+    deprecated,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
@@ -24,7 +25,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bytes::Bytes;
 use pingora_proxy::Session;
 use waf_common::tier::Tier;
-use waf_common::{DetectionResult, HostConfig, Phase, RequestCtx, WafAction, WafDecision};
+use waf_common::{DetectionResult, HostConfig, InteropMode, Phase, RequestCtx, WafAction, WafDecision};
 
 use gateway::proxy_waf_response::{write_waf_body_decision, write_waf_decision};
 
@@ -119,6 +120,9 @@ async fn write_waf_decision_returns_false_for_log_only() {
     let decision = WafDecision {
         action: WafAction::LogOnly,
         result: Some(detection_result()),
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
     };
 
     let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
@@ -194,6 +198,9 @@ async fn write_waf_decision_block_without_detection_result_uses_defaults() {
             body: Some("teapot".into()),
         },
         result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
     };
 
     let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
@@ -219,6 +226,9 @@ async fn write_waf_decision_redirect_writes_302_with_location() {
             url: "https://safe.example.com/landing".into(),
         },
         result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
     };
 
     let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
@@ -248,6 +258,9 @@ async fn write_waf_decision_challenge_action_without_ctx_returns_false() {
     let decision = WafDecision {
         action: WafAction::Challenge,
         result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
     };
 
     let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
@@ -285,6 +298,9 @@ async fn write_waf_body_decision_log_only_returns_ok() {
     let decision = WafDecision {
         action: WafAction::LogOnly,
         result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
     };
 
     write_waf_body_decision(&mut session, &decision, &ctx, &counter)
@@ -324,6 +340,9 @@ async fn write_waf_body_decision_block_default_body() {
             body: None,
         },
         result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
     };
 
     let err = write_waf_body_decision(&mut session, &decision, &ctx, &counter)
@@ -347,6 +366,9 @@ async fn write_waf_body_decision_redirect_writes_302_and_errors() {
     let decision = WafDecision {
         action: WafAction::Redirect { url: "/captcha".into() },
         result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
     };
 
     let err = write_waf_body_decision(&mut session, &decision, &ctx, &counter)
@@ -373,10 +395,107 @@ async fn write_waf_body_decision_challenge_returns_ok() {
     let decision = WafDecision {
         action: WafAction::Challenge,
         result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
     };
 
     write_waf_body_decision(&mut session, &decision, &ctx, &counter)
         .await
         .expect("challenge falls through to Ok(())");
     assert_eq!(counter.load(Ordering::Relaxed), 1);
+}
+
+// ── Phase 2: new WafAction variant tests ────────────────────────────────────
+
+#[tokio::test]
+async fn write_waf_decision_rate_limit_writes_429() {
+    let (mut session, drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    let decision = WafDecision {
+        action: WafAction::RateLimit {
+            status: 429,
+            body: Some("rate limited".into()),
+        },
+        result: Some(detection_result()),
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
+    };
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
+        .await
+        .expect("write_waf_decision");
+    assert!(result, "RateLimit must signal that response was sent");
+    assert_eq!(counter.load(Ordering::Relaxed), 1);
+    drop(session);
+    let bytes = drain.await.expect("drain task");
+    let wire = String::from_utf8_lossy(&bytes);
+    assert!(
+        wire.starts_with("HTTP/1.1 429"),
+        "expected 429 status line, got: {wire}"
+    );
+    assert!(
+        wire.contains("rate limited"),
+        "rate limit body must reach the wire: {wire}"
+    );
+}
+
+#[tokio::test]
+async fn write_waf_decision_timeout_writes_504() {
+    let (mut session, drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    let decision = WafDecision {
+        action: WafAction::Timeout { status: 504 },
+        result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
+    };
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
+        .await
+        .expect("write_waf_decision");
+    assert!(result, "Timeout must signal that response was sent");
+    assert_eq!(counter.load(Ordering::Relaxed), 1);
+    drop(session);
+    let bytes = drain.await.expect("drain task");
+    let wire = String::from_utf8_lossy(&bytes);
+    assert!(
+        wire.starts_with("HTTP/1.1 504"),
+        "expected 504 status line, got: {wire}"
+    );
+}
+
+#[tokio::test]
+async fn write_waf_decision_circuit_breaker_writes_503() {
+    let (mut session, drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    let decision = WafDecision {
+        action: WafAction::CircuitBreaker {
+            status: 503,
+            body: Some("upstream down".into()),
+        },
+        result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
+    };
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
+        .await
+        .expect("write_waf_decision");
+    assert!(result, "CircuitBreaker must signal that response was sent");
+    assert_eq!(counter.load(Ordering::Relaxed), 1);
+    drop(session);
+    let bytes = drain.await.expect("drain task");
+    let wire = String::from_utf8_lossy(&bytes);
+    assert!(
+        wire.starts_with("HTTP/1.1 503"),
+        "expected 503 status line, got: {wire}"
+    );
+    assert!(
+        wire.contains("upstream down"),
+        "circuit breaker body must reach the wire: {wire}"
+    );
 }
