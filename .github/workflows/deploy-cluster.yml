@@ -1,0 +1,186 @@
+name: Deploy Cluster (test)
+
+# Deploys the prx-waf binary onto the 2-node test cluster.
+# Triggers: automatic on push to main; manual (workflow_dispatch) from
+# main or release/stg. Only these two branches may deploy to the test
+# VMs — enforced authoritatively by the cluster-test-deploy environment's
+# deployment branch policy, and fail-fast by the guard job below.
+# Auth: GitHub OIDC -> AWS IAM role (no long-lived credentials in repo).
+# Transport: S3 presigned URL + SSM Run Command (no inbound SSH).
+# Target allowlist: instances tagged project=other env=dev Name=other-test-cluster-*.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'plans/**'
+      - '.github/ISSUE_TEMPLATE/**'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cluster-test
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  guard-branch:
+    name: Restrict deploy to main and release/stg
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Reject disallowed branches
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            main|release/stg)
+              echo "branch ${GITHUB_REF_NAME} is allowed to deploy" ;;
+            *)
+              echo "::error::branch ${GITHUB_REF_NAME} is not allowed to deploy to the test cluster (only main, release/stg)"
+              exit 1 ;;
+          esac
+
+  deploy:
+    name: Build and deploy to test cluster
+    needs: guard-branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: cluster-test-deploy
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/admin-panel/package-lock.json
+
+      - name: Build admin panel
+        working-directory: web/admin-panel
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: deploy-cluster
+
+      - name: Build prx-waf release
+        run: cargo build --release -p prx-waf --locked
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_DEPLOY_REGION }}
+          role-session-name: gha-deploy-cluster-${{ github.run_id }}
+
+      - name: Upload binary to S3
+        id: upload
+        run: |
+          set -euo pipefail
+          KEY="releases/${GITHUB_SHA}/prx-waf"
+          BUCKET="${{ secrets.AWS_DEPLOY_BUCKET }}"
+          aws s3 cp target/release/prx-waf "s3://${BUCKET}/${KEY}" --no-progress
+          URL=$(aws s3 presign "s3://${BUCKET}/${KEY}" --expires-in 1800)
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "Uploaded s3://${BUCKET}/${KEY}"
+
+      - name: Discover cluster instance IDs by tag
+        id: targets
+        env:
+          DISCOVERY_TAGS: ${{ secrets.CLUSTER_DISCOVERY_TAGS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCOVERY_TAGS}" ]; then
+            echo "::error::secret CLUSTER_DISCOVERY_TAGS is empty"; exit 1
+          fi
+          FILTERS=("Name=instance-state-name,Values=running")
+          IFS=',' read -ra ITEMS <<<"${DISCOVERY_TAGS}"
+          for kv in "${ITEMS[@]}"; do
+            k="${kv%%=*}"; v="${kv#*=}"
+            FILTERS+=("Name=tag:${k},Values=${v}")
+          done
+          IDS=$(aws ec2 describe-instances \
+            --filters "${FILTERS[@]}" \
+            --query 'Reservations[].Instances[].InstanceId' \
+            --output text)
+          if [ -z "$IDS" ]; then
+            echo "::error::No running cluster instances matched the discovery filter"; exit 1
+          fi
+          IDS_CSV=$(echo "$IDS" | tr -s '[:space:]' ',' | sed 's/,$//')
+          echo "ids=${IDS_CSV}" >> "$GITHUB_OUTPUT"
+          echo "Targets: ${IDS_CSV}"
+
+      - name: Dispatch deploy command via SSM
+        id: ssm
+        env:
+          PRESIGNED_URL: ${{ steps.upload.outputs.url }}
+          TARGET_IDS: ${{ steps.targets.outputs.ids }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra IDS_ARR <<<"${TARGET_IDS}"
+          SCRIPT_RENDERED=$(python3 - <<'PY'
+          import os, sys
+          body = open(".github/workflows/scripts/deploy-on-vm.sh").read()
+          body = body.replace("__URL__", os.environ["PRESIGNED_URL"])
+          body = body.replace("__SHA__", os.environ["GIT_SHA"])
+          sys.stdout.write(body)
+          PY
+          )
+          PARAMS=$(jq -n --arg cmd "$SCRIPT_RENDERED" '{commands:[$cmd], executionTimeout:["300"]}')
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${IDS_ARR[@]}" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${GIT_SHA::7}" \
+            --parameters "$PARAMS" \
+            --query 'Command.CommandId' \
+            --output text)
+          echo "command_id=${CMD_ID}" >> "$GITHUB_OUTPUT"
+          echo "instance_ids=${TARGET_IDS}" >> "$GITHUB_OUTPUT"
+          echo "Dispatched SSM command ${CMD_ID}"
+
+      - name: Wait for SSM completion + report per-node status
+        env:
+          CMD_ID: ${{ steps.ssm.outputs.command_id }}
+          TARGET_IDS: ${{ steps.ssm.outputs.instance_ids }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra IDS_ARR <<<"${TARGET_IDS}"
+          FAIL=0
+          for IID in "${IDS_ARR[@]}"; do
+            echo "::group::Wait for ${IID}"
+            for _ in $(seq 1 60); do
+              STATUS=$(aws ssm get-command-invocation \
+                --command-id "$CMD_ID" \
+                --instance-id "$IID" \
+                --query 'Status' \
+                --output text 2>/dev/null || echo "Pending")
+              case "$STATUS" in
+                Success) echo "${IID}: Success"; break ;;
+                Failed|Cancelled|TimedOut)
+                  echo "::error::${IID}: ${STATUS}"
+                  aws ssm get-command-invocation \
+                    --command-id "$CMD_ID" \
+                    --instance-id "$IID" \
+                    --query '{stdout:StandardOutputContent,stderr:StandardErrorContent}' \
+                    --output text || true
+                  FAIL=1
+                  break ;;
+                *) sleep 5 ;;
+              esac
+            done
+            echo "::endgroup::"
+          done
+          [ "$FAIL" = 0 ] || { echo "::error::Deploy failed on at least one node"; exit 1; }
+          echo "All nodes deployed."
