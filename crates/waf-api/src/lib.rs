@@ -18,6 +18,7 @@ pub mod notifications;
 pub mod panel_api;
 pub mod plugins;
 pub mod relay_api;
+pub mod reputation_api;
 pub mod risk_api;
 pub mod rule_sources_api;
 pub mod rules_api;

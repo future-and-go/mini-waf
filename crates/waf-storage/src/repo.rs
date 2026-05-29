@@ -7,12 +7,13 @@ use crate::error::StorageError;
 use crate::models::{
     AdminUser, AllowIp, AllowUrl, AttackLog, AttackLogQuery, AuditLogEntry, AuditLogQuery, BlockIp, BlockUrl,
     CategoryTimeSeriesPoint, Certificate, CreateAdminUser, CreateCertificate, CreateCrowdSecEvent, CreateCustomRule,
-    CreateHost, CreateIpRule, CreateLbBackend, CreateNotificationConfig, CreateSecurityEvent, CreateSensitivePattern,
-    CreateTunnel, CreateUrlRule, CreateWasmPlugin, CrowdSecConfigRow, CrowdSecEventQuery, CrowdSecEventRow, CustomRule,
-    EndpointHeatmap, GeoDistEntry, GeoStats, HeatmapCell, HeatmapFilter, Host, HotlinkConfig, LbBackend,
-    NotificationConfig, NotificationLog, RecentEvent, RefreshToken, SecurityEvent, SecurityEventQuery,
-    SensitivePattern, StatsFilter, StatsOverview, TimeSeriesPoint, TopEntry, TunnelRow, UpdateCertificatePem,
-    UpdateCustomRule, UpdateHost, UpdateSensitivePattern, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
+    CreateHost, CreateIpRule, CreateLbBackend, CreateNotificationConfig, CreateReputationEntry, CreateSecurityEvent,
+    CreateSensitivePattern, CreateTunnel, CreateUrlRule, CreateWasmPlugin, CrowdSecConfigRow, CrowdSecEventQuery,
+    CrowdSecEventRow, CustomRule, EndpointHeatmap, GeoDistEntry, GeoStats, HeatmapCell, HeatmapFilter, Host,
+    HotlinkConfig, LbBackend, NotificationConfig, NotificationLog, RecentEvent, RefreshToken, ReputationEntry,
+    ReputationQuery, SecurityEvent, SecurityEventQuery, SensitivePattern, StatsFilter, StatsOverview, TimeSeriesPoint,
+    TopEntry, TunnelRow, UpdateCertificatePem, UpdateCustomRule, UpdateHost, UpdateReputationEntry,
+    UpdateSensitivePattern, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
 };
 
 impl Database {
@@ -2201,5 +2202,113 @@ impl Database {
         .await?;
 
         Ok((rows, total))
+    }
+
+    // ─── IP reputation list (FR-042) ─────────────────────────────────────────
+
+    /// List reputation entries matching the optional AND-filters in `query`.
+    /// Returns `(entries, total_unpaginated_count)` so the FE can render
+    /// pagination controls without a second round-trip.
+    pub async fn list_reputation_entries(
+        &self,
+        query: &ReputationQuery,
+    ) -> Result<(Vec<ReputationEntry>, i64), StorageError> {
+        let mut count_qb: QueryBuilder<sqlx::Postgres> =
+            QueryBuilder::new("SELECT COUNT(*) FROM reputation_list WHERE 1 = 1");
+        let mut list_qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new("SELECT * FROM reputation_list WHERE 1 = 1");
+
+        for qb in [&mut count_qb, &mut list_qb] {
+            if let Some(prefix) = &query.ip_prefix {
+                qb.push(" AND ip LIKE ").push_bind(format!("{prefix}%"));
+            }
+            if let Some(src) = &query.source {
+                qb.push(" AND source = ").push_bind(src);
+            }
+            if let Some(min) = query.min_score {
+                qb.push(" AND score >= ").push_bind(min);
+            }
+            if let Some(max) = query.max_score {
+                qb.push(" AND score <= ").push_bind(max);
+            }
+        }
+
+        let total: i64 = count_qb.build_query_scalar().fetch_one(&self.pool).await?;
+
+        list_qb.push(" ORDER BY updated_at DESC");
+        if let Some(limit) = query.limit {
+            list_qb.push(" LIMIT ").push_bind(limit);
+        }
+        if let Some(offset) = query.offset {
+            list_qb.push(" OFFSET ").push_bind(offset);
+        }
+        let rows = list_qb
+            .build_query_as::<ReputationEntry>()
+            .fetch_all(&self.pool)
+            .await?;
+        Ok((rows, total))
+    }
+
+    /// Insert a new reputation entry, or update the existing row matching
+    /// `(ip, source)` via the table's UNIQUE constraint. Returns the
+    /// post-write row.
+    pub async fn upsert_reputation_entry(&self, req: &CreateReputationEntry) -> Result<ReputationEntry, StorageError> {
+        let now = chrono::Utc::now();
+        let row = sqlx::query_as::<_, ReputationEntry>(
+            r"INSERT INTO reputation_list (ip, score, source, expires_at, notes, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $6)
+               ON CONFLICT (ip, source) DO UPDATE
+                   SET score      = EXCLUDED.score,
+                       expires_at = EXCLUDED.expires_at,
+                       notes      = EXCLUDED.notes,
+                       updated_at = EXCLUDED.updated_at
+               RETURNING *",
+        )
+        .bind(&req.ip)
+        .bind(req.score)
+        .bind(&req.source)
+        .bind(req.expires_at)
+        .bind(&req.notes)
+        .bind(now)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// Apply a partial update to the entry with the given id. Returns `Ok(None)`
+    /// when no row matched.
+    pub async fn update_reputation_entry(
+        &self,
+        id: i64,
+        req: &UpdateReputationEntry<'_>,
+    ) -> Result<Option<ReputationEntry>, StorageError> {
+        let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new("UPDATE reputation_list SET updated_at = NOW()");
+        if let Some(score) = req.score {
+            qb.push(", score = ").push_bind(score);
+        }
+        if let Some(source) = req.source {
+            qb.push(", source = ").push_bind(source);
+        }
+        if let Some(exp) = req.expires_at {
+            qb.push(", expires_at = ").push_bind(exp);
+        }
+        if let Some(notes) = req.notes {
+            qb.push(", notes = ").push_bind(notes);
+        }
+        qb.push(" WHERE id = ").push_bind(id).push(" RETURNING *");
+        let row = qb
+            .build_query_as::<ReputationEntry>()
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row)
+    }
+
+    /// Delete the entry with the given id. Returns `true` when a row was
+    /// removed.
+    pub async fn delete_reputation_entry(&self, id: i64) -> Result<bool, StorageError> {
+        let res = sqlx::query("DELETE FROM reputation_list WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(res.rows_affected() > 0)
     }
 }

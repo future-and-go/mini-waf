@@ -7,7 +7,9 @@ use axum::http::{
     header::{AUTHORIZATION, CONTENT_TYPE},
 };
 use axum::{
-    Router, middleware,
+    Router,
+    extract::DefaultBodyLimit,
+    middleware,
     response::Redirect,
     routing::{delete, get, patch, post},
 };
@@ -52,6 +54,7 @@ use crate::notifications::{
 use crate::panel_api::{get_panel_config, put_panel_config};
 use crate::plugins::{delete_plugin, disable_plugin, enable_plugin, list_plugins, upload_plugin};
 use crate::relay_api::{get_relay_config, get_relay_intel_status, put_relay_config, refresh_relay_intel, test_relay};
+use crate::reputation_api::{delete_reputation, list_reputation, update_reputation, upsert_reputation};
 use crate::risk_api::{
     clear_risk_actor, credit_risk_actor, get_risk_config, get_risk_metrics, list_risk_actors, put_risk_config,
 };
@@ -306,6 +309,19 @@ pub fn build_router(state: Arc<AppState>, tls_enabled: bool) -> Router {
         .route("/api/geoip/rules", get(list_geo_rules).post(create_geo_rule))
         .route("/api/geoip/rules/{id}", patch(patch_geo_rule).delete(delete_geo_rule))
         .route("/api/geoip/lookup", post(lookup_ip))
+        // FR-042 IP reputation editor (#60.6)
+        .route(
+            "/api/reputation",
+            get(list_reputation)
+                .post(upsert_reputation)
+                .layer(DefaultBodyLimit::max(crate::reputation_api::MAX_BODY_BYTES)),
+        )
+        .route(
+            "/api/reputation/{id}",
+            axum::routing::put(update_reputation)
+                .delete(delete_reputation)
+                .layer(DefaultBodyLimit::max(crate::reputation_api::MAX_BODY_BYTES)),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), require_auth))
         .layer(middleware::from_fn_with_state(
             state.clone(),
