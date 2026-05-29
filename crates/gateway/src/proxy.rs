@@ -13,7 +13,7 @@ use std::time::Duration;
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use pingora_core::upstreams::peer::{HttpPeer, Peer};
 use pingora_proxy::{FailToProxy, ProxyHttp, Session};
@@ -485,7 +485,7 @@ impl ProxyHttp for WafProxy {
             ctx.request_ctx = Some(builder.build());
         }
 
-        info!("Proxying {} → {}", host_header, upstream_addr);
+        debug!("Proxying {} → {}", host_header, upstream_addr);
         let mut peer = HttpPeer::new(&upstream_addr, use_tls, host_config.remote_host.clone());
         apply_fr039_timeouts(&mut peer, &host_config);
         apply_upstream_alpn(&mut peer, &host_config);
