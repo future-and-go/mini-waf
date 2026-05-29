@@ -1213,7 +1213,7 @@ fn pattern_matches_request(pattern: &Regex, field: &str, ctx: &RequestCtx) -> bo
         // Generic header lookup: header_accept → "accept", header_content_type → "content-type"
         field if field.starts_with("header_") => {
             let header_name = field[7..].replace('_', "-");
-            let value = ctx.headers.get(header_name.as_str()).map(String::as_str).unwrap_or("");
+            let value = ctx.headers.get(header_name.as_str()).map_or("", String::as_str);
             test_with_decode(pattern, value)
         }
         // Response body rules are evaluated via check_response_body(), not here.
