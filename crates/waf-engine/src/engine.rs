@@ -417,6 +417,15 @@ impl WafEngine {
         &self.geo_check
     }
 
+    /// Clear all temporary runtime state across engine subsystems.
+    pub fn reset_runtime_state(&self) {
+        for checker in &self.checkers {
+            checker.reset_state();
+        }
+        self.ddos_ban_table().clear();
+        self.tx_velocity_store.clear_all();
+    }
+
     /// Hot-reload `SQLi` scan configuration without restarting.
     pub fn reload_sqli_scan_config(&self, cfg: SqliScanConfig) {
         self.sqli_check.reload_config(cfg);

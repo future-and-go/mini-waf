@@ -9,6 +9,7 @@ pub mod device_fp;
 pub mod engine;
 pub mod geoip;
 pub mod geoip_updater;
+pub mod interop;
 pub mod logging;
 pub mod outbound;
 pub mod plugins;

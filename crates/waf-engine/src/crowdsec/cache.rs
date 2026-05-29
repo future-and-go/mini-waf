@@ -100,6 +100,19 @@ impl DecisionCache {
         self.update_total();
     }
 
+    /// Drop all cached decisions (interop reset).
+    pub fn clear_all(&self) {
+        self.ip_decisions.clear();
+        {
+            let mut ranges = self.range_decisions.write();
+            ranges.clear();
+        }
+        self.other_decisions.clear();
+        self.hits.store(0, Ordering::Relaxed);
+        self.misses.store(0, Ordering::Relaxed);
+        self.total_cached.store(0, Ordering::Relaxed);
+    }
+
     /// Remove all expired entries from the cache.
     pub fn cleanup_expired(&self) {
         let now = Instant::now();

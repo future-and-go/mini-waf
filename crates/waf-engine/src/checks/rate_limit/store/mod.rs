@@ -61,4 +61,10 @@ pub trait RateLimitStore: Send + Sync {
     /// Sweep idle entries. Returns count purged. (No-op for backends that
     /// rely on native TTL such as Redis `EXPIRE`.)
     async fn purge_expired(&self) -> anyhow::Result<usize>;
+
+    /// Drop all entries (interop reset). Default no-op for backends without
+    /// a clear primitive.
+    async fn clear_all(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }

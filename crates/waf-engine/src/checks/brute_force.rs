@@ -150,6 +150,10 @@ impl Check for BruteForceCheck {
                 .record_spray(ctx.client_ip, pwd_hash, user_hash, window, dc.bf_spray_threshold);
         }
     }
+
+    fn reset_state(&self) {
+        self.state.clear_all();
+    }
 }
 
 /// Lower-case + trim so `"alice"`, `"ALICE"`, and `"alice "` all hash to the

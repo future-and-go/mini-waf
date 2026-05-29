@@ -58,6 +58,10 @@ pub trait Check: Send + Sync {
     /// v1: Pingora `response_filter` gives headers + status only; the body
     /// path via `response_body_filter` is deferred.
     fn on_response(&self, _ctx: &RequestCtx, _status: u16) {}
+
+    /// Clear runtime state held by this checker. Override in stateful checks
+    /// (rate limiter, brute force, tx velocity). Stateless checks inherit the no-op.
+    fn reset_state(&self) {}
 }
 
 /// Monotonic clock abstraction so stateful checks (FR-018 brute-force,

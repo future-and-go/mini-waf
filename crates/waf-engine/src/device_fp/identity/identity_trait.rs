@@ -22,4 +22,9 @@ pub trait IdentityStore: Send + Sync {
 
     /// Sweep expired entries. Returns the number purged.
     async fn purge_expired(&self) -> anyhow::Result<usize>;
+
+    /// Clear all stored identities.
+    async fn clear_all(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }

@@ -63,6 +63,10 @@ impl Check for TxVelocityCheck {
         // Signal-only: never block here.
         None
     }
+
+    fn reset_state(&self) {
+        self.store.clear_all();
+    }
 }
 
 #[cfg(test)]

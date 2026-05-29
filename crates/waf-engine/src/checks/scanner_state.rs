@@ -149,6 +149,11 @@ impl ScannerState {
         }
     }
 
+    pub fn clear_all(&self) {
+        self.per_ip.clear();
+        self.evict_ticker.store(0, Ordering::Relaxed);
+    }
+
     /// Record one path visit and return the current distinct-path count
     /// inside `window` for this client.
     pub fn record_path(&self, ip: IpAddr, path: &str, window: Duration) -> usize {

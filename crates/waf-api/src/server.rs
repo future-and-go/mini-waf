@@ -35,6 +35,7 @@ use crate::handlers::{
     update_custom_rule, update_host, upload_certificate, upsert_hotlink_config,
 };
 use crate::health::health_check;
+use crate::interop_control;
 use crate::logs::{logs_query, logs_stats, logs_streams};
 use crate::middleware::require_auth;
 use crate::notifications::{
@@ -268,10 +269,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/ui/", get(static_handler))
         .route("/ui/{*path}", get(static_handler));
 
+    let interop_routes = Router::new().nest("/__waf_control", interop_control::interop_control_routes(state.clone()));
+
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
         .merge(ws_routes)
+        .merge(interop_routes)
         .merge(ui_routes)
         .layer(middleware::from_fn(security_headers_middleware))
         .layer(cors)

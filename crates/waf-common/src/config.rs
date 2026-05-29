@@ -45,6 +45,9 @@ pub struct AppConfig {
     /// FR-035 outbound response-header leak prevention. Disabled by default.
     #[serde(default)]
     pub outbound: OutboundConfig,
+    /// Benchmark interop control interface configuration
+    #[serde(default)]
+    pub interop: InteropConfig,
 }
 
 /// Path reference for `configs/rate-limit.yaml`.
@@ -1026,6 +1029,37 @@ impl VictoriaLogsConfig {
     /// onto this — so this function MUST return only the host root.
     pub fn base_url(&self) -> String {
         format!("http://{}", self.listen_addr)
+    }
+}
+
+/// Benchmark interop control interface configuration.
+///
+/// Controls the `/__waf_control/*` route group used by external benchmark
+/// harnesses to manage WAF mode/state during automated testing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteropConfig {
+    /// Shared secret for `X-Benchmark-Secret` header authentication.
+    #[serde(default = "default_benchmark_secret")]
+    pub benchmark_secret: String,
+    /// Master toggle — when `false`, all `/__waf_control/*` routes return 404.
+    #[serde(default = "default_interop_enabled")]
+    pub enabled: bool,
+}
+
+fn default_benchmark_secret() -> String {
+    "waf-hackathon-2026-ctrl".to_string()
+}
+
+const fn default_interop_enabled() -> bool {
+    true
+}
+
+impl Default for InteropConfig {
+    fn default() -> Self {
+        Self {
+            benchmark_secret: default_benchmark_secret(),
+            enabled: default_interop_enabled(),
+        }
     }
 }
 

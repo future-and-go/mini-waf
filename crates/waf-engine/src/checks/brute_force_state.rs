@@ -84,6 +84,14 @@ impl BfState {
         }
     }
 
+    pub fn clear_all(&self) {
+        self.failed.clear();
+        self.spray.clear();
+        self.spray_hits_per_ip.clear();
+        self.spray_passwords_per_ip.clear();
+        self.evict_ticker.store(0, Ordering::Relaxed);
+    }
+
     pub fn record_failed(&self, user_hash: u64, ip: IpAddr, window: Duration) {
         self.evict_if_over_cap_failed();
         let now = self.clock.now();

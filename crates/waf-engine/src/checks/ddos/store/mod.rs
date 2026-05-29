@@ -39,4 +39,9 @@ pub trait CounterStore: Send + Sync {
     /// Called periodically by GC task. Implementations with native TTL
     /// (e.g., Redis `EXPIRE`) may no-op here.
     async fn purge_expired(&self, now_ms: i64) -> anyhow::Result<usize>;
+
+    /// Drop all entries (interop reset).
+    async fn clear_all(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
