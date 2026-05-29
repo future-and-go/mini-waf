@@ -1,3 +1,4 @@
 *
 !.gitignore
 !ec2-install-gh-runner.sh
+!ci-local.sh

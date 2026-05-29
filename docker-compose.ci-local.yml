@@ -1,0 +1,56 @@
+# Local mirror of GitHub Actions CI environment.
+# See docker/ci-local.Dockerfile + scripts/ci-local.sh.
+#
+# Usage:
+#   # Run the full pre-push verification pipeline:
+#   docker compose -f docker-compose.ci-local.yml run --rm ci-local /workspace/scripts/ci-local.sh
+#
+#   # Interactive shell for debugging:
+#   docker compose -f docker-compose.ci-local.yml run --rm ci-local
+#
+#   # Run a single CI subset (e.g. just clippy):
+#   docker compose -f docker-compose.ci-local.yml run --rm ci-local \
+#     cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+services:
+  postgres-ci:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: prx_waf
+      POSTGRES_PASSWORD: prx_waf
+      POSTGRES_DB: prx_waf
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prx_waf"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ci-local:
+    build:
+      context: .
+      dockerfile: docker/ci-local.Dockerfile
+    depends_on:
+      postgres-ci:
+        condition: service_healthy
+    environment:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: "-D warnings"
+      RUST_BACKTRACE: full
+      CARGO_INCREMENTAL: "0"
+      DATABASE_URL: postgres://prx_waf:prx_waf@postgres-ci:5432/prx_waf
+      JWT_SECRET: ci-local-integration-test-secret-key-32bytes-min
+      MASTER_KEY: ci-local-integration-test-master-key-32bytes-min
+    volumes:
+      - .:/workspace
+      # Persistent cargo + target caches keep iteration cheap across runs.
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - target-cache:/workspace/target
+    working_dir: /workspace
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  target-cache:
