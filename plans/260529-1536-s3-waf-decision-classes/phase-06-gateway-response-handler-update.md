@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Gateway Response Handler Update"
-status: pending
+status: done
 priority: P1
 effort: "2h"
 dependencies: [2, 3]
@@ -215,14 +215,14 @@ Run `cargo test -p gateway` — all tests pass.
 
 ## Success Criteria
 
-- [ ] `write_waf_decision()` handles RateLimit (429), Timeout (504), CircuitBreaker (503)
-- [ ] `write_waf_body_decision()` handles same 3 variants
-- [ ] HTTP/3 handler handles same 3 variants
-- [ ] Mode-aware: log_only decisions skip enforcement (return `Ok(false)`)
-- [ ] Logging uses `as_contract_str()` for action field
-- [ ] No `_ => {}` catch-all — all variants explicitly matched
-- [ ] 4 new gateway tests pass
-- [ ] `cargo test -p gateway` — zero failures
+- [x] `write_waf_decision()` handles RateLimit (429), Timeout (504), CircuitBreaker (503)
+- [x] `write_waf_body_decision()` handles same 3 variants
+- [x] HTTP/3 handler handles same 3 variants
+- [x] Mode-aware: log_only decisions skip enforcement (return `Ok(false)`)
+- [x] Logging uses `as_contract_str()` for action field
+- [x] No `_ => {}` catch-all — all variants explicitly matched
+- [x] 4 new gateway tests pass (rate_limit 429, timeout 504, circuit_breaker 503, log_only_block bypass)
+- [x] `cargo test -p gateway` — zero failures (345 lib + 17 writer suite)
 
 ## Risk Assessment
 

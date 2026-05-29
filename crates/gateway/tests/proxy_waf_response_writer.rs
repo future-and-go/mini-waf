@@ -499,3 +499,23 @@ async fn write_waf_decision_circuit_breaker_writes_503() {
         "circuit breaker body must reach the wire: {wire}"
     );
 }
+
+#[tokio::test]
+async fn write_waf_decision_log_only_block_returns_false() {
+    let (mut session, _drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    // A Block decision in LogOnly mode must skip enforcement: the request
+    // passes to upstream (Ok(false)) and the blocked counter stays at zero.
+    let decision = WafDecision::block(403, None, detection_result()).with_mode(InteropMode::LogOnly);
+
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
+        .await
+        .expect("write_waf_decision");
+    assert!(!result, "LogOnly mode must bypass enforcement for a Block action");
+    assert_eq!(
+        counter.load(Ordering::Relaxed),
+        0,
+        "LogOnly mode must not bump the blocked counter"
+    );
+}
