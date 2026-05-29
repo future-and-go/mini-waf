@@ -7,6 +7,12 @@ All notable changes to PRX-WAF are documented here. The format follows [Keep a C
 ## [Unreleased]
 
 ### Added
+- **WAF Control Interface (Interop / Benchmark Mode)**: Lock-free `/__waf_control/*` endpoints for live WAF reconfiguration during benchmarking; supports mode override (enforce/log_only) per feature/policy, state reset, and cache flush; constant-time auth via `X-Benchmark-Secret` header (7 phases complete, 9 integration tests)
+  - **ModeRegistry**: ArcSwap-based lock-free snapshot (~1-2ns hot-path read)
+  - **FeatureCatalog**: Static registry of 17 WAF features with per-feature policy scopes
+  - **Endpoints**: `GET /capabilities`, `POST /reset_state`, `POST /set_profile`, `POST /flush_cache`
+  - **Config**: `[interop] enabled` (default: false), `benchmark_secret` (TOML)
+  - **Modules**: `crates/waf-engine/src/interop/` (mode_registry.rs, feature_catalog.rs), `crates/waf-api/src/interop_control.rs`
 - **FR-030 — Endpoint Heatmap**: Real-time attack distribution by endpoint + stats overview filters (commit 54d642b)
 - **Admin Panel**: Rule analytics dashboard + security event detail view (commit 5faa764)
 

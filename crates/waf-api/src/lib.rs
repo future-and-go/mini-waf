@@ -11,6 +11,7 @@ pub mod error;
 pub mod geo_api;
 pub mod handlers;
 pub mod health;
+pub mod interop_control;
 pub mod logs;
 pub mod middleware;
 pub mod notifications;

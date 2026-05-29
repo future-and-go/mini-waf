@@ -125,6 +125,11 @@ impl RateLimitStore for MemoryStore {
     async fn purge_expired(&self) -> anyhow::Result<usize> {
         Ok(Self::cleanup(&self.map, now_epoch_ms()))
     }
+
+    async fn clear_all(&self) -> anyhow::Result<()> {
+        self.map.clear();
+        Ok(())
+    }
 }
 
 /// Current wall-clock epoch milliseconds, clamped to `i64`.

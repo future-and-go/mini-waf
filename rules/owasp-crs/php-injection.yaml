@@ -60,8 +60,8 @@ tags:
 - owasp-crs
 - php-injection
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '933130'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-933135
@@ -76,8 +76,8 @@ tags:
 - owasp-crs
 - php-injection
 metadata:
-  crs_id: '933135'
   source: OWASP CRS v4.25.0
+  crs_id: '933135'
 ---
 kind: custom_rule_v1
 id: CRS-933140
@@ -100,7 +100,7 @@ id: CRS-933200
 name: 'PHP Injection Attack: Wrapper scheme detected'
 enabled: true
 action: block
-pattern: (?i)(?:php|bzip2|expect|glob|ogg|(?:ph|r)ar|ssh2(?:.(?:s(?:hell|(?:ft|c)p)|exec|tunnel))?|z(?:ip|lib)|data|convert\.base64-(?:en|de)code|string\.(?:to(?:upper|lower)|re(?:place|verse)|rot13))://
+pattern: (?:bzip2|expect|glob|ogg|(?:ph|r)ar|ssh2(?:.(?:s(?:hell|(?:ft|c)p)|exec|tunnel))?|z(?:ip|lib))://
 category: php-injection
 severity: critical
 paranoia: 1
@@ -141,8 +141,8 @@ tags:
 - owasp-crs
 - php-injection
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '933160'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-933170
@@ -157,8 +157,8 @@ tags:
 - owasp-crs
 - php-injection
 metadata:
-  crs_id: '933170'
   source: OWASP CRS v4.25.0
+  crs_id: '933170'
 ---
 kind: custom_rule_v1
 id: CRS-933180
@@ -173,8 +173,8 @@ tags:
 - owasp-crs
 - php-injection
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '933180'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-933210
@@ -189,8 +189,8 @@ tags:
 - owasp-crs
 - php-injection
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '933210'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-933220
@@ -253,8 +253,8 @@ tags:
 - owasp-crs
 - php-injection
 metadata:
-  crs_id: '933153'
   source: OWASP CRS v4.25.0
+  crs_id: '933153'
 ---
 kind: custom_rule_v1
 id: CRS-933131

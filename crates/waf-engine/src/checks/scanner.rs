@@ -248,6 +248,10 @@ impl Check for ScannerCheck {
 
         None
     }
+
+    fn reset_state(&self) {
+        self.state.clear_all();
+    }
 }
 
 #[cfg(test)]

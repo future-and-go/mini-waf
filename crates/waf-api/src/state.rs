@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use gateway::{HostRouter, ResponseCache, TunnelRegistry};
+use waf_engine::interop::ModeRegistry;
 use waf_engine::{CommunityReporter, CrowdSecClient, DecisionCache, PluginManager, WafEngine};
 use waf_storage::Database;
 
@@ -71,6 +72,10 @@ pub struct AppState {
     /// Closure to change the global tracing filter at runtime.
     /// `None` when the dynamic reload layer is not wired (e.g. CLI sub-commands).
     pub log_level_setter: Option<LogLevelSetter>,
+    /// Benchmark interop control interface configuration
+    pub interop_config: waf_common::config::InteropConfig,
+    /// Benchmark interop mode registry (`enforce`/`log_only` state)
+    pub mode_registry: ModeRegistry,
 }
 
 impl AppState {
@@ -120,6 +125,8 @@ impl AppState {
             victoria_logs_base_url: None,
             logs_streams_cache: crate::logs::new_streams_cache(),
             log_level_setter: None,
+            interop_config: waf_common::config::InteropConfig::default(),
+            mode_registry: ModeRegistry::new(),
         })
     }
 

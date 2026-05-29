@@ -99,6 +99,12 @@ impl Check for RateLimitCheck {
             Err(e) => Self::handle_store_err(&e, ctx),
         }
     }
+
+    fn reset_state(&self) {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.store.clear_all()).ok();
+        });
+    }
 }
 
 /// Current wall-clock epoch milliseconds, clamped to `i64`.
