@@ -102,6 +102,20 @@ Standards: OWASP ASVS V14.4, CWE-200, CWE-209, RFC 9110 §7.6, NIST SP 800-53 SI
 
 ---
 
+## Subsystem Summary
+
+Quick reference for subsystems detailed in dedicated sections below:
+
+| Subsystem | Feature | Module | Purpose |
+|-----------|---------|--------|---------|
+| **Challenge & PoW** | FR-006 | `waf-engine/challenge/` | Minimal HTML page (<5KB) with JS PoW puzzle; difficulty tiers (easy/medium/hard); nonce store prevents replay |
+| **Challenge Credit Tokens** | FR-025 Phase 8 | `waf-engine/risk/challenge_credit/` | Single-use HMAC-signed tokens on PoW completion; bidirectional actor_id binding; verify outcomes (Valid/Invalid/Replay/Expired) with risk deltas |
+| **Community Threat Intel** | — | `waf-engine/community/` | Two-way IP blocklist exchange; auto-enrollment with machine_id/api_key; Ed25519 signature verification (fail-closed); batched signal reporter |
+| **Logging & Audit** | FR-033 | `waf-engine/logging/` + `prx-waf/victoria_logs/` | VictoriaLogs JSON ingest layer; separate audit sink for non-Allow decisions; batched DB writer; fail-open on buffer saturation |
+| **Gateway Filter Chain** | FR-035 | `gateway/filters/` | 6 request filters + 8 response filters; response body chain: decompress → catalog scan → JSON redact → operator regex |
+
+---
+
 ## Component Interaction
 
 ### Gateway (Pingora) → WafEngine
@@ -479,3 +493,181 @@ Rule Load Operation
 
 **Integration**: Rule reload (via file watcher or API) invokes `classify_error()` to emit consistent metrics.
 
+### Cluster Mode (Optional 3-Node HA)
+
+QUIC mTLS mesh with automatic leader election, rule sync, event forwarding, config sync, and write forwarding.
+
+```
+Main Node (control plane)
+├── PostgreSQL storage (authoritative)
+├── RuleRegistry + RuleChangelog
+├── Admin API (read-write)
+└── QUIC server
+    ├── handles RuleSyncRequest → returns incremental/snapshot
+    ├── receives EventBatch → batch INSERT to DB
+    ├── broadcasts ConfigSync (TOML, version-gated, term-fenced)
+    └── replays ApiForward → returns ApiForwardResponse
+
+Worker Nodes (data plane)
+├── In-memory RuleRegistry (synced from main)
+├── Admin API (read-only; writes forwarded via QUIC)
+├── EventBatcher → forwards SecurityEvents to main
+└── QUIC client
+    ├── periodic RuleSyncRequest (pull model)
+    ├── receives ConfigSync → apply (proxy/rules/cache/api sections)
+    └── ApiForward for write requests (1MB payload limit, 10s timeout)
+```
+
+**Key flows:**
+
+1. **Rule sync** — Workers poll main every `rules_interval_secs`. Main responds with incremental delta (from `RuleChangelog` ring buffer) or lz4-compressed full snapshot. Workers apply to in-memory `RuleRegistry` and call `RuleReloader::reload_from_registry()` (no DB needed on workers).
+
+2. **Event forwarding** — Workers batch `SecurityEvent`s (configurable size/interval) via `EventBatcher`. Main persists with batch INSERT, tags `source_node_id` to prevent double-counting.
+
+3. **Config sync** — Main broadcasts `ConfigSync` with TOML-serialized `SyncableConfig` (proxy, rules, cache, api sections only — never overwrites cluster/storage). Includes election `term` for stale-main rejection.
+
+4. **Write forwarding** — Worker API middleware intercepts POST/PUT/DELETE/PATCH, serializes to `ApiForward`, sends via QUIC. Main replays via HTTP, returns `ApiForwardResponse`. Workers return 503 if main unreachable.
+
+5. **Transport dispatch** — All 13 `ClusterMessage` variants dispatched exhaustively (no catch-all) in both server and client. `NodeState` bridges to `WafEngine` via `Arc<dyn RuleReloader>`.
+
+**Module:** `crates/waf-cluster/` (transport/, sync/, node.rs, cluster_forward.rs, lib.rs).
+
+---
+
+## Challenge & Proof-of-Work System (FR-006)
+
+Risk score >= challenge_threshold triggers minimal (<5KB) HTML page with embedded JS PoW puzzle.
+
+```
+Risk Scorer (challenge_threshold breach)
+    ├─ DifficultyMap::select(score) → DifficultyTier
+    ├─ JsChallengeRenderer::render() → nonce + page
+    └─ Nonce store (in-memory LRU) + verify_pow()
+    │
+Client solves PoW → POST /retry with cookie
+    │
+    ├─ PowVerifyResult (Valid → issue token | Invalid/Replay → +risk)
+    └─ Token signed via HMAC-SHA256(secret, actor_id || nonce)
+```
+
+**Key types:** `ChallengeConfig`, `DifficultyMap`, `PowSolution`, `JsChallengeRenderer`.
+
+**Module:** `crates/waf-engine/src/challenge/`.
+
+---
+
+## Challenge Credit Tokens (FR-025 Phase 8)
+
+After PoW success, issue single-use HMAC-signed token (secret: `/var/lib/waf/challenge-hmac.key`).
+
+**Verify Outcomes:**
+| Outcome | Risk Delta | Condition |
+|---------|-----------|-----------|
+| Valid | -25 | Signature OK + nonce unused + TTL valid |
+| Invalid | +20 | Signature mismatch |
+| Replay | +30 | Nonce already consumed |
+| Expired | +10 | Token TTL exceeded |
+
+Token binds bidirectionally: actor_id must match in token and request. Nonce store (in-memory LRU) prevents replay.
+
+**Module:** `crates/waf-engine/src/risk/challenge_credit/`.
+
+---
+
+## Community Threat Intelligence
+
+Two-way IP blocklist + detection signal exchange. Auto-enroll (machine_id/api_key) on first run.
+
+**Inbound (blocklist check):**
+- Periodic sync (configurable interval, default 5min)
+- Ed25519 signature verification (fail-closed if public_key invalid)
+- In-memory cache lookup → +40 risk delta if hit
+
+**Outbound (report detections):**
+- Batched HTTP POST (signal type: SQLi, XSS, DDoS, etc.)
+- Configurable batch size + flush interval
+- Background flush task, fail-open on network errors
+
+**Module:** `crates/waf-engine/src/community/`.
+
+---
+
+## Logging & Audit Subsystem (FR-033)
+
+Two independent layers sharing batch-buffer abstraction:
+
+**VictoriaLogs Layer:** All `tracing` events → JSON to HTTP endpoint (batch: 1000 events or 5s).
+
+**Audit Layer:** Non-Allow decisions (Block/Challenge/Redirect) → PostgreSQL (batch: 500 events or 10s).
+
+**VictoriaLogs Sidecar:** Auto-downloaded from GitHub (SHA-256 verified), runs as managed child process, listens on :9428.
+
+**Fail-Open:** Buffer saturation or network errors drop entries (never block WAF path). DB connection failure → WARN + continue.
+
+**Module:** `crates/waf-engine/src/logging/` + `crates/prx-waf/src/victoria_logs/`.
+
+---
+
+## Gateway Filter Chain
+
+Trait-based Chain-of-Responsibility for request/response processing.
+
+**Request Filters:** ForwardedHost, ForwardedProto, HopByHop, HostPolicy, RealIp, Xff.
+
+**Response Filters:** BodyDecompressor → BodyContentScanner (audit) → JsonFieldRedactor (FR-034) → HeaderBlocklist → LocationRewriter, ServerPolicy, ViaStrip.
+
+**Response Body Chain:** Decompress → catalog PII/secrets (emit FR-033 audit) → redact JSONPath fields → operator regex.
+
+**Module:** `crates/gateway/src/filters/`.
+
+---
+
+## Security Check Pipeline (11 Checks)
+
+All checks run async, deltas accumulate → FR-025 scorer.
+
+| Check | Feature | Risk |
+|-------|---------|------|
+| BruteForce | FR-018 | +50 failed auth; -20 success |
+| Ssrf | FR-016 | +35 (metadata IP); +20 (obfuscated) |
+| HeaderInjection | FR-017 | +25 (CRLF); +30 (Host bypass) |
+| BodyAbuse | FR-020 | +10–20 (oversized/depth/explosion) |
+| SqlInjection | — | +40 (libinjection) |
+| Xss | — | +30 (script/event handler) |
+| Rce | — | +50 (shell metachar) |
+| DirTraversal | — | +35 (%2e%2e%2f) |
+| Scanner | — | +20 (known scanner UA) |
+| Geo | — | +5–15 (policy) |
+| AntiHotlink | — | +10 (missing Referer) |
+
+**Module:** `crates/waf-engine/src/checks/`.
+
+---
+
+## CrowdSec Integration (3 Modes)
+
+**Bouncer:** IP reputation cache (LRU, configurable TTL) → Allow or Block per policy.
+
+**AppSec:** Async HTTP check against AppSec endpoint (remote_addr, user_agent, rule_hit context) → Allow, Block, or Captcha.
+
+**Both:** Combine both modes.
+
+**Background Tasks:** Sync (periodic decision polling + cache eviction), Pusher (batched logs to LAPI).
+
+**Circuit Breaker:** Fallback to allow-all if LAPI unreachable; recover on success.
+
+**Module:** `crates/waf-engine/src/crowdsec/`.
+
+---
+
+## RequestCtx Population Order
+
+1. **RelayDetector** — XFF/X-Real-IP evaluation → `client_ip`
+2. **TierPolicyRegistry** — host/path classification → `tier` + `tier_policy`
+3. **GeoIP** — lookup → `geo` (optional)
+4. **Tier Cache Gate** — URL-based cache eligibility check
+5. **11 Checks** — async, deltas accumulate in `RequestCtx.risk_deltas`
+6. **Risk Scorer** — thresholds (allow_threshold, challenge_threshold) → Allow/Challenge/Block
+7. **Audit Sink** — FR-033 event emission for non-Allow decisions
+
+**Key fields:** `client_ip`, `method`, `path`, `headers`, `body_preview`, `host_config`, `geo`, `tier`, `tier_policy`, `cookies` (pre-parsed).
