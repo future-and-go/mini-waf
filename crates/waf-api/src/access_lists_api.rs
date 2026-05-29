@@ -5,7 +5,7 @@
 //! 256 KiB by the route layer. After a successful write the engine rule cache
 //! is refreshed so live traffic sees the new lists immediately.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use axum::{
@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::auth::{Claims, validate_admin_token};
+use crate::config_paths::resolve_under_root;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -108,20 +109,6 @@ fn require_admin(headers: &HeaderMap, jwt_secret: &str) -> Result<Claims, ApiErr
 
 // ─── Filesystem helpers ──────────────────────────────────────────────────────
 
-fn resolve_path(state: &AppState, relative: &str) -> PathBuf {
-    state.main_config_file.as_ref().map_or_else(
-        || PathBuf::from(relative),
-        |main| {
-            let p = Path::new(main.as_str());
-            let root = p
-                .parent()
-                .and_then(Path::parent)
-                .unwrap_or_else(|| Path::new("."));
-            root.join(relative)
-        },
-    )
-}
-
 async fn read_yaml_opt(path: &Path) -> Option<AccessConfig> {
     let raw = tokio::fs::read_to_string(path).await.ok()?;
     match serde_yaml::from_str::<AccessConfig>(&raw) {
@@ -172,7 +159,7 @@ fn validate(cfg: &AccessConfig) -> Result<(), ApiError> {
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 pub async fn get_access_lists(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
-    let path = resolve_path(&state, "configs/access-lists.yaml");
+    let path = resolve_under_root(&state, "configs/access-lists.yaml");
     let cfg = read_yaml_opt(&path).await.unwrap_or_default();
     Ok(Json(json!({ "success": true, "data": cfg })))
 }
@@ -185,7 +172,7 @@ pub async fn put_access_lists(
     require_admin(&headers, &state.jwt_secret)?;
     validate(&body)?;
 
-    let path = resolve_path(&state, "configs/access-lists.yaml");
+    let path = resolve_under_root(&state, "configs/access-lists.yaml");
     write_yaml(&path, &body).await?;
 
     if let Err(e) = state.engine.reload_rules().await {
@@ -199,7 +186,7 @@ pub async fn test_access_lists(
     State(state): State<Arc<AppState>>,
     Query(q): Query<TestQuery>,
 ) -> ApiResult<Json<Value>> {
-    let path = resolve_path(&state, "configs/access-lists.yaml");
+    let path = resolve_under_root(&state, "configs/access-lists.yaml");
     let cfg = read_yaml_opt(&path).await.unwrap_or_default();
 
     let ip = q.ip.as_deref().unwrap_or("");

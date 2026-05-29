@@ -5,7 +5,7 @@
 //! `DynamicBanTable` held by `WafEngine`; mutations require the `admin` role.
 //! Request bodies are capped at 256 KiB by the route layer.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::auth::{Claims, validate_admin_token};
+use crate::config_paths::resolve_under_root;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -59,20 +60,6 @@ fn require_admin(headers: &HeaderMap, jwt_secret: &str) -> Result<Claims, ApiErr
 }
 
 // ─── Filesystem helpers ──────────────────────────────────────────────────────
-
-fn resolve_path(state: &AppState, relative: &str) -> PathBuf {
-    state.main_config_file.as_ref().map_or_else(
-        || PathBuf::from(relative),
-        |main| {
-            let p = Path::new(main.as_str());
-            let root = p
-                .parent()
-                .and_then(Path::parent)
-                .unwrap_or_else(|| Path::new("."));
-            root.join(relative)
-        },
-    )
-}
 
 async fn read_yaml_opt(path: &Path) -> Option<DdosConfigBody> {
     let raw = tokio::fs::read_to_string(path).await.ok()?;
@@ -131,7 +118,7 @@ fn now_epoch_ms() -> i64 {
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 pub async fn get_ddos_config(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
-    let path = resolve_path(&state, "configs/ddos.yaml");
+    let path = resolve_under_root(&state, "configs/ddos.yaml");
     let cfg = read_yaml_opt(&path).await.unwrap_or_else(default_ddos_config);
     Ok(Json(json!({ "success": true, "data": cfg })))
 }
@@ -147,7 +134,9 @@ pub async fn put_ddos_config(
         return Err(ApiError::BadRequest("ban_durations_secs must not be empty".into()));
     }
     if body.ban_durations_secs.iter().any(|d| *d <= 0) {
-        return Err(ApiError::BadRequest("ban_durations_secs entries must be positive".into()));
+        return Err(ApiError::BadRequest(
+            "ban_durations_secs entries must be positive".into(),
+        ));
     }
     if body.per_ip.threshold_rps <= 0 || body.per_fingerprint.threshold_rps <= 0 {
         return Err(ApiError::BadRequest("threshold_rps must be positive".into()));
@@ -156,7 +145,7 @@ pub async fn put_ddos_config(
         return Err(ApiError::BadRequest("window_secs must be positive".into()));
     }
 
-    let path = resolve_path(&state, "configs/ddos.yaml");
+    let path = resolve_under_root(&state, "configs/ddos.yaml");
     write_yaml(&path, &body).await?;
     Ok(Json(json!({ "success": true, "data": body })))
 }

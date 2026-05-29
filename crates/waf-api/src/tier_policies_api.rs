@@ -4,18 +4,15 @@
 //! typed serde structs, requires the `admin` role, and writes atomically via
 //! tmp-file + rename. Body size is capped at 256 KiB by the route layer.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
-use axum::{
-    Json,
-    extract::State,
-    http::HeaderMap,
-};
+use axum::{Json, extract::State, http::HeaderMap};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::auth::{Claims, validate_admin_token};
+use crate::config_paths::resolve_under_root;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -86,20 +83,6 @@ fn require_admin(headers: &HeaderMap, jwt_secret: &str) -> Result<Claims, ApiErr
 
 // ─── Filesystem helpers ──────────────────────────────────────────────────────
 
-fn resolve_path(state: &AppState, relative: &str) -> PathBuf {
-    state.main_config_file.as_ref().map_or_else(
-        || PathBuf::from(relative),
-        |main| {
-            let p = Path::new(main.as_str());
-            let root = p
-                .parent()
-                .and_then(Path::parent)
-                .unwrap_or_else(|| Path::new("."));
-            root.join(relative)
-        },
-    )
-}
-
 async fn read_yaml_opt<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     let raw = tokio::fs::read_to_string(path).await.ok()?;
     match serde_yaml::from_str::<T>(&raw) {
@@ -111,7 +94,7 @@ async fn read_yaml_opt<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     }
 }
 
-async fn write_yaml<T: Serialize>(path: &Path, value: &T) -> Result<(), ApiError> {
+async fn write_yaml<T: Serialize + Sync>(path: &Path, value: &T) -> Result<(), ApiError> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -164,7 +147,7 @@ fn validate_thresholds(tier: &str, t: &RiskThresholds) -> Result<(), ApiError> {
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 pub async fn get_tier_policies(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
-    let path = resolve_path(&state, "configs/tier-policies.yaml");
+    let path = resolve_under_root(&state, "configs/tier-policies.yaml");
     let cfg = read_yaml_opt::<TierConfig>(&path)
         .await
         .unwrap_or_else(default_tier_config);
@@ -183,7 +166,7 @@ pub async fn put_tier_policies(
     validate_thresholds("medium", &body.policies.medium.risk_thresholds)?;
     validate_thresholds("catch_all", &body.policies.catch_all.risk_thresholds)?;
 
-    let path = resolve_path(&state, "configs/tier-policies.yaml");
+    let path = resolve_under_root(&state, "configs/tier-policies.yaml");
     write_yaml(&path, &body).await?;
     Ok(Json(json!({ "success": true, "data": body })))
 }
@@ -192,7 +175,7 @@ pub async fn dry_run_tier(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DryRunRequest>,
 ) -> ApiResult<Json<Value>> {
-    let path = resolve_path(&state, "configs/tier-policies.yaml");
+    let path = resolve_under_root(&state, "configs/tier-policies.yaml");
     let cfg = read_yaml_opt::<TierConfig>(&path)
         .await
         .unwrap_or_else(default_tier_config);
