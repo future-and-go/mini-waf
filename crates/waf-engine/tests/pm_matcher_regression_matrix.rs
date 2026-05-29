@@ -543,6 +543,7 @@ fn known_pm_data_files() -> Vec<&'static str> {
         "unix-shell.data",
         "php-variables.data",
         "php-function-names-933150.data",
+        "java-classes.data",
         "scanners-user-agents.data",
         "windows-powershell-commands.data",
         "restricted-upload.data",
