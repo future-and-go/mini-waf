@@ -9,7 +9,7 @@ use axum::{
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -17,6 +17,53 @@ use waf_storage::models::CreateTunnel;
 
 use crate::state::AppState;
 use gateway::{TunnelConfig, TunnelConnection, generate_token, hash_token};
+
+/// Closed set of transport protocols accepted on the tunnel API boundary.
+///
+/// Mirrors the `tunnels_protocol_check` CHECK constraint in migration 0017
+/// so an invalid value is rejected with 400 before reaching the database.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TunnelProtocol {
+    Tcp,
+    Udp,
+    Ws,
+    Quic,
+    Http,
+    Grpc,
+}
+
+impl TunnelProtocol {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Tcp => "tcp",
+            Self::Udp => "udp",
+            Self::Ws => "ws",
+            Self::Quic => "quic",
+            Self::Http => "http",
+            Self::Grpc => "grpc",
+        }
+    }
+
+    /// Parse a database/JSON string into the enum.
+    ///
+    /// `None` and the empty string default to TCP (matches the migration 0017
+    /// column default); any other value off the closed set is a client error.
+    pub fn parse_or_default(s: Option<&str>) -> Result<Self, String> {
+        let raw = s.unwrap_or("tcp");
+        match raw {
+            "" | "tcp" => Ok(Self::Tcp),
+            "udp" => Ok(Self::Udp),
+            "ws" => Ok(Self::Ws),
+            "quic" => Ok(Self::Quic),
+            "http" => Ok(Self::Http),
+            "grpc" => Ok(Self::Grpc),
+            other => Err(format!(
+                "protocol must be one of tcp|udp|ws|quic|http|grpc (got {other:?})"
+            )),
+        }
+    }
+}
 
 // ─── REST handlers ─────────────────────────────────────────────────────────────
 
@@ -35,6 +82,7 @@ pub async fn list_tunnels(State(state): State<Arc<AppState>>) -> impl IntoRespon
                         "name": r.name,
                         "target_host": r.target_host,
                         "target_port": r.target_port,
+                        "protocol": r.protocol,
                         "enabled": r.enabled,
                         "connected": connected,
                         "last_seen": r.last_seen,
@@ -42,7 +90,20 @@ pub async fn list_tunnels(State(state): State<Arc<AppState>>) -> impl IntoRespon
                     })
                 })
                 .collect();
-            (StatusCode::OK, Json(json!({ "tunnels": list }))).into_response()
+            // Envelope standardisation: canonical shape is `success/data/total`.
+            // `tunnels` retained as a one-release deprecation alias.
+            let total = list.len();
+            let alias = list.clone();
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "success": true,
+                    "data": list,
+                    "total": total,
+                    "tunnels": alias,
+                })),
+            )
+                .into_response()
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -92,6 +153,16 @@ pub async fn create_tunnel(
             .into_response();
     };
 
+    // Parse + validate protocol against the closed enum BEFORE allocating a
+    // token; an invalid protocol is a client error, not a server one.
+    let protocol_str = body.get("protocol").and_then(serde_json::Value::as_str);
+    let protocol = match TunnelProtocol::parse_or_default(protocol_str) {
+        Ok(p) => p,
+        Err(msg) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))).into_response();
+        }
+    };
+
     let token = generate_token();
     let token_hash = hash_token(&token);
 
@@ -101,6 +172,7 @@ pub async fn create_tunnel(
         target_host: target_host.clone(),
         target_port,
         enabled: body.get("enabled").and_then(serde_json::Value::as_bool),
+        protocol: Some(protocol.as_db_str().to_string()),
     };
 
     let row = match state.db.create_tunnel(&req, &token_hash).await {
@@ -137,6 +209,7 @@ pub async fn create_tunnel(
             "name": row.name,
             "target_host": row.target_host,
             "target_port": row.target_port,
+            "protocol": row.protocol,
             "enabled": row.enabled,
             "token": token,   // shown once — client must save this
         })),

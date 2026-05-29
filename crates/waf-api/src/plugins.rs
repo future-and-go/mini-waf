@@ -82,7 +82,24 @@ pub async fn list_plugins(State(state): State<Arc<AppState>>) -> impl IntoRespon
                     })
                 })
                 .collect();
-            (StatusCode::OK, Json(json!({ "plugins": list }))).into_response()
+            // Envelope standardisation: the `success/data/total` shape is the
+            // canonical form across admin-panel APIs. `plugins` is retained as
+            // a deprecation alias for one release so existing UI clients keep
+            // working — slated for removal in the next major.
+            let total = list.len();
+            // Clone once for the deprecation-alias field; admin endpoint, small
+            // list, acceptable trade-off to keep the existing UI client working.
+            let alias = list.clone();
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "success": true,
+                    "data": list,
+                    "total": total,
+                    "plugins": alias,
+                })),
+            )
+                .into_response()
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

@@ -97,6 +97,7 @@ async fn tunnel_lifecycle_with_status_updates() {
                 target_host: "10.0.0.1".into(),
                 target_port: 8080,
                 enabled: Some(true),
+                protocol: None,
             },
             "hashed",
         )

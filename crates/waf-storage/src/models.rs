@@ -405,6 +405,19 @@ pub struct CreateSensitivePattern {
     pub remarks: Option<String>,
 }
 
+/// Partial-update sensitive pattern request. Every field is optional so a PATCH
+/// caller can supply any subset; `None` fields leave the column unchanged.
+#[derive(Debug, Clone, Default)]
+pub struct UpdateSensitivePattern<'a> {
+    pub pattern: Option<&'a str>,
+    pub pattern_type: Option<&'a str>,
+    pub check_request: Option<bool>,
+    pub check_response: Option<bool>,
+    pub action: Option<&'a str>,
+    pub remarks: Option<&'a str>,
+    pub enabled: Option<bool>,
+}
+
 /// Create/update hotlink config request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpsertHotlinkConfig {
@@ -672,9 +685,20 @@ pub struct TunnelRow {
     pub target_port: i32,
     pub enabled: bool,
     pub status: String,
+    /// Transport protocol — closed set enforced by the migration 0017 CHECK
+    /// constraint and by the API-boundary `TunnelProtocol` enum. The sqlx
+    /// `default` attribute keeps reads working against databases that have
+    /// not yet applied migration 0017.
+    #[serde(default = "default_tunnel_protocol")]
+    #[sqlx(default)]
+    pub protocol: String,
     pub last_seen: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+fn default_tunnel_protocol() -> String {
+    "tcp".to_string()
 }
 
 /// Create tunnel request
@@ -686,6 +710,9 @@ pub struct CreateTunnel {
     pub target_host: String,
     pub target_port: i32,
     pub enabled: Option<bool>,
+    /// Transport protocol; defaults to `"tcp"` when absent. Validated against
+    /// the closed set at the API boundary before reaching this struct.
+    pub protocol: Option<String>,
 }
 
 // ─── Phase 5: Audit Log ───────────────────────────────────────────────────────
