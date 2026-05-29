@@ -30,8 +30,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942140'
   source: OWASP CRS v4.25.0
+  crs_id: '942140'
 ---
 kind: custom_rule_v1
 id: CRS-942151
@@ -64,8 +64,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942160'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942170
@@ -81,8 +81,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942170'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942190
@@ -200,15 +200,15 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942280'
   source: OWASP CRS v4.25.0
+  crs_id: '942280'
 ---
 kind: custom_rule_v1
 id: CRS-942290
 name: Finds basic MongoDB SQL injection attempts
 enabled: true
 action: block
-pattern: (?i)\[?\$(?:a(?:bs|c(?:cumulator|osh?)|dd(?:ToSet)?|ll(?:ElementsTrue)?|n(?:d|yElementTrue)|rray(?:ElemA|ToObjec)t|sinh?|tan[2h]?|vg)|b(?:etween|i(?:narySize|t(?:And|Not|(?:O|Xo)r)?)|ottomN?|sonSize|ucket(?:Auto)?)|c(?:eil|mp|o(?:n(?:cat(?:Arrays)?|d|vert)|sh?|unt|variance(?:Po|Sam)p)|urrentDate)|d(?:a(?:te(?:Add|Diff|From(?:Parts|String)|Subtract|T(?:o(?:Parts|String)|runc))|yOf(?:Month|Week|Year))|e(?:greesToRadians|nseRank|rivative)|iv(?:ide)?|ocumentNumber)|e(?:(?:a|lemMat)ch|q|x(?:ists|p(?:MovingAvg|r)?))|f(?:i(?:lter|rstN?)|loor|unction)|g(?:etField|roup|te?)|(?:hou|xo|yea)r|i(?:fNull|n(?:c|dexOf(?:Array|Bytes|CP)|tegral)?|s(?:Array|Number|o(?:DayOfWeek|Week(?:Year)?)))|jsonSchema|l(?:astN?|et|i(?:ke|(?:nearFil|tera)l)|n|o(?:cf|g(?:10)?)|t(?:e|rim)?)|m(?:a(?:p|xN?)|e(?:dian|rgeObjects|ta)|i(?:llisecond|n(?:N|ute)?)|o(?:d|nth)|ul(?:tiply)?)|n(?:atural|e|in|o[rt])|o(?:bjectToArray|r)|p(?:ercentile|o(?:[pw]|sition)|roject|u(?:ll(?:All)?|sh))|r(?:a(?:diansToDegrees|n(?:[dk]|ge))|e(?:(?:duc|nam)e|gex(?:Find(?:All)?|Match)?|place(?:All|One)|verseArray)|ound|trim)|s(?:(?:ampleRat|lic)e|e(?:cond|t(?:Difference|(?:Equal|WindowField)s|Field|I(?:ntersection|sSubset)|OnInsert|Union)?)|(?:hif|pli|qr)t|i(?:nh?|ze)|ort(?:Array)?|t(?:dDev(?:Po|Sam)p|r(?:Len(?:Bytes|CP)|casecmp))|u(?:b(?:str(?:Bytes|CP)?|tract)|m)|witch)|t(?:anh?|ext|o(?:Bool|D(?:(?:at|oubl)e|ecimal)|HashedIndexKey|Int|Lo(?:ng|wer)|ObjectId|String|U(?:UID|pper)|pN?)|r(?:im|unc)|s(?:Increment|Second)|ype)|unset|w(?:eek|here)|zip)\]?
+pattern: (?i)\[?\$(?:a(?:bs|c(?:cumulator|osh?)|dd(?:ToSet)?|ll(?:ElementsTrue)?|n(?:d|yElementTrue)|rray(?:ElemA|ToObjec)t|sinh?|tan[2h]?|vg)|b(?:etween|i(?:narySize|t(?:And|Not|(?:O|Xo)r)?)|ottomN?|sonSize|ucket(?:Auto)?)|c(?:eil|mp|o(?:n(?:cat(?:Arrays)?|d|vert)|sh?|unt|variance(?:Po|Sam)p)|urrentDate)|d(?:a(?:te(?:Add|Diff|From(?:Parts|String)|Subtract|T(?:o(?:Parts|String)|runc))|yOf(?:Month|Week|Year))|e(?:greesToRadians|nseRank|rivative)|iv(?:ide)?|ocumentNumber)|e(?:(?:a|lemMat)ch|q|x(?:ists|p(?:MovingAvg|r)?))|f(?:i(?:lter|rstN?)|loor|unction)|g(?:etField|roup|te?)|(?:hou|xo|yea)r|i(?:fNull|n(?:c|dexOf(?:Array|Bytes|CP)|tegral)?|s(?:Array|Number|o(?:DayOfWeek|Week(?:Year)?)))|jsonSchema|l(?:astN?|et|i(?:ke|(?:nearFil|tera)l)|n|o(?:cf|g(?:10)?)|t(?:e|rim)?)|m(?:a(?:p|xN?)|e(?:dian|rgeObjects|ta)|i(?:llisecond|n(?:N|ute)?)|o(?:d|nth)|ul(?:tiply)?)|n(?:atural|e|in|o[rt])|o(?:bjectToArray|r)|p(?:ercentile|o(?:[pw]|sition)|roject|u(?:ll(?:All)?|sh))|r(?:a(?:diansToDegrees|n(?:[dk]|ge))|e(?:(?:duc|nam)e|gex(?:Find(?:All)?|Match)?|place(?:All|One)|verseArray)|ound|trim)|s(?:(?:ampleRat|lic)e|e(?:cond|t(?:Difference|(?:Equal|WindowField)s|Field|I(?:ntersection|sSubset)|OnInsert|Union)?)|(?:hif|pli|qr)t|i(?:nh?|ze)|ort(?:Array)?|t(?:dDev(?:Po|Sam)p|r(?:Len(?:Bytes|CP)|casecmp))|u(?:b(?:str(?:Bytes|CP)?|tract)|m)|witch)|t(?:anh?|ext|o(?:Bool|D(?:(?:at|oubl)e|ecimal)|HashedIndexKey|Int|Lo(?:ng|wer)|ObjectId|String|U(?:UID|pper)|pN?)|r(?:im|unc)|s(?:Increment|Second)|ype)|unset|w(?:eek|here)|zip)\b\]?
 category: sqli
 severity: critical
 paranoia: 1
@@ -217,8 +217,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942290'
   source: OWASP CRS v4.25.0
+  crs_id: '942290'
 ---
 kind: custom_rule_v1
 id: CRS-942320
@@ -234,8 +234,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942320'
   source: OWASP CRS v4.25.0
+  crs_id: '942320'
 ---
 kind: custom_rule_v1
 id: CRS-942350
@@ -251,8 +251,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942350'
   source: OWASP CRS v4.25.0
+  crs_id: '942350'
 ---
 kind: custom_rule_v1
 id: CRS-942360
@@ -285,8 +285,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942500'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942540
@@ -302,8 +302,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942540'
   source: OWASP CRS v4.25.0
+  crs_id: '942540'
 ---
 kind: custom_rule_v1
 id: CRS-942560
@@ -336,8 +336,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942550'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942120
@@ -371,8 +371,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942130'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942131
@@ -389,8 +389,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942131'
   source: OWASP CRS v4.25.0
+  crs_id: '942131'
 ---
 kind: custom_rule_v1
 id: CRS-942150
@@ -474,8 +474,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942260'
   source: OWASP CRS v4.25.0
+  crs_id: '942260'
 ---
 kind: custom_rule_v1
 id: CRS-942300
@@ -508,8 +508,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942310'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942330
@@ -542,8 +542,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942340'
   source: OWASP CRS v4.25.0
+  crs_id: '942340'
 ---
 kind: custom_rule_v1
 id: CRS-942361
@@ -559,8 +559,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942361'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942362
@@ -576,8 +576,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942362'
   source: OWASP CRS v4.25.0
+  crs_id: '942362'
 ---
 kind: custom_rule_v1
 id: CRS-942370
@@ -610,8 +610,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942380'
   source: OWASP CRS v4.25.0
+  crs_id: '942380'
 ---
 kind: custom_rule_v1
 id: CRS-942390
@@ -627,8 +627,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942390'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942400
@@ -678,8 +678,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942470'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942480
@@ -695,8 +695,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942480'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942430
@@ -747,8 +747,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942450'
   source: OWASP CRS v4.25.0
+  crs_id: '942450'
 ---
 kind: custom_rule_v1
 id: CRS-942510
@@ -886,8 +886,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942251'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942490
@@ -903,8 +903,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942490'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942420
@@ -938,8 +938,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942431'
   source: OWASP CRS v4.25.0
+  crs_id: '942431'
 ---
 kind: custom_rule_v1
 id: CRS-942460
@@ -956,8 +956,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  source: OWASP CRS v4.25.0
   crs_id: '942460'
+  source: OWASP CRS v4.25.0
 ---
 kind: custom_rule_v1
 id: CRS-942511
@@ -973,8 +973,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942511'
   source: OWASP CRS v4.25.0
+  crs_id: '942511'
 ---
 kind: custom_rule_v1
 id: CRS-942530
@@ -990,8 +990,8 @@ tags:
 - sqli
 - attack-sqli
 metadata:
-  crs_id: '942530'
   source: OWASP CRS v4.25.0
+  crs_id: '942530'
 ---
 kind: custom_rule_v1
 id: CRS-942421
