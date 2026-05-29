@@ -70,7 +70,7 @@ engine logging helpers (3 match blocks)
 | 3 | [WafDecision Enrichment](./phase-03-wafdecision-enrichment.md) | Completed | P1 | 2h | Phase 2 |
 | 4 | [Engine log_only Semantic Fix](./phase-04-engine-log-only-semantic-fix.md) | Done | P1 | 3h | Phase 3 |
 | 5 | [Rate-Limit Action Mapping](./phase-05-rate-limit-action-mapping.md) | Done | P1 | 1h | Phase 3 |
-| 6 | [Gateway Response Handler Update](./phase-06-gateway-response-handler-update.md) | Pending | P1 | 2h | Phases 2,3 |
+| 6 | [Gateway Response Handler Update](./phase-06-gateway-response-handler-update.md) | Done | P1 | 2h | Phases 2,3 |
 | 7 | [Validation and Regression](./phase-07-validation-and-regression.md) | Pending | P1 | 1h | Phases 1-6 |
 
 **Total estimated effort:** ~13h (1.5-2 days)

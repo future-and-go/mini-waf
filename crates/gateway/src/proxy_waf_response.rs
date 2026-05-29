@@ -53,6 +53,7 @@ pub async fn write_waf_decision(
                     })
                     .unwrap_or_default();
                 warn!(
+                    action = %decision.action.as_contract_str(),
                     rule_id = %rule_id,
                     rule_name = %rule_name,
                     phase = %phase,
@@ -87,7 +88,10 @@ pub async fn write_waf_decision(
             WafAction::Challenge => {
                 return handle_challenge(session, request_ctx, challenge_ctx).await;
             }
-            _ => {}
+            // Non-enforced actions: pass through to upstream. Explicit so the
+            // compiler flags any future WafAction variant that needs handling.
+            #[allow(deprecated)]
+            WafAction::Allow | WafAction::LogOnly => {}
         }
     }
     Ok(false)
@@ -253,7 +257,10 @@ pub async fn write_waf_body_decision(
                     "WAF redirected request",
                 ));
             }
-            _ => {}
+            // Challenge is not enforced at the body-inspection stage; Allow /
+            // LogOnly pass through. Explicit so new variants must be handled.
+            #[allow(deprecated)]
+            WafAction::Allow | WafAction::Challenge | WafAction::LogOnly => {}
         }
     }
     Ok(())

@@ -295,7 +295,10 @@ where
                 stream.finish().await?;
                 return Ok(());
             }
-            _ => {}
+            // Challenge is not served over HTTP/3 yet; Allow / LogOnly pass
+            // through. Explicit so new variants must be handled.
+            #[allow(deprecated)]
+            WafAction::Allow | WafAction::Challenge | WafAction::LogOnly => {}
         }
     }
 
