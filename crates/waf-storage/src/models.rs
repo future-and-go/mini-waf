@@ -847,3 +847,58 @@ pub struct StatsFilter {
     pub host_code: Option<String>,
     pub action: Option<String>,
 }
+
+// ─── IP reputation list (FR-042) ─────────────────────────────────────────────
+
+/// Operator-curated reputation entry persisted in the `reputation_list` table.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ReputationEntry {
+    pub id: i64,
+    pub ip: String,
+    pub score: i32,
+    pub source: String,
+    pub expires_at: DateTime<Utc>,
+    pub notes: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Insert/upsert payload for a reputation entry.
+///
+/// Bounded to score ±100 and one of the four sources by the `reputation_list`
+/// CHECK constraints; the API boundary additionally rejects unknown values
+/// with 400 before reaching this layer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateReputationEntry {
+    pub ip: String,
+    pub score: i32,
+    pub source: String,
+    pub expires_at: DateTime<Utc>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+/// Partial-update payload. Each field is optional so PATCH-style requests
+/// only touch the columns the caller specified.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdateReputationEntry<'a> {
+    #[serde(default)]
+    pub score: Option<i32>,
+    #[serde(default)]
+    pub source: Option<&'a str>,
+    #[serde(default)]
+    pub expires_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub notes: Option<&'a str>,
+}
+
+/// Filters for `GET /api/reputation` — all optional, treated as AND.
+#[derive(Debug, Clone, Default)]
+pub struct ReputationQuery {
+    pub ip_prefix: Option<String>,
+    pub source: Option<String>,
+    pub min_score: Option<i32>,
+    pub max_score: Option<i32>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
