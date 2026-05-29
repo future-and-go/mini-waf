@@ -1,7 +1,7 @@
 ---
 title: "§3 WAF Decision Classes — Interop Contract v2.3 Compliance"
 description: "Extend WafAction with 3 missing decision classes, enrich WafDecision with contract metadata, fix log_only semantics, update gateway response handler — all via TDD"
-status: pending
+status: completed
 priority: P1
 branch: "main"
 tags: [interop, contract, benchmark, s3-decision-classes, tdd]
@@ -71,7 +71,7 @@ engine logging helpers (3 match blocks)
 | 4 | [Engine log_only Semantic Fix](./phase-04-engine-log-only-semantic-fix.md) | Done | P1 | 3h | Phase 3 |
 | 5 | [Rate-Limit Action Mapping](./phase-05-rate-limit-action-mapping.md) | Done | P1 | 1h | Phase 3 |
 | 6 | [Gateway Response Handler Update](./phase-06-gateway-response-handler-update.md) | Done | P1 | 2h | Phases 2,3 |
-| 7 | [Validation and Regression](./phase-07-validation-and-regression.md) | Pending | P1 | 1h | Phases 1-6 |
+| 7 | [Validation and Regression](./phase-07-validation-and-regression.md) | Done | P1 | 1h | Phases 1-6 |
 
 **Total estimated effort:** ~13h (1.5-2 days)
 

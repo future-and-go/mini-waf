@@ -47,7 +47,7 @@ prx-waf     → Add: config auto-discovery, wrapper script for ./waf run
 
 | Phase | Name | Status | Priority | Effort | Dependencies |
 |-------|------|--------|----------|--------|--------------|
-| 1 | [Core Type System Refactor (§3 + log_only)](./phase-01-core-type-system-refactor-3-log-only.md) | Pending | P1 | 1-2d | None |
+| 1 | [Core Type System Refactor (§3 + log_only)](./phase-01-core-type-system-refactor-3-log-only.md) | Completed (superseded by 260529-1536-s3-waf-decision-classes) | P1 | 1-2d | None |
 | 2 | [Response Observability Headers (§5)](./phase-02-response-observability-headers-5.md) | Pending | P1 | 1d | Phase 1 |
 | 3 | [JSONL Interop Audit Writer (§6)](./phase-03-jsonl-audit-log-writer-6.md) | Pending | P1 | 1d | Phase 1 |
 | 4 | [Control Interface (§2)](./phase-04-control-interface-2.md) | Pending | P1 | 1-2d | Phase 1 |
