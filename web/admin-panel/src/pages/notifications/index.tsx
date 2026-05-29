@@ -11,14 +11,32 @@ import {
   App,
   Typography,
   Popconfirm,
+  Tabs,
+  Switch,
 } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
-import { useTable, useCreate, useDelete, useCustomMutation } from "@refinedev/core";
+import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { useTable, useCreate, useDelete, useCustomMutation, useCustom } from "@refinedev/core";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { fmtDateTime } from "../../utils/format";
 import type { NotificationConfig } from "../../types/api";
+
+interface NotifLogEntry {
+  id: number;
+  config_name: string;
+  channel: string;
+  event_type: string;
+  status: "sent" | "failed";
+  latency_ms?: number;
+  error?: string;
+  created_at: string;
+}
+
+interface NotifLogEnvelope {
+  data: NotifLogEntry[];
+  total: number;
+}
 
 interface NotifForm {
   name: string;
@@ -32,6 +50,82 @@ const placeholderFor = (channel: string): string => {
   if (channel === "webhook") return '{"url": "https://hooks.example.com/..."}';
   if (channel === "telegram") return '{"bot_token": "...", "chat_id": "..."}';
   return '{"smtp_host": "smtp.gmail.com", "smtp_port": 587, "from": "waf@example.com", "to": ["admin@example.com"]}';
+};
+
+const NotifLogTab: React.FC = () => {
+  const { t } = useTranslation();
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+
+  const logQuery = useCustom<NotifLogEnvelope>({
+    url: "/api/notifications/log",
+    method: "get",
+    config: { query: { page, page_size: pageSize } },
+    queryOptions: { staleTime: 0, refetchInterval: autoRefresh ? 30_000 : false },
+    errorNotification: false,
+  });
+
+  const logs: NotifLogEntry[] = (() => {
+    const raw = logQuery.result?.data;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (Array.isArray((raw as NotifLogEnvelope).data)) return (raw as NotifLogEnvelope).data;
+    return [];
+  })();
+  const total = (logQuery.result?.data as NotifLogEnvelope | undefined)?.total ?? logs.length;
+
+  const columns: ColumnsType<NotifLogEntry> = [
+    { title: t("notifications.log.timestamp"), dataIndex: "created_at", width: 170, render: v => fmtDateTime(v) },
+    { title: t("notifications.log.configName"), dataIndex: "config_name" },
+    { title: t("notifications.log.channel"), dataIndex: "channel", width: 100, render: v => <Tag color="blue">{v}</Tag> },
+    { title: t("notifications.log.eventType"), dataIndex: "event_type", width: 140 },
+    {
+      title: t("notifications.log.status"),
+      dataIndex: "status",
+      width: 90,
+      render: v => <Tag color={v === "sent" ? "green" : "red"}>{v}</Tag>,
+    },
+    { title: t("notifications.log.latency"), dataIndex: "latency_ms", width: 90, render: v => v != null ? `${v} ms` : "—" },
+    {
+      title: t("notifications.log.error"),
+      dataIndex: "error",
+      render: v => v ? <Typography.Text type="danger" ellipsis style={{ maxWidth: 200 }}>{v}</Typography.Text> : "—",
+    },
+  ];
+
+  return (
+    <Card
+      size="small"
+      extra={
+        <Space>
+          <Switch
+            checked={autoRefresh}
+            onChange={setAutoRefresh}
+            checkedChildren="Auto"
+            unCheckedChildren="Manual"
+          />
+          <Button icon={<ReloadOutlined />} size="small" onClick={() => logQuery.query.refetch()} loading={logQuery.query.isLoading} />
+        </Space>
+      }
+    >
+      <Table
+        rowKey="id"
+        size="small"
+        dataSource={logs}
+        columns={columns}
+        loading={logQuery.query.isLoading}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          onChange: setPage,
+          showSizeChanger: false,
+        }}
+        locale={{ emptyText: t("notifications.log.noLogs") }}
+      />
+    </Card>
+  );
 };
 
 export const NotificationsPage: React.FC = () => {
@@ -137,26 +231,42 @@ export const NotificationsPage: React.FC = () => {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-      <Space style={{ width: "100%", justifyContent: "space-between" }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          {t("notifications.title")}
-        </Typography.Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
-          {t("notifications.addConfig")}
-        </Button>
-      </Space>
+      <Typography.Title level={4} style={{ margin: 0 }}>
+        {t("notifications.title")}
+      </Typography.Title>
 
-      <Card size="small">
-        <Table
-          rowKey="id"
-          size="small"
-          dataSource={data}
-          columns={columns}
-          loading={tableQuery.isLoading}
-          pagination={false}
-          locale={{ emptyText: t("notifications.noConfigs") }}
-        />
-      </Card>
+      <Tabs
+        defaultActiveKey="configs"
+        tabBarExtraContent={
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
+            {t("notifications.addConfig")}
+          </Button>
+        }
+        items={[
+          {
+            key: "configs",
+            label: t("notifications.tabConfigs"),
+            children: (
+              <Card size="small">
+                <Table
+                  rowKey="id"
+                  size="small"
+                  dataSource={data}
+                  columns={columns}
+                  loading={tableQuery.isLoading}
+                  pagination={false}
+                  locale={{ emptyText: t("notifications.noConfigs") }}
+                />
+              </Card>
+            ),
+          },
+          {
+            key: "log",
+            label: t("notifications.tabLog"),
+            children: <NotifLogTab />,
+          },
+        ]}
+      />
 
       <Modal
         title={t("notifications.newConfig")}

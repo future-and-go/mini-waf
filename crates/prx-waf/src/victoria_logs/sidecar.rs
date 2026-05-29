@@ -122,19 +122,14 @@ impl VictoriaLogsSidecar {
             consecutive_failures = consecutive_failures.saturating_add(1);
             info!(attempt = consecutive_failures, "Starting VictoriaLogs sidecar");
 
-            let run_start = tokio::time::Instant::now();
-
-            match spawn_once(cfg).await {
-                Ok(ExitReason::Shutdown) => {
-                    info!("VictoriaLogs shutdown requested; not restarting");
-                    return Ok(Some(Self { _private: () }));
-                }
-                Ok(ExitReason::ChildExited(status)) => {
-                    warn!(?status, "VictoriaLogs exited unexpectedly; restarting in {backoff:?}");
-                }
-                Ok(ExitReason::WaitError(e)) => {
-                    warn!(error = %e, "VictoriaLogs wait error; restarting in {backoff:?}");
-                }
+            // Spawn the child and wait for the health check to pass.
+            // run_start is intentionally set AFTER spawn_child() so that the
+            // stability window only counts actual supervision time, not the
+            // time spent waiting for the health endpoint (up to
+            // HEALTH_READY_TIMEOUT).  A slow-start process that crashes
+            // immediately after becoming healthy should not reset the backoff.
+            let child = match spawn_child(cfg).await {
+                Ok(c) => c,
                 Err(e) => {
                     // First attempt must be fail-closed: propagate the error
                     // so the WAF refuses to start without its audit pipeline.
@@ -142,6 +137,38 @@ impl VictoriaLogsSidecar {
                         return Err(e);
                     }
                     error!(error = %e, "Failed to spawn VictoriaLogs; retrying in {backoff:?}");
+                    if consecutive_failures >= RESTART_MAX_CONSECUTIVE_FAILURES {
+                        error!(
+                            attempts = consecutive_failures,
+                            "VictoriaLogs exceeded max consecutive failures; giving up"
+                        );
+                        return Ok(None);
+                    }
+                    tokio::select! {
+                        () = tokio::time::sleep(backoff) => {}
+                        _ = tokio::signal::ctrl_c() => {
+                            info!("Shutdown signal during backoff; exiting restart loop");
+                            return Ok(None);
+                        }
+                    }
+                    backoff = backoff.saturating_mul(2).min(RESTART_BACKOFF_MAX);
+                    continue;
+                }
+            };
+
+            // Child is healthy; track how long supervision actually runs.
+            let run_start = tokio::time::Instant::now();
+            let listen_addr = cfg.listen_addr.clone();
+            match supervise_until_exit(child, listen_addr).await {
+                ExitReason::Shutdown => {
+                    info!("VictoriaLogs shutdown requested; not restarting");
+                    return Ok(Some(Self { _private: () }));
+                }
+                ExitReason::ChildExited(status) => {
+                    warn!(?status, "VictoriaLogs exited unexpectedly; restarting in {backoff:?}");
+                }
+                ExitReason::WaitError(e) => {
+                    warn!(error = %e, "VictoriaLogs wait error; restarting in {backoff:?}");
                 }
             }
 
@@ -163,8 +190,8 @@ impl VictoriaLogsSidecar {
                 }
             }
 
-            // Reset backoff after a run that lasted longer than the max
-            // backoff duration — indicates the child was stable.
+            // Reset backoff only after the child ran for a full RESTART_BACKOFF_MAX
+            // of supervised uptime — excluding spawn/health-check time.
             let run_elapsed = run_start.elapsed();
             if run_elapsed >= RESTART_BACKOFF_MAX {
                 backoff = RESTART_BACKOFF_BASE;
@@ -227,14 +254,6 @@ async fn spawn_child(cfg: &VictoriaLogsConfig) -> anyhow::Result<Child> {
     info!(listen = %listen_addr, "VictoriaLogs sidecar healthy");
 
     Ok(child)
-}
-
-/// Single-shot spawn + supervise: creates the child, waits for health,
-/// then blocks until the supervisor returns. Used by the restart loop.
-async fn spawn_once(cfg: &VictoriaLogsConfig) -> anyhow::Result<ExitReason> {
-    let child = spawn_child(cfg).await?;
-    let listen_addr = cfg.listen_addr.clone();
-    Ok(supervise_until_exit(child, listen_addr).await)
 }
 
 /// Forward a child's stdio stream into the parent `tracing` subscriber line by

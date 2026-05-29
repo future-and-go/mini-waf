@@ -492,10 +492,7 @@ async fn reset_preserves_static_config() {
         "feature catalog size unchanged after reset"
     );
     for key in features_before.keys() {
-        assert!(
-            features_after.contains_key(key),
-            "feature '{key}' must survive reset"
-        );
+        assert!(features_after.contains_key(key), "feature '{key}' must survive reset");
     }
 }
 

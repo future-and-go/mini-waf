@@ -75,9 +75,21 @@ impl ConfigSyncer {
     }
 
     /// Build a `ConfigSync` message from the syncable config sections.
+    ///
+    /// Version is a Unix timestamp in milliseconds so it is monotonically
+    /// increasing across main-node restarts.  A simple counter resets to 0 on
+    /// restart; workers already at version 7 would treat version 1 as stale and
+    /// silently discard the new config, leaving the cluster stuck.
     pub fn build_sync(&mut self, config: &SyncableConfig) -> Result<ConfigSync> {
         let config_toml = toml::to_string(config).context("failed to serialize SyncableConfig to TOML")?;
-        self.current_version += 1;
+        let ts_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or_else(
+                |_| self.current_version + 1,
+                |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX),
+            );
+        // Guard against clock skew: ensure version is always strictly increasing.
+        self.current_version = ts_ms.max(self.current_version + 1);
         Ok(ConfigSync {
             version: self.current_version,
             config_toml,

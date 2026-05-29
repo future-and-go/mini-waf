@@ -350,6 +350,28 @@ impl WafEngine {
         let _ = self.rules_dir.set(dir);
     }
 
+    /// Reload only file-based custom rules without touching the database.
+    ///
+    /// Used by worker nodes (`StorageMode::ForwardOnly`) that have no DB
+    /// connection. Clears any previously loaded file rules and re-scans
+    /// the rules directory. DB-sourced rules are left untouched.
+    pub fn reload_file_rules(&self) {
+        let rules_dir = self.rules_dir.get().cloned().unwrap_or_else(|| PathBuf::from("rules"));
+        self.custom_rules.clear_file_rules();
+        match crate::rules::custom_file_loader::load_dir(&rules_dir) {
+            Ok(file_rules) => {
+                let count = file_rules.len();
+                for rule in file_rules {
+                    self.custom_rules.add_file_rule(rule);
+                }
+                if count > 0 {
+                    info!("Reloaded {count} file-based rules from {rules_dir:?}");
+                }
+            }
+            Err(e) => warn!("File rule reload failed: {e}"),
+        }
+    }
+
     /// Start the FR-003 hot-reload watcher on `<rules_dir>/custom/`.
     ///
     /// Must be called after `set_rules_dir` + initial `reload_rules`. Creation

@@ -396,7 +396,8 @@ pub async fn dispatch_message(msg: ClusterMessage, node_state: &NodeState) -> Op
                 path = %fwd.path,
                 "ApiForward received — replaying locally"
             );
-            let resp = crate::cluster_forward::replay_request(&fwd).await;
+            let api_addr = node_state.api_listen_addr.read().clone();
+            let resp = crate::cluster_forward::replay_request(&fwd, &api_addr).await;
             Some(ClusterMessage::ApiForwardResponse(resp))
         }
 

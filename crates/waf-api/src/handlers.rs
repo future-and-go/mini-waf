@@ -5,11 +5,13 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
 
 use waf_storage::models::{
     AttackLogQuery, CreateCertificate, CreateCustomRule, CreateHost, CreateIpRule, CreateLbBackend,
-    CreateSensitivePattern, CreateUrlRule, SecurityEventQuery, UpdateCustomRule, UpdateHost, UpsertHotlinkConfig,
+    CreateSensitivePattern, CreateUrlRule, SecurityEventQuery, UpdateCustomRule, UpdateHost, UpdateSensitivePattern,
+    UpsertHotlinkConfig,
 };
 
 use waf_common::{HostConfig, UpstreamAlpn};
@@ -529,6 +531,60 @@ pub async fn delete_sensitive_pattern(
     Ok(Json(json!({ "success": true, "data": null })))
 }
 
+pub async fn patch_sensitive_pattern(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> ApiResult<Json<Value>> {
+    let obj = body
+        .as_object()
+        .ok_or_else(|| ApiError::BadRequest("body must be a JSON object".into()))?;
+
+    let is_toggle_only = obj.len() == 1 && obj.contains_key("enabled");
+
+    if is_toggle_only {
+        let enabled = obj["enabled"]
+            .as_bool()
+            .ok_or_else(|| ApiError::BadRequest("enabled must be a boolean".into()))?;
+        let found = state.db.toggle_sensitive_pattern(id, enabled).await?;
+        if !found {
+            return Err(ApiError::NotFound(format!("Pattern {id} not found")));
+        }
+    } else {
+        let pattern = obj.get("pattern").and_then(|v| v.as_str());
+        let pattern_type = obj.get("pattern_type").and_then(|v| v.as_str());
+        let check_request = obj.get("check_request").and_then(Value::as_bool);
+        let check_response = obj.get("check_response").and_then(Value::as_bool);
+        let action = obj.get("action").and_then(|v| v.as_str());
+        let remarks = obj.get("remarks").and_then(|v| v.as_str());
+        let enabled = obj.get("enabled").and_then(Value::as_bool);
+
+        let updated = state
+            .db
+            .update_sensitive_pattern(
+                id,
+                UpdateSensitivePattern {
+                    pattern,
+                    pattern_type,
+                    check_request,
+                    check_response,
+                    action,
+                    remarks,
+                    enabled,
+                },
+            )
+            .await?;
+        if updated.is_none() {
+            return Err(ApiError::NotFound(format!("Pattern {id} not found")));
+        }
+    }
+
+    if let Err(e) = state.engine.reload_rules().await {
+        tracing::warn!("Failed to reload after pattern patch: {}", e);
+    }
+    Ok(Json(json!({ "success": true, "data": { "id": id } })))
+}
+
 // ─── Hotlink Config ───────────────────────────────────────────────────────────
 
 pub async fn get_hotlink_config(
@@ -641,6 +697,12 @@ pub async fn delete_certificate(State(state): State<Arc<AppState>>, Path(id): Pa
 
 // ─── Log level ───────────────────────────────────────────────────────────────
 
+/// Minimum interval between log-level changes (milliseconds).
+const LOG_LEVEL_COOLDOWN_MS: u64 = 10_000;
+
+/// Tracks the last successful log-level change as Unix millis (0 = never).
+static LAST_LOG_LEVEL_CHANGE_MS: AtomicU64 = AtomicU64::new(0);
+
 #[derive(Deserialize)]
 pub struct SetLogLevelRequest {
     pub filter: String,
@@ -653,11 +715,29 @@ pub async fn set_log_level(
     if req.filter.len() > 256 {
         return Err(ApiError::BadRequest("filter string exceeds 256 character limit".into()));
     }
+
+    let now_ms = u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis()),
+    )
+    .unwrap_or(u64::MAX);
+    let last = LAST_LOG_LEVEL_CHANGE_MS.load(Ordering::Relaxed);
+    if last > 0 && now_ms.saturating_sub(last) < LOG_LEVEL_COOLDOWN_MS {
+        let remaining_ms = LOG_LEVEL_COOLDOWN_MS - now_ms.saturating_sub(last);
+        return Err(ApiError::TooManyRequests(format!(
+            "log level may only change once per {}s; retry in {}ms",
+            LOG_LEVEL_COOLDOWN_MS / 1000,
+            remaining_ms,
+        )));
+    }
+
     let setter = state
         .log_level_setter
         .as_ref()
         .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("log level control not initialized")))?;
     setter(&req.filter).map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    LAST_LOG_LEVEL_CHANGE_MS.store(now_ms, Ordering::Relaxed);
     tracing::info!("Log filter updated to: {}", req.filter);
     Ok(Json(json!({ "success": true, "data": { "filter": req.filter } })))
 }

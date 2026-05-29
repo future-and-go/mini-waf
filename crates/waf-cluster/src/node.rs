@@ -76,6 +76,9 @@ pub struct NodeState {
     event_rx: ParkingMutex<Option<mpsc::Receiver<SecurityEvent>>>,
     /// Registry of in-flight API forward requests (worker → main).
     pending_forwards: Option<PendingForwards>,
+    /// Local API listen address used to replay forwarded write requests on the main node.
+    /// Defaults to `"127.0.0.1:9527"`; update via `set_api_listen_addr` on startup.
+    pub api_listen_addr: ParkingRwLock<String>,
 }
 
 impl NodeState {
@@ -131,6 +134,7 @@ impl NodeState {
             event_tx,
             event_rx: ParkingMutex::new(Some(event_rx)),
             pending_forwards: Some(PendingForwards::new()),
+            api_listen_addr: ParkingRwLock::new("127.0.0.1:9527".to_string()),
         })
     }
 
@@ -290,6 +294,14 @@ impl NodeState {
     /// Access the pending forwards registry (worker nodes only).
     pub const fn pending_forwards(&self) -> Option<&PendingForwards> {
         self.pending_forwards.as_ref()
+    }
+
+    /// Set the local API listen address used to replay forwarded write requests.
+    ///
+    /// Call this on startup with the actual `ApiConfig::listen_addr` value so that
+    /// operator-configured ports are honoured instead of the hard-coded default.
+    pub fn set_api_listen_addr(&self, addr: &str) {
+        *self.api_listen_addr.write() = addr.to_string();
     }
 
     /// Register a `RuleReloader` callback (typically the `WafEngine`).

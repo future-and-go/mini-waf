@@ -64,7 +64,20 @@ impl RuleReloader for WafEngine {
         self.reload_rules().await
     }
 
-    async fn reload_from_registry(&self, _registry: &RuleRegistry) -> anyhow::Result<()> {
-        self.reload_rules().await
+    /// Reload engine state from the cluster-synced registry without touching
+    /// the database.  Called on worker nodes (`StorageMode::ForwardOnly`) that
+    /// have no `PostgreSQL` connection — `reload_rules()` would panic/error there.
+    ///
+    /// Refreshes only the file-based custom rules (local disk, no DB required).
+    /// Built-in and DB-sourced rules remain as they were loaded at startup;
+    /// cluster sync keeps them current via the `NodeState::rule_registry`.
+    async fn reload_from_registry(&self, registry: &RuleRegistry) -> anyhow::Result<()> {
+        tracing::info!(
+            rules = registry.rules.len(),
+            version = registry.version,
+            "Reloading engine from cluster registry (skipping DB)"
+        );
+        self.reload_file_rules();
+        Ok(())
     }
 }

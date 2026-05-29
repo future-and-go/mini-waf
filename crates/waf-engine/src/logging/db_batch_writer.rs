@@ -168,23 +168,15 @@ mod tests {
 
     #[tokio::test]
     async fn flush_loop_exits_on_channel_close() {
-        let (tx, rx) = mpsc::channel::<DbLogEvent>(10);
-
-        let db = Arc::new(Database::connect("postgres://invalid:5432/nonexistent", 1).await.ok());
-
-        // If we have no real DB, just verify the flush_loop doesn't hang
-        // when the sender side is dropped — it should exit promptly.
-        if db.is_none() {
-            drop(tx);
-            // flush_loop needs a real Database, so we can't test it fully
-            // without a DB. We test the channel close behavior via the writer.
-            let (tx2, rx2) = mpsc::channel::<DbLogEvent>(2);
-            drop(tx2);
-            // Channel is closed; recv will return None immediately
-            let mut test_rx = rx2;
-            assert!(test_rx.recv().await.is_none());
-            drop(rx);
-        }
+        // flush_loop requires a live Database and cannot be fully tested without one.
+        // Verify the underlying channel contract: a closed sender causes recv() to
+        // return None immediately, which is the signal flush_loop uses to exit.
+        let (tx, mut rx) = mpsc::channel::<DbLogEvent>(2);
+        drop(tx);
+        assert!(
+            rx.recv().await.is_none(),
+            "closed sender must cause recv to return None"
+        );
     }
 
     #[tokio::test]

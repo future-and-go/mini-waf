@@ -20,16 +20,18 @@ use serde_json::json;
 #[tokio::test(flavor = "multi_thread")]
 async fn list_plugins_empty() {
     let s = start_test_server().await;
-    let body: serde_json::Value = client()
+    let resp = client()
         .get(url_for(s.addr, "/api/plugins"))
         .bearer_auth(&s.admin_token)
         .send()
         .await
-        .expect("send")
-        .json()
-        .await
-        .expect("json");
-    assert!(body["plugins"].as_array().unwrap().is_empty());
+        .expect("send");
+    assert_eq!(resp.status(), 200, "list_plugins must return 200");
+    let body: serde_json::Value = resp.json().await.expect("json");
+    let data = body["data"]
+        .as_array()
+        .unwrap_or_else(|| panic!("expected array at body[\"data\"], got: {body}"));
+    assert!(data.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -119,16 +121,18 @@ async fn disable_unknown_plugin_404() {
 #[tokio::test(flavor = "multi_thread")]
 async fn list_tunnels_empty() {
     let s = start_test_server().await;
-    let body: serde_json::Value = client()
+    let resp = client()
         .get(url_for(s.addr, "/api/tunnels"))
         .bearer_auth(&s.admin_token)
         .send()
         .await
-        .expect("send")
-        .json()
-        .await
-        .expect("json");
-    assert!(body["tunnels"].as_array().unwrap().is_empty());
+        .expect("send");
+    assert_eq!(resp.status(), 200, "list_tunnels must return 200");
+    let body: serde_json::Value = resp.json().await.expect("json");
+    let data = body["data"]
+        .as_array()
+        .unwrap_or_else(|| panic!("expected array at body[\"data\"], got: {body}"));
+    assert!(data.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
