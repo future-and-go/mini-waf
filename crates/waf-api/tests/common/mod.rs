@@ -122,6 +122,94 @@ pub async fn start_test_server() -> TestServer {
     }
 }
 
+/// Variant that wires `main_config_file` to a writable temp `configs/` tree
+/// so admin-panel BE handlers can round-trip their YAML files under the
+/// tempdir. Returns `(server, tempdir)`; the `tempdir` is kept alive by
+/// the caller so `state.main_config_file` keeps resolving until the test
+/// drops it.
+///
+/// Mirrors the per-feature bootstrap PR-β1 needed for 4 test files; lifted
+/// here to keep each `*_api_test.rs` focused on assertions rather than
+/// fixture wiring.
+pub async fn start_test_server_with_tempdir_configs() -> (TestServer, tempfile::TempDir) {
+    // SAFETY: test-only; called before any other threads read these env vars.
+    unsafe {
+        std::env::set_var("JWT_SECRET", "integration-test-secret-key-32bytes-min");
+        std::env::set_var("MASTER_KEY", "integration-test-master-key-32bytes-min");
+    }
+
+    let container = PostgresImage::default()
+        .with_tag("16-alpine")
+        .start()
+        .await
+        .expect("start postgres testcontainer");
+    let host = container.get_host().await.expect("container host");
+    let port = container.get_host_port_ipv4(5432).await.expect("container port");
+    let url = format!("postgres://postgres:postgres@{host}:{port}/postgres");
+
+    let db = Database::connect(&url, 5).await.expect("db connect");
+    db.migrate().await.expect("migrate");
+    let db = Arc::new(db);
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let configs_dir = tmp.path().join("configs");
+    std::fs::create_dir_all(&configs_dir).expect("mk configs");
+    let main_cfg = configs_dir.join("default.toml");
+    std::fs::write(&main_cfg, b"").expect("seed main config");
+
+    let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
+    let router = Arc::new(HostRouter::new());
+    let cache = ResponseCache::new(8, 60, 300);
+    let mut state_inner =
+        AppState::new(Arc::clone(&db), Arc::clone(&engine), Arc::clone(&router), cache).expect("AppState::new");
+    state_inner.main_config_file = Some(main_cfg.to_string_lossy().into_owned());
+    let state = Arc::new(state_inner);
+
+    let admin_password = "test-admin-password".to_string();
+    let hash = hash_password(&admin_password).expect("hash password");
+    let admin = db
+        .create_admin_user(
+            CreateAdminUser {
+                username: "admin".into(),
+                email: Some("admin@example.com".into()),
+                password: admin_password.clone(),
+                role: Some("admin".into()),
+            },
+            &hash,
+        )
+        .await
+        .expect("seed admin");
+
+    let admin_token =
+        generate_access_token(admin.id, &admin.username, &admin.role, &state.jwt_secret).expect("issue admin token");
+
+    let app = build_router(Arc::clone(&state));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local_addr");
+    let server_task = tokio::spawn(async move {
+        let _ = serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await;
+    });
+
+    let server = TestServer {
+        addr,
+        db,
+        admin_token,
+        admin_password,
+        admin_id: admin.id,
+        state,
+        server_task: Some(server_task),
+        _container: container,
+    };
+    (server, tmp)
+}
+
+/// Mint a viewer-role JWT against the test server's secret. Used by tests
+/// that assert RBAC paths (401 for viewer on PUT/POST/PATCH/DELETE).
+#[must_use]
+pub fn issue_viewer_token(s: &TestServer) -> String {
+    generate_access_token(uuid::Uuid::new_v4(), "viewer", "viewer", &s.state.jwt_secret).expect("viewer token")
+}
+
 /// Variant that wires `panel_config_path` to a writable temp file before
 /// starting the server. Used by panel_api integration tests that need to
 /// exercise the success branches of GET/PUT /api/panel-config.

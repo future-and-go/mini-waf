@@ -12,103 +12,11 @@
     clippy::undocumented_unsafe_blocks
 )]
 
-use std::net::SocketAddr;
-use std::sync::Arc;
+mod common;
 
-use axum::serve;
-use gateway::{HostRouter, ResponseCache};
 use serde_json::json;
-use tempfile::TempDir;
-use testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
-use testcontainers_modules::postgres::Postgres as PostgresImage;
-use tokio::task::JoinHandle;
-use waf_api::AppState;
-use waf_api::auth::generate_access_token;
-use waf_api::server::build_router;
-use waf_engine::{WafEngine, WafEngineConfig};
-use waf_storage::Database;
 
-struct LocalServer {
-    addr: SocketAddr,
-    admin_token: String,
-    viewer_token: String,
-    tmp: TempDir,
-    server_task: Option<JoinHandle<()>>,
-    _container: ContainerAsync<PostgresImage>,
-}
-
-impl Drop for LocalServer {
-    fn drop(&mut self) {
-        if let Some(t) = self.server_task.take() {
-            t.abort();
-        }
-    }
-}
-
-async fn start_local_server() -> LocalServer {
-    unsafe {
-        std::env::set_var("JWT_SECRET", "integration-test-secret-key-32bytes-min");
-        std::env::set_var("MASTER_KEY", "integration-test-master-key-32bytes-min");
-    }
-
-    let container = PostgresImage::default()
-        .with_tag("16-alpine")
-        .start()
-        .await
-        .expect("start postgres testcontainer");
-    let host = container.get_host().await.expect("container host");
-    let port = container.get_host_port_ipv4(5432).await.expect("container port");
-    let db_url = format!("postgres://postgres:postgres@{host}:{port}/postgres");
-
-    let db = Database::connect(&db_url, 5).await.expect("db connect");
-    db.migrate().await.expect("migrate");
-    let db = Arc::new(db);
-
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let configs_dir = tmp.path().join("configs");
-    std::fs::create_dir_all(&configs_dir).expect("mk configs");
-    let main_cfg = configs_dir.join("default.toml");
-    std::fs::write(&main_cfg, b"").expect("seed main config");
-
-    let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
-    let router = Arc::new(HostRouter::new());
-    let cache = ResponseCache::new(8, 60, 300);
-    let mut state_inner = AppState::new(Arc::clone(&db), Arc::clone(&engine), router, cache).expect("AppState::new");
-    state_inner.main_config_file = Some(main_cfg.to_string_lossy().into_owned());
-    let state = Arc::new(state_inner);
-
-    let admin_token =
-        generate_access_token(uuid::Uuid::new_v4(), "admin", "admin", &state.jwt_secret).expect("admin token");
-    let viewer_token =
-        generate_access_token(uuid::Uuid::new_v4(), "viewer", "viewer", &state.jwt_secret).expect("viewer token");
-
-    let app = build_router(Arc::clone(&state));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
-    let addr = listener.local_addr().expect("local_addr");
-    let server_task = tokio::spawn(async move {
-        let _ = serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await;
-    });
-
-    LocalServer {
-        addr,
-        admin_token,
-        viewer_token,
-        tmp,
-        server_task: Some(server_task),
-        _container: container,
-    }
-}
-
-fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .expect("client")
-}
-
-fn url(s: &LocalServer, path: &str) -> String {
-    format!("http://{}{path}", s.addr)
-}
+use common::{client, issue_viewer_token, start_test_server_with_tempdir_configs, url_for};
 
 fn valid_body() -> serde_json::Value {
     json!({
@@ -126,9 +34,9 @@ fn valid_body() -> serde_json::Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn get_returns_default_when_no_file() {
-    let s = start_local_server().await;
+    let (s, _tmp) = start_test_server_with_tempdir_configs().await;
     let body: serde_json::Value = client()
-        .get(url(&s, "/api/challenge/config"))
+        .get(url_for(s.addr, "/api/challenge/config"))
         .bearer_auth(&s.admin_token)
         .send()
         .await
@@ -143,9 +51,9 @@ async fn get_returns_default_when_no_file() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn put_round_trips_via_get() {
-    let s = start_local_server().await;
+    let (s, tmp) = start_test_server_with_tempdir_configs().await;
     let put = client()
-        .put(url(&s, "/api/challenge/config"))
+        .put(url_for(s.addr, "/api/challenge/config"))
         .bearer_auth(&s.admin_token)
         .json(&valid_body())
         .send()
@@ -154,7 +62,7 @@ async fn put_round_trips_via_get() {
     assert_eq!(put.status(), 200);
 
     let body: serde_json::Value = client()
-        .get(url(&s, "/api/challenge/config"))
+        .get(url_for(s.addr, "/api/challenge/config"))
         .bearer_auth(&s.admin_token)
         .send()
         .await
@@ -167,18 +75,18 @@ async fn put_round_trips_via_get() {
     assert_eq!(body["data"]["cookie_name"], "__cc");
     assert_eq!(body["data"]["branding"]["title"], "Verifying…");
 
-    // Verify the YAML wrapper was written under the configured root.
-    let yaml = std::fs::read_to_string(s.tmp.path().join("configs/challenge.yaml")).expect("read yaml");
+    let yaml = std::fs::read_to_string(tmp.path().join("configs/challenge.yaml")).expect("read yaml");
     assert!(yaml.contains("challenge:"));
     assert!(yaml.contains("pow_challenge"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn put_requires_admin_role() {
-    let s = start_local_server().await;
+    let (s, _tmp) = start_test_server_with_tempdir_configs().await;
+    let viewer = issue_viewer_token(&s);
     let resp = client()
-        .put(url(&s, "/api/challenge/config"))
-        .bearer_auth(&s.viewer_token)
+        .put(url_for(s.addr, "/api/challenge/config"))
+        .bearer_auth(&viewer)
         .json(&valid_body())
         .send()
         .await
@@ -188,9 +96,9 @@ async fn put_requires_admin_role() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn put_rejects_malformed_body() {
-    let s = start_local_server().await;
+    let (s, _tmp) = start_test_server_with_tempdir_configs().await;
     let resp = client()
-        .put(url(&s, "/api/challenge/config"))
+        .put(url_for(s.addr, "/api/challenge/config"))
         .bearer_auth(&s.admin_token)
         .json(&json!({ "enabled": true }))
         .send()
@@ -201,9 +109,9 @@ async fn put_rejects_malformed_body() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn preview_escapes_html_in_branding() {
-    let s = start_local_server().await;
+    let (s, _tmp) = start_test_server_with_tempdir_configs().await;
     let html = client()
-        .post(url(&s, "/api/challenge/preview"))
+        .post(url_for(s.addr, "/api/challenge/preview"))
         .bearer_auth(&s.admin_token)
         .json(&json!({
             "branding": {
@@ -224,9 +132,9 @@ async fn preview_escapes_html_in_branding() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn stats_endpoint_returns_zero_counts() {
-    let s = start_local_server().await;
+    let (s, _tmp) = start_test_server_with_tempdir_configs().await;
     let body: serde_json::Value = client()
-        .get(url(&s, "/api/challenge/stats"))
+        .get(url_for(s.addr, "/api/challenge/stats"))
         .bearer_auth(&s.admin_token)
         .send()
         .await
