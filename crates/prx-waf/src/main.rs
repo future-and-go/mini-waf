@@ -7,12 +7,12 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use tracing::{info, warn};
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*, reload};
 
 use anyhow::Context;
 use gateway::{HostRouter, TunnelConfig, WafProxy};
 use pingora_core::listeners::tls::TlsSettings;
-use waf_api::{AppState, start_api_server};
+use waf_api::{AppState, LogLevelSetter, start_api_server};
 use waf_common::config::{AppConfig, load_config};
 use waf_engine::logging::{AuditSender, BatchConfig, LayerSlot, VictoriaLogsLayer, spawn_batch_flusher};
 use waf_engine::{
@@ -305,12 +305,13 @@ fn main() -> anyhow::Result<()> {
     // that don't go through `run_server` are unaffected.
     let (vlogs_layer, vlogs_layer_slot) = VictoriaLogsLayer::new();
 
+    let env_filter =
+        EnvFilter::from_default_env().add_directive(tracing_subscriber::filter::Directive::from(tracing::Level::INFO));
+    let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
+
     tracing_subscriber::registry()
+        .with(filter_layer)
         .with(fmt::layer())
-        .with(
-            EnvFilter::from_default_env()
-                .add_directive(tracing_subscriber::filter::Directive::from(tracing::Level::INFO)),
-        )
         .with(vlogs_layer)
         .init();
 
@@ -336,7 +337,15 @@ fn main() -> anyhow::Result<()> {
                 .block_on(run_seed_admin(&config))?;
         }
         Commands::Run => {
-            run_server(&config, &cli.config, vlogs_layer_slot)?;
+            let log_level_setter: LogLevelSetter = Arc::new(move |filter_str: &str| {
+                let new_filter =
+                    EnvFilter::try_new(filter_str).map_err(|e| anyhow::anyhow!("invalid filter directive: {e}"))?;
+                reload_handle
+                    .reload(new_filter)
+                    .map_err(|e| anyhow::anyhow!("failed to reload filter: {e}"))?;
+                Ok(())
+            });
+            run_server(&config, &cli.config, vlogs_layer_slot, Some(log_level_setter))?;
         }
         Commands::Crowdsec(sub) => {
             tokio::runtime::Builder::new_current_thread()
@@ -1151,6 +1160,8 @@ fn app_config_to_crowdsec(config: &AppConfig) -> CrowdSecConfig {
         api_key: config.crowdsec.appsec_key.clone().unwrap_or_default(),
         timeout_ms: config.crowdsec.appsec_timeout_ms,
         failure_action: FallbackAction::Allow,
+        circuit_breaker_threshold: 5,
+        circuit_breaker_reset_secs: 30,
     });
 
     let pusher = config
@@ -1179,7 +1190,12 @@ fn app_config_to_crowdsec(config: &AppConfig) -> CrowdSecConfig {
 }
 
 /// Start the full server: async init → API server thread → Pingora proxy
-fn run_server(config: &AppConfig, config_file_path: &str, vlogs_layer_slot: LayerSlot) -> anyhow::Result<()> {
+fn run_server(
+    config: &AppConfig,
+    config_file_path: &str,
+    vlogs_layer_slot: LayerSlot,
+    log_level_setter: Option<LogLevelSetter>,
+) -> anyhow::Result<()> {
     use pingora_core::server::Server;
 
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
@@ -1220,6 +1236,7 @@ fn run_server(config: &AppConfig, config_file_path: &str, vlogs_layer_slot: Laye
         cluster_state_for_api,
         panel_config_path,
         vlogs_layer_slot,
+        log_level_setter,
     ))?;
 
     // Start the management API in a background thread
@@ -1518,6 +1535,7 @@ async fn init_async(
     cluster_state: Option<Arc<waf_cluster::NodeState>>,
     panel_config_path: Option<std::path::PathBuf>,
     vlogs_layer_slot: LayerSlot,
+    log_level_setter: Option<LogLevelSetter>,
 ) -> anyhow::Result<(
     Arc<WafEngine>,
     Arc<HostRouter>,
@@ -1769,6 +1787,8 @@ async fn init_async(
     if config.victoria_logs.enabled {
         api_state.victoria_logs_base_url = Some(config.victoria_logs.base_url());
     }
+
+    api_state.log_level_setter = log_level_setter;
 
     // Phase 4: create default admin user if none exist
     {
