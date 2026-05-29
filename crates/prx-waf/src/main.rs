@@ -12,7 +12,7 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*, reload};
 use anyhow::Context;
 use gateway::{HostRouter, TunnelConfig, WafProxy};
 use pingora_core::listeners::tls::TlsSettings;
-use waf_api::{AppState, start_api_server};
+use waf_api::{AppState, LogLevelSetter, start_api_server};
 use waf_common::config::{AppConfig, load_config};
 use waf_engine::logging::{AuditSender, BatchConfig, LayerSlot, VictoriaLogsLayer, spawn_batch_flusher};
 use waf_engine::{
@@ -337,15 +337,14 @@ fn main() -> anyhow::Result<()> {
                 .block_on(run_seed_admin(&config))?;
         }
         Commands::Run => {
-            let log_level_setter: Arc<dyn Fn(&str) -> anyhow::Result<()> + Send + Sync> =
-                Arc::new(move |filter_str: &str| {
-                    let new_filter =
-                        EnvFilter::try_new(filter_str).map_err(|e| anyhow::anyhow!("invalid filter directive: {e}"))?;
-                    reload_handle
-                        .reload(new_filter)
-                        .map_err(|e| anyhow::anyhow!("failed to reload filter: {e}"))?;
-                    Ok(())
-                });
+            let log_level_setter: LogLevelSetter = Arc::new(move |filter_str: &str| {
+                let new_filter =
+                    EnvFilter::try_new(filter_str).map_err(|e| anyhow::anyhow!("invalid filter directive: {e}"))?;
+                reload_handle
+                    .reload(new_filter)
+                    .map_err(|e| anyhow::anyhow!("failed to reload filter: {e}"))?;
+                Ok(())
+            });
             run_server(&config, &cli.config, vlogs_layer_slot, Some(log_level_setter))?;
         }
         Commands::Crowdsec(sub) => {
@@ -1195,7 +1194,7 @@ fn run_server(
     config: &AppConfig,
     config_file_path: &str,
     vlogs_layer_slot: LayerSlot,
-    log_level_setter: Option<Arc<dyn Fn(&str) -> anyhow::Result<()> + Send + Sync>>,
+    log_level_setter: Option<LogLevelSetter>,
 ) -> anyhow::Result<()> {
     use pingora_core::server::Server;
 
@@ -1536,7 +1535,7 @@ async fn init_async(
     cluster_state: Option<Arc<waf_cluster::NodeState>>,
     panel_config_path: Option<std::path::PathBuf>,
     vlogs_layer_slot: LayerSlot,
-    log_level_setter: Option<Arc<dyn Fn(&str) -> anyhow::Result<()> + Send + Sync>>,
+    log_level_setter: Option<LogLevelSetter>,
 ) -> anyhow::Result<(
     Arc<WafEngine>,
     Arc<HostRouter>,

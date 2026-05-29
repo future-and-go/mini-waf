@@ -8,6 +8,11 @@ use waf_storage::Database;
 
 use crate::notifications::NotifRateLimiter;
 
+/// Setter closure handed by the binary boot path so admin handlers can
+/// reconfigure the global tracing filter at runtime. `None` when the
+/// dynamic reload layer is not wired (e.g. CLI sub-commands).
+pub type LogLevelSetter = Arc<dyn Fn(&str) -> anyhow::Result<()> + Send + Sync>;
+
 /// Shared application state for the API server.
 #[derive(Clone)]
 pub struct AppState {
@@ -66,8 +71,7 @@ pub struct AppState {
     /// only needs it to populate filter dropdowns.
     pub logs_streams_cache: Arc<crate::logs::StreamsCache>,
     /// Closure to change the global tracing filter at runtime.
-    /// `None` when the dynamic reload layer is not wired (e.g. CLI sub-commands).
-    pub log_level_setter: Option<Arc<dyn Fn(&str) -> anyhow::Result<()> + Send + Sync>>,
+    pub log_level_setter: Option<LogLevelSetter>,
 }
 
 impl AppState {
