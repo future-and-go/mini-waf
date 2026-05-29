@@ -20,11 +20,16 @@ systemctl restart mini-waf
 sleep 6
 systemctl is-active mini-waf
 
-if ! curl -fsS --max-time 5 http://127.0.0.1:9527/healthz \
-  && ! curl -fsS --max-time 5 http://127.0.0.1:9527/api/health; then
-  echo "post-deploy healthz failed" >&2
-  journalctl -u mini-waf -n 80 --no-pager >&2 || true
-  exit 1
-fi
+for i in 1 2 3 4 5; do
+  if curl -fsS --max-time 5 http://127.0.0.1:9527/health >/dev/null; then
+    break
+  fi
+  if [ "$i" = 5 ]; then
+    echo "post-deploy /health failed after 5 tries" >&2
+    journalctl -u mini-waf -n 80 --no-pager >&2 || true
+    exit 1
+  fi
+  sleep 2
+done
 
 echo "deploy OK: __SHA__"
