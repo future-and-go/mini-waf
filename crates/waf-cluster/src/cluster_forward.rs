@@ -146,10 +146,10 @@ pub fn is_write_method(method: &str) -> bool {
 /// Replay a forwarded API request against the local HTTP API on the main node.
 ///
 /// Constructs an HTTP request from the `ApiForward` fields and sends it to
-/// `127.0.0.1` on the API port. Returns an `ApiForwardResponse` with the status
-/// and body from the local handler.
-pub async fn replay_request(fwd: &ApiForward) -> ApiForwardResponse {
-    let url = format!("http://127.0.0.1:9527{}", fwd.path);
+/// `api_addr` (e.g. `"127.0.0.1:9527"`). Returns an `ApiForwardResponse` with
+/// the status and body from the local handler.
+pub async fn replay_request(fwd: &ApiForward, api_addr: &str) -> ApiForwardResponse {
+    let url = format!("http://{}{}", api_addr, fwd.path);
 
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))

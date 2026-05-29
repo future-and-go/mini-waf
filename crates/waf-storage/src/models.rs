@@ -405,6 +405,18 @@ pub struct CreateSensitivePattern {
     pub remarks: Option<String>,
 }
 
+/// Partial-update sensitive pattern request (all fields optional for PATCH)
+#[derive(Debug, Clone, Default)]
+pub struct UpdateSensitivePattern<'a> {
+    pub pattern: Option<&'a str>,
+    pub pattern_type: Option<&'a str>,
+    pub check_request: Option<bool>,
+    pub check_response: Option<bool>,
+    pub action: Option<&'a str>,
+    pub remarks: Option<&'a str>,
+    pub enabled: Option<bool>,
+}
+
 /// Create/update hotlink config request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpsertHotlinkConfig {
@@ -672,9 +684,17 @@ pub struct TunnelRow {
     pub target_port: i32,
     pub enabled: bool,
     pub status: String,
+    /// Transport protocol: tcp | udp | ws (defaults to "tcp" when column absent)
+    #[serde(default = "default_protocol")]
+    #[sqlx(default)]
+    pub protocol: String,
     pub last_seen: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+fn default_protocol() -> String {
+    "tcp".to_string()
 }
 
 /// Create tunnel request
@@ -686,6 +706,8 @@ pub struct CreateTunnel {
     pub target_host: String,
     pub target_port: i32,
     pub enabled: Option<bool>,
+    /// Transport protocol: tcp | udp | ws. Defaults to "tcp" when absent.
+    pub protocol: Option<String>,
 }
 
 // ─── Phase 5: Audit Log ───────────────────────────────────────────────────────

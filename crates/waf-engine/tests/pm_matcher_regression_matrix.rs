@@ -422,7 +422,7 @@ fn pm_from_file_ssrf_no_scheme_blocks_isolated() {
 #[test]
 fn pm_from_file_negative_innocuous_path_passes() {
     let checker = load_crs_engine();
-    let ctx = ctx_p4("GET", "/users/profile", "", &[], &[]);
+    let ctx = ctx_p4("GET", "/users/profile", "", &[], &[("accept", "*/*")]);
     assert!(
         checker.check(&ctx).is_none(),
         "innocuous GET /users/profile must not match any CRS rule"
@@ -432,17 +432,24 @@ fn pm_from_file_negative_innocuous_path_passes() {
 #[test]
 fn pm_from_file_negative_clean_body_passes() {
     let checker = load_crs_engine();
-    let ctx = ctx_p4("POST", "/api/data", "", b"name=alice", &[]);
+    let ctx = ctx_p4("POST", "/api/data", "", b"name=alice", &[("accept", "*/*")]);
+    let result = checker.check(&ctx);
     assert!(
-        checker.check(&ctx).is_none(),
-        "clean POST body must not match any CRS rule"
+        result.is_none(),
+        "clean POST body must not match any CRS rule, got: {result:?}"
     );
 }
 
 #[test]
 fn pm_from_file_negative_normal_user_agent_passes() {
     let checker = load_crs_engine();
-    let ctx = ctx_p4("GET", "/home", "", &[], &[("user-agent", "CustomApp/1.0")]);
+    let ctx = ctx_p4(
+        "GET",
+        "/home",
+        "",
+        &[],
+        &[("user-agent", "CustomApp/1.0"), ("accept", "*/*")],
+    );
     assert!(
         checker.check(&ctx).is_none(),
         "normal user-agent must not match scanner rule"
@@ -479,7 +486,7 @@ fn contains_any_php_close_tag_blocks() {
 fn contains_any_negative_clean_query_passes() {
     let checker = load_crs_engine();
     // Use paranoia 1 — higher levels trigger aggressive regex rules unrelated to contains_any
-    let ctx = ctx_with("GET", "/items", "id=42", &[], &[], 1);
+    let ctx = ctx_with("GET", "/items", "id=42", &[], &[("accept", "*/*")], 1);
     assert!(
         checker.check(&ctx).is_none(),
         "clean query must not match contains_any rules"
@@ -530,6 +537,25 @@ fn encoding_bypass_double_encode_behavior() {
     // Intentionally no assertion — this test documents behavior
 }
 
+#[test]
+fn pm_from_file_java_classes_blocks_isolated() {
+    let engine = engine_from_crs_file("java-injection.yaml");
+    // java-classes.data: dangerous Java class names used in RCE/deserialization attacks (CVE-2017-5638, Log4Shell, etc.)
+    let patterns = [
+        "java.lang.Runtime",
+        "java.lang.ProcessBuilder",
+        "com.opensymphony.xwork2",
+    ];
+    for p in &patterns {
+        let body = format!("data={p}");
+        let ctx = ctx_p4("POST", "/api/invoke", "", body.as_bytes(), &[]);
+        assert!(
+            engine.check(&ctx).is_some(),
+            "CRS-944130: java-classes pattern '{p}' in body should be blocked"
+        );
+    }
+}
+
 // ── Completeness guard ──────────────────────────────────────────────────────
 // Fails if a new pm_from_file rule is added to CRS without coverage here.
 
@@ -546,6 +572,7 @@ fn known_pm_data_files() -> Vec<&'static str> {
         "scanners-user-agents.data",
         "windows-powershell-commands.data",
         "restricted-upload.data",
+        "java-classes.data",
         // Response-phase data files (tested indirectly — can't inject response body)
         "asp-dotnet-errors.data",
         "iis-errors.data",

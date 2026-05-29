@@ -58,6 +58,10 @@ impl AppSecCircuitBreaker {
                     false
                 }
             }
+            // HalfOpen intentionally allows exactly one probe (the call that
+            // transitions Open → HalfOpen returns true above).  Every subsequent
+            // request is blocked here until on_success() closes the circuit or
+            // on_failure() re-opens it.
             CircuitState::HalfOpen => false,
         };
         drop(state);

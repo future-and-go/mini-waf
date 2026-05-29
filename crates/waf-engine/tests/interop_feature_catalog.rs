@@ -1,3 +1,5 @@
+#![allow(clippy::indexing_slicing)]
+
 use waf_engine::interop::FeatureCatalog;
 
 #[test]
@@ -94,7 +96,7 @@ fn specific_feature_policies() {
 #[test]
 fn feature_info_toggleable() {
     let cat = FeatureCatalog::all();
-    for (_name, info) in &cat {
+    for info in cat.values() {
         assert!(info.toggleable, "all features should be toggleable");
     }
 }

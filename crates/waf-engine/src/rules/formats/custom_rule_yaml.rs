@@ -276,12 +276,13 @@ fn parse_operator_str(s: &str) -> Result<Operator> {
         "cidr_match" => Operator::CidrMatch,
         "gt" => Operator::Gt,
         "lt" => Operator::Lt,
-        "gte" => Operator::Gte,
-        "lte" => Operator::Lte,
+        "ge" | "gte" => Operator::Gte,
+        "le" | "lte" => Operator::Lte,
         "pm_from_file" => Operator::PmFromFile,
         "detect_sqli" => Operator::DetectSqli,
         "detect_xss" => Operator::DetectXss,
         "contains_any" => Operator::ContainsAny,
+        "validate_byte_range" | "validateByteRange" => Operator::ValidateByteRange,
         other => bail!("unknown operator: {other}"),
     })
 }

@@ -611,13 +611,29 @@ export const RuleAnalyticsPage: React.FC = () => {
             placeholder={t("security.action")}
             value={filters.searchAction ?? undefined}
             onChange={(v) => updateFilter({ searchAction: v ?? undefined })}
-            style={{ width: 120 }}
+            style={{ width: 130 }}
             options={[
-              { value: "block",     label: <Tag color="red"    style={{ color: "#fff", margin: 0 }}>block</Tag>      },
-              { value: "allow",     label: <Tag color="green"  style={{ color: "#fff", margin: 0 }}>allow</Tag>      },
-              { value: "log",       label: <Tag color="gold"   style={{ color: "#fff", margin: 0 }}>log</Tag>        },
-              { value: "challenge", label: <Tag color="blue"   style={{ color: "#fff", margin: 0 }}>challenge</Tag>  },
+              { value: "block",     label: "block"     },
+              { value: "allow",     label: "allow"     },
+              { value: "log",       label: "log"       },
+              { value: "challenge", label: "challenge" },
             ]}
+            optionRender={(opt) => (
+              <Tag
+                color={actionColors[opt.value as string] ?? "default"}
+                style={{ margin: 0, cursor: "pointer" }}
+              >
+                {opt.label as string}
+              </Tag>
+            )}
+            labelRender={(props) => (
+              <Tag
+                color={actionColors[props.value as string] ?? "default"}
+                style={{ margin: 0, lineHeight: "20px" }}
+              >
+                {props.label as string}
+              </Tag>
+            )}
           />
           <Input
             size="small"

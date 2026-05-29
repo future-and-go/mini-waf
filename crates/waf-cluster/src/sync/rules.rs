@@ -224,7 +224,15 @@ pub fn decompress_snapshot(data: &[u8]) -> Result<Vec<u8>> {
 /// Periodically send `RuleSyncRequest` to the main node and apply responses.
 ///
 /// Only active when the node's role is `Worker`. Exits when `main_tx` is closed.
+///
+/// An initial random jitter sleep of up to one interval is applied before the
+/// first tick so that all workers in a cluster do not poll the main node in
+/// a thundering-herd burst on startup.
 pub async fn run_rule_sync_loop(state: Arc<NodeState>, interval_secs: u64, main_tx: mpsc::Sender<ClusterMessage>) {
+    let interval_ms = interval_secs.max(1) * 1000;
+    let jitter_ms = rand::random::<u64>() % interval_ms;
+    tokio::time::sleep(Duration::from_millis(jitter_ms)).await;
+
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs.max(1)));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 

@@ -46,6 +46,18 @@ import { CacheDashboardPage } from "./pages/cache";
 import { TxVelocityPage } from "./pages/tx-velocity";
 import { RuleAnalyticsPage } from "./pages/rule-analytics";
 import { SecurityEventDetailPage } from "./pages/security-events/detail";
+import { PluginsPage } from "./pages/plugins";
+import { TunnelsPage } from "./pages/tunnels";
+import { SensitivePatternsPage } from "./pages/sensitive-patterns";
+import { TierPoliciesPage } from "./pages/tier-policies";
+import { DdosProtectionPage } from "./pages/ddos-protection";
+import { RiskScoringPage } from "./pages/risk-scoring";
+import { ChallengeEnginePage } from "./pages/challenge-engine";
+import { AccessListsPage } from "./pages/access-lists";
+import { DeviceFingerprintingPage } from "./pages/device-fingerprinting";
+import { RelayIntelPage } from "./pages/relay-intel";
+import { GeoRestrictionPage } from "./pages/geo-restriction";
+import { ResponseFilteringPage } from "./pages/response-filtering";
 
 // Each Refine `resource` is what binds list/create/edit/delete pages,
 // the data provider, and the navigation system. Path on resource is what
@@ -80,6 +92,18 @@ const resources = [
   { name: "cluster-sync", list: "/cluster/sync" },
   { name: "cache", list: "/cache" },
   { name: "tx-velocity", list: "/tx-velocity" },
+  { name: "plugins", list: "/plugins" },
+  { name: "tunnels", list: "/tunnels" },
+  { name: "sensitive-patterns", list: "/sensitive-patterns" },
+  { name: "tier-policies", list: "/tier-policies" },
+  { name: "ddos-protection", list: "/ddos-protection" },
+  { name: "risk-scoring", list: "/risk-scoring" },
+  { name: "challenge-engine", list: "/challenge-engine" },
+  { name: "access-lists", list: "/access-lists" },
+  { name: "device-fingerprinting", list: "/device-fingerprinting" },
+  { name: "relay-intel", list: "/relay-intel" },
+  { name: "geo-restriction", list: "/geo-restriction" },
+  { name: "response-filtering", list: "/response-filtering" },
 ];
 
 export const App: React.FC = () => {
@@ -147,6 +171,18 @@ export const App: React.FC = () => {
                   <Route path="/cluster/sync" element={<ClusterSyncPage />} />
                   <Route path="/cache" element={<CacheDashboardPage />} />
                   <Route path="/tx-velocity" element={<TxVelocityPage />} />
+                  <Route path="/plugins" element={<PluginsPage />} />
+                  <Route path="/tunnels" element={<TunnelsPage />} />
+                  <Route path="/sensitive-patterns" element={<SensitivePatternsPage />} />
+                  <Route path="/tier-policies" element={<TierPoliciesPage />} />
+                  <Route path="/ddos-protection" element={<DdosProtectionPage />} />
+                  <Route path="/risk-scoring" element={<RiskScoringPage />} />
+                  <Route path="/challenge-engine" element={<ChallengeEnginePage />} />
+                  <Route path="/access-lists" element={<AccessListsPage />} />
+                  <Route path="/device-fingerprinting" element={<DeviceFingerprintingPage />} />
+                  <Route path="/relay-intel" element={<RelayIntelPage />} />
+                  <Route path="/geo-restriction" element={<GeoRestrictionPage />} />
+                  <Route path="/response-filtering" element={<ResponseFilteringPage />} />
                   <Route path="*" element={<ErrorComponent />} />
                 </Route>
 

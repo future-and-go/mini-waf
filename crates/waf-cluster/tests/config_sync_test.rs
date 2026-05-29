@@ -25,7 +25,8 @@ fn build_sync_produces_valid_toml() {
     let config = sample_syncable_config();
     let msg = syncer.build_sync(&config).unwrap();
 
-    assert_eq!(msg.version, 1);
+    // Version is a monotonic Unix-timestamp-based value, always > 0.
+    assert!(msg.version > 0, "version must be positive, got {}", msg.version);
     assert!(!msg.config_toml.is_empty());
 
     // Parse it back
@@ -44,7 +45,7 @@ fn apply_sync_updates_version_and_returns_config() {
 
     let result = syncer.apply_sync(&msg, 1);
     assert!(result.is_some());
-    assert_eq!(syncer.current_version(), 1);
+    assert_eq!(syncer.current_version(), msg.version);
 
     let applied = result.unwrap();
     assert_eq!(applied.proxy.listen_addr, "0.0.0.0:8080");
@@ -129,8 +130,9 @@ fn build_sync_increments_version() {
     let m2 = syncer.build_sync(&config).unwrap();
     let m3 = syncer.build_sync(&config).unwrap();
 
-    assert_eq!(m1.version, 1);
-    assert_eq!(m2.version, 2);
-    assert_eq!(m3.version, 3);
-    assert_eq!(syncer.current_version(), 3);
+    // Versions are monotonic (timestamp-based), not sequential counters.
+    assert!(m1.version > 0, "m1 must be positive");
+    assert!(m2.version > m1.version, "m2 must exceed m1");
+    assert!(m3.version > m2.version, "m3 must exceed m2");
+    assert_eq!(syncer.current_version(), m3.version);
 }

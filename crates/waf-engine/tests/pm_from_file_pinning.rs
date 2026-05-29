@@ -171,7 +171,7 @@ fn pin_lfi_os_file_in_body_must_block() {
 #[test]
 fn pin_innocuous_path_must_pass() {
     let checker = load_crs_engine();
-    let ctx = ctx_with("GET", "/users/profile", "", &[], &[]);
+    let ctx = ctx_with("GET", "/users/profile", "", &[], &[("accept", "*/*")]);
     // No CRS rule should match a benign request — guards against
     // false-positive over-matching after the matcher unification.
     assert!(

@@ -184,6 +184,7 @@ pub enum Operator {
     DetectSqli,
     DetectXss,
     ContainsAny,
+    ValidateByteRange,
 }
 
 // ── Condition value ───────────────────────────────────────────────────────────
@@ -763,6 +764,9 @@ impl CustomRulesEngine {
             (Operator::Lt, ConditionValue::Number(n)) => fstr.parse::<i64>().ok().is_some_and(|v| v < *n),
             (Operator::Gte, ConditionValue::Number(n)) => fstr.parse::<i64>().ok().is_some_and(|v| v >= *n),
             (Operator::Lte, ConditionValue::Number(n)) => fstr.parse::<i64>().ok().is_some_and(|v| v <= *n),
+            (Operator::ValidateByteRange, ConditionValue::Str(spec)) => {
+                !validate_byte_range_matches(fstr.as_bytes(), spec)
+            }
             _ => false,
         }
     }
@@ -861,6 +865,28 @@ pub struct OrBranch {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotBranch {
     pub not: Box<ConditionNode>,
+}
+
+/// Returns `true` if any byte in `data` falls OUTSIDE the allowed ranges.
+///
+/// Spec format: comma-separated items, each either a single byte value or
+/// `lo-hi` inclusive range (e.g. `"9,10,13,32-126,128-255"`).
+#[allow(clippy::indexing_slicing)] // u8→usize is always in bounds for [bool; 256]
+fn validate_byte_range_matches(data: &[u8], spec: &str) -> bool {
+    let mut allowed = [false; 256];
+    for item in spec.split(',') {
+        let item = item.trim();
+        if let Some((lo, hi)) = item.split_once('-') {
+            if let (Ok(lo), Ok(hi)) = (lo.trim().parse::<u8>(), hi.trim().parse::<u8>()) {
+                for b in lo..=hi {
+                    allowed[usize::from(b)] = true;
+                }
+            }
+        } else if let Ok(b) = item.parse::<u8>() {
+            allowed[usize::from(b)] = true;
+        }
+    }
+    data.iter().any(|&b| !allowed[usize::from(b)])
 }
 
 /// Maximum allowed depth of a `ConditionNode` tree. Guards against
@@ -1184,6 +1210,12 @@ fn pattern_matches_request(pattern: &Regex, field: &str, ctx: &RequestCtx) -> bo
             .iter()
             .filter(|(k, _)| !is_routing_header(k))
             .any(|(_, v)| test_with_decode(pattern, v)),
+        // Generic header lookup: header_accept → "accept", header_content_type → "content-type"
+        field if field.starts_with("header_") => {
+            let header_name = field[7..].replace('_', "-");
+            let value = ctx.headers.get(header_name.as_str()).map_or("", String::as_str);
+            test_with_decode(pattern, value)
+        }
         // Response body rules are evaluated via check_response_body(), not here.
         "response_body" => false,
         // "all" or unknown field — check everything, smallest first

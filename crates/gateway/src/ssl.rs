@@ -321,9 +321,95 @@ mod tests {
     }
 
     #[test]
+    fn test_challenge_store_default_is_empty() {
+        let store = ChallengeStore::default();
+        assert!(store.get("nope").is_none());
+    }
+
+    #[test]
+    fn test_challenge_store_overwrite() {
+        let store = ChallengeStore::new();
+        store.set("t".into(), "v1".into());
+        store.set("t".into(), "v2".into());
+        assert_eq!(store.get("t"), Some("v2".to_string()));
+    }
+
+    #[test]
+    fn test_challenge_store_multiple_tokens() {
+        let store = ChallengeStore::new();
+        store.set("a".into(), "ka".into());
+        store.set("b".into(), "kb".into());
+        assert_eq!(store.get("a"), Some("ka".to_string()));
+        assert_eq!(store.get("b"), Some("kb".to_string()));
+        store.remove("a");
+        assert!(store.get("a").is_none());
+        assert_eq!(store.get("b"), Some("kb".to_string()));
+    }
+
+    #[test]
+    fn test_challenge_store_remove_missing_is_noop() {
+        let store = ChallengeStore::new();
+        store.remove("nonexistent");
+        assert!(store.get("nonexistent").is_none());
+    }
+
+    #[test]
     fn test_self_signed_generation() {
-        let (cert_pem, key_pem) = SslManager::generate_self_signed("example.com").unwrap();
+        let (cert_pem, key_pem) = SslManager::generate_self_signed("example.com").expect("self-signed");
         assert!(cert_pem.contains("BEGIN CERTIFICATE"));
         assert!(key_pem.contains("BEGIN"));
+    }
+
+    #[test]
+    fn test_self_signed_distinct_per_call() {
+        let (c1, k1) = SslManager::generate_self_signed("a.test").expect("first");
+        let (c2, k2) = SslManager::generate_self_signed("a.test").expect("second");
+        // Each call generates a fresh key pair → PEM strings must differ.
+        assert_ne!(c1, c2);
+        assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn test_self_signed_subdomain_and_punycode() {
+        let (cert, _) = SslManager::generate_self_signed("api.example.org").expect("subdomain");
+        assert!(cert.contains("BEGIN CERTIFICATE"));
+        let (cert2, _) = SslManager::generate_self_signed("xn--bcher-kva.example").expect("punycode");
+        assert!(cert2.contains("BEGIN CERTIFICATE"));
+    }
+
+    #[test]
+    fn test_cert_info_clone_and_debug() {
+        let now = chrono::Utc::now();
+        let info = CertInfo {
+            cert_pem: "PEM".into(),
+            key_pem: "KEY".into(),
+            chain_pem: Some("CHAIN".into()),
+            not_before: now,
+            not_after: now + chrono::Duration::days(90),
+            subject: "CN=example.com".into(),
+            issuer: "Let's Encrypt".into(),
+        };
+        let copy = info.clone();
+        assert_eq!(copy.cert_pem, "PEM");
+        assert_eq!(copy.subject, "CN=example.com");
+        assert_eq!(copy.chain_pem.as_deref(), Some("CHAIN"));
+        let debug_str = format!("{info:?}");
+        assert!(debug_str.contains("CertInfo"));
+        assert!(debug_str.contains("Let's Encrypt"));
+    }
+
+    #[test]
+    fn test_cert_info_no_chain() {
+        let now = chrono::Utc::now();
+        let info = CertInfo {
+            cert_pem: "PEM".into(),
+            key_pem: "KEY".into(),
+            chain_pem: None,
+            not_before: now,
+            not_after: now,
+            subject: String::new(),
+            issuer: String::new(),
+        };
+        assert!(info.chain_pem.is_none());
     }
 }

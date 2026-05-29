@@ -12,7 +12,7 @@ use crate::models::{
     EndpointHeatmap, GeoDistEntry, GeoStats, HeatmapCell, HeatmapFilter, Host, HotlinkConfig, LbBackend,
     NotificationConfig, NotificationLog, RecentEvent, RefreshToken, SecurityEvent, SecurityEventQuery,
     SensitivePattern, StatsFilter, StatsOverview, TimeSeriesPoint, TopEntry, TunnelRow, UpdateCertificatePem,
-    UpdateCustomRule, UpdateHost, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
+    UpdateCustomRule, UpdateHost, UpdateSensitivePattern, UpsertCrowdSecConfig, UpsertHotlinkConfig, WasmPluginRow,
 };
 
 impl Database {
@@ -822,6 +822,46 @@ impl Database {
             .execute(&self.pool)
             .await?;
         Ok(r.rows_affected() > 0)
+    }
+
+    pub async fn toggle_sensitive_pattern(&self, id: Uuid, enabled: bool) -> Result<bool, StorageError> {
+        let r = sqlx::query("UPDATE sensitive_patterns SET enabled=$2, updated_at=NOW() WHERE id=$1")
+            .bind(id)
+            .bind(enabled)
+            .execute(&self.pool)
+            .await?;
+        Ok(r.rows_affected() > 0)
+    }
+
+    pub async fn update_sensitive_pattern(
+        &self,
+        id: Uuid,
+        req: UpdateSensitivePattern<'_>,
+    ) -> Result<Option<SensitivePattern>, StorageError> {
+        let row = sqlx::query_as::<_, SensitivePattern>(
+            r"UPDATE sensitive_patterns SET
+                pattern       = COALESCE($2, pattern),
+                pattern_type  = COALESCE($3, pattern_type),
+                check_request = COALESCE($4, check_request),
+                check_response = COALESCE($5, check_response),
+                action        = COALESCE($6, action),
+                remarks       = COALESCE($7, remarks),
+                enabled       = COALESCE($8, enabled),
+                updated_at    = NOW()
+              WHERE id = $1
+              RETURNING *",
+        )
+        .bind(id)
+        .bind(req.pattern)
+        .bind(req.pattern_type)
+        .bind(req.check_request)
+        .bind(req.check_response)
+        .bind(req.action)
+        .bind(req.remarks)
+        .bind(req.enabled)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
     }
 
     // ─── Hotlink Configs ──────────────────────────────────────────────────────
@@ -1970,10 +2010,11 @@ impl Database {
     pub async fn create_tunnel(&self, req: &CreateTunnel, token_hash: &str) -> Result<TunnelRow, StorageError> {
         let id = Uuid::new_v4();
         let now = chrono::Utc::now();
+        let protocol = req.protocol.as_deref().unwrap_or("tcp");
         Ok(sqlx::query_as::<_, TunnelRow>(
             r"INSERT INTO tunnels
-               (id, name, token_hash, target_host, target_port, enabled, status, created_at, updated_at)
-               VALUES ($1,$2,$3,$4,$5,$6,'disconnected',$7,$7) RETURNING *",
+               (id, name, token_hash, target_host, target_port, enabled, status, protocol, created_at, updated_at)
+               VALUES ($1,$2,$3,$4,$5,$6,'disconnected',$7,$8,$8) RETURNING *",
         )
         .bind(id)
         .bind(&req.name)
@@ -1981,6 +2022,7 @@ impl Database {
         .bind(&req.target_host)
         .bind(req.target_port)
         .bind(req.enabled.unwrap_or(true))
+        .bind(protocol)
         .bind(now)
         .fetch_one(&self.pool)
         .await?)

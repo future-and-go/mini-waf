@@ -75,7 +75,7 @@ fn shannon_entropy_x100(bytes: &[u8]) -> u16 {
             continue;
         }
         let p = f64::from(c) / len;
-        h -= p * p.log2();
+        h = p.mul_add(-p.log2(), h);
     }
     let scaled = (h * 100.0).round();
     if scaled <= 0.0 {
