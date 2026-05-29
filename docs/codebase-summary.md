@@ -155,6 +155,11 @@ prx-waf/
 │   │   │   │   └── nonce_store.rs # NonceStore trait + MemoryNonceStore (LRU, replay detection)
 │   │   │   └── store/         # RiskStore trait + MemoryRiskStore (in-memory state machine)
 │   │   │
+│   │   ├── interop/            # Benchmark mode control interface (WAF reconfiguration during testing)
+│   │   │   ├── mode_registry.rs # ModeRegistry: ArcSwap-based lock-free mode state (Enforce/LogOnly overrides)
+│   │   │   ├── feature_catalog.rs # Static registry of 17 features + validation
+│   │   │   └── mod.rs          # Public API (ModeSnapshot, InteropMode enum)
+│   │   │
 │   │   ├── outbound/
 │   │   │   ├── header_filter.rs # FR-035 response header leak prevention
 │   │   │   └── mod.rs
@@ -183,6 +188,7 @@ prx-waf/
 │   │
 │   ├── waf-api/src/
 │   │   ├── server.rs          # Axum router + middleware
+│   │   ├── interop_control.rs # Benchmark mode endpoints (/__waf_control/*, constant-time auth)
 │   │   ├── middleware/
 │   │   │   ├── auth.rs        # JWT bearer token extraction
 │   │   │   ├── security.rs    # CORS, security headers, rate limit

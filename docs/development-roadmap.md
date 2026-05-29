@@ -17,7 +17,86 @@ Living document tracking project phases, milestones, and progress.
 | **Phase 5** | ✅ Complete | WASM plugins + HTTP/3 + tunnels | 4f10195 |
 | **Phase 5b** | ✅ Complete | Rules YAML v1 consolidation + legacy parser deprecation | c8dbc7b, cdc343c, 9798af3 |
 | **Phase 6** | ✅ Complete | CrowdSec integration + rule CLI | 786637c |
+| **Phase 7a** | ✅ Complete | WAF Control Interface (Interop / Benchmark Mode) | — |
 | **Phase 7** | 🔄 In Progress | Schema alignment + GeoIP integration | — |
+
+---
+
+## Phase 7a: WAF Control Interface (Interop / Benchmark Mode)
+
+### Overview
+
+Lock-free benchmarking control plane for live WAF reconfiguration during testing, performance validation, and incident response without restarting.
+
+### Completion Details
+
+**Status**: ✅ Complete (May 29, 2026)
+
+**Scope**:
+- Implemented 7-phase WAF Control Interface with 4 endpoints
+- Lock-free mode registry via ArcSwap (1-2ns hot-path reads)
+- Feature catalog with 17 WAF features + policy-level scoping
+- Constant-time auth via `X-Benchmark-Secret` header
+- 9 integration tests covering auth, capabilities, profile changes, reset state, cache flush, concurrent access
+
+**Architecture:**
+| Component | Type | Purpose | Module |
+|-----------|------|---------|--------|
+| ModeRegistry | ArcSwap<ModeSnapshot> | Lock-free Enforce/LogOnly overrides | `interop/mode_registry.rs` |
+| FeatureCatalog | Static HashMap | 17 features + per-feature policies | `interop/feature_catalog.rs` |
+| Endpoints | Axum Router | `GET /capabilities`, `POST /reset_state`, `POST /set_profile`, `POST /flush_cache` | `waf-api/interop_control.rs` |
+
+**Endpoints Implemented**:
+1. `GET /__waf_control/capabilities` — Returns feature catalog + active mode snapshot
+2. `POST /__waf_control/reset_state` — Clears rate-limit stores, DDoS ban table, tx velocity, identity stores, mode overrides, response cache
+3. `POST /__waf_control/set_profile` — Sets mode (enforce/log_only) for scope: `all`, `features`, `policies`; lenient handling of unsupported items
+4. `POST /__waf_control/flush_cache` — Flushes response cache
+
+**Configuration:**
+```toml
+[interop]
+enabled = false                              # Enable control interface (default: disabled for security)
+benchmark_secret = "your-secret-key"       # ≥32 chars recommended for constant-time comparison
+```
+
+**Features Supported** (17 total):
+`rate_limit`, `ddos_protection`, `scanner_detection`, `sql_injection`, `xss`, `rce`, `directory_traversal`, `bot_detection`, `brute_force`, `header_injection`, `ssrf`, `body_abuse`, `cve_patches`, `geo_blocking`, `anti_hotlink`, `crowdsec`, `sensitive_data`.
+
+**Testing**: 9 integration tests in `crates/waf-api/tests/interop_control_integration.rs`:
+- Auth enforcement (valid/invalid secret)
+- Capabilities endpoint shape
+- Set profile validation (all/features/policies scopes)
+- Reset state verification
+- Flush cache behavior
+- Full lifecycle workflow
+- Concurrent access patterns
+- Static config preservation
+
+**Codebase Impact:**
+- 2 new crates/waf-engine modules: `interop/mode_registry.rs`, `interop/feature_catalog.rs`
+- 1 new waf-api file: `interop_control.rs` (261 LOC)
+- 1 new integration test file: `tests/interop_control_integration.rs` (250+ LOC)
+- 1 mode_registry field added to AppState
+- Config extension in `waf-common/src/config.rs` (`InteropConfig`)
+- Server wiring in `waf-api/src/server.rs`
+
+**Documentation:**
+- Added WAF Control Interface section to `docs/system-architecture.md`
+- Updated `docs/codebase-summary.md` with interop module entries
+- Added changelog entry in `docs/project-changelog.md`
+- Updated Phase 7 roadmap status
+
+**Use Cases:**
+- A/B testing: Switch enforce ↔ log_only modes live
+- Capacity planning: Reset counters before benchmark run
+- Incident response: Temporarily log-only critical rules during outage
+- Cache validation: Flush stale entries for testing
+
+**Security Considerations:**
+- Benchmark mode disabled by default (`[interop] enabled = false`)
+- Secret validation via constant-time comparison (prevents timing attacks)
+- Intended for isolated test/staging; document risk if exposed in production
+- All state changes logged to audit sink (FR-033) with actor IP + timestamp
 
 ---
 

@@ -672,3 +672,129 @@ All checks run async, deltas accumulate → FR-025 scorer.
 
 **Key fields:** `client_ip`, `method`, `path`, `headers`, `body_preview`, `host_config`, `geo`, `tier`, `tier_policy`, `cookies` (pre-parsed).
 
+---
+
+## WAF Control Interface (Interop / Benchmark Mode)
+
+Lock-free control plane for live WAF reconfiguration during benchmarking, testing, and incident response.
+
+**Route group:** `/__waf_control/*` (scoped under benchmark secret authentication).
+
+### Authentication
+
+`benchmark_secret_guard` middleware validates `X-Benchmark-Secret` header via constant-time comparison against `[interop] benchmark_secret` (TOML config, ≥32 chars recommended). Disabled by default (`[interop] enabled = false`); returns 404 if disabled.
+
+**Security note:** Benchmark mode intended for isolated test/staging environments. In production, disable via config or run behind reverse firewall.
+
+### Endpoints
+
+| Method | Path | Purpose | Input | Output |
+|--------|------|---------|-------|--------|
+| **GET** | `/capabilities` | Enumerate supported features + active mode | — | FeatureCatalog + active mode snapshot |
+| **POST** | `/reset_state` | Wipe rate-limit/DDoS/velocity/identity stores + mode registry | — | `ok: true, ts_ms` |
+| **POST** | `/set_profile` | Override WAF mode (enforce/log_only) for all/features/policies | `scope`, `mode`, optional `features`, `feature`, `policies` | Applied config + unsupported list |
+| **POST** | `/flush_cache` | Clear response cache | — | `ok: true, ts_ms` |
+
+### Mode Registry
+
+`ArcSwap`-based lock-free state holder (`Arc<ModeSnapshot>`) supporting atomic read during request pipeline with zero-copy hot-path access.
+
+**ModeSnapshot structure:**
+```rust
+pub struct ModeSnapshot {
+    pub default_mode: InteropMode,                         // Global: enforce or log_only
+    pub feature_overrides: HashMap<String, InteropMode>,  // Per-feature overrides
+    pub policy_overrides: HashMap<String, InteropMode>,   // Per-policy overrides
+}
+```
+
+**InteropMode enum:**
+- `Enforce` — Block decisions respected (HTTP 403 + log)
+- `LogOnly` — Block decisions suppressed; logged but allowed (HTTP 2xx passthrough)
+
+**API methods:**
+- `set_all(mode)` — Global override (applies to all features)
+- `set_features(&[names], mode)` — Apply to specific features; unsupported names silently ignored (lenient handling)
+- `set_policies(feature, &[policies], mode)` — Apply to policies within a feature
+- `snapshot()` — Atomic read of current state (lock-free, ~1-2ns hot-path)
+- `reset()` — Restore defaults (all overrides cleared, default_mode = Enforce)
+
+### Feature Catalog
+
+Static registry of 17 WAF features: `rate_limit`, `ddos_protection`, `scanner_detection`, `sql_injection`, `xss`, `rce`, `directory_traversal`, `bot_detection`, `brute_force`, `header_injection`, `ssrf`, `body_abuse`, `cve_patches`, `geo_blocking`, `anti_hotlink`, `crowdsec`, `sensitive_data`.
+
+Each feature declares:
+- `supported: bool` — Feature is active (always true in v1.0)
+- `toggleable: bool` — Can be disabled via set_profile (false for critical features like sql_injection)
+- `policies: Vec<&str>` — Sub-scopes (e.g., `rate_limit` has policies: `ip_based`, `session_based`)
+
+**Validation:** `FeatureCatalog::validate_features()` and `FeatureCatalog::validate_policies()` filter user input against catalog; unsupported items returned separately for client-side ACK.
+
+### Integration with Decision Pipeline
+
+During `WafEngine::check()`, after all 16-phase checks accumulate risk deltas, `Scorer::score()` queries `ModeRegistry::snapshot()` to fetch active mode:
+
+```rust
+let mode_snap = engine.mode_registry.snapshot();
+let mode = mode_snap.feature_overrides.get(feature_name)
+    .or_else(|| mode_snap.policy_overrides.get(policy_name))
+    .unwrap_or(&mode_snap.default_mode);
+
+let decision = match mode {
+    Enforce => original_threshold_based_decision,
+    LogOnly => WafAction::Allow,  // Suppress block, pass through
+};
+```
+
+Risk score + decision still emitted in audit logs (FR-033) for observability; only HTTP response action is altered.
+
+**Module:** `crates/waf-engine/src/interop/` (mode_registry.rs, feature_catalog.rs, mod.rs).
+
+**Configuration:**
+```toml
+[interop]
+enabled = false                                  # Enable control interface (default: disabled)
+benchmark_secret = "your-secret-key-here"      # ≥32 chars recommended
+```
+
+### Reset State Behavior
+
+`POST /__waf_control/reset_state` clears:
+1. **Rate limit stores** — `MemoryRateLimitStore` (token-bucket counters)
+2. **DDoS ban table** — Dynamic IP bans (TTL-based entries)
+3. **Tx velocity recorder** — Transaction sequence history
+4. **Identity stores** — Device fingerprint observations (all FpKey entries)
+5. **Mode registry** — All feature/policy overrides (restored to defaults)
+6. **Response cache** — Moka LRU (all tags purged)
+7. **CrowdSec cache** — IP reputation cache (if bouncer enabled)
+
+**Preserved:** PostgreSQL audit log, security_events table, custom rules, certificates. Audit sink logs the reset action with actor IP + timestamp.
+
+### Usage Examples
+
+**Check capabilities:**
+```bash
+curl -H "X-Benchmark-Secret: secret" \
+  http://localhost:16827/__waf_control/capabilities
+```
+
+**Set WAF to log-only mode (suppress blocks):**
+```bash
+curl -X POST -H "X-Benchmark-Secret: secret" \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"all","mode":"log_only"}' \
+  http://localhost:16827/__waf_control/set_profile
+```
+
+**Reset runtime state (clear rate limit counters, ban table):**
+```bash
+curl -X POST -H "X-Benchmark-Secret: secret" \
+  http://localhost:16827/__waf_control/reset_state
+```
+
+**Flush cache:**
+```bash
+curl -X POST -H "X-Benchmark-Secret: secret" \
+  http://localhost:16827/__waf_control/flush_cache
+```
+
