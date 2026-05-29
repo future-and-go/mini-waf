@@ -165,7 +165,9 @@ fn validate_thresholds(tier: &str, t: &RiskThresholds) -> Result<(), ApiError> {
 
 pub async fn get_tier_policies(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "configs/tier-policies.yaml");
-    let cfg = read_yaml_opt::<TierConfig>(&path).await.unwrap_or_else(default_tier_config);
+    let cfg = read_yaml_opt::<TierConfig>(&path)
+        .await
+        .unwrap_or_else(default_tier_config);
     Ok(Json(json!({ "success": true, "data": cfg })))
 }
 
@@ -191,7 +193,9 @@ pub async fn dry_run_tier(
     Json(req): Json<DryRunRequest>,
 ) -> ApiResult<Json<Value>> {
     let path = resolve_path(&state, "configs/tier-policies.yaml");
-    let cfg = read_yaml_opt::<TierConfig>(&path).await.unwrap_or_else(default_tier_config);
+    let cfg = read_yaml_opt::<TierConfig>(&path)
+        .await
+        .unwrap_or_else(default_tier_config);
 
     let method = req.method.as_deref().unwrap_or("GET");
     let path_str = req.path.as_deref().unwrap_or("/");

@@ -73,8 +73,7 @@ async fn start_local_server() -> LocalServer {
     let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
     let router = Arc::new(HostRouter::new());
     let cache = ResponseCache::new(8, 60, 300);
-    let mut state_inner =
-        AppState::new(Arc::clone(&db), Arc::clone(&engine), router, cache).expect("AppState::new");
+    let mut state_inner = AppState::new(Arc::clone(&db), Arc::clone(&engine), router, cache).expect("AppState::new");
     state_inner.main_config_file = Some(main_cfg.to_string_lossy().into_owned());
     let state = Arc::new(state_inner);
 
@@ -292,7 +291,10 @@ async fn test_endpoint_no_match_passes() {
     assert_eq!(put.status(), 200);
 
     let v: serde_json::Value = client()
-        .get(url(&s, "/api/access-lists/test?ip=42.42.42.42&host=other.example.com&tier=medium"))
+        .get(url(
+            &s,
+            "/api/access-lists/test?ip=42.42.42.42&host=other.example.com&tier=medium",
+        ))
         .bearer_auth(&s.admin_token)
         .send()
         .await
