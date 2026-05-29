@@ -104,10 +104,7 @@ async fn forward_write_stamp_overrides_caller_supplied_header() {
             );
             // Other caller-supplied headers are passed through unchanged —
             // the stamp is targeted, not a wholesale replace.
-            assert_eq!(
-                fw.headers.get("authorization").map(String::as_str),
-                Some("Bearer test")
-            );
+            assert_eq!(fw.headers.get("authorization").map(String::as_str), Some("Bearer test"));
         }
         other => panic!("expected ApiForward, got {other:?}"),
     }
