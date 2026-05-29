@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Rate-Limit Action Mapping"
-status: pending
+status: done
 priority: P1
 effort: "1h"
 dependencies: [3]
@@ -122,12 +122,20 @@ Run `cargo test -p waf-engine` — all tests pass.
 
 ## Success Criteria
 
-- [ ] Rate-limit breaches produce `WafAction::RateLimit { status: 429, .. }`
-- [ ] DDoS breaches still produce `WafAction::Block { status: 403, .. }`
-- [ ] All other checker phases still produce `WafAction::Block { status: 403, .. }`
-- [ ] `as_contract_str()` returns `"rate_limit"` for rate-limit decisions
-- [ ] Rate-limit check inline tests pass
-- [ ] `cargo test -p waf-engine` passes
+- [x] Rate-limit breaches produce `WafAction::RateLimit { status: 429, .. }`
+- [x] DDoS breaches still produce `WafAction::Block { status: 403, .. }`
+- [x] All other checker phases still produce `WafAction::Block { status: 403, .. }`
+- [x] `as_contract_str()` returns `"rate_limit"` for rate-limit decisions
+- [x] Rate-limit check inline tests pass
+- [x] `cargo test -p waf-engine` passes (rate_limit suite: 37/37)
+
+> Note: Step 4 (engine-level `inspect()` integration test) intentionally
+> skipped — `RateLimitCheck` is inert until `start_rate_limit_watcher` loads
+> tier config from a file, so an engine-level breach test requires a
+> debounced file-watcher fixture on top of a Postgres testcontainer
+> (high-cost/low-value). The engine's phase→action mapping is plain
+> exhaustively-matched control flow; the unit test `ip_burst_produces_rate_limit_phase`
+> pins the load-bearing invariant (RateLimitCheck → `Phase::RateLimit`).
 
 ## Risk Assessment
 

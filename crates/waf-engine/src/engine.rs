@@ -628,7 +628,18 @@ impl WafEngine {
             if let Some(result) = checker.check(ctx) {
                 let rule_name = result.rule_name.clone();
 
-                let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+                // Rate-limit breaches are a distinct decision class (HTTP 429),
+                // not a security block. Other checker phases stay as 403 blocks.
+                let decision = if result.phase == waf_common::Phase::RateLimit {
+                    let body = render_block_page(ctx, &rule_name);
+                    let mut d = WafDecision::rate_limit(429, Some(body), result);
+                    if ctx.host_config.log_only_mode {
+                        d.mode = InteropMode::LogOnly;
+                    }
+                    d
+                } else {
+                    Self::make_block_decision(ctx, &rule_name, result, 403)
+                };
 
                 self.log_security_event(ctx, &decision);
                 self.report_community_signal(ctx, &decision);

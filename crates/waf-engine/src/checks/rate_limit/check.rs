@@ -297,20 +297,18 @@ mod tests {
         assert_eq!(result.rule_id.as_deref(), Some("RL-ERR"));
     }
 
-    // Phase 1 TDD scaffold: uncomment when Phase 2-3 adds WafAction::RateLimit
-    // and the engine produces it instead of WafAction::Block for rate-limit hits.
-    //
-    // #[test]
-    // fn ip_burst_produces_rate_limit_action() {
-    //     let cfg = cfg_for_tier(Tier::CatchAll);
-    //     let store = Arc::new(ScriptedStore::new(vec![Ok(Decision::BurstExceeded)]));
-    //     let check = RateLimitCheck::new(store, cfg);
-    //     let ctx = make_ctx(Tier::CatchAll, FailMode::Open, true);
-    //     let result = check.check(&ctx).expect("must produce detection result");
-    //     assert_eq!(result.phase, Phase::RateLimit);
-    //     // After Phase 3: engine should wrap this into WafAction::RateLimit { status: 429, .. }
-    //     // rather than WafAction::Block { status: 403, .. }
-    // }
+    // A rate-limit breach must carry `Phase::RateLimit` so the engine's
+    // phase-aware wrapper emits WafAction::RateLimit { status: 429 } instead
+    // of a 403 security block.
+    #[test]
+    fn ip_burst_produces_rate_limit_phase() {
+        let cfg = cfg_for_tier(Tier::CatchAll);
+        let store = Arc::new(ScriptedStore::new(vec![Ok(Decision::BurstExceeded)]));
+        let check = RateLimitCheck::new(store, cfg);
+        let ctx = make_ctx(Tier::CatchAll, FailMode::Open, true);
+        let result = check.check(&ctx).expect("must produce detection result");
+        assert_eq!(result.phase, Phase::RateLimit);
+    }
 
     /// Engine-level integration: real `MemoryStore`, request allowed under
     /// limit then blocked over limit.
