@@ -4,29 +4,10 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum InteropMode {
-    Enforce,
-    LogOnly,
-}
-
-impl InteropMode {
-    pub const fn as_contract_str(self) -> &'static str {
-        match self {
-            Self::Enforce => "enforce",
-            Self::LogOnly => "log_only",
-        }
-    }
-
-    pub fn from_contract_str(s: &str) -> Option<Self> {
-        match s {
-            "enforce" => Some(Self::Enforce),
-            "log_only" => Some(Self::LogOnly),
-            _ => None,
-        }
-    }
-}
+// `InteropMode` is a shared primitive owned by `waf-common` (it appears on
+// `WafDecision`). Re-exported here so existing `interop::InteropMode` import
+// paths and the `ModeRegistry` consumers below stay unchanged.
+pub use waf_common::InteropMode;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModeState {

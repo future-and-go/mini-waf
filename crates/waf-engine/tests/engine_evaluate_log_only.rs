@@ -6,6 +6,7 @@
 //! asserts the action is `LogOnly` with a populated `result`.
 
 #![allow(
+    deprecated,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
@@ -89,6 +90,10 @@ async fn xss_in_log_only_mode_returns_log_only() {
         "XSS LogOnly: got {:?}",
         d.action
     );
+    // Phase 4: replace above assertion with:
+    // assert!(matches!(d.action, WafAction::Block { .. }), "XSS should preserve Block action in log_only: got {:?}", d.action);
+    // assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
+    // assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -103,6 +108,10 @@ async fn directory_traversal_in_log_only_mode_returns_log_only() {
         "traversal LogOnly: got {:?}",
         d.action
     );
+    // Phase 4: replace above assertion with:
+    // assert!(matches!(d.action, WafAction::Block { .. }), "traversal should preserve Block action in log_only: got {:?}", d.action);
+    // assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
+    // assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -118,6 +127,10 @@ async fn rce_in_log_only_mode_returns_log_only() {
         "RCE LogOnly: got {:?}",
         d.action
     );
+    // Phase 4: replace above assertion with:
+    // assert!(matches!(d.action, WafAction::Block { .. }), "RCE should preserve Block action in log_only: got {:?}", d.action);
+    // assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
+    // assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -134,6 +147,10 @@ async fn scanner_ua_in_log_only_mode_returns_log_only() {
         "scanner UA LogOnly: got {:?}",
         d.action
     );
+    // Phase 4: replace above assertion with:
+    // assert!(matches!(d.action, WafAction::Block { .. }), "scanner should preserve Block action in log_only: got {:?}", d.action);
+    // assert_eq!(d.mode, InteropMode::LogOnly, "mode must be LogOnly");
+    // assert!(d.is_enforcement_allowed(), "log_only must allow enforcement bypass");
 }
 
 #[tokio::test(flavor = "multi_thread")]

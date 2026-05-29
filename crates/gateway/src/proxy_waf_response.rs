@@ -34,10 +34,12 @@ pub async fn write_waf_decision(
     blocked_counter: &AtomicU64,
     challenge_ctx: Option<&Arc<ChallengeCtx>>,
 ) -> pingora_core::Result<bool> {
-    if !decision.is_allowed() {
+    if !decision.is_enforcement_allowed() {
         blocked_counter.fetch_add(1, Ordering::Relaxed);
         match &decision.action {
-            WafAction::Block { status, body } => {
+            WafAction::Block { status, body }
+            | WafAction::RateLimit { status, body }
+            | WafAction::CircuitBreaker { status, body } => {
                 let (rule_id, rule_name, phase, detail) = decision
                     .result
                     .as_ref()
@@ -66,6 +68,14 @@ pub async fn write_waf_decision(
                 let response = pingora_http::ResponseHeader::build(status_code, None)?;
                 session.write_response_header(Box::new(response), false).await?;
                 session.write_response_body(Some(Bytes::from(body_str)), true).await?;
+                return Ok(true);
+            }
+            WafAction::Timeout { status } => {
+                let response = pingora_http::ResponseHeader::build(*status, None)?;
+                session.write_response_header(Box::new(response), false).await?;
+                session
+                    .write_response_body(Some(Bytes::from("Gateway Timeout")), true)
+                    .await?;
                 return Ok(true);
             }
             WafAction::Redirect { url } => {
@@ -193,10 +203,18 @@ pub async fn write_waf_body_decision(
     request_ctx: &waf_common::RequestCtx,
     blocked_counter: &AtomicU64,
 ) -> pingora_core::Result<()> {
-    if !decision.is_allowed() {
+    if !decision.is_enforcement_allowed() {
         blocked_counter.fetch_add(1, Ordering::Relaxed);
         match &decision.action {
             WafAction::Block {
+                status,
+                body: block_body,
+            }
+            | WafAction::RateLimit {
+                status,
+                body: block_body,
+            }
+            | WafAction::CircuitBreaker {
                 status,
                 body: block_body,
             } => {
@@ -212,6 +230,18 @@ pub async fn write_waf_body_decision(
                 return Err(pingora_core::Error::explain(
                     pingora_core::ErrorType::HTTPStatus(status_code),
                     "WAF blocked request body",
+                ));
+            }
+            WafAction::Timeout { status } => {
+                let status_code = *status;
+                let response = pingora_http::ResponseHeader::build(status_code, None)?;
+                session.write_response_header(Box::new(response), false).await?;
+                session
+                    .write_response_body(Some(Bytes::from("Gateway Timeout")), true)
+                    .await?;
+                return Err(pingora_core::Error::explain(
+                    pingora_core::ErrorType::HTTPStatus(status_code),
+                    "WAF timeout",
                 ));
             }
             WafAction::Redirect { url } => {
