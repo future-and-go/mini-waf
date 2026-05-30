@@ -60,7 +60,7 @@ services:
       - ../../rules:/app/rules:ro
       - ./configs/e2e.toml:/app/e2e.toml:ro
     command:
-      - "/usr/local/bin/prx-waf"
+      - "/usr/local/bin/waf"
       - "--config"
       - "/app/e2e.toml"
       - "run"

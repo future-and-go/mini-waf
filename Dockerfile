@@ -77,7 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy WAF binary
-COPY --from=builder /build/target/release/prx-waf /usr/local/bin/prx-waf
+COPY --from=builder /build/target/release/waf /usr/local/bin/waf
 
 # Copy the Valkey server binary for embedded mode (backend = "embedded").
 # EmbeddedValkey finds it at /usr/local/bin/valkey-server via PATH when
@@ -91,7 +91,7 @@ COPY configs/   /app/configs/
 COPY rules/     /app/rules/
 COPY --from=frontend-builder /ui/dist /app/web/admin-panel/dist
 
-RUN chmod +x /usr/local/bin/prx-waf
+RUN chmod +x /usr/local/bin/waf
 
 EXPOSE 80 443 9527
 
@@ -99,4 +99,4 @@ EXPOSE 80 443 9527
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:9527/health || exit 1
 
-CMD ["/usr/local/bin/prx-waf", "--config", "/app/configs/default.toml", "run"]
+CMD ["/usr/local/bin/waf", "--config", "/app/configs/default.toml", "run"]
