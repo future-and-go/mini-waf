@@ -6,15 +6,28 @@ use std::sync::Arc;
 use pingora_proxy::Session;
 
 use crate::cache::{CachedResponse, ResponseCache};
-use crate::context::{RESPONSE_CACHE_BODY_LIMIT, ResponseCachePending};
+use crate::context::{GatewayCtx, RESPONSE_CACHE_BODY_LIMIT, ResponseCachePending};
+use crate::waf_observability_headers::{CacheStatus, inject_for_passthrough_with_cache};
 
 /// Write a cache hit to the downstream session and finish the exchange.
-pub async fn write_cached_entry(session: &mut Session, entry: &Arc<CachedResponse>) -> pingora_core::Result<()> {
+///
+/// Forces `cache = CacheStatus::Hit` on the injected headers so served-from-
+/// cache responses always advertise the contract surface. Other fields come
+/// from `ctx.waf_decision_meta` so a previously-stored `log_only` block
+/// continues to advertise its intended action (red-team F9).
+pub async fn write_cached_entry(
+    session: &mut Session,
+    entry: &Arc<CachedResponse>,
+    ctx: &GatewayCtx,
+) -> pingora_core::Result<()> {
     let status = http::StatusCode::from_u16(entry.status).unwrap_or(http::StatusCode::OK);
     let mut resp = pingora_http::ResponseHeader::build(status, None)?;
     for (k, v) in &entry.headers {
         let _ = resp.insert_header(k.clone(), v.clone());
     }
+    // Inject AFTER the header replay loop so per-request observability values
+    // override any (stale) x-waf-* baked into the cached entry.
+    inject_for_passthrough_with_cache(&mut resp, ctx, CacheStatus::Hit)?;
     session.write_response_header(Box::new(resp), false).await?;
     session
         .write_response_body(Some(bytes::Bytes::clone(&entry.body)), true)
@@ -69,6 +82,14 @@ pub fn begin_upstream_cache_capture(
     }
     pending.status = status;
     pending.headers = collect_response_headers(upstream_response);
+    // Belt-and-suspenders against cross-request leak (red-team F3/F6): even
+    // though the §5 ordering invariant injects x-waf-* AFTER capture, drop
+    // any that snuck in here so a future refactor cannot turn the cache into
+    // a stale-identifier replay channel. Matches by lower-cased prefix
+    // `x-waf-` (the dash terminator keeps `x-wafer` etc. unaffected).
+    pending
+        .headers
+        .retain(|(name, _)| !name.to_ascii_lowercase().starts_with("x-waf-"));
     pending.cache_control = upstream_response
         .headers
         .get("cache-control")
@@ -300,6 +321,65 @@ mod tests {
         let mut p = pending("k3");
         let resp = build_resp(200, &[("content-encoding", "identity")]);
         assert!(begin_upstream_cache_capture(&mut p, &resp, false));
+    }
+
+    // ── x-waf-* cross-request leak guard (§5 phase 5 red-team F3/F6) ─────────
+
+    #[test]
+    fn capture_unconditionally_strips_x_waf_star_from_pending_headers() {
+        let mut p = pending("k-xwaf");
+        // Upstream somehow returned x-waf-* (or a prior inject moved); the
+        // cache snapshot must never include them — per-request identifiers
+        // would replay to a different client on HIT.
+        let resp = build_resp(
+            200,
+            &[
+                ("x-waf-request-id", "leak-id-aaa"),
+                ("x-waf-cache", "MISS"),
+                ("x-waf-action", "allow"),
+                ("x-waf-rule-id", "R-leak"),
+                ("x-waf-risk-score", "9"),
+                ("x-waf-mode", "enforce"),
+                ("x-keep", "ok"),
+            ],
+        );
+        assert!(begin_upstream_cache_capture(&mut p, &resp, false));
+        // Non-waf header preserved; every x-waf-* stripped.
+        assert!(
+            p.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("x-keep")),
+            "non-waf headers must survive capture: {:?}",
+            p.headers
+        );
+        assert!(
+            !p.headers
+                .iter()
+                .any(|(k, _)| k.to_ascii_lowercase().starts_with("x-waf-")),
+            "no x-waf-* may enter the cache snapshot: {:?}",
+            p.headers
+        );
+    }
+
+    #[test]
+    fn capture_strip_handles_mixed_case_and_partial_prefix_boundary() {
+        let mut p = pending("k-case");
+        let resp = build_resp(
+            200,
+            &[
+                ("X-WAF-Request-Id", "MIXED-case"),
+                ("x-Waf-Mode", "log_only"),
+                ("x-wafer", "not-stripped"), // must NOT be stripped (no trailing -)
+                ("x-keep", "ok"),
+            ],
+        );
+        assert!(begin_upstream_cache_capture(&mut p, &resp, false));
+        let lower: Vec<String> = p.headers.iter().map(|(k, _)| k.to_ascii_lowercase()).collect();
+        assert!(!lower.iter().any(|k| k == "x-waf-request-id"));
+        assert!(!lower.iter().any(|k| k == "x-waf-mode"));
+        assert!(
+            lower.iter().any(|k| k == "x-wafer"),
+            "boundary: only `x-waf-` (with dash) strips"
+        );
+        assert!(lower.iter().any(|k| k == "x-keep"));
     }
 
     // ── cache_store_on_body_chunk ──────────────────────────────────────────────
