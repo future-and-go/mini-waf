@@ -52,7 +52,7 @@ services:
       - ../../../rules:/app/rules:ro
       - ./waf-config.toml:/app/waf-config.toml:ro
     command:
-      - "/usr/local/bin/prx-waf"
+      - "/usr/local/bin/waf"
       - "--config"
       - "/app/waf-config.toml"
       - "run"

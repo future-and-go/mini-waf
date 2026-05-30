@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "prx-waf"
+name = "waf"
 path = "src/main.rs"
 
 [dependencies]

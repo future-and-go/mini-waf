@@ -109,7 +109,7 @@ sudo tee /usr/local/sbin/prx-waf-deploy >/dev/null <<'DEPLOY_EOF'
 # prx-waf binary + rule/config tree, with first-run DB migrate + admin seed.
 #
 # Layout expected at $UNPACKED:
-#   prx-waf             ← release binary
+#   waf                 ← release binary
 #   rules/              ← OWASP CRS + custom rules
 #   configs/            ← default.toml + companion YAMLs (rate-limit, cache, …)
 #   migrations/         ← sqlx migrations (optional — binary also embeds them)
@@ -121,9 +121,9 @@ UNPACKED=${1:?"usage: prx-waf-deploy <unpacked-dir> [version]"}
 VERSION=${2:-unknown}
 
 [ -d "$UNPACKED" ]      || { echo "$UNPACKED is not a directory" >&2; exit 1; }
-# Release artifact ships the binary as `waf` (renamed in the workflow); the
-# installed path on disk stays `/usr/local/bin/prx-waf` so the systemd unit,
-# sudoers rules, and operator muscle memory don't churn.
+# Release artifact ships the binary as `waf`; installed at /usr/local/bin/waf
+# to match the systemd unit's ExecStart. Systemd unit/user/sudoers names stay
+# `prx-waf` (those are OS identifiers, not the binary path).
 SRC_BIN="$UNPACKED/waf"
 [ -x "$SRC_BIN" ]       || { echo "$SRC_BIN missing or not executable" >&2; exit 1; }
 
@@ -165,9 +165,9 @@ rsync -a --delete --exclude='default.toml' "$UNPACKED/configs/" /opt/prx-waf/con
 chown -R prx-waf:prx-waf /opt/prx-waf/rules /opt/prx-waf/configs
 
 # 3. Install binary (atomic via temp + rename), add CAP_NET_BIND_SERVICE
-install -m 0755 "$SRC_BIN" /usr/local/bin/prx-waf.new
-setcap 'cap_net_bind_service=+ep' /usr/local/bin/prx-waf.new
-mv -f /usr/local/bin/prx-waf.new /usr/local/bin/prx-waf
+install -m 0755 "$SRC_BIN" /usr/local/bin/waf.new
+setcap 'cap_net_bind_service=+ep' /usr/local/bin/waf.new
+mv -f /usr/local/bin/waf.new /usr/local/bin/waf
 
 # 4. Refresh the systemd unit only when its contents differ
 if [ -f "$UNIT_SRC" ]; then
@@ -180,8 +180,8 @@ fi
 # 5. First-run bootstrap: migrate + seed-admin
 if [ ! -f "$MARKER" ]; then
   echo "==> First deploy: running migrate + seed-admin"
-  sudo -u prx-waf /usr/local/bin/prx-waf -c "$CONF" migrate
-  sudo -u prx-waf /usr/local/bin/prx-waf -c "$CONF" seed-admin || \
+  sudo -u prx-waf /usr/local/bin/waf -c "$CONF" migrate
+  sudo -u prx-waf /usr/local/bin/waf -c "$CONF" seed-admin || \
     echo "(seed-admin may have already run — continuing)"
   install -o prx-waf -g prx-waf -m 0644 /dev/null "$MARKER"
 fi

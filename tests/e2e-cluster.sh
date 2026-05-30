@@ -9,7 +9,7 @@
 #   3. Stopping node-a triggers election; a new main is elected
 #
 # Prerequisites:
-#   - cargo build --release (binary must exist at target/release/prx-waf)
+#   - cargo build --release (binary must exist at target/release/waf)
 #   - docker-compose or podman-compose installed
 #   - curl installed
 #
@@ -85,7 +85,7 @@ trap cleanup EXIT
 log "=== PRX-WAF Cluster E2E Test ==="
 log ""
 
-if [ ! -f "target/release/prx-waf" ]; then
+if [ ! -f "target/release/waf" ]; then
     log "Binary not found. Building..."
     ~/.cargo/bin/cargo build --release -p prx-waf
 fi

@@ -51,7 +51,7 @@ services:
       dockerfile: Dockerfile.prebuilt
     container_name: cluster-init
     command:
-      - "/usr/local/bin/prx-waf"
+      - "/usr/local/bin/waf"
       - "cluster"
       - "cert-init"
       - "--nodes"
@@ -86,7 +86,7 @@ services:
       - ./web/admin-panel/dist:/app/web/admin-panel/dist:ro
       - cluster_certs:/certs:ro
     command:
-      - "/usr/local/bin/prx-waf"
+      - "/usr/local/bin/waf"
       - "--config"
       - "/app/configs/cluster-node-a.toml"
       - "run"
@@ -135,7 +135,7 @@ services:
       - ./web/admin-panel/dist:/app/web/admin-panel/dist:ro
       - cluster_certs:/certs:ro
     command:
-      - "/usr/local/bin/prx-waf"
+      - "/usr/local/bin/waf"
       - "--config"
       - "/app/configs/cluster-node-b.toml"
       - "run"
@@ -182,7 +182,7 @@ services:
       - ./web/admin-panel/dist:/app/web/admin-panel/dist:ro
       - cluster_certs:/certs:ro
     command:
-      - "/usr/local/bin/prx-waf"
+      - "/usr/local/bin/waf"
       - "--config"
       - "/app/configs/cluster-node-c.toml"
       - "run"
