@@ -306,6 +306,7 @@ async fn config_sync_version_gating() {
         cache: Default::default(),
         api: waf_common::config::ApiConfig {
             listen_addr: "0.0.0.0:9527".into(),
+            tls: Default::default(),
         },
     };
 
@@ -559,6 +560,7 @@ async fn full_lifecycle_join_sync_events_config_election() {
         cache: Default::default(),
         api: waf_common::config::ApiConfig {
             listen_addr: "0.0.0.0:9527".into(),
+            tls: Default::default(),
         },
     };
     let cfg_msg = main_syncer.build_sync(&syncable_config).unwrap();
