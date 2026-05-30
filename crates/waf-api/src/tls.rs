@@ -215,7 +215,8 @@ impl AdminTlsManager {
 
     fn load_or_generate(config: &AdminTlsConfig, listen_addr: SocketAddr) -> Result<AdminTlsMaterial> {
         let data_dir = resolve_data_dir(config);
-        std::fs::create_dir_all(&data_dir).with_context(|| format!("create admin TLS data dir {}", data_dir.display()))?;
+        std::fs::create_dir_all(&data_dir)
+            .with_context(|| format!("create admin TLS data dir {}", data_dir.display()))?;
 
         let cert_path = data_dir.join("cert.pem");
         let key_path = data_dir.join("key.pem");
@@ -446,8 +447,10 @@ fn generate(sans: &[String], validity_days: u32) -> Result<(String, String, Offs
 
 /// Load cert + key from PEM files.
 fn load_from_files(cert_path: &Path, key_path: &Path) -> Result<AdminTlsMaterial> {
-    let cert_pem = std::fs::read_to_string(cert_path).with_context(|| format!("read cert PEM from {}", cert_path.display()))?;
-    let key_pem = std::fs::read_to_string(key_path).with_context(|| format!("read key PEM from {}", key_path.display()))?;
+    let cert_pem =
+        std::fs::read_to_string(cert_path).with_context(|| format!("read cert PEM from {}", cert_path.display()))?;
+    let key_pem =
+        std::fs::read_to_string(key_path).with_context(|| format!("read key PEM from {}", key_path.display()))?;
 
     // Parse expiry from cert to populate `not_after`.
     // Use rcgen to decode just enough to get the notAfter field.
@@ -535,8 +538,7 @@ fn parse_not_after_asn1(der: &[u8]) -> Result<OffsetDateTime> {
 
     // Skip optional [0] explicit version tag
     let tbs = if tbs.first().copied() == Some(0xa0) {
-        let (len, rest) =
-            asn1_read_length(tbs.get(1..).context("version tag: no content after tag")?)?;
+        let (len, rest) = asn1_read_length(tbs.get(1..).context("version tag: no content after tag")?)?;
         rest.get(len..).context("version tag: content truncated")?
     } else {
         tbs
@@ -561,18 +563,16 @@ fn asn1_unwrap_sequence(data: &[u8]) -> Result<&[u8]> {
     if data.first().copied() != Some(0x30) {
         bail!("expected SEQUENCE tag 0x30, got {:02x?}", data.first());
     }
-    let (len, rest) =
-        asn1_read_length(data.get(1..).context("SEQUENCE: missing length bytes")?)?;
-    Ok(rest.get(..len).context("SEQUENCE: content truncated")?)
+    let (len, rest) = asn1_read_length(data.get(1..).context("SEQUENCE: missing length bytes")?)?;
+    rest.get(..len).context("SEQUENCE: content truncated")
 }
 
 fn asn1_skip_element(data: &[u8]) -> Result<&[u8]> {
     if data.is_empty() {
         bail!("unexpected end of ASN.1 data");
     }
-    let (len, rest) =
-        asn1_read_length(data.get(1..).context("element: missing length bytes")?)?;
-    Ok(rest.get(len..).context("element: skip overflow")?)
+    let (len, rest) = asn1_read_length(data.get(1..).context("element: missing length bytes")?)?;
+    rest.get(len..).context("element: skip overflow")
 }
 
 fn asn1_read_length(data: &[u8]) -> Result<(usize, &[u8])> {
@@ -600,10 +600,8 @@ fn asn1_read_length(data: &[u8]) -> Result<(usize, &[u8])> {
 
 fn asn1_parse_time(data: &[u8]) -> Result<OffsetDateTime> {
     let tag = *data.first().context("time tag")?;
-    let (len, content) =
-        asn1_read_length(data.get(1..).context("time: missing length bytes")?)?;
-    let s = std::str::from_utf8(content.get(..len).context("time: content truncated")?)
-        .context("time string UTF-8")?;
+    let (len, content) = asn1_read_length(data.get(1..).context("time: missing length bytes")?)?;
+    let s = std::str::from_utf8(content.get(..len).context("time: content truncated")?).context("time string UTF-8")?;
     match tag {
         0x17 => {
             // UTCTime: YYMMDDHHMMSSZ
@@ -760,7 +758,10 @@ mod tests {
         // After swap the resolver holds the new cert — verify fingerprint differs
         // (certs generated milliseconds apart should still have different keys)
         drop(ck);
-        assert_ne!(fp_before, mat2.fingerprint_sha256, "fingerprints must differ after swap");
+        assert_ne!(
+            fp_before, mat2.fingerprint_sha256,
+            "fingerprints must differ after swap"
+        );
     }
 
     #[test]

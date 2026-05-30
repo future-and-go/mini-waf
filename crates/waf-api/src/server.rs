@@ -109,8 +109,7 @@ pub fn build_router(state: Arc<AppState>, tls_enabled: bool) -> Router {
             .allow_headers([AUTHORIZATION, CONTENT_TYPE])
     };
 
-    let body_limit =
-        usize::try_from(state.security_config.max_request_body_bytes).unwrap_or(usize::MAX);
+    let body_limit = usize::try_from(state.security_config.max_request_body_bytes).unwrap_or(usize::MAX);
 
     // Public routes (no JWT)
     let public_routes = Router::new()
