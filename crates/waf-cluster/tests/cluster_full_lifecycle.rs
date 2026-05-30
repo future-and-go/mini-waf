@@ -46,7 +46,7 @@ use waf_cluster::sync::rules::{NoopReloader, RuleChangelog, apply_sync_response,
 use waf_cluster::transport::client::ClusterClient;
 use waf_cluster::transport::server::ClusterServer;
 use waf_cluster::{ClusterConfig, NodeRole};
-use waf_common::config::ClusterElectionConfig;
+use waf_common::config::{AdminTlsConfig, ClusterElectionConfig};
 use waf_engine::{Rule, RuleRegistry};
 
 fn install_crypto_provider() {
@@ -306,7 +306,7 @@ async fn config_sync_version_gating() {
         cache: Default::default(),
         api: waf_common::config::ApiConfig {
             listen_addr: "0.0.0.0:9527".into(),
-            tls: Default::default(),
+            tls: AdminTlsConfig::default(),
         },
     };
 
@@ -560,7 +560,7 @@ async fn full_lifecycle_join_sync_events_config_election() {
         cache: Default::default(),
         api: waf_common::config::ApiConfig {
             listen_addr: "0.0.0.0:9527".into(),
-            tls: Default::default(),
+            tls: AdminTlsConfig::default(),
         },
     };
     let cfg_msg = main_syncer.build_sync(&syncable_config).unwrap();
