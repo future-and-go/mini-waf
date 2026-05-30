@@ -377,9 +377,7 @@ impl AdminTlsConfig {
             other => anyhow::bail!("api.tls.min_tls_version must be \"1.2\" or \"1.3\", got: {other:?}"),
         }
         if self.mode == AdminTlsMode::Provided && (self.cert_pem.is_none() || self.key_pem.is_none()) {
-            anyhow::bail!(
-                "api.tls.mode = \"provided\" requires both cert_pem and key_pem to be set"
-            );
+            anyhow::bail!("api.tls.mode = \"provided\" requires both cert_pem and key_pem to be set");
         }
         Ok(())
     }

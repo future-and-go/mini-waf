@@ -210,9 +210,8 @@ async fn end_to_end_https_health_check() {
 
     // Use `server_config()` to get the rustls ServerConfig already wired to
     // the hot-swappable resolver — no PEM decoding needed in the test.
-    let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(
-        manager.server_config().expect("server_config"),
-    );
+    let rustls_config =
+        axum_server::tls_rustls::RustlsConfig::from_config(manager.server_config().expect("server_config"));
 
     // Trivial Axum router — no DB needed for TLS connectivity check
     let app = Router::new().route("/health", get(|| async { Json(json!({"status": "ok"})) }));
@@ -293,7 +292,10 @@ async fn http_redirect_listener_returns_301() {
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
 
-    assert!(location.starts_with("https://"), "Location must start with https://, got: {location}");
+    assert!(
+        location.starts_with("https://"),
+        "Location must start with https://, got: {location}"
+    );
 }
 
 // ─── Test: AdminTlsConfig validate rejects unsupported TLS version ────────────

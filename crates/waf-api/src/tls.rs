@@ -121,7 +121,12 @@ impl AdminTlsManager {
 
         let resolver = Arc::new(AdminCertResolver::new(&material).context("build cert resolver")?);
         let material = Arc::new(RwLock::new(Arc::new(material)));
-        Ok(Some(Self { config, listen_addr, material, resolver }))
+        Ok(Some(Self {
+            config,
+            listen_addr,
+            material,
+            resolver,
+        }))
     }
 
     /// Build a `rustls::ServerConfig` snapshot wired to the cert resolver.
@@ -210,8 +215,7 @@ impl AdminTlsManager {
 
     fn load_or_generate(config: &AdminTlsConfig, listen_addr: SocketAddr) -> Result<AdminTlsMaterial> {
         let data_dir = resolve_data_dir(config)?;
-        std::fs::create_dir_all(&data_dir)
-            .with_context(|| format!("create admin TLS data dir {data_dir:?}"))?;
+        std::fs::create_dir_all(&data_dir).with_context(|| format!("create admin TLS data dir {data_dir:?}"))?;
 
         let cert_path = data_dir.join("cert.pem");
         let key_path = data_dir.join("key.pem");
@@ -331,8 +335,8 @@ pub fn spawn_http_redirect(https_addr: SocketAddr, redirect_port: Option<u16>) {
     let https_port = https_addr.port();
 
     tokio::spawn(async move {
-        use axum::{Router, http::Request, response::Redirect, routing::any};
         use axum::body::Body;
+        use axum::{Router, http::Request, response::Redirect, routing::any};
 
         let app = Router::new().route(
             "/{*path}",
@@ -442,17 +446,14 @@ fn generate(sans: &[String], validity_days: u32) -> Result<(String, String, Offs
 
 /// Load cert + key from PEM files.
 fn load_from_files(cert_path: &Path, key_path: &Path) -> Result<AdminTlsMaterial> {
-    let cert_pem = std::fs::read_to_string(cert_path)
-        .with_context(|| format!("read cert PEM from {cert_path:?}"))?;
-    let key_pem = std::fs::read_to_string(key_path)
-        .with_context(|| format!("read key PEM from {key_path:?}"))?;
+    let cert_pem = std::fs::read_to_string(cert_path).with_context(|| format!("read cert PEM from {cert_path:?}"))?;
+    let key_pem = std::fs::read_to_string(key_path).with_context(|| format!("read key PEM from {key_path:?}"))?;
 
     // Parse expiry from cert to populate `not_after`.
     // Use rcgen to decode just enough to get the notAfter field.
-    let cert_ders: Vec<CertificateDer<'static>> =
-        CertificateDer::pem_slice_iter(cert_pem.as_bytes())
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .context("parse cert PEM")?;
+    let cert_ders: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("parse cert PEM")?;
 
     let not_after = parse_not_after_from_der(cert_ders.first().context("cert PEM has no certificates")?)?;
 
@@ -461,10 +462,9 @@ fn load_from_files(cert_path: &Path, key_path: &Path) -> Result<AdminTlsMaterial
 
 /// Parse `AdminTlsMaterial` from PEM strings.
 fn parse_material(cert_pem: &str, key_pem: &str, not_after: OffsetDateTime) -> Result<AdminTlsMaterial> {
-    let cert_chain: Vec<CertificateDer<'static>> =
-        CertificateDer::pem_slice_iter(cert_pem.as_bytes())
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .context("parse cert chain")?;
+    let cert_chain: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("parse cert chain")?;
 
     let key: PrivateKeyDer<'static> =
         PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).context("parse private key PEM")?;
@@ -809,7 +809,10 @@ mod tests {
             ..AdminTlsConfig::default()
         };
         AdminTlsManager::bootstrap(cfg, test_addr()).unwrap().unwrap();
-        let mode = std::fs::metadata(dir.path().join("key.pem")).unwrap().permissions().mode();
+        let mode = std::fs::metadata(dir.path().join("key.pem"))
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600, "key.pem must be chmod 600");
     }
 }

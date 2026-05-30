@@ -77,14 +77,8 @@ pub async fn security_headers_middleware(req: Request<Body>, next: Next) -> impl
         "Referrer-Policy",
         HeaderValue::from_static("strict-origin-when-cross-origin"),
     );
-    headers.insert(
-        "Cross-Origin-Opener-Policy",
-        HeaderValue::from_static("same-origin"),
-    );
-    headers.insert(
-        "Cross-Origin-Resource-Policy",
-        HeaderValue::from_static("same-origin"),
-    );
+    headers.insert("Cross-Origin-Opener-Policy", HeaderValue::from_static("same-origin"));
+    headers.insert("Cross-Origin-Resource-Policy", HeaderValue::from_static("same-origin"));
     headers.insert(
         "Permissions-Policy",
         HeaderValue::from_static("geolocation=(), microphone=(), camera=(), payment=()"),
@@ -92,10 +86,7 @@ pub async fn security_headers_middleware(req: Request<Body>, next: Next) -> impl
 
     // COEP only for UI — API routes may serve cross-origin clients (CORS).
     if path.starts_with("/ui") || path == "/" {
-        headers.insert(
-            "Cross-Origin-Embedder-Policy",
-            HeaderValue::from_static("require-corp"),
-        );
+        headers.insert("Cross-Origin-Embedder-Policy", HeaderValue::from_static("require-corp"));
     }
 
     response
@@ -522,7 +513,10 @@ mod tests {
             .unwrap()
             .to_str()
             .unwrap();
-        assert!(hsts.contains("max-age=63072000"), "HSTS must be 2-year max-age, got: {hsts}");
+        assert!(
+            hsts.contains("max-age=63072000"),
+            "HSTS must be 2-year max-age, got: {hsts}"
+        );
         assert!(hsts.contains("preload"), "HSTS must include preload, got: {hsts}");
     }
 
@@ -591,7 +585,10 @@ mod tests {
         );
         assert!(csp.contains("script-src"), "CSP missing script-src directive");
         assert!(csp.contains("style-src"), "CSP missing style-src directive");
-        assert!(csp.contains("frame-ancestors 'none'"), "CSP missing frame-ancestors directive");
+        assert!(
+            csp.contains("frame-ancestors 'none'"),
+            "CSP missing frame-ancestors directive"
+        );
     }
 
     // ── Cache-control tests ───────────────────────────────────────────────────
@@ -606,14 +603,15 @@ mod tests {
         let req = Request::builder().uri("/api/test").body(Body::empty()).unwrap();
         let resp: axum::response::Response = app.oneshot(req).await.unwrap();
 
-        let cc = resp
-            .headers()
-            .get("cache-control")
-            .unwrap()
-            .to_str()
-            .unwrap();
-        assert!(cc.contains("no-store"), "Cache-Control must include no-store, got: {cc}");
-        assert!(cc.contains("no-cache"), "Cache-Control must include no-cache, got: {cc}");
+        let cc = resp.headers().get("cache-control").unwrap().to_str().unwrap();
+        assert!(
+            cc.contains("no-store"),
+            "Cache-Control must include no-store, got: {cc}"
+        );
+        assert!(
+            cc.contains("no-cache"),
+            "Cache-Control must include no-cache, got: {cc}"
+        );
     }
 
     /// `/ui/*` responses must NOT have the cache-control override.

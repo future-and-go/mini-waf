@@ -60,8 +60,8 @@ use crate::rule_sources_api::{
 };
 use crate::rules_api::{get_rule_registry, import_rules, reload_rule_registry, toggle_rule};
 use crate::security::{
-    admin_ip_check_middleware, cache_control_middleware, list_audit_log, rate_limit_middleware,
-    request_id_middleware, security_headers_middleware,
+    admin_ip_check_middleware, cache_control_middleware, list_audit_log, rate_limit_middleware, request_id_middleware,
+    security_headers_middleware,
 };
 use crate::state::AppState;
 use crate::static_files::static_handler;
@@ -82,11 +82,7 @@ pub fn build_router(state: Arc<AppState>, tls_enabled: bool) -> Router {
             // Same-origin: reject requests whose Origin differs from Host.
             CorsLayer::new()
                 .allow_origin(AllowOrigin::predicate(|origin, req| {
-                    let host = req
-                        .headers
-                        .get("host")
-                        .and_then(|h| h.to_str().ok())
-                        .unwrap_or("");
+                    let host = req.headers.get("host").and_then(|h| h.to_str().ok()).unwrap_or("");
                     origin
                         .to_str()
                         .ok()
@@ -411,11 +407,7 @@ pub async fn start_api_server(config: &ApiConfig, state: Arc<AppState>) -> anyho
     serve_tls(listen_addr, app, tls_manager).await
 }
 
-async fn serve_tls(
-    listen_addr: SocketAddr,
-    app: Router,
-    manager: Arc<AdminTlsManager>,
-) -> anyhow::Result<()> {
+async fn serve_tls(listen_addr: SocketAddr, app: Router, manager: Arc<AdminTlsManager>) -> anyhow::Result<()> {
     use axum_server::tls_rustls::RustlsConfig;
 
     let server_config = manager.server_config().context("build rustls ServerConfig")?;
