@@ -739,8 +739,8 @@ mod tests {
         let mat = parse_material(&cert_pem, &key_pem, not_after).unwrap();
         let resolver = AdminCertResolver::new(&mat).unwrap();
 
-        let (cert2_pem, key2_pem, not_after2) = generate(&["localhost".to_owned()], 365).unwrap();
-        let mat2 = parse_material(&cert2_pem, &key2_pem, not_after2).unwrap();
+        let (renewed_cert, renewed_key, renewed_expiry) = generate(&["localhost".to_owned()], 365).unwrap();
+        let mat2 = parse_material(&renewed_cert, &renewed_key, renewed_expiry).unwrap();
 
         let fp_before = mat.fingerprint_sha256.clone();
         resolver.swap(&mat2).unwrap();
