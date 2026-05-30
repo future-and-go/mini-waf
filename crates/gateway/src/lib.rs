@@ -16,6 +16,7 @@ pub mod router;
 pub mod ssl;
 pub mod tiered;
 pub mod tunnel;
+pub mod waf_observability_headers;
 
 pub use cache::{BackendHealth, BackendInfo, CacheStatsSnapshot, CachedResponse, ResponseCache, TimeseriesBucket};
 pub use ctx_builder::RequestCtxBuilder;

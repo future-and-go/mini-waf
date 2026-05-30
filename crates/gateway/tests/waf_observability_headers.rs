@@ -12,15 +12,6 @@
 //! * idempotency — repeat injection replaces, never appends
 //! * `WafAction::as_contract_str()` covers every variant exactly
 //!
-//! ## Phase 1 / Phase 2 handshake
-//!
-//! The injector module does not exist yet. To keep the workspace building
-//! during the TDD red→green walk, this file declares a local stub module
-//! that mirrors the Phase 2 signatures verbatim. The stub deliberately does
-//! nothing — assertions fail with the expected red diff. When Phase 2 lands,
-//! delete the `mod waf_observability_headers` block and replace it with
-//! `use gateway::waf_observability_headers::{...}` — no test body changes.
-
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -28,52 +19,7 @@
     clippy::too_many_lines
 )]
 
-// ── Phase 2 API stub (delete on Phase 2 merge — replace with `use gateway::…`) ─
-
-#[allow(dead_code)] // stub fields are read once Phase 2 replaces this module with the real impl
-mod waf_observability_headers {
-    //! Phase 2 will populate this module in `crates/gateway/src/waf_observability_headers.rs`.
-    //! Signatures here are the contract Phase 2 must honour.
-
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-    pub enum CacheStatus {
-        Hit,
-        Miss,
-        #[default]
-        Bypass,
-    }
-
-    impl CacheStatus {
-        #[allow(dead_code)]
-        pub const fn as_contract_str(self) -> &'static str {
-            match self {
-                Self::Hit => "HIT",
-                Self::Miss => "MISS",
-                Self::Bypass => "BYPASS",
-            }
-        }
-    }
-
-    pub struct WafHeaderValues<'a> {
-        pub request_id: &'a str,
-        pub risk_score: u8,
-        pub action: &'a str,
-        pub rule_id: Option<&'a str>,
-        pub mode: &'a str,
-        pub cache: CacheStatus,
-    }
-
-    /// Phase 1 stub — no-op so every assertion in this file fails red.
-    /// Phase 2 replaces this with the real injector.
-    pub fn inject_waf_observability_headers(
-        _resp: &mut pingora_http::ResponseHeader,
-        _vals: &WafHeaderValues<'_>,
-    ) -> pingora_core::Result<()> {
-        Ok(())
-    }
-}
-
-use waf_observability_headers::{CacheStatus, WafHeaderValues, inject_waf_observability_headers};
+use gateway::waf_observability_headers::{CacheStatus, WafHeaderValues, inject_waf_observability_headers};
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
