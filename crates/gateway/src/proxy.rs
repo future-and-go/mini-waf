@@ -863,6 +863,7 @@ impl ProxyHttp for WafProxy {
     where
         Self::CTX: Send + Sync,
     {
+        ctx.upstream_response_observed = true;
         let upstream_contacted = ctx.upstream_addr.is_some();
         if let (Some(req_ctx), Some(hc)) = (&ctx.request_ctx, &ctx.host_config) {
             // FR-018: brute-force / credential-stuffing dispatch. Engine state
@@ -1182,8 +1183,11 @@ impl ProxyHttp for WafProxy {
         }
     }
 
-    async fn logging(&self, _session: &mut Session, _error: Option<&pingora_core::Error>, ctx: &mut GatewayCtx) {
+    async fn logging(&self, session: &mut Session, _error: Option<&pingora_core::Error>, ctx: &mut GatewayCtx) {
         if let Some(req_ctx) = &ctx.request_ctx {
+            let status = session.response_written().map_or(0, |h| h.status.as_u16());
+            self.engine
+                .on_request_complete(req_ctx, status, ctx.upstream_response_observed);
             debug!(
                 tier = ?req_ctx.tier,
                 "Request completed: {} {} {} → upstream={}",

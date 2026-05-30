@@ -8,6 +8,7 @@ Core detection engine. Evaluates inbound HTTP requests against rule sets and sec
 - **Access control (FR-008)**: hot-reloadable IP/CIDR allow/block tables + host-gate evaluator.
 - **Relay / proxy intel (FR-009)**: ASN classifier, Tor-exit, datacenter, proxy-chain, XFF validator providers fed by HTTP feeds (iptoasn, Tor exit list) with atomic swap reload.
 - **Device fingerprinting (FR-010)**: TLS ClientHello + HTTP/2 frame capture, JA3 / JA4 / Akamai H2 fingerprint hashers, identity store (in-memory or Redis), risk-signal providers (UA blocklist/entropy, fingerprint conflict, IP hopping, H2 anomaly), risk aggregator.
+- **Transaction velocity (FR-012)**: signal-only; dispatched from gateway `logging()` hook (not `response_filter`) so streaming, WAF-blocked, and origin-down paths are handled correctly. Events carry tristate `Outcome::{Pending, Ok, Failed}`; classifiers ignore Pending. Velocity signals carry both `count` (settled attempts in window) and `ok_count` (subset that succeeded). Cookie-less requests fall back to `RequestCtx.device_fp` scoped by `peer_ip` for session identity.
 - **CrowdSec integration**: AppSec component, decision sync, cache, pusher, models.
 - **Community blocklist**: enrollment, fetch, reporter, checker.
 - **Plugins**: WASM (`wasmtime`) and Rhai script execution for custom logic.

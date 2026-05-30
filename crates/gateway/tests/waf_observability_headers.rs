@@ -391,6 +391,7 @@ mod phase6 {
             tier_policy: RequestCtx::default_tier_policy(),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
@@ -602,6 +603,7 @@ mod phase5 {
             tier_policy: RequestCtx::default_tier_policy(),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
@@ -904,6 +906,7 @@ mod phase7 {
             tier_policy: RequestCtx::default_tier_policy(),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         };
         GatewayCtx {
             request_ctx: Some(request_ctx),
@@ -976,6 +979,7 @@ mod phase7 {
             tier_policy: RequestCtx::default_tier_policy(),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         };
 
         // A non-trivial sync delta drives the score up so the scorer must emit

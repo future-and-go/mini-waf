@@ -53,6 +53,7 @@ fn make_request_ctx() -> RequestCtx {
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 
