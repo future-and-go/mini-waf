@@ -1,6 +1,8 @@
 //! Security-hardening middleware and helpers.
 //!
 //! - Security response headers (`X-Frame-Options`, CSP, HSTS, `X-Content-Type-Options`)
+//! - Cache-control for `/api/*` paths (prevents JWT/data caching by intermediaries)
+//! - Request-ID correlation (generate or propagate `X-Request-Id`)
 //! - Request body size enforcement
 //! - IP-based admin access control
 //! - Simple in-process per-IP rate limiting
@@ -29,10 +31,25 @@ use waf_storage::models::AuditLogQuery;
 
 // ─── Security headers middleware ──────────────────────────────────────────────
 
-/// Adds security headers to every management API response.
+/// Adds hardened security headers to every management API response.
+///
+/// Headers applied (H2 in the plan):
+/// - `Strict-Transport-Security` — 2-year max-age with preload
+/// - `Content-Security-Policy` — default-src 'self' + hardened directives
+/// - `Cross-Origin-Opener-Policy` — same-origin
+/// - `Cross-Origin-Resource-Policy` — same-origin
+/// - `Permissions-Policy` — restrictive set
+/// - `X-Frame-Options` — DENY
+/// - `X-Content-Type-Options` — nosniff
+/// - `X-XSS-Protection` — 1; mode=block (legacy browsers)
+/// - `Referrer-Policy` — strict-origin-when-cross-origin
+///
+/// `Cross-Origin-Embedder-Policy: require-corp` is applied only to `/ui/*`
+/// paths to avoid blocking CORS API calls.
 pub async fn security_headers_middleware(req: Request<Body>, next: Next) -> impl IntoResponse {
     use axum::http::HeaderValue;
 
+    let path = req.uri().path().to_owned();
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
 
@@ -41,21 +58,104 @@ pub async fn security_headers_middleware(req: Request<Body>, next: Next) -> impl
     headers.insert("X-XSS-Protection", HeaderValue::from_static("1; mode=block"));
     headers.insert(
         "Strict-Transport-Security",
-        HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+        HeaderValue::from_static("max-age=63072000; includeSubDomains; preload"),
     );
     headers.insert(
         "Content-Security-Policy",
         HeaderValue::from_static(
-            "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'",
+            "default-src 'self'; \
+             script-src 'self' 'unsafe-inline' 'unsafe-eval'; \
+             style-src 'self' 'unsafe-inline'; \
+             upgrade-insecure-requests; \
+             base-uri 'self'; \
+             form-action 'self'; \
+             frame-ancestors 'none'; \
+             object-src 'none'",
         ),
     );
     headers.insert(
         "Referrer-Policy",
         HeaderValue::from_static("strict-origin-when-cross-origin"),
     );
+    headers.insert(
+        "Cross-Origin-Opener-Policy",
+        HeaderValue::from_static("same-origin"),
+    );
+    headers.insert(
+        "Cross-Origin-Resource-Policy",
+        HeaderValue::from_static("same-origin"),
+    );
+    headers.insert(
+        "Permissions-Policy",
+        HeaderValue::from_static("geolocation=(), microphone=(), camera=(), payment=()"),
+    );
+
+    // COEP only for UI — API routes may serve cross-origin clients (CORS).
+    if path.starts_with("/ui") || path == "/" {
+        headers.insert(
+            "Cross-Origin-Embedder-Policy",
+            HeaderValue::from_static("require-corp"),
+        );
+    }
 
     response
 }
+
+// ─── Cache-control middleware for /api/* ──────────────────────────────────────
+
+/// Adds `Cache-Control: no-store` and related headers to every `/api/*` response.
+///
+/// Prevents JWT tokens and admin data from being cached by intermediary proxies.
+pub async fn cache_control_middleware(req: Request<Body>, next: Next) -> impl IntoResponse {
+    use axum::http::HeaderValue;
+
+    let is_api = req.uri().path().starts_with("/api/");
+    let mut response = next.run(req).await;
+
+    if is_api {
+        let headers = response.headers_mut();
+        headers.insert(
+            "Cache-Control",
+            HeaderValue::from_static("no-store, no-cache, must-revalidate, private"),
+        );
+        headers.insert("Pragma", HeaderValue::from_static("no-cache"));
+        headers.insert("Expires", HeaderValue::from_static("0"));
+    }
+
+    response
+}
+
+// ─── Request-ID middleware ────────────────────────────────────────────────────
+
+/// Propagates or generates a `X-Request-Id` header.
+///
+/// If the incoming request already carries the header it is forwarded
+/// unchanged. Otherwise a new `uuid::Uuid::new_v4()` (simple format) is
+/// generated, stored in request extensions, and echoed in the response.
+pub async fn request_id_middleware(mut req: Request<Body>, next: Next) -> impl IntoResponse {
+    use axum::http::HeaderValue;
+
+    let request_id = req
+        .headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+
+    req.extensions_mut().insert(RequestId(request_id.clone()));
+
+    let mut response = next.run(req).await;
+
+    if let Ok(val) = HeaderValue::from_str(&request_id) {
+        response.headers_mut().insert("x-request-id", val);
+    }
+
+    response
+}
+
+/// Request extension holding the correlation ID for this request.
+#[derive(Clone)]
+pub struct RequestId(pub String);
 
 // ─── Rate limiter ──────────────────────────────────────────────────────────────
 
@@ -406,6 +506,46 @@ mod tests {
         );
     }
 
+    /// HSTS header must use 2-year max-age with preload.
+    #[tokio::test]
+    async fn hsts_header_value_is_two_years_with_preload() {
+        let app = Router::new()
+            .route("/test", get(|| async { "ok" }))
+            .layer(middleware::from_fn(security_headers_middleware));
+
+        let req = Request::builder().uri("/test").body(Body::empty()).unwrap();
+        let resp: axum::response::Response = app.oneshot(req).await.unwrap();
+
+        let hsts = resp
+            .headers()
+            .get("strict-transport-security")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(hsts.contains("max-age=63072000"), "HSTS must be 2-year max-age, got: {hsts}");
+        assert!(hsts.contains("preload"), "HSTS must include preload, got: {hsts}");
+    }
+
+    /// COOP header must be present.
+    #[tokio::test]
+    async fn coop_header_present() {
+        let app = Router::new()
+            .route("/test", get(|| async { "ok" }))
+            .layer(middleware::from_fn(security_headers_middleware));
+
+        let req = Request::builder().uri("/test").body(Body::empty()).unwrap();
+        let resp: axum::response::Response = app.oneshot(req).await.unwrap();
+
+        assert_eq!(
+            resp.headers()
+                .get("cross-origin-opener-policy")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "same-origin"
+        );
+    }
+
     /// All security header values must match their expected strings exactly.
     #[tokio::test]
     async fn security_headers_values_correct() {
@@ -425,10 +565,6 @@ mod tests {
         assert_eq!(
             headers.get("x-xss-protection").unwrap().to_str().unwrap(),
             "1; mode=block"
-        );
-        assert_eq!(
-            headers.get("strict-transport-security").unwrap().to_str().unwrap(),
-            "max-age=31536000; includeSubDomains"
         );
         assert_eq!(
             headers.get("referrer-policy").unwrap().to_str().unwrap(),
@@ -455,6 +591,85 @@ mod tests {
         );
         assert!(csp.contains("script-src"), "CSP missing script-src directive");
         assert!(csp.contains("style-src"), "CSP missing style-src directive");
+        assert!(csp.contains("frame-ancestors 'none'"), "CSP missing frame-ancestors directive");
+    }
+
+    // ── Cache-control tests ───────────────────────────────────────────────────
+
+    /// `/api/*` responses must have `Cache-Control: no-store`.
+    #[tokio::test]
+    async fn cache_control_no_store_on_api_paths() {
+        let app = Router::new()
+            .route("/api/test", get(|| async { "ok" }))
+            .layer(middleware::from_fn(cache_control_middleware));
+
+        let req = Request::builder().uri("/api/test").body(Body::empty()).unwrap();
+        let resp: axum::response::Response = app.oneshot(req).await.unwrap();
+
+        let cc = resp
+            .headers()
+            .get("cache-control")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(cc.contains("no-store"), "Cache-Control must include no-store, got: {cc}");
+        assert!(cc.contains("no-cache"), "Cache-Control must include no-cache, got: {cc}");
+    }
+
+    /// `/ui/*` responses must NOT have the cache-control override.
+    #[tokio::test]
+    async fn cache_control_absent_on_ui_paths() {
+        let app = Router::new()
+            .route("/ui/index.html", get(|| async { "ok" }))
+            .layer(middleware::from_fn(cache_control_middleware));
+
+        let req = Request::builder().uri("/ui/index.html").body(Body::empty()).unwrap();
+        let resp: axum::response::Response = app.oneshot(req).await.unwrap();
+
+        assert!(
+            !resp.headers().contains_key("cache-control"),
+            "Cache-Control must not be set for /ui/ paths"
+        );
+    }
+
+    // ── Request-ID tests ──────────────────────────────────────────────────────
+
+    /// When no `X-Request-Id` is provided, the middleware generates one and adds it.
+    #[tokio::test]
+    async fn request_id_generated_when_missing() {
+        let app = Router::new()
+            .route("/test", get(|| async { "ok" }))
+            .layer(middleware::from_fn(request_id_middleware));
+
+        let req = Request::builder().uri("/test").body(Body::empty()).unwrap();
+        let resp: axum::response::Response = app.oneshot(req).await.unwrap();
+
+        assert!(
+            resp.headers().contains_key("x-request-id"),
+            "X-Request-Id header must be generated"
+        );
+        let id = resp.headers().get("x-request-id").unwrap().to_str().unwrap();
+        assert!(!id.is_empty(), "X-Request-Id must not be empty");
+    }
+
+    /// When `X-Request-Id` is provided it must be echoed back unchanged.
+    #[tokio::test]
+    async fn request_id_propagated_when_provided() {
+        let app = Router::new()
+            .route("/test", get(|| async { "ok" }))
+            .layer(middleware::from_fn(request_id_middleware));
+
+        let req = Request::builder()
+            .uri("/test")
+            .header("x-request-id", "my-custom-id-abc123")
+            .body(Body::empty())
+            .unwrap();
+        let resp: axum::response::Response = app.oneshot(req).await.unwrap();
+
+        assert_eq!(
+            resp.headers().get("x-request-id").unwrap().to_str().unwrap(),
+            "my-custom-id-abc123"
+        );
     }
 
     /// After consuming some tokens, sleeping allows the bucket to refill.
@@ -568,7 +783,6 @@ mod tests {
         );
 
         // IPv4-mapped IPv6 — does NOT match the plain IPv4 allowlist entry
-        // because its string representation is "::ffff:192.168.1.1", not "192.168.1.1".
         let ipv4_mapped: IpAddr = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xc0a8, 0x0101));
         assert!(
             !is_admin_ip_allowed(&ipv4_mapped, &allowlist),

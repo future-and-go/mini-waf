@@ -3,12 +3,26 @@ import react from "@vitejs/plugin-react";
 
 // PRX-WAF Admin Panel
 //   - Dev: Vite serves at http://localhost:5174, proxies /api + /ws to :9527
+//          Admin API now uses HTTPS by default (self-signed cert).
+//          To proxy to an HTTP-only backend, set VITE_API_HTTPS=false in
+//          .env.local before starting the dev server.
 //   - Prod: dist/ is embedded into the Rust binary via `rust_embed`
 //           (crates/waf-api/src/static_files.rs) and served by prx-waf at
-//           http://<host>:9527/ui/.
+//           https://<host>:9527/ui/.
 //   Base path `/ui/` so every asset URL in the generated index.html is
 //   prefixed correctly and matches the Rust static handler, which strips
 //   the `/ui/` prefix before looking up files in the embedded archive.
+
+// Safe `process.env` access without requiring @types/node.
+// `globalThis.process` is defined in Node.js (where vite.config.ts runs)
+// but TypeScript doesn't know about it unless @types/node is installed.
+// Casting through `unknown` keeps the TS compiler happy.
+const nodeEnv = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } })
+  .process?.env ?? {};
+
+const apiHttps = nodeEnv.VITE_API_HTTPS !== "false"; // default: true
+const apiTarget = apiHttps ? "https://localhost:9527" : "http://localhost:9527";
+const wsTarget  = apiHttps ? "wss://localhost:9527"  : "ws://localhost:9527";
 export default defineConfig({
   plugins: [react()],
   base: "/ui/",
@@ -61,12 +75,15 @@ export default defineConfig({
     port: 5174,
     proxy: {
       "/api": {
-        target: "http://localhost:9527",
+        target: apiTarget,
         changeOrigin: true,
+        // Accept self-signed admin cert in dev without disabling all TLS checks.
+        secure: !apiHttps,
       },
       "/ws": {
-        target: "ws://localhost:9527",
+        target: wsTarget,
         ws: true,
+        secure: !apiHttps,
       },
     },
   },

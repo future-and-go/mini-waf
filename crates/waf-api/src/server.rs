@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use axum::http::{
     HeaderValue, Method,
     header::{AUTHORIZATION, CONTENT_TYPE},
@@ -11,8 +12,10 @@ use axum::{
     routing::{delete, get, patch, post},
 };
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
+use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{info, warn};
+use waf_common::config::ApiConfig;
 
 use crate::access_lists_api::{get_access_lists, put_access_lists, test_access_lists};
 use crate::auth::{login, logout, refresh_token};
@@ -56,25 +59,48 @@ use crate::rule_sources_api::{
     create_rule_source, delete_rule_source, list_rule_sources, sync_all_rule_sources, sync_rule_source,
 };
 use crate::rules_api::{get_rule_registry, import_rules, reload_rule_registry, toggle_rule};
-use crate::security::{admin_ip_check_middleware, list_audit_log, rate_limit_middleware, security_headers_middleware};
+use crate::security::{
+    admin_ip_check_middleware, cache_control_middleware, list_audit_log, rate_limit_middleware,
+    request_id_middleware, security_headers_middleware,
+};
 use crate::state::AppState;
 use crate::static_files::static_handler;
 use crate::stats::{
     stats_endpoints, stats_geo, stats_overview, stats_timeseries, stats_timeseries_by_category, threat_intel_status,
 };
 use crate::tier_policies_api::{dry_run_tier, get_tier_policies, put_tier_policies};
+use crate::tls::{AdminTlsManager, spawn_http_redirect};
 use crate::tunnels::{create_tunnel, delete_tunnel, list_tunnels, ws_tunnel};
 use crate::websocket::{ws_events, ws_logs};
 
-/// Build the Axum router with all API routes
-pub fn build_router(state: Arc<AppState>) -> Router {
-    // Build CORS layer: use configured origin allowlist when available,
-    // otherwise fall back to permissive mode (backward compatible but insecure).
+/// Build the Axum router with all API routes.
+pub fn build_router(state: Arc<AppState>, tls_enabled: bool) -> Router {
+    // CORS: tighten when TLS is on — same-origin predicate when no explicit list.
+    // When TLS is off (dev only) fall back to permissive for backwards compat.
     let cors = if state.cors_origins.is_empty() {
-        CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
-            .allow_headers([AUTHORIZATION, CONTENT_TYPE])
+        if tls_enabled {
+            // Same-origin: reject requests whose Origin differs from Host.
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::predicate(|origin, req| {
+                    let host = req
+                        .headers
+                        .get("host")
+                        .and_then(|h| h.to_str().ok())
+                        .unwrap_or("");
+                    origin
+                        .to_str()
+                        .ok()
+                        .map_or(false, |o| o.contains(host) && !host.is_empty())
+                }))
+                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+                .allow_headers([AUTHORIZATION, CONTENT_TYPE])
+        } else {
+            warn!("Admin API CORS is open (allow all) — set [security] cors_origins for production");
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+                .allow_headers([AUTHORIZATION, CONTENT_TYPE])
+        }
     } else {
         let origins: Vec<HeaderValue> = state
             .cors_origins
@@ -86,6 +112,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
             .allow_headers([AUTHORIZATION, CONTENT_TYPE])
     };
+
+    let body_limit = state.security_config.max_request_body_bytes as usize;
 
     // Public routes (no JWT)
     let public_routes = Router::new()
@@ -242,9 +270,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .route("/api/crowdsec/stats", get(crowdsec_stats))
         .route("/api/crowdsec/events", get(list_crowdsec_events))
-        // Phase 02 (VictoriaLogs): admin-only LogsQL proxy. JWT comes from
-        // the shared `require_auth` layer below; the role check is enforced
-        // inside each handler so it can return 403 with a useful body.
+        // Phase 02 (VictoriaLogs): admin-only LogsQL proxy.
         .route("/api/v1/logs/query", get(logs_query))
         .route("/api/v1/logs/stats", get(logs_stats))
         .route("/api/v1/logs/streams", get(logs_streams))
@@ -295,7 +321,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ));
 
     // WebSocket routes — protected by admin IP allowlist and rate limiting.
-    // Auth is handled via query param inside each handler.
     let ws_routes = Router::new()
         .route("/ws/events", get(ws_events))
         .route("/ws/logs", get(ws_logs))
@@ -303,10 +328,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .layer(middleware::from_fn_with_state(state.clone(), admin_ip_check_middleware))
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit_middleware));
 
-    // Serve the embedded React admin panel (Refine + AntD) at /ui/*.
-    // Root `/` redirects to `/ui/` so visitors hitting the bare host land on
-    // the dashboard instead of a 404. `/ui` without trailing slash also
-    // normalises to `/ui/` for consistent asset resolution.
+    // Embedded React admin panel at /ui/*.
     let ui_routes = Router::new()
         .route("/", get(|| async { Redirect::permanent("/ui/") }))
         .route("/ui", get(|| async { Redirect::permanent("/ui/") }))
@@ -321,21 +343,86 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(ws_routes)
         .merge(interop_routes)
         .merge(ui_routes)
+        .layer(middleware::from_fn(cache_control_middleware))
+        .layer(middleware::from_fn(request_id_middleware))
         .layer(middleware::from_fn(security_headers_middleware))
+        .layer(RequestBodyLimitLayer::new(body_limit))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
 
-/// Start the management API server
-pub async fn start_api_server(listen_addr: &str, state: Arc<AppState>) -> anyhow::Result<()> {
-    let addr: SocketAddr = listen_addr.parse()?;
-    let app = build_router(state);
+/// Start the management API server.
+///
+/// Serves HTTPS when `config.tls.enabled` (default), falling back to plaintext
+/// HTTP with a periodic WARN when `enabled = false`.
+pub async fn start_api_server(config: &ApiConfig, state: Arc<AppState>) -> anyhow::Result<()> {
+    let listen_addr: SocketAddr = config
+        .listen_addr
+        .parse()
+        .with_context(|| format!("invalid api.listen_addr: {}", config.listen_addr))?;
 
-    info!("Management API listening on {}", addr);
+    let tls_enabled = config.tls.enabled;
+    let app = build_router(state.clone(), tls_enabled);
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
+    if !tls_enabled {
+        warn!(
+            listen_addr = %listen_addr,
+            "Admin API serving plaintext HTTP — traffic includes JWT tokens. \
+             Set [api.tls] enabled = true for production."
+        );
+        // Repeat warn every 60 s while running
+        tokio::spawn(async {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            interval.tick().await; // skip first tick
+            loop {
+                interval.tick().await;
+                warn!("Admin API is serving plaintext HTTP — JWT tokens are unencrypted in transit");
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(listen_addr)
+            .await
+            .with_context(|| format!("bind admin API listener on {listen_addr}"))?;
+        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .context("admin API serve error")?;
+        return Ok(());
+    }
 
-    Ok(())
+    let tls_manager = Arc::new(
+        AdminTlsManager::bootstrap(config.tls.clone(), listen_addr)
+            .context("bootstrap admin TLS material")?
+            .context("admin TLS enabled but bootstrap returned None")?,
+    );
+
+    let _renewal = Arc::clone(&tls_manager).spawn_renewal();
+
+    info!(
+        addr = %listen_addr,
+        fingerprint = %tls_manager.fingerprint(),
+        mode = ?config.tls.mode,
+        "Admin API listening on HTTPS"
+    );
+
+    if config.tls.http_redirect {
+        spawn_http_redirect(listen_addr, config.tls.http_redirect_port);
+    }
+
+    serve_tls(listen_addr, app, tls_manager).await
+}
+
+async fn serve_tls(
+    listen_addr: SocketAddr,
+    app: Router,
+    manager: Arc<AdminTlsManager>,
+) -> anyhow::Result<()> {
+    use axum_server::tls_rustls::RustlsConfig;
+
+    let server_config = manager.server_config().context("build rustls ServerConfig")?;
+    let rustls_config = RustlsConfig::from_config(server_config);
+
+    axum_server::bind_rustls(listen_addr, rustls_config)
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+        .await
+        .context("axum-server TLS serve failed")
 }

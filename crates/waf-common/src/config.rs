@@ -256,13 +256,132 @@ impl ProxyConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiConfig {
     pub listen_addr: String,
+    /// TLS configuration for the admin API. Defaults to HTTPS auto-on.
+    #[serde(default)]
+    pub tls: AdminTlsConfig,
 }
 
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
             listen_addr: "127.0.0.1:9527".to_string(),
+            tls: AdminTlsConfig::default(),
         }
+    }
+}
+
+/// TLS configuration for the admin API endpoint.
+///
+/// Default: HTTPS enabled, self-signed cert auto-generated at `data_dir/admin-tls/`,
+/// renewed 30 days before expiry, TLS 1.2+ with HTTP→HTTPS redirect listener.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminTlsConfig {
+    /// Enable TLS. Default: true. Set false to fall back to HTTP (not recommended).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Operating mode.
+    /// - `"auto"` (default): generate cert if absent, persist, auto-renew
+    /// - `"provided"`: load cert/key from `cert_pem` + `key_pem`, no auto-renew
+    #[serde(default)]
+    pub mode: AdminTlsMode,
+
+    /// PEM cert path — only used when `mode = "provided"`.
+    #[serde(default)]
+    pub cert_pem: Option<std::path::PathBuf>,
+
+    /// PEM key path — only used when `mode = "provided"`.
+    #[serde(default)]
+    pub key_pem: Option<std::path::PathBuf>,
+
+    /// Directory for auto-generated cert storage.
+    /// Fallback chain: this field → `<geoip.data_dir>/admin-tls` → `/var/lib/prx-waf/admin-tls`.
+    #[serde(default)]
+    pub data_dir: Option<std::path::PathBuf>,
+
+    /// Additional SANs (hostname + listen IP are appended automatically).
+    /// Default: ["localhost", "127.0.0.1", "::1"]
+    #[serde(default = "default_admin_tls_sans")]
+    pub extra_sans: Vec<String>,
+
+    /// Cert validity in days. Default: 365.
+    #[serde(default = "default_admin_tls_validity")]
+    pub validity_days: u32,
+
+    /// Renew when remaining lifetime ≤ this many days. Default: 30.
+    #[serde(default = "default_admin_tls_renew_before")]
+    pub renewal_before_days: u32,
+
+    /// Minimum TLS version: `"1.2"` or `"1.3"`. Default: `"1.2"`.
+    #[serde(default = "default_min_tls_version")]
+    pub min_tls_version: String,
+
+    /// Bind an HTTP listener that 301-redirects to HTTPS. Default: true.
+    #[serde(default = "default_true")]
+    pub http_redirect: bool,
+
+    /// Port for the HTTP redirect listener. Default: `listen_addr.port() - 1`.
+    #[serde(default)]
+    pub http_redirect_port: Option<u16>,
+}
+
+/// Admin TLS operating mode.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminTlsMode {
+    #[default]
+    Auto,
+    Provided,
+}
+
+fn default_admin_tls_sans() -> Vec<String> {
+    vec!["localhost".into(), "127.0.0.1".into(), "::1".into()]
+}
+const fn default_admin_tls_validity() -> u32 {
+    365
+}
+const fn default_admin_tls_renew_before() -> u32 {
+    30
+}
+fn default_min_tls_version() -> String {
+    "1.2".into()
+}
+
+impl Default for AdminTlsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mode: AdminTlsMode::Auto,
+            cert_pem: None,
+            key_pem: None,
+            data_dir: None,
+            extra_sans: default_admin_tls_sans(),
+            validity_days: default_admin_tls_validity(),
+            renewal_before_days: default_admin_tls_renew_before(),
+            min_tls_version: default_min_tls_version(),
+            http_redirect: true,
+            http_redirect_port: None,
+        }
+    }
+}
+
+impl AdminTlsConfig {
+    /// Validate config values. Called from `load_config` after TOML parse.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        match self.min_tls_version.as_str() {
+            "1.2" | "1.3" => {}
+            other => anyhow::bail!("api.tls.min_tls_version must be \"1.2\" or \"1.3\", got: {other:?}"),
+        }
+        if self.mode == AdminTlsMode::Provided && (self.cert_pem.is_none() || self.key_pem.is_none()) {
+            anyhow::bail!(
+                "api.tls.mode = \"provided\" requires both cert_pem and key_pem to be set"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -1077,6 +1196,7 @@ pub fn load_config(path: &str) -> anyhow::Result<AppConfig> {
     let mut config: AppConfig = toml::from_str(&content)?;
     apply_env_overrides(&mut config)?;
     config.victoria_logs.validate()?;
+    config.api.tls.validate()?;
     Ok(config)
 }
 
@@ -1149,6 +1269,61 @@ mod env_override_tests {
                 "error must mention CACHE_BACKEND, got: {e}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod admin_tls_config_tests {
+    use super::{AdminTlsConfig, AdminTlsMode};
+
+    #[test]
+    fn default_admin_tls_config_is_valid() {
+        AdminTlsConfig::default().validate().unwrap();
+    }
+
+    #[test]
+    fn admin_tls_config_validate_rejects_invalid_tls_version() {
+        let cfg = AdminTlsConfig {
+            min_tls_version: "1.0".into(),
+            ..AdminTlsConfig::default()
+        };
+        assert!(cfg.validate().is_err(), "\"1.0\" must be rejected");
+    }
+
+    #[test]
+    fn admin_tls_config_validate_rejects_provided_without_paths() {
+        let cfg = AdminTlsConfig {
+            mode: AdminTlsMode::Provided,
+            cert_pem: None,
+            key_pem: None,
+            ..AdminTlsConfig::default()
+        };
+        assert!(cfg.validate().is_err(), "provided mode without paths must error");
+    }
+
+    #[test]
+    fn admin_tls_config_validate_accepts_tls13() {
+        let cfg = AdminTlsConfig {
+            min_tls_version: "1.3".into(),
+            ..AdminTlsConfig::default()
+        };
+        cfg.validate().unwrap();
+    }
+
+    #[test]
+    fn admin_tls_config_disabled_skips_validation() {
+        let cfg = AdminTlsConfig {
+            enabled: false,
+            min_tls_version: "badvalue".into(),
+            ..AdminTlsConfig::default()
+        };
+        // disabled → validate is a no-op, no error
+        cfg.validate().unwrap();
+    }
+
+    #[test]
+    fn admin_tls_mode_default_is_auto() {
+        assert_eq!(AdminTlsMode::default(), AdminTlsMode::Auto);
     }
 }
 

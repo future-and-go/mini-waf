@@ -103,7 +103,7 @@ pub async fn start_test_server() -> TestServer {
     let admin_token =
         generate_access_token(admin.id, &admin.username, &admin.role, &state.jwt_secret).expect("issue admin token");
 
-    let app = build_router(Arc::clone(&state));
+    let app = build_router(Arc::clone(&state), false);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local_addr");
     let server_task = tokio::spawn(async move {
@@ -179,7 +179,7 @@ pub async fn start_test_server_with_panel() -> (TestServer, std::path::PathBuf) 
     let admin_token =
         generate_access_token(admin.id, &admin.username, &admin.role, &state.jwt_secret).expect("issue admin token");
 
-    let app = build_router(Arc::clone(&state));
+    let app = build_router(Arc::clone(&state), false);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local_addr");
     let server_task = tokio::spawn(async move {
@@ -261,7 +261,7 @@ pub async fn start_test_server_with_cluster() -> TestServer {
     let admin_token =
         generate_access_token(admin.id, &admin.username, &admin.role, &state.jwt_secret).expect("issue admin token");
 
-    let app = build_router(Arc::clone(&state));
+    let app = build_router(Arc::clone(&state), false);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local_addr");
     let server_task = tokio::spawn(async move {
@@ -331,7 +331,7 @@ pub async fn start_test_server_with_crowdsec() -> TestServer {
     let admin_token =
         generate_access_token(admin.id, &admin.username, &admin.role, &state.jwt_secret).expect("issue admin token");
 
-    let app = build_router(Arc::clone(&state));
+    let app = build_router(Arc::clone(&state), false);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local_addr");
     let server_task = tokio::spawn(async move {
@@ -398,7 +398,7 @@ pub async fn start_test_server_with_logs(vl_base: String) -> TestServer {
     let admin_token =
         generate_access_token(admin.id, &admin.username, &admin.role, &state.jwt_secret).expect("issue admin token");
 
-    let app = build_router(Arc::clone(&state));
+    let app = build_router(Arc::clone(&state), false);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local_addr");
     let server_task = tokio::spawn(async move {
