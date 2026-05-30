@@ -13,8 +13,9 @@ trap 'rm -f "$TMP"' EXIT
 curl -fSL --max-time 120 --retry 2 --retry-delay 3 "__URL__" -o "$TMP"
 chmod +x "$TMP"
 
-install -o miniwaf -g miniwaf -m 0755 "$TMP" /opt/mini-waf/bin/prx-waf.new
-mv -f /opt/mini-waf/bin/prx-waf.new /opt/mini-waf/bin/prx-waf
+# Install at /opt/mini-waf/bin/mini-waf — the path the systemd unit executes.
+install -o miniwaf -g miniwaf -m 0755 "$TMP" /opt/mini-waf/bin/mini-waf.new
+mv -f /opt/mini-waf/bin/mini-waf.new /opt/mini-waf/bin/mini-waf
 
 systemctl restart mini-waf
 sleep 6
