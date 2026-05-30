@@ -301,7 +301,7 @@ pub struct AdminTlsConfig {
     pub data_dir: Option<std::path::PathBuf>,
 
     /// Additional SANs (hostname + listen IP are appended automatically).
-    /// Default: ["localhost", "127.0.0.1", "::1"]
+    /// Default: \[`"localhost"`, `"127.0.0.1"`, `"::1"`\]
     #[serde(default = "default_admin_tls_sans")]
     pub extra_sans: Vec<String>,
 
