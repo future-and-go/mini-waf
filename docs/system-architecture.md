@@ -100,6 +100,36 @@ Security headers (HSTS, CSP, X-Frame-Options, etc.) are never stripped.
 
 Standards: OWASP ASVS V14.4, CWE-200, CWE-209, RFC 9110 §7.6, NIST SP 800-53 SI-11.
 
+### Outbound Phase — §5 Observability Header Injection (Interop Contract v2.3)
+
+Every HTTP response — block, allow, challenge, cache HIT, error page,
+transport failure — carries the six contract-mandatory `X-WAF-*` headers
+(`X-WAF-Request-Id`, `X-WAF-Risk-Score`, `X-WAF-Action`, `X-WAF-Rule-Id`,
+`X-WAF-Cache`, `X-WAF-Mode`). The injector lives in
+`gateway::waf_observability_headers` (single DRY module) and is invoked
+by every egress site through three helpers:
+
+- `inject_waf_observability_headers` — raw inject from a `WafHeaderValues`
+  struct; used by WAF-decision pages (`proxy_waf_response.rs`).
+- `inject_for_passthrough[_with_cache]` — reads the per-request snapshot
+  on `GatewayCtx.waf_decision_meta` + `cache_status`; used by
+  `response_filter` (allow / MISS / access-bypass / challenge-passed)
+  and `write_cached_entry` (HIT).
+- `inject_for_pre_inspect_or_error` — for paths with no `WafDecision`
+  (access-gate 403, fail-closed 503, health 200, HTTP→HTTPS 301,
+  `fail_to_proxy` transport errors). Derives `X-WAF-Mode` from
+  `host_config.log_only_mode` and falls back to a caller-supplied UUID
+  v4 for `X-WAF-Request-Id` so the header is never absent; paired with
+  `WafEngine::emit_minimal_audit_stub` for §5↔§6 audit correlation.
+
+In `response_filter` the inject runs AFTER `response_chain.apply_all`,
+the FR-035 `HeaderFilter`, and `begin_upstream_cache_capture`. The
+ordering invariant guarantees the headers survive FR-035 (its
+`preserve_prefixes` default contains `x-waf-`) AND never enter the
+cache snapshot (no per-request leak on HIT). See
+[request-pipeline.md](./request-pipeline.md#egress-§5-observability-header-injection-interop-contract-v23)
+for the full egress inventory.
+
 ---
 
 ## Subsystem Summary

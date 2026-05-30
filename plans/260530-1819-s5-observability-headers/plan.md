@@ -1,7 +1,7 @@
 ---
 title: "§5 Mandatory Observability Headers — Interop Contract v2.3 Compliance"
 description: "Inject all 6 X-WAF-* response headers on EVERY HTTP response egress path (11 paths) via a single DRY injector + ctx snapshot, ordered after FR-035 and outside the cache-capture set, wired through TDD"
-status: pending
+status: completed
 priority: P1
 branch: "main"
 tags: [interop, contract, benchmark, s5-observability-headers, tdd]
@@ -93,11 +93,11 @@ FR-035/cache-capture, so they inject directly.
 |-------|------|--------|----------|--------|--------------|
 | 1 | [TDD Test Scaffold](./phase-01-tdd-test-scaffold.md) | completed | P1 | 3h | None |
 | 2 | [Core Types + Injector Module](./phase-02-core-types-and-injector.md) | completed | P1 | 2h | Phase 1 |
-| 3 | [Ctx Plumbing + Risk/Rule Wiring](./phase-03-ctx-plumbing-and-risk-wiring.md) | pending | P1 | 6h | Phase 2 |
-| 4 | [Inject on WAF-Decision Paths](./phase-04-inject-waf-decision-paths.md) | pending | P1 | 3h | Phases 2,3 |
-| 5 | [Inject on Passthrough + Cache-Hit](./phase-05-inject-passthrough-and-cache.md) | pending | P1 | 3h | Phases 2,3 |
-| 6 | [Inject on Pre-Inspect + Error Paths](./phase-06-inject-transport-error-paths.md) | pending | P1 | 3h | Phases 2,3 |
-| 7 | [Validation + Contract E2E](./phase-07-validation-and-contract-e2e.md) | pending | P1 | 3h | Phases 1-6 |
+| 3 | [Ctx Plumbing + Risk/Rule Wiring](./phase-03-ctx-plumbing-and-risk-wiring.md) | completed | P1 | 6h | Phase 2 |
+| 4 | [Inject on WAF-Decision Paths](./phase-04-inject-waf-decision-paths.md) | completed | P1 | 3h | Phases 2,3 |
+| 5 | [Inject on Passthrough + Cache-Hit](./phase-05-inject-passthrough-and-cache.md) | completed | P1 | 3h | Phases 2,3 |
+| 6 | [Inject on Pre-Inspect + Error Paths](./phase-06-inject-transport-error-paths.md) | completed | P1 | 3h | Phases 2,3 |
+| 7 | [Validation + Contract E2E](./phase-07-validation-and-contract-e2e.md) | completed | P1 | 3h | Phases 1-6 |
 
 **Total estimated effort:** ~23h (3–3.5 days). Phase 6 raised to P1 (contract-mandatory error/pre-inspect paths); Phase 3 +2h for firm scorer wiring.
 

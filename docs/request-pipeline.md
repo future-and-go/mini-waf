@@ -404,6 +404,49 @@ After all checks complete:
    └─ Wait for client to solve challenge before allowing
 ```
 
+## Egress: §5 Observability Header Injection (Interop Contract v2.3)
+
+Every HTTP response — regardless of egress class — carries the six mandatory
+`X-WAF-*` headers (`X-WAF-Request-Id`, `X-WAF-Risk-Score`, `X-WAF-Action`,
+`X-WAF-Rule-Id`, `X-WAF-Cache`, `X-WAF-Mode`). One DRY injector module
+(`gateway::waf_observability_headers`) owns the writes; every egress site
+calls it.
+
+### Ordering invariant (`response_filter`)
+
+Injection runs as the FINAL step of `response_filter`, AFTER:
+
+1. `response_chain.apply_all` (per-host blocklist strip),
+2. FR-035 `header_filter` (global outbound name + PII-value scrub),
+3. `begin_upstream_cache_capture` (cache snapshot).
+
+This guarantees: (a) FR-035 cannot strip the headers (its
+`preserve_prefixes` default also contains `x-waf-`), and (b) the cache
+snapshot taken in step 3 NEVER contains per-request `x-waf-*` — so a HIT
+served to a different client never replays a stale `X-WAF-Request-Id`.
+Defense-in-depth: capture also unconditionally strips any `x-waf-*` that
+sneaks into the pending headers.
+
+### Egress inventory (12 paths)
+
+| Egress class | Helper |
+|---|---|
+| Header-inspect block / rate_limit / timeout / circuit_breaker / redirect | `inject_waf_observability_headers` via `write_waf_decision` |
+| Challenge page served | `inject_waf_observability_headers` via `handle_challenge` |
+| Body-inspect block / rate_limit / timeout / redirect | `inject_waf_observability_headers` via `write_waf_body_decision` |
+| Access-gate 403 (pre-WAF) | `inject_for_pre_inspect_or_error` |
+| Fail-closed 503 (request_ctx None) | `inject_for_pre_inspect_or_error` + minimal audit stub |
+| Health 200 / HTTP→HTTPS 301 | `inject_for_pre_inspect_or_error` |
+| Allow → upstream (MISS) / access-bypass passthrough / challenge-passed | `inject_for_passthrough` (`response_filter` final step) |
+| Cache HIT | `inject_for_passthrough_with_cache(Hit)` via `write_cached_entry` |
+| Transport error (504 / 503 / 502) | `inject_for_pre_inspect_or_error` via `fail_to_proxy` (+ stub when ctx None) |
+
+`X-WAF-Mode` derives from `host_config.log_only_mode` on every path
+(never hardcoded). `X-WAF-Cache` defaults to `Bypass` (fail-safe — never
+falsely advertises `HIT`/`MISS`). `X-WAF-Request-Id` always correlates
+with at least one audit-log entry: engine-inspected paths via the normal
+audit pipeline, ctx-None paths via `WafEngine::emit_minimal_audit_stub`.
+
 ---
 
 ## Related Docs
