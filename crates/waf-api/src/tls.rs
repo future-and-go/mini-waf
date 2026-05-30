@@ -1,7 +1,7 @@
 //! Admin API TLS certificate lifecycle.
 //!
 //! - Auto mode: generate Ed25519 self-signed cert on first boot, persist to
-//!   `data_dir`, reuse on subsequent boots, auto-renew when ≤ renewal_before_days.
+//!   `data_dir`, reuse on subsequent boots, auto-renew when ≤ `renewal_before_days`.
 //! - Provided mode: load cert/key from filesystem paths, no auto-renew.
 //!
 //! All I/O is fail-fast with `anyhow::Context` — no silent fall-back.
@@ -34,7 +34,7 @@ use waf_common::config::{AdminTlsConfig, AdminTlsMode};
 pub struct AdminTlsMaterial {
     pub cert_chain: Vec<CertificateDer<'static>>,
     pub key: Arc<PrivateKeyDer<'static>>,
-    /// UTC expiry instant (not_after)
+    /// UTC expiry instant (`not_after`)
     pub not_after: OffsetDateTime,
     /// Hex-encoded SHA-256 fingerprint of the leaf cert — safe to log.
     pub fingerprint_sha256: String,
@@ -164,11 +164,11 @@ impl AdminTlsManager {
             if self.config.mode != AdminTlsMode::Auto {
                 return;
             }
-            let mut interval = tokio::time::interval(Duration::from_secs(6 * 3600));
+            let mut interval = tokio::time::interval(Duration::from_hours(6));
             loop {
                 interval.tick().await;
                 let not_after = self.material.read().not_after;
-                let before = Duration::from_secs(u64::from(self.config.renewal_before_days) * 86_400);
+                let before = Duration::from_hours(u64::from(self.config.renewal_before_days) * 24);
                 if !is_due_for_renewal(not_after, before) {
                     continue;
                 }
@@ -210,19 +210,19 @@ impl AdminTlsManager {
             .as_ref()
             .context("api.tls.key_pem must be set when mode = \"provided\"")?;
         load_from_files(cert_path, key_path)
-            .with_context(|| format!("load provided admin TLS material from {cert_path:?}"))
+            .with_context(|| format!("load provided admin TLS material from {}", cert_path.display()))
     }
 
     fn load_or_generate(config: &AdminTlsConfig, listen_addr: SocketAddr) -> Result<AdminTlsMaterial> {
-        let data_dir = resolve_data_dir(config)?;
-        std::fs::create_dir_all(&data_dir).with_context(|| format!("create admin TLS data dir {data_dir:?}"))?;
+        let data_dir = resolve_data_dir(config);
+        std::fs::create_dir_all(&data_dir).with_context(|| format!("create admin TLS data dir {}", data_dir.display()))?;
 
         let cert_path = data_dir.join("cert.pem");
         let key_path = data_dir.join("key.pem");
         let meta_path = data_dir.join("metadata.json");
 
         let sans = resolve_sans(listen_addr, &config.extra_sans);
-        let before = Duration::from_secs(u64::from(config.renewal_before_days) * 86_400);
+        let before = Duration::from_hours(u64::from(config.renewal_before_days) * 24);
 
         if cert_path.exists() && key_path.exists() {
             match load_from_files(&cert_path, &key_path) {
@@ -249,7 +249,7 @@ impl AdminTlsManager {
 
     /// Generate fresh material and persist to `data_dir`.
     fn regenerate(config: &AdminTlsConfig, listen_addr: SocketAddr) -> Result<AdminTlsMaterial> {
-        let data_dir = resolve_data_dir(config)?;
+        let data_dir = resolve_data_dir(config);
         let cert_path = data_dir.join("cert.pem");
         let key_path = data_dir.join("key.pem");
         let meta_path = data_dir.join("metadata.json");
@@ -377,7 +377,7 @@ pub fn spawn_http_redirect(https_addr: SocketAddr, redirect_port: Option<u16>) {
 ///
 /// `0.0.0.0` / `::` are expanded to all known interface IPs (best-effort).
 pub fn resolve_sans(listen_addr: SocketAddr, extras: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = extras.iter().cloned().collect();
+    let mut out: Vec<String> = extras.to_vec();
 
     // Always include the canonical loopback aliases so `https://localhost:…`
     // works regardless of where the cert was generated.
@@ -446,8 +446,8 @@ fn generate(sans: &[String], validity_days: u32) -> Result<(String, String, Offs
 
 /// Load cert + key from PEM files.
 fn load_from_files(cert_path: &Path, key_path: &Path) -> Result<AdminTlsMaterial> {
-    let cert_pem = std::fs::read_to_string(cert_path).with_context(|| format!("read cert PEM from {cert_path:?}"))?;
-    let key_pem = std::fs::read_to_string(key_path).with_context(|| format!("read key PEM from {key_path:?}"))?;
+    let cert_pem = std::fs::read_to_string(cert_path).with_context(|| format!("read cert PEM from {}", cert_path.display()))?;
+    let key_pem = std::fs::read_to_string(key_path).with_context(|| format!("read key PEM from {}", key_path.display()))?;
 
     // Parse expiry from cert to populate `not_after`.
     // Use rcgen to decode just enough to get the notAfter field.
@@ -535,8 +535,9 @@ fn parse_not_after_asn1(der: &[u8]) -> Result<OffsetDateTime> {
 
     // Skip optional [0] explicit version tag
     let tbs = if tbs.first().copied() == Some(0xa0) {
-        let (len, rest) = asn1_read_length(&tbs[1..])?;
-        &rest[len..]
+        let (len, rest) =
+            asn1_read_length(tbs.get(1..).context("version tag: no content after tag")?)?;
+        rest.get(len..).context("version tag: content truncated")?
     } else {
         tbs
     };
@@ -560,22 +561,27 @@ fn asn1_unwrap_sequence(data: &[u8]) -> Result<&[u8]> {
     if data.first().copied() != Some(0x30) {
         bail!("expected SEQUENCE tag 0x30, got {:02x?}", data.first());
     }
-    let (len, rest) = asn1_read_length(&data[1..])?;
-    Ok(&rest[..len])
+    let (len, rest) =
+        asn1_read_length(data.get(1..).context("SEQUENCE: missing length bytes")?)?;
+    Ok(rest.get(..len).context("SEQUENCE: content truncated")?)
 }
 
 fn asn1_skip_element(data: &[u8]) -> Result<&[u8]> {
     if data.is_empty() {
         bail!("unexpected end of ASN.1 data");
     }
-    let (len, rest) = asn1_read_length(&data[1..])?;
-    Ok(&rest[len..])
+    let (len, rest) =
+        asn1_read_length(data.get(1..).context("element: missing length bytes")?)?;
+    Ok(rest.get(len..).context("element: skip overflow")?)
 }
 
 fn asn1_read_length(data: &[u8]) -> Result<(usize, &[u8])> {
     let first = *data.first().context("read length: empty")?;
     if first < 0x80 {
-        return Ok((first as usize, &data[1..]));
+        return Ok((
+            first as usize,
+            data.get(1..).context("length: no content after short form")?,
+        ));
     }
     let n_bytes = (first & 0x7f) as usize;
     if n_bytes == 0 || n_bytes > 4 {
@@ -586,13 +592,18 @@ fn asn1_read_length(data: &[u8]) -> Result<(usize, &[u8])> {
     for &b in len_bytes {
         len = (len << 8) | b as usize;
     }
-    Ok((len, &data[1 + n_bytes..]))
+    Ok((
+        len,
+        data.get(1 + n_bytes..).context("length: no content after long form")?,
+    ))
 }
 
 fn asn1_parse_time(data: &[u8]) -> Result<OffsetDateTime> {
     let tag = *data.first().context("time tag")?;
-    let (len, content) = asn1_read_length(&data[1..])?;
-    let s = std::str::from_utf8(&content[..len]).context("time string UTF-8")?;
+    let (len, content) =
+        asn1_read_length(data.get(1..).context("time: missing length bytes")?)?;
+    let s = std::str::from_utf8(content.get(..len).context("time: content truncated")?)
+        .context("time string UTF-8")?;
     match tag {
         0x17 => {
             // UTCTime: YYMMDDHHMMSSZ
@@ -659,11 +670,11 @@ fn san_drift(meta_path: &Path, current_sans: &[String]) -> bool {
 /// Resolve the `data_dir` to use for auto-generated cert storage.
 ///
 /// Chain: `config.data_dir` → `/var/lib/prx-waf/admin-tls` (Linux-style default).
-fn resolve_data_dir(config: &AdminTlsConfig) -> Result<PathBuf> {
-    if let Some(ref d) = config.data_dir {
-        return Ok(d.clone());
-    }
-    Ok(PathBuf::from("/var/lib/prx-waf/admin-tls"))
+fn resolve_data_dir(config: &AdminTlsConfig) -> PathBuf {
+    config
+        .data_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("/var/lib/prx-waf/admin-tls"))
 }
 
 /// Hex-encode SHA-256 of the raw DER bytes.
@@ -690,8 +701,8 @@ mod tests {
     #[test]
     fn generate_produces_parseable_cert() {
         let sans = vec!["localhost".to_owned(), "127.0.0.1".to_owned()];
-        let (cert_pem, _key_pem, not_after) = generate(&sans, 365).unwrap();
-        let mat = parse_material(&cert_pem, _key_pem.as_str(), not_after).unwrap();
+        let (cert_pem, key_pem, not_after) = generate(&sans, 365).unwrap();
+        let mat = parse_material(&cert_pem, key_pem.as_str(), not_after).unwrap();
         assert!(!mat.fingerprint_sha256.is_empty());
         assert!(!mat.cert_chain.is_empty());
     }
@@ -714,14 +725,14 @@ mod tests {
     #[test]
     fn renewal_due_when_within_window() {
         let not_after = OffsetDateTime::now_utc() + time::Duration::days(2);
-        let before = Duration::from_secs(3 * 86_400); // 3 days window
+        let before = Duration::from_hours(72);
         assert!(is_due_for_renewal(not_after, before));
     }
 
     #[test]
     fn renewal_not_due_outside_window() {
         let not_after = OffsetDateTime::now_utc() + time::Duration::days(60);
-        let before = Duration::from_secs(30 * 86_400);
+        let before = Duration::from_hours(720);
         assert!(!is_due_for_renewal(not_after, before));
     }
 
@@ -742,14 +753,14 @@ mod tests {
         let (renewed_cert, renewed_key, renewed_expiry) = generate(&["localhost".to_owned()], 365).unwrap();
         let mat2 = parse_material(&renewed_cert, &renewed_key, renewed_expiry).unwrap();
 
-        let fp_before = mat.fingerprint_sha256.clone();
+        let fp_before = mat.fingerprint_sha256.as_str();
         resolver.swap(&mat2).unwrap();
 
         let ck = resolver.current.load_full();
         // After swap the resolver holds the new cert — verify fingerprint differs
         // (certs generated milliseconds apart should still have different keys)
         drop(ck);
-        let _ = fp_before; // used for assertion intent clarity
+        assert_ne!(fp_before, mat2.fingerprint_sha256, "fingerprints must differ after swap");
     }
 
     #[test]

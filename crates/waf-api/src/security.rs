@@ -130,8 +130,7 @@ pub async fn request_id_middleware(mut req: Request<Body>, next: Next) -> impl I
         .headers()
         .get("x-request-id")
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_owned())
-        .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+        .map_or_else(|| uuid::Uuid::new_v4().simple().to_string(), ToOwned::to_owned);
 
     req.extensions_mut().insert(RequestId(request_id.clone()));
 

@@ -86,7 +86,7 @@ pub fn build_router(state: Arc<AppState>, tls_enabled: bool) -> Router {
                     origin
                         .to_str()
                         .ok()
-                        .map_or(false, |o| o.contains(host) && !host.is_empty())
+                        .is_some_and(|o| o.contains(host) && !host.is_empty())
                 }))
                 .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
                 .allow_headers([AUTHORIZATION, CONTENT_TYPE])
@@ -109,7 +109,8 @@ pub fn build_router(state: Arc<AppState>, tls_enabled: bool) -> Router {
             .allow_headers([AUTHORIZATION, CONTENT_TYPE])
     };
 
-    let body_limit = state.security_config.max_request_body_bytes as usize;
+    let body_limit =
+        usize::try_from(state.security_config.max_request_body_bytes).unwrap_or(usize::MAX);
 
     // Public routes (no JWT)
     let public_routes = Router::new()
@@ -369,7 +370,7 @@ pub async fn start_api_server(config: &ApiConfig, state: Arc<AppState>) -> anyho
         );
         // Repeat warn every 60 s while running
         tokio::spawn(async {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            let mut interval = tokio::time::interval(std::time::Duration::from_mins(1));
             interval.tick().await; // skip first tick
             loop {
                 interval.tick().await;
