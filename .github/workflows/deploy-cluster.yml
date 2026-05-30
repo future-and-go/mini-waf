@@ -1,13 +1,23 @@
 name: Deploy Cluster (test)
 
-# Deploys the prx-waf binary onto the 2-node test cluster.
+# Deploys the prx-waf binary onto the test cluster.
 # Triggers: automatic on push to main; manual (workflow_dispatch) from
 # main or release/stg. Only these two branches may deploy to the test
 # VMs — enforced authoritatively by the cluster-test-deploy environment's
 # deployment branch policy, and fail-fast by the guard job below.
 # Auth: GitHub OIDC -> AWS IAM role (no long-lived credentials in repo).
-# Transport: S3 presigned URL + SSM Run Command (no inbound SSH).
+# Transport: S3 presigned URL + SSM Run Command (AWS) / SSH (external worker).
 # Target allowlist: instances tagged project=other env=dev Name=other-test-cluster-*.
+#
+# Binary compatibility: the cluster nodes run different OSes (RHEL9 = glibc
+# 2.34, Ubuntu 24.04 = glibc 2.39) but all on x86_64. A binary built on
+# ubuntu-latest (glibc 2.39) does NOT run on RHEL9. So the release binary is
+# built inside a rockylinux:9 container (glibc 2.34 floor) — that binary runs
+# on every glibc >= 2.34 node. A preflight step probes each node's CPU arch
+# and glibc and FAILS the deploy if any node's arch is not x86_64 (so an arm64
+# node can never silently receive an incompatible amd64 binary). The build
+# enables the `gateway/valkey` feature because the AWS nodes use the
+# `backend = "standalone"` cache, which aborts without it.
 
 on:
   push:
@@ -51,31 +61,10 @@ jobs:
     name: Build and deploy to test cluster
     needs: guard-branch
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     environment: cluster-test-deploy
     steps:
       - uses: actions/checkout@v6
-
-      - name: Setup Node 22
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: web/admin-panel/package-lock.json
-
-      - name: Build admin panel
-        working-directory: web/admin-panel
-        run: |
-          npm ci --no-audit --no-fund
-          npm run build
-
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: deploy-cluster
-
-      - name: Build prx-waf release
-        run: cargo build --release -p prx-waf
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v6
@@ -83,17 +72,6 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_DEPLOY_REGION }}
           role-session-name: gha-deploy-cluster-${{ github.run_id }}
-
-      - name: Upload binary to S3
-        id: upload
-        run: |
-          set -euo pipefail
-          KEY="releases/${GITHUB_SHA}/prx-waf"
-          BUCKET="${{ secrets.AWS_DEPLOY_BUCKET }}"
-          aws s3 cp target/release/prx-waf "s3://${BUCKET}/${KEY}" --no-progress
-          URL=$(aws s3 presign "s3://${BUCKET}/${KEY}" --expires-in 1800)
-          echo "url=${URL}" >> "$GITHUB_OUTPUT"
-          echo "Uploaded s3://${BUCKET}/${KEY}"
 
       - name: Discover cluster instance IDs by tag
         id: targets
@@ -120,6 +98,97 @@ jobs:
           IDS_CSV=$(echo "$IDS" | tr -s '[:space:]' ',' | sed 's/,$//')
           echo "ids=${IDS_CSV}" >> "$GITHUB_OUTPUT"
           echo "Targets: ${IDS_CSV}"
+
+      - name: Preflight — assert every node is x86_64
+        # The release binary is built for x86_64 (rockylinux:9). Probe each
+        # node's CPU arch + glibc and fail if any node is not x86_64 so an
+        # arm64 node can never silently receive an incompatible binary. To
+        # support arm64 later, add an aarch64 build and select per-node here.
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          WORKER_HOST: ${{ secrets.EXTERNAL_WORKER_HOST }}
+          WORKER_USER: ${{ secrets.EXTERNAL_WORKER_USER }}
+          TARGET_IDS: ${{ steps.targets.outputs.ids }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra IDS_ARR <<<"${TARGET_IDS}"
+          PROBE='echo "arch=$(uname -m) glibc=$(ldd --version 2>/dev/null | head -1 | grep -oE "[0-9]+\.[0-9]+$")"'
+          BAD=0
+          for IID in "${IDS_ARR[@]}"; do
+            CID=$(aws ssm send-command --instance-ids "$IID" \
+              --document-name AWS-RunShellScript \
+              --parameters "commands=[\"$PROBE\"]" \
+              --query 'Command.CommandId' --output text)
+            for _ in $(seq 1 20); do
+              ST=$(aws ssm get-command-invocation --command-id "$CID" --instance-id "$IID" \
+                --query 'Status' --output text 2>/dev/null || echo Pending)
+              [ "$ST" = Success ] || [ "$ST" = Failed ] && break
+              sleep 3
+            done
+            OUT=$(aws ssm get-command-invocation --command-id "$CID" --instance-id "$IID" \
+              --query 'StandardOutputContent' --output text 2>/dev/null || echo "")
+            echo "${IID}: ${OUT}"
+            case "$OUT" in
+              *arch=x86_64*) : ;;
+              *) echo "::error::${IID} is not x86_64 (${OUT}); no matching binary"; BAD=1 ;;
+            esac
+          done
+          if [ -n "${WORKER_HOST:-}" ]; then
+            KEYF=$(mktemp); trap 'rm -f "$KEYF"' EXIT
+            printf '%s\n' "$SSH_KEY" > "$KEYF"; chmod 600 "$KEYF"
+            OUT=$(ssh -i "$KEYF" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=15 "${WORKER_USER:-root}@${WORKER_HOST}" "$PROBE" 2>/dev/null || echo "")
+            echo "external ${WORKER_HOST}: ${OUT}"
+            case "$OUT" in
+              *arch=x86_64*) : ;;
+              *) echo "::error::external worker is not x86_64 (${OUT}); no matching binary"; BAD=1 ;;
+            esac
+          fi
+          [ "$BAD" = 0 ] || { echo "::error::Aborting: at least one node arch mismatch"; exit 1; }
+          echo "All nodes are x86_64 — proceeding with rockylinux:9 (glibc 2.34) build."
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/admin-panel/package-lock.json
+
+      - name: Build admin panel
+        working-directory: web/admin-panel
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build prx-waf for glibc 2.34 (rockylinux:9) with valkey
+        # rockylinux:9 == glibc 2.34, the floor across all nodes. The resulting
+        # binary runs on RHEL9 and on newer-glibc nodes (Ubuntu 24.04) alike.
+        # gateway/valkey is required by the standalone cache backend.
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD":/src -w /src \
+            -e CARGO_TERM_COLOR=always \
+            rockylinux:9 bash -c '
+              set -e
+              dnf install -y -q gcc gcc-c++ make perl openssl-devel pkgconfig cmake >/dev/null 2>&1
+              curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal >/dev/null 2>&1
+              source "$HOME/.cargo/env"
+              cargo build --release -p prx-waf --features gateway/valkey
+            '
+          GLIBC=$(objdump -T target/release/prx-waf | grep -oE "GLIBC_[0-9.]+" | sort -V | tail -1)
+          echo "Built target/release/prx-waf (max ${GLIBC})"
+
+      - name: Upload binary to S3
+        id: upload
+        run: |
+          set -euo pipefail
+          KEY="releases/${GITHUB_SHA}/prx-waf"
+          BUCKET="${{ secrets.AWS_DEPLOY_BUCKET }}"
+          aws s3 cp target/release/prx-waf "s3://${BUCKET}/${KEY}" --no-progress
+          URL=$(aws s3 presign "s3://${BUCKET}/${KEY}" --expires-in 1800)
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "Uploaded s3://${BUCKET}/${KEY}"
 
       - name: Dispatch deploy command via SSM
         id: ssm
