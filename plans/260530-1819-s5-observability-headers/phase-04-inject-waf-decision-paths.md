@@ -1,11 +1,40 @@
 ---
 phase: 4
 title: "Inject on WAF-Decision Paths"
-status: pending
+status: completed
 priority: P1
 effort: "3h"
 dependencies: [2, 3]
 ---
+
+## Completion Note (2026-05-30)
+
+Landed via a single TDD pass — Phase 1's red scaffold (`proxy_waf_response_writer.rs`)
+turned green without test edits:
+
+- **`crates/gateway/src/proxy_waf_response.rs`** — added a private
+  `waf_header_values_from_decision(decision, req_id) -> WafHeaderValues` view
+  (allocation-free, `cache = Bypass` hard-wired because WAF-authored responses
+  never run cache-capture). `write_waf_decision` injects the 6 headers in
+  Block/RateLimit/CircuitBreaker/Timeout/Redirect arms right before
+  `session.write_response_header`, with `req_id` bound to a local `&str`
+  ahead of the mutable header borrow (Rule 7). `write_waf_body_decision`
+  injects on every enforcing arm; the Challenge arm now passes the decision
+  into `handle_challenge`, which forces `action = "challenge"` on the issued
+  page (explicit override so a future `WafAction` variant cannot silently
+  mislabel the wire).
+- **`crates/gateway/src/proxy.rs::request_filter`** — when `write_waf_decision`
+  returns `Ok(false)` for a `Challenge` decision (valid `__waf_cc` credit
+  cookie → passthrough), `ctx.waf_decision_meta.action` is rewritten to
+  `"allow"` so the upstream 200 reports the contract-correct action. Allow /
+  LogOnly already carry the right contract string from `from_decision`.
+
+Validation: `cargo fmt --all -- --check` clean, `cargo clippy -p gateway
+--no-deps --lib` clean, `cargo check --workspace` clean,
+`cargo test -p gateway --test proxy_waf_response_writer` 26/26 pass + 1
+ignored (the ChallengeCtx-fixture stub still deferred), gateway
+`waf_observability_headers` suite 16/16 + 8 ignored (Phase 5/6 stubs), full
+`cargo test -p gateway --lib` 345/345 pass.
 
 # Phase 4: Inject on WAF-Decision Paths
 

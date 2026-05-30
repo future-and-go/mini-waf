@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Inject on Passthrough + Cache-Hit"
-status: pending
+status: completed
 priority: P1
 effort: "3h"
 dependencies: [2, 3]
@@ -56,11 +56,11 @@ all outcomes), emit all 6 with `action="allow"`, `risk=0`, `rule_id=none`, `mode
    - (d) the cached entry's stored headers contain NO `x-waf-*` (assert on the put payload / second-hit).
 
 ## Success Criteria
-- [ ] Allowed/proxied + bypass + challenge-passed responses carry all 6 (FR-035 does not strip them)
-- [ ] HIT carries all 6, `X-WAF-Cache: HIT`, fresh per-request `X-WAF-Request-Id`, action from meta
-- [ ] MISS/BYPASS report correct `X-WAF-Cache`
-- [ ] Stored cache entry contains no `x-waf-*` (no stale replay)
-- [ ] `cargo test -p gateway` green; clippy clean
+- [x] Allowed/proxied + bypass + challenge-passed responses carry all 6 (FR-035 does not strip them)
+- [x] HIT carries all 6, `X-WAF-Cache: HIT`, fresh per-request `X-WAF-Request-Id`, action from meta
+- [x] MISS/BYPASS report correct `X-WAF-Cache`
+- [x] Stored cache entry contains no `x-waf-*` (no stale replay)
+- [x] `cargo test -p gateway` green; clippy clean
 
 ## Risk Assessment
 - Risk: injecting before FR-035/capture → strip or poison. Mitigation: inject-last invariant + capture strip (tested).
