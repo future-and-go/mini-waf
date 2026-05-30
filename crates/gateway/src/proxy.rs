@@ -553,6 +553,12 @@ impl ProxyHttp for WafProxy {
                 if let Some(reg) = &self.tier_registry {
                     builder = builder.with_tier_registry(reg);
                 }
+                builder = builder.with_device_fp(
+                    ctx.device_identity
+                        .as_ref()
+                        .filter(|d| !d.key.is_empty())
+                        .map(|d| Arc::clone(&d.key)),
+                );
                 let mut built = builder.build();
                 // FR-007 → FR-008 handover: when the detector resolved a
                 // validated `real_ip`, prefer it over the builder's XFF-based

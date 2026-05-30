@@ -506,6 +506,7 @@ mod tests {
             tier: waf_common::tier::Tier::CatchAll,
             tier_policy: RequestCtx::default_tier_policy(),
             cookies: HashMap::new(),
+            device_fp: None,
         };
 
         // Bouncer mode → cache hit

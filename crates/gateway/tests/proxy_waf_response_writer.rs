@@ -52,6 +52,7 @@ fn make_request_ctx() -> RequestCtx {
         tier: Tier::CatchAll,
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
+        device_fp: None,
     }
 }
 

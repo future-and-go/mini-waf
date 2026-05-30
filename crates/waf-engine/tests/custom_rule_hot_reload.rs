@@ -144,6 +144,7 @@ fn watcher_loads_pattern_based_rule() {
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
+        device_fp: None,
     };
     let hit = engine.check(&ctx);
     assert!(hit.is_some(), "pattern rule should match SSRF payload");
@@ -223,6 +224,7 @@ paranoia: 1
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
+        device_fp: None,
     };
     assert!(
         checker.check(&ctx_forbidden).is_some(),

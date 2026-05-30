@@ -12,7 +12,7 @@ use bytes::Bytes;
 use pingora_proxy::Session;
 use uuid::Uuid;
 use waf_common::tier::{Tier, TierPolicy};
-use waf_common::{HostConfig, RequestCtx, parse_cookie_header};
+use waf_common::{FpKey, HostConfig, RequestCtx, parse_cookie_header};
 
 use crate::tiered::tier_classifier::RequestParts;
 use crate::tiered::tier_policy_registry::TierPolicyRegistry;
@@ -24,6 +24,7 @@ pub struct RequestCtxBuilder<'a> {
     trust_proxy_headers: bool,
     trusted_proxies: &'a [ipnet::IpNet],
     tier_registry: Option<&'a TierPolicyRegistry>,
+    device_fp: Option<Arc<FpKey>>,
 }
 
 impl<'a> RequestCtxBuilder<'a> {
@@ -38,6 +39,7 @@ impl<'a> RequestCtxBuilder<'a> {
             trust_proxy_headers,
             trusted_proxies,
             tier_registry: None,
+            device_fp: None,
         }
     }
 
@@ -55,6 +57,13 @@ impl<'a> RequestCtxBuilder<'a> {
     #[must_use]
     pub const fn with_tier_registry(mut self, registry: &'a TierPolicyRegistry) -> Self {
         self.tier_registry = Some(registry);
+        self
+    }
+
+    /// Attach the resolved device fingerprint key from the FR-010 pipeline.
+    #[must_use]
+    pub fn with_device_fp(mut self, fp: Option<Arc<FpKey>>) -> Self {
+        self.device_fp = fp;
         self
     }
 
@@ -128,6 +137,7 @@ impl<'a> RequestCtxBuilder<'a> {
             host_config,
             tier,
             tier_policy,
+            self.device_fp,
         )
     }
 }
@@ -165,6 +175,7 @@ pub fn build_from_parts(
     host_config: Arc<HostConfig>,
     tier: Tier,
     tier_policy: Arc<TierPolicy>,
+    device_fp: Option<Arc<FpKey>>,
 ) -> RequestCtx {
     let cookies = headers
         .get("cookie")
@@ -188,6 +199,7 @@ pub fn build_from_parts(
         tier,
         tier_policy,
         cookies,
+        device_fp,
     }
 }
 
@@ -273,6 +285,7 @@ mod tests {
             hc,
             Tier::CatchAll,
             RequestCtx::default_tier_policy(),
+            None,
         );
         assert!(ctx.is_tls, "expected is_tls = true");
         assert_eq!(ctx.host, "example.com");
@@ -294,6 +307,7 @@ mod tests {
             hc,
             Tier::CatchAll,
             RequestCtx::default_tier_policy(),
+            None,
         );
         assert!(!ctx.is_tls, "expected is_tls = false");
         assert_eq!(ctx.content_length, 5);
@@ -315,6 +329,7 @@ mod tests {
             hc,
             Tier::CatchAll,
             RequestCtx::default_tier_policy(),
+            None,
         );
         // host comes from HostConfig.host, not from a header
         assert_eq!(ctx.host, "fallback.example.com");
@@ -337,6 +352,7 @@ mod tests {
             hc,
             Tier::CatchAll,
             RequestCtx::default_tier_policy(),
+            None,
         );
         assert_eq!(ctx.client_ip, ip);
         assert_eq!(ctx.client_port, 9999);
@@ -358,6 +374,7 @@ mod tests {
             hc,
             Tier::CatchAll,
             RequestCtx::default_tier_policy(),
+            None,
         );
         assert_eq!(ctx.client_ip, ip);
         assert!(ctx.is_tls);
@@ -381,6 +398,7 @@ mod tests {
             hc,
             Tier::CatchAll,
             RequestCtx::default_tier_policy(),
+            None,
         );
         assert_eq!(ctx.tier, Tier::CatchAll);
     }
@@ -476,6 +494,7 @@ mod tests {
             hc,
             Tier::CatchAll,
             RequestCtx::default_tier_policy(),
+            None,
         );
         let ctx2 = build_from_parts(
             IpAddr::V4(Ipv4Addr::UNSPECIFIED),
@@ -489,6 +508,7 @@ mod tests {
             hc2,
             Tier::CatchAll,
             RequestCtx::default_tier_policy(),
+            None,
         );
         assert_ne!(ctx1.req_id, ctx2.req_id, "req_id must be unique per request");
     }

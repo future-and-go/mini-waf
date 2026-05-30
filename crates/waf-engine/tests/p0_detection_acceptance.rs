@@ -47,6 +47,7 @@ fn ctx(path: &str, method: &str, body: &[u8], ct: &str, headers: HashMap<String,
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
+        device_fp: None,
     }
 }
 

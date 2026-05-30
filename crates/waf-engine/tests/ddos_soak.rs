@@ -160,6 +160,7 @@ impl SoakHarness {
                 ..TierPolicy::default()
             }),
             cookies: HashMap::new(),
+            device_fp: None,
         };
 
         self.check.check(&ctx);

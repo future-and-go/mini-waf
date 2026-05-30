@@ -31,7 +31,7 @@ use crate::device_fp::types::FpKey;
 /// dedupe should look at signal payloads, not the key, in that case.
 fn fp_key_for_submission(key: &SessionKey) -> FpKey {
     match &key.ident {
-        SessionIdent::Fingerprint(fp) => fp.clone(),
+        SessionIdent::Fingerprint { fp, .. } => fp.clone(),
         SessionIdent::Cookie(_) => FpKey::default(),
     }
 }
@@ -285,6 +285,7 @@ impl TxStore {
 mod tests {
     use super::*;
     use crate::checks::tx_velocity::session_key::SessionIdent;
+    use std::net::{IpAddr, Ipv4Addr};
 
     fn cfg(ttl_secs: u64) -> Arc<ArcSwap<TxVelocityConfig>> {
         Arc::new(ArcSwap::from_pointee(TxVelocityConfig {
@@ -509,7 +510,10 @@ mod tests {
         };
         let k = SessionKey {
             host: "h".to_string(),
-            ident: SessionIdent::Fingerprint(fp.clone()),
+            ident: SessionIdent::Fingerprint {
+                fp: fp.clone(),
+                ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            },
         };
         for _ in 0..3 {
             store.record(&k, EndpointRole::Withdrawal, true);

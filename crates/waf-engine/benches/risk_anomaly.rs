@@ -104,6 +104,7 @@ fn make_ctx() -> RequestCtx {
             },
         }),
         cookies: HashMap::new(),
+        device_fp: None,
     }
 }
 

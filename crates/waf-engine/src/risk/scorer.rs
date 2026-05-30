@@ -433,6 +433,7 @@ mod tests {
                 },
             }),
             cookies: HashMap::new(),
+            device_fp: None,
         }
     }
 

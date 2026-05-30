@@ -221,6 +221,7 @@ mod tests {
             tier,
             tier_policy: Arc::new(TierPolicy::default()),
             cookies: HashMap::new(),
+            device_fp: None,
         }
     }
 
