@@ -51,6 +51,9 @@ prx-waf/
 │   │   │   ├── response_body_mask_filter.rs        # AC-17 operator regex
 │   │   │   ├── response_body_content_scanner.rs    # FR-033 built-in catalog
 │   │   │   └── response_body_decompressor.rs       # FR-033 gzip decoder
+│   │   ├── context.rs         # Per-request GatewayCtx (waf_decision_meta, cache_status snapshot for header injection)
+│   │   ├── waf_observability_headers.rs # §5 Observability Header Injection (DRY module, 3 helpers: inject_waf_observability_headers, inject_for_passthrough, inject_for_pre_inspect_or_error)
+│   │   ├── proxy_waf_response.rs # §3 Decision-class HTTP response writer (Block/Challenge/RateLimit/Timeout/CircuitBreaker → HTTP status mapping)
 │   │   └── tunnel.rs          # Reverse tunnel (encrypted WebSocket)
 │   │
 │   ├── waf-engine/src/
