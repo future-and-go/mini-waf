@@ -15,6 +15,22 @@ use waf_engine::challenge::{ChallengeContext, PowSolution, PowVerifyResult, veri
 use waf_engine::risk::VerifyOutcome;
 
 use crate::context::ChallengeCtx;
+use crate::waf_observability_headers::{CacheStatus, WafHeaderValues, inject_waf_observability_headers};
+
+/// Build the contract-mandatory observability values from a WAF decision.
+/// WAF-decision egress paths bypass cache capture entirely, so the cache
+/// status is hardcoded to `Bypass` (fail-safe: never advertise HIT/MISS for
+/// responses authored by the WAF itself).
+fn waf_header_values_from_decision<'a>(decision: &'a WafDecision, req_id: &'a str) -> WafHeaderValues<'a> {
+    WafHeaderValues {
+        request_id: req_id,
+        risk_score: decision.risk_score,
+        action: decision.action.as_contract_str(),
+        rule_id: decision.rule_id.as_deref(),
+        mode: decision.mode.as_contract_str(),
+        cache: CacheStatus::Bypass,
+    }
+}
 
 /// Write a WAF block/redirect/challenge response to `session` and return
 /// `Ok(true)` to tell `request_filter` that the response is already sent.
@@ -36,6 +52,10 @@ pub async fn write_waf_decision(
 ) -> pingora_core::Result<bool> {
     if !decision.is_enforcement_allowed() {
         blocked_counter.fetch_add(1, Ordering::Relaxed);
+        // Bind req_id locally so the values borrow does not collide with the
+        // upcoming mutable borrow of the response header.
+        let req_id = request_ctx.req_id.as_str();
+        let header_values = waf_header_values_from_decision(decision, req_id);
         match &decision.action {
             WafAction::Block { status, body }
             | WafAction::RateLimit { status, body }
@@ -66,13 +86,15 @@ pub async fn write_waf_decision(
                 );
                 let status_code = *status;
                 let body_str = body.clone().unwrap_or_else(|| "Access Denied".to_string());
-                let response = pingora_http::ResponseHeader::build(status_code, None)?;
+                let mut response = pingora_http::ResponseHeader::build(status_code, None)?;
+                inject_waf_observability_headers(&mut response, &header_values)?;
                 session.write_response_header(Box::new(response), false).await?;
                 session.write_response_body(Some(Bytes::from(body_str)), true).await?;
                 return Ok(true);
             }
             WafAction::Timeout { status } => {
-                let response = pingora_http::ResponseHeader::build(*status, None)?;
+                let mut response = pingora_http::ResponseHeader::build(*status, None)?;
+                inject_waf_observability_headers(&mut response, &header_values)?;
                 session.write_response_header(Box::new(response), false).await?;
                 session
                     .write_response_body(Some(Bytes::from("Gateway Timeout")), true)
@@ -82,11 +104,12 @@ pub async fn write_waf_decision(
             WafAction::Redirect { url } => {
                 let mut response = pingora_http::ResponseHeader::build(302, None)?;
                 response.insert_header("location", url.as_str())?;
+                inject_waf_observability_headers(&mut response, &header_values)?;
                 session.write_response_header(Box::new(response), true).await?;
                 return Ok(true);
             }
             WafAction::Challenge => {
-                return handle_challenge(session, request_ctx, challenge_ctx).await;
+                return handle_challenge(session, decision, request_ctx, challenge_ctx).await;
             }
             // Non-enforced actions: pass through to upstream. Explicit so the
             // compiler flags any future WafAction variant that needs handling.
@@ -108,6 +131,7 @@ fn build_fingerprint_binding(ctx: &RequestCtx) -> String {
 /// Handle `WafAction::Challenge` by checking cookie or rendering challenge page.
 async fn handle_challenge(
     session: &mut Session,
+    decision: &WafDecision,
     request_ctx: &RequestCtx,
     challenge_ctx: Option<&Arc<ChallengeCtx>>,
 ) -> pingora_core::Result<bool> {
@@ -183,6 +207,14 @@ async fn handle_challenge(
         resp.insert_header(name, value)?;
     }
 
+    // Force action="challenge" on the issued challenge page regardless of the
+    // decision's contract string (it is "challenge" already, but be explicit
+    // so a future variant change cannot silently mislabel the wire).
+    let req_id = request_ctx.req_id.as_str();
+    let mut header_values = waf_header_values_from_decision(decision, req_id);
+    header_values.action = "challenge";
+    inject_waf_observability_headers(&mut resp, &header_values)?;
+
     session.write_response_header(Box::new(resp), false).await?;
     session
         .write_response_body(Some(Bytes::from(challenge_response.body)), true)
@@ -209,6 +241,8 @@ pub async fn write_waf_body_decision(
 ) -> pingora_core::Result<()> {
     if !decision.is_enforcement_allowed() {
         blocked_counter.fetch_add(1, Ordering::Relaxed);
+        let req_id = request_ctx.req_id.as_str();
+        let header_values = waf_header_values_from_decision(decision, req_id);
         match &decision.action {
             WafAction::Block {
                 status,
@@ -228,7 +262,8 @@ pub async fn write_waf_body_decision(
                 );
                 let status_code = *status;
                 let body_str = block_body.clone().unwrap_or_else(|| "Access Denied".to_string());
-                let response = pingora_http::ResponseHeader::build(status_code, None)?;
+                let mut response = pingora_http::ResponseHeader::build(status_code, None)?;
+                inject_waf_observability_headers(&mut response, &header_values)?;
                 session.write_response_header(Box::new(response), false).await?;
                 session.write_response_body(Some(Bytes::from(body_str)), true).await?;
                 return Err(pingora_core::Error::explain(
@@ -238,7 +273,8 @@ pub async fn write_waf_body_decision(
             }
             WafAction::Timeout { status } => {
                 let status_code = *status;
-                let response = pingora_http::ResponseHeader::build(status_code, None)?;
+                let mut response = pingora_http::ResponseHeader::build(status_code, None)?;
+                inject_waf_observability_headers(&mut response, &header_values)?;
                 session.write_response_header(Box::new(response), false).await?;
                 session
                     .write_response_body(Some(Bytes::from("Gateway Timeout")), true)
@@ -251,6 +287,7 @@ pub async fn write_waf_body_decision(
             WafAction::Redirect { url } => {
                 let mut response = pingora_http::ResponseHeader::build(302, None)?;
                 response.insert_header("location", url.as_str())?;
+                inject_waf_observability_headers(&mut response, &header_values)?;
                 session.write_response_header(Box::new(response), true).await?;
                 return Err(pingora_core::Error::explain(
                     pingora_core::ErrorType::HTTPStatus(302),

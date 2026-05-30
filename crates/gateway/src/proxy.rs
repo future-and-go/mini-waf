@@ -18,19 +18,21 @@ use tracing::{debug, warn};
 use pingora_core::upstreams::peer::{HttpPeer, Peer};
 use pingora_proxy::{FailToProxy, ProxyHttp, Session};
 
+use uuid::Uuid;
 use waf_common::HostConfig;
 use waf_common::tier::CachePolicy;
 use waf_engine::access::AccessLists;
 use waf_engine::device_fp::DeviceFpDetector;
 use waf_engine::device_fp::behavior::Recorder as BehaviorRecorder;
 use waf_engine::device_fp::capture::ConnCtx as DeviceFpConnCtx;
+use waf_engine::logging::AuditEventType;
 use waf_engine::relay::RelayDetector;
 use waf_engine::{HeaderFilter, WafEngine};
 
 use crate::tiered::TierPolicyRegistry;
 
 use crate::cache::ResponseCache;
-use crate::context::{BODY_PREVIEW_LIMIT, ChallengeCtx, GatewayCtx, ResponseCachePending};
+use crate::context::{BODY_PREVIEW_LIMIT, ChallengeCtx, GatewayCtx, ResponseCachePending, WafDecisionMeta};
 use crate::ctx_builder::RequestCtxBuilder;
 use crate::error_page::ErrorPageFactory;
 use crate::filters::{
@@ -44,6 +46,7 @@ use crate::pipeline::{AccessGateOutcome, AccessPhaseGate, FilterCtx, RequestFilt
 use crate::protocol::{ProtoCounters, detect_from_session};
 use crate::proxy_waf_response::{write_waf_body_decision, write_waf_decision};
 use crate::router::HostRouter;
+use crate::waf_observability_headers::{CacheStatus, inject_for_pre_inspect_or_error};
 
 /// Pingora-based reverse proxy with WAF integration and filter chains.
 pub struct WafProxy {
@@ -577,14 +580,37 @@ impl ProxyHttp for WafProxy {
                 .get_header("accept")
                 .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
                 .map(str::to_string);
-            let (headers, body) = ErrorPageFactory::render(503, accept.as_deref())?;
+            let (mut headers, body) = ErrorPageFactory::render(503, accept.as_deref())?;
+            // ctx-None fallback: fresh UUID v4 keeps X-WAF-Request-Id non-empty
+            // and a minimal audit stub records the same id for §5↔§6 correlation.
+            let fallback_req_id = Uuid::new_v4().to_string();
+            let peer_ip = session
+                .client_addr()
+                .and_then(|a| a.as_inet())
+                .map(|s| s.ip().to_string())
+                .unwrap_or_default();
+            self.engine.emit_minimal_audit_stub(
+                &fallback_req_id,
+                AuditEventType::Block,
+                &host_for_log,
+                session.req_header().method.as_str(),
+                session.req_header().uri.path_and_query().map_or("/", |pq| pq.as_str()),
+                &peer_ip,
+                "fail-closed: missing request context",
+            );
+            inject_for_pre_inspect_or_error(&mut headers, ctx, "circuit_breaker", &fallback_req_id)?;
             session.write_response_header(Box::new(headers), false).await?;
             session.write_response_body(Some(body), true).await?;
             return Ok(true);
         };
 
         if request_ctx.path == "/health" && request_ctx.method == "GET" {
-            let _ = session.respond_error(200).await;
+            // Build the 200 ourselves (rather than `respond_error(200)`) so the
+            // six contract observability headers ride on the response.
+            let mut resp = pingora_http::ResponseHeader::build(200, Some(2))?;
+            resp.insert_header("content-length", "0")?;
+            inject_for_pre_inspect_or_error(&mut resp, ctx, "allow", "")?;
+            session.write_response_header(Box::new(resp), true).await?;
             return Ok(true);
         }
 
@@ -614,6 +640,7 @@ impl ProxyHttp for WafProxy {
             let mut resp = pingora_http::ResponseHeader::build(301, Some(2))?;
             resp.insert_header("Location", &location)?;
             resp.insert_header("Content-Length", "0")?;
+            inject_for_pre_inspect_or_error(&mut resp, ctx, "allow", "")?;
             session.write_response_header(Box::new(resp), true).await?;
             return Ok(true);
         }
@@ -665,7 +692,8 @@ impl ProxyHttp for WafProxy {
                         .get_header("accept")
                         .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
                         .map(str::to_string);
-                    let (headers, body) = ErrorPageFactory::render(status, accept.as_deref())?;
+                    let (mut headers, body) = ErrorPageFactory::render(status, accept.as_deref())?;
+                    inject_for_pre_inspect_or_error(&mut headers, ctx, "block", "")?;
                     session.write_response_header(Box::new(headers), false).await?;
                     session.write_response_body(Some(body), true).await?;
                     return Ok(true);
@@ -674,11 +702,25 @@ impl ProxyHttp for WafProxy {
         }
 
         // Whitelist full-bypass skips the WAF engine entirely (D6 fast path).
+        // Snapshot a default "allow" meta so passthrough egress paths always
+        // have decision metadata to render observability headers from.
         if ctx.access_bypass {
+            let mut meta = WafDecisionMeta::default();
+            if request_ctx.host_config.log_only_mode {
+                meta.mode = "log_only";
+            }
+            ctx.waf_decision_meta = Some(meta);
             return Ok(false);
         }
 
         let decision = self.engine.inspect(&mut request_ctx).await;
+        // Snapshot decision metadata BEFORE write_waf_decision and BEFORE the
+        // cache HIT branch so every downstream egress path can read it.
+        let is_challenge = matches!(decision.action, waf_common::WafAction::Challenge);
+        let meta = WafDecisionMeta::from_decision(&decision);
+        let meta_action_allow = meta.action == "allow";
+        ctx.waf_decision_meta = Some(meta);
+
         if write_waf_decision(
             session,
             &decision,
@@ -689,6 +731,15 @@ impl ProxyHttp for WafProxy {
         .await?
         {
             return Ok(true);
+        }
+
+        // Challenge-passed passthrough: write_waf_decision returned Ok(false)
+        // because the client presented a valid `__waf_cc` credit cookie. The
+        // upstream response will report the contract action as `allow`, so
+        // overwrite the snapshot action accordingly. Allow/LogOnly already
+        // carry the correct contract string from `from_decision`.
+        if is_challenge && let Some(meta) = ctx.waf_decision_meta.as_mut() {
+            meta.action = "allow";
         }
 
         if let Some(cache) = &self.response_cache
@@ -704,8 +755,16 @@ impl ProxyHttp for WafProxy {
                 &request_ctx.query,
             );
             if let Some(entry) = cache.get(&key, request_ctx.tier).await {
-                crate::response_cache_integration::write_cached_entry(session, &entry).await?;
+                // HIT advertised only for clean allow responses — non-allow
+                // outcomes must never report a cache-clean origin response.
+                if meta_action_allow {
+                    ctx.cache_status = CacheStatus::Hit;
+                }
+                crate::response_cache_integration::write_cached_entry(session, &entry, ctx).await?;
                 return Ok(true);
+            }
+            if meta_action_allow {
+                ctx.cache_status = CacheStatus::Miss;
             }
             ctx.response_cache_store = Some(ResponseCachePending {
                 key,
@@ -942,6 +1001,13 @@ impl ProxyHttp for WafProxy {
             ctx.response_cache_store = None;
         }
 
+        // §5 phase-5 ordering invariant: inject the six contract observability
+        // headers as the FINAL step — after (a) response_chain.apply_all,
+        // (b) FR-035 header_filter, and (c) begin_upstream_cache_capture. This
+        // guarantees: FR-035 cannot strip them, and the cache snapshot taken
+        // in (c) NEVER contains per-request x-waf-* (no stale replay on HIT).
+        crate::waf_observability_headers::inject_for_passthrough(upstream_response, ctx)?;
+
         Ok(())
     }
 
@@ -1036,7 +1102,7 @@ impl ProxyHttp for WafProxy {
     /// Maps the error to an HTTP status using the same heuristics as the trait
     /// default, then writes our own headers+body so the response is free of any
     /// Pingora-default markers (`Server: pingora/...`, default HTML page, etc.).
-    async fn fail_to_proxy(&self, session: &mut Session, e: &pingora_core::Error, _ctx: &mut Self::CTX) -> FailToProxy
+    async fn fail_to_proxy(&self, session: &mut Session, e: &pingora_core::Error, ctx: &mut Self::CTX) -> FailToProxy
     where
         Self::CTX: Send + Sync,
     {
@@ -1047,7 +1113,52 @@ impl ProxyHttp for WafProxy {
                 .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
                 .map(str::to_string);
             match ErrorPageFactory::render(code, accept.as_deref()) {
-                Ok((headers, body)) => {
+                Ok((mut headers, body)) => {
+                    // Map transport status → contract action. 504 ↔ timeout,
+                    // 503 ↔ circuit_breaker (FR-039: connect-refused / unresponsive
+                    // upstream), else `block` (502 / 4xx / 5xx other).
+                    let action = match code {
+                        504 => "timeout",
+                        503 => "circuit_breaker",
+                        _ => "block",
+                    };
+                    // req_id: prefer ctx.request_ctx.req_id (already audited by
+                    // engine.inspect). When ctx is None (rare here — fail_to_proxy
+                    // typically fires after request_filter built the ctx), fall
+                    // back to a fresh UUID v4 + minimal audit stub so the wire
+                    // X-WAF-Request-Id is always correlatable.
+                    let fallback_req_id = if ctx.request_ctx.is_none() {
+                        let id = Uuid::new_v4().to_string();
+                        let peer_ip = session
+                            .client_addr()
+                            .and_then(|a| a.as_inet())
+                            .map(|s| s.ip().to_string())
+                            .unwrap_or_default();
+                        let host = session
+                            .req_header()
+                            .headers
+                            .get("host")
+                            .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
+                            .unwrap_or_default()
+                            .to_string();
+                        self.engine.emit_minimal_audit_stub(
+                            &id,
+                            AuditEventType::Block,
+                            &host,
+                            session.req_header().method.as_str(),
+                            session.req_header().uri.path_and_query().map_or("/", |pq| pq.as_str()),
+                            &peer_ip,
+                            "fail_to_proxy: transport error (ctx-None)",
+                        );
+                        id
+                    } else {
+                        String::new()
+                    };
+                    if let Err(inject_err) =
+                        inject_for_pre_inspect_or_error(&mut headers, ctx, action, &fallback_req_id)
+                    {
+                        warn!("failed to inject WAF observability headers on transport error: {inject_err}");
+                    }
                     if let Err(write_err) = session.write_response_header(Box::new(headers), false).await {
                         warn!("failed to write error header to downstream: {write_err}");
                     } else if let Err(write_err) = session.write_response_body(Some(body), true).await {
