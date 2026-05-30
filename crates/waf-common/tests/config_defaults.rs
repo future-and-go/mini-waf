@@ -8,8 +8,9 @@
 use waf_common::config::{
     ApiConfig, AppConfig, CacheBackendKind, CacheConfig, ClusterConfig, ClusterCryptoConfig, ClusterElectionConfig,
     ClusterHealthConfig, ClusterSyncConfig, CommunityConfig, CrowdSecConfig, EmbeddedValkeyConfig,
-    GeoIpAutoUpdateConfig, GeoIpConfig, Http3Config, NodeRole, ProxyConfig, RateLimitFileRef, RuleSourceEntry,
-    RulesConfig, SecurityConfig, SqliScanConfig, StorageConfig, ValkeyClientConfig, VictoriaLogsConfig,
+    GeoIpAutoUpdateConfig, GeoIpConfig, HeaderFilterConfig, Http3Config, NodeRole, ProxyConfig, RateLimitFileRef,
+    RuleSourceEntry, RulesConfig, SecurityConfig, SqliScanConfig, StorageConfig, ValkeyClientConfig,
+    VictoriaLogsConfig,
 };
 
 #[test]
@@ -87,6 +88,12 @@ fn security_defaults() {
     assert_eq!(s.max_request_body_bytes, 10 * 1024 * 1024);
     assert_eq!(s.api_rate_limit_rps, 0);
     assert!(s.cors_origins.is_empty());
+}
+
+#[test]
+fn header_filter_defaults_preserve_waf_observability_headers() {
+    let h = HeaderFilterConfig::default();
+    assert!(h.preserve_prefixes.contains(&"x-waf-".to_string()));
 }
 
 #[test]

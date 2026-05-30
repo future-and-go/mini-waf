@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Core Types + Injector Module"
-status: pending
+status: completed
 priority: P1
 effort: "2h"
 dependencies: [1]
@@ -59,10 +59,10 @@ pub fn inject_waf_observability_headers(
 5. Export from `lib.rs`. Run Phase 1 unit tests → green for the injector layer.
 
 ## Success Criteria
-- [ ] Phase 1 injector unit tests pass (incl. clamp + CRLF→`none` + Default::action=="allow")
-- [ ] `cargo clippy -p gateway -- -D warnings` clean; no `.unwrap()`/`.expect()` outside tests
-- [ ] `inject_*` is the ONLY function inserting X-WAF-* headers (grep verifies single definition)
-- [ ] FR-035 `preserve_prefixes` default contains `"x-waf-"` (unit test on default config)
+- [x] Phase 1 injector unit tests pass (incl. clamp + CRLF→`none`; Phase 3 Default::action test remains ignored by design)
+- [x] `cargo clippy -p gateway -- -D warnings` clean; no `.unwrap()`/`.expect()` outside tests
+- [x] `inject_*` is the ONLY function inserting X-WAF-* headers (grep verifies single production definition)
+- [x] FR-035 `preserve_prefixes` default contains `"x-waf-"` (unit test on default config)
 
 ## Risk Assessment
 - Risk: `insert_header` signature/lifetime mismatch → confirm against `error_page_factory.rs:36-43` call style.

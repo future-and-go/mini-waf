@@ -654,7 +654,7 @@ impl Default for HeaderFilterConfig {
             strip_headers: Vec::new(),
             strip_prefixes: Vec::new(),
             preserve_headers: Vec::new(),
-            preserve_prefixes: Vec::new(),
+            preserve_prefixes: vec!["x-waf-".to_string()],
             pii: PiiConfig::default(),
         }
     }

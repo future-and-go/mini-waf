@@ -92,7 +92,7 @@ FR-035/cache-capture, so they inject directly.
 | Phase | Name | Status | Priority | Effort | Dependencies |
 |-------|------|--------|----------|--------|--------------|
 | 1 | [TDD Test Scaffold](./phase-01-tdd-test-scaffold.md) | completed | P1 | 3h | None |
-| 2 | [Core Types + Injector Module](./phase-02-core-types-and-injector.md) | pending | P1 | 2h | Phase 1 |
+| 2 | [Core Types + Injector Module](./phase-02-core-types-and-injector.md) | completed | P1 | 2h | Phase 1 |
 | 3 | [Ctx Plumbing + Risk/Rule Wiring](./phase-03-ctx-plumbing-and-risk-wiring.md) | pending | P1 | 6h | Phase 2 |
 | 4 | [Inject on WAF-Decision Paths](./phase-04-inject-waf-decision-paths.md) | pending | P1 | 3h | Phases 2,3 |
 | 5 | [Inject on Passthrough + Cache-Hit](./phase-05-inject-passthrough-and-cache.md) | pending | P1 | 3h | Phases 2,3 |
