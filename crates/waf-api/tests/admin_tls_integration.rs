@@ -10,11 +10,11 @@
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::disallowed_types,
-    clippy::disallowed_methods
+    clippy::disallowed_methods,
+    clippy::field_reassign_with_default
 )]
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{Json, Router, routing::get};
@@ -58,7 +58,7 @@ async fn admin_tls_auto_mode_generates_and_persists() {
 
     let dir = tempfile::tempdir().unwrap();
     let mut cfg = AdminTlsConfig::default();
-    cfg.data_dir = dir.path().to_string_lossy().to_string();
+    cfg.data_dir = Some(dir.path().to_path_buf());
     let listen_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
     let manager = AdminTlsManager::bootstrap(cfg, listen_addr)
@@ -84,7 +84,7 @@ async fn admin_tls_reuse_on_second_boot() {
 
     let dir = tempfile::tempdir().unwrap();
     let mut cfg = AdminTlsConfig::default();
-    cfg.data_dir = dir.path().to_string_lossy().to_string();
+    cfg.data_dir = Some(dir.path().to_path_buf());
     let listen_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
     let fp1 = AdminTlsManager::bootstrap(cfg.clone(), listen_addr)
@@ -109,9 +109,9 @@ async fn admin_tls_renews_when_within_window() {
     let dir = tempfile::tempdir().unwrap();
     // validity=2 days, renew_before=3 days → always within renewal window
     let mut cfg = AdminTlsConfig::default();
-    cfg.data_dir = dir.path().to_string_lossy().to_string();
+    cfg.data_dir = Some(dir.path().to_path_buf());
     cfg.validity_days = 2;
-    cfg.renew_before_days = 3;
+    cfg.renewal_before_days = 3;
 
     let listen_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
@@ -153,14 +153,14 @@ async fn admin_cert_resolver_swap_atomic() {
     // Build two independent TLS material sets
     let dir1 = tempfile::tempdir().unwrap();
     let mut cfg1 = AdminTlsConfig::default();
-    cfg1.data_dir = dir1.path().to_string_lossy().to_string();
+    cfg1.data_dir = Some(dir1.path().to_path_buf());
 
     let dir2 = tempfile::tempdir().unwrap();
     let mut cfg2 = AdminTlsConfig::default();
-    cfg2.data_dir = dir2.path().to_string_lossy().to_string();
+    cfg2.data_dir = Some(dir2.path().to_path_buf());
     // Short validity so the two certs are guaranteed to differ
     cfg2.validity_days = 2;
-    cfg2.renew_before_days = 0;
+    cfg2.renewal_before_days = 0;
 
     let listen_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
@@ -195,7 +195,7 @@ async fn end_to_end_https_health_check() {
 
     let dir = tempfile::tempdir().unwrap();
     let mut tls_cfg = AdminTlsConfig::default();
-    tls_cfg.data_dir = dir.path().to_string_lossy().to_string();
+    tls_cfg.data_dir = Some(dir.path().to_path_buf());
 
     // Pick an ephemeral port
     let tmp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -248,13 +248,13 @@ async fn end_to_end_https_health_check() {
 async fn http_redirect_listener_returns_301() {
     install_ring_provider_once();
 
-    let https_tmp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let https_addr = https_tmp.local_addr().unwrap();
-    drop(https_tmp);
+    let ssl_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let https_addr = ssl_listener.local_addr().unwrap();
+    drop(ssl_listener);
 
-    let http_tmp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let http_port = http_tmp.local_addr().unwrap().port();
-    drop(http_tmp);
+    let plain_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let http_port = plain_listener.local_addr().unwrap().port();
+    drop(plain_listener);
 
     spawn_http_redirect(https_addr, Some(http_port));
 
