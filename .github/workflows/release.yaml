@@ -6,8 +6,7 @@
 #   1. build  — GitHub-hosted ubuntu-22.04 host, inside a rockylinux:9 container so
 #               the produced binary links against glibc 2.34 (matches the RHEL 9.7
 #               EC2 deploy target exactly). Outputs a tar.gz + sha256 containing
-#               the `waf` binary (renamed from cargo's `prx-waf` output), rules/,
-#               configs/, migrations/.
+#               the `waf` binary, rules/, configs/, migrations/.
 #   2. deploy — Self-hosted runner on the EC2 (labels: self-hosted, linux, x64,
 #               prx-waf-ec2). Downloads the artifact, hands the unpacked tree to
 #               /usr/local/sbin/prx-waf-deploy (installed once by
@@ -107,9 +106,7 @@ jobs:
           set -euo pipefail
           STAGE="dist/waf"
           mkdir -p "$STAGE"
-          # Cargo emits the binary under the [[bin]] name `prx-waf`; rename to
-          # `waf` in the artifact so consumers see a `waf` executable.
-          install -m 0755 target/release/prx-waf "$STAGE/waf"
+          install -m 0755 target/release/waf "$STAGE/waf"
           cp -r rules      "$STAGE/"
           cp -r configs    "$STAGE/"
           cp -r migrations "$STAGE/" 2>/dev/null || true
