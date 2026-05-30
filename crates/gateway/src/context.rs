@@ -194,6 +194,10 @@ pub struct GatewayCtx {
     /// upgrades to `Hit`/`Miss` only on the allow path; non-allow outcomes
     /// must never report a cache-clean origin response.
     pub cache_status: CacheStatus,
+    /// FR-012: set to `true` in `upstream_response_filter` when the origin
+    /// actually responded. `false` for WAF-blocked, origin-down, or
+    /// Pingora-synthesized responses.
+    pub upstream_response_observed: bool,
 }
 
 /// Per-response state for the streaming body masker (AC-17).

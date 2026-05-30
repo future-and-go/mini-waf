@@ -235,6 +235,7 @@ where
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: std::collections::HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     };
 
     // ── WAF inspection — same pipeline as HTTP/1.1 ──────────────────────────

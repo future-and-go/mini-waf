@@ -200,6 +200,7 @@ pub fn build_from_parts(
         tier_policy,
         cookies,
         device_fp,
+        tx_velocity_token: None,
     }
 }
 

@@ -68,3 +68,8 @@ No blocking plans. All upstream deps complete.
 - Zero false positives on baseline traffic suite
 - `cargo fmt && cargo clippy -D warnings && cargo test` green
 - No `.unwrap()` in production code (Iron Rule #1)
+
+## Follow-ups (post-completion)
+
+- [Completed 2026-05-31] FR-010 fingerprint plumbing + response-side `ok` enrichment closed in
+  [`260530-2325-fr012-fp-plumbing-and-ok-enrichment/plan.md`](../260530-2325-fr012-fp-plumbing-and-ok-enrichment/plan.md).
