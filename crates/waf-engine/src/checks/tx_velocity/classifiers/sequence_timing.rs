@@ -5,6 +5,8 @@
 //! role landed less than `min_human_ms` earlier. Older history is ignored
 //! so a slow sequence followed by a fast retry still fires correctly.
 
+use waf_common::Outcome;
+
 use crate::checks::tx_velocity::EndpointRole;
 use crate::checks::tx_velocity::classifier::Classifier;
 use crate::checks::tx_velocity::config::TxVelocityConfig;
@@ -26,13 +28,11 @@ impl Classifier for SequenceTimingClassifier {
 
     fn evaluate(&self, snap: &ActorTxSnapshot, _now_ms: u64, cfg: &TxVelocityConfig) -> Option<Signal> {
         let scfg = cfg.classifiers.sequence.as_ref()?;
-        // Snapshot is oldest → newest; inspect the latest event.
-        let last = snap.events.last()?;
+        let settled: Vec<_> = snap.events.iter().filter(|e| e.outcome != Outcome::Pending).collect();
+        let last = settled.last()?;
         let (from, to) = TRANSITIONS.iter().copied().find(|(_, to)| *to == last.role)?;
 
-        // Find the most-recent prior event with `from` role. Walk backwards
-        // skipping the final element (which is `to`).
-        let prior = snap.events.iter().rev().skip(1).find(|e| e.role == from)?;
+        let prior = settled.iter().rev().skip(1).find(|e| e.role == from)?;
 
         let interval_ms = last.ts_ms.saturating_sub(prior.ts_ms);
         if interval_ms < scfg.min_human_ms {
@@ -69,7 +69,11 @@ mod tests {
     }
 
     fn ev(role: EndpointRole, ts_ms: u64) -> Event {
-        Event { role, ts_ms, ok: true }
+        Event {
+            role,
+            ts_ms,
+            outcome: Outcome::Ok,
+        }
     }
 
     #[test]

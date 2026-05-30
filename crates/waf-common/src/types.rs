@@ -4,7 +4,31 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
 
+use crate::session_key::SessionKey;
 use crate::tier::{Tier, TierPolicy};
+
+/// Tristate outcome for a transaction event.
+///
+/// `Pending` means the upstream has not yet responded (or the request was
+/// WAF-blocked / abandoned). Classifiers ignore `Pending` events — only
+/// `Ok` and `Failed` feed velocity / sequence checks.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Outcome {
+    #[default]
+    Pending,
+    Ok,
+    Failed,
+}
+
+/// Opaque token returned by `TxStore::record()`. Carried in `RequestCtx`
+/// so `on_response` can flip the exact ring slot without re-extracting
+/// the session key or re-classifying the endpoint role.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TxEventToken {
+    pub key: SessionKey,
+    pub slot: u8,
+    pub generation: u32,
+}
 
 /// `GeoIP` information resolved from the client IP address.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -95,6 +119,10 @@ pub struct RequestCtx {
     /// produced no values. Consumed by `TxVelocityCheck` to fall back from
     /// cookie to fingerprint as the session identity.
     pub device_fp: Option<Arc<FpKey>>,
+    /// Token set by `TxVelocityCheck::check()` so `on_response` can flip
+    /// the exact ring-buffer slot to `Ok` or `Failed` without re-extracting
+    /// the session key.
+    pub tx_velocity_token: Option<TxEventToken>,
 }
 
 /// Parse a `Cookie:` header value into a name → value map.
@@ -143,6 +171,7 @@ impl Default for RequestCtx {
             tier_policy: Self::default_tier_policy(),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 }

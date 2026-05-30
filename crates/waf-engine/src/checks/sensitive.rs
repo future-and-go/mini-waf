@@ -142,7 +142,7 @@ impl Default for SensitiveCheck {
 }
 
 impl Check for SensitiveCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         if !ctx.host_config.defense_config.sensitive {
             return None;
         }
@@ -220,29 +220,30 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: std::collections::HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
     #[test]
     fn test_private_key_detection() {
         let checker = SensitiveCheck::new();
-        let ctx = make_ctx("/upload", b"-----BEGIN RSA PRIVATE KEY-----\nMIIEo...");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/upload", b"-----BEGIN RSA PRIVATE KEY-----\nMIIEo...");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn test_custom_word() {
         let checker = SensitiveCheck::new();
         checker.load_host("test", &["super_secret_token".to_string()]);
-        let ctx = make_ctx("/api?token=super_secret_token", b"");
-        let result = checker.check(&ctx);
+        let mut ctx = make_ctx("/api?token=super_secret_token", b"");
+        let result = checker.check(&mut ctx);
         assert!(result.is_some());
     }
 
     #[test]
     fn test_no_match() {
         let checker = SensitiveCheck::new();
-        let ctx = make_ctx("/public/page", b"Hello world");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/public/page", b"Hello world");
+        assert!(checker.check(&mut ctx).is_none());
     }
 }

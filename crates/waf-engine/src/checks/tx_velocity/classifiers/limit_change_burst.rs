@@ -22,8 +22,13 @@ impl Classifier for LimitChangeBurstClassifier {
 
     fn evaluate(&self, snap: &ActorTxSnapshot, now_ms: u64, cfg: &TxVelocityConfig) -> Option<Signal> {
         let vcfg = cfg.classifiers.limit_change_velocity.as_ref()?;
-        evaluate_velocity(snap, now_ms, vcfg, EndpointRole::LimitChange)
-            .map(|(count, window_sec)| Signal::LimitChangeBurst { count, window_sec })
+        evaluate_velocity(snap, now_ms, vcfg, EndpointRole::LimitChange).map(|(count, ok_count, window_sec)| {
+            Signal::LimitChangeBurst {
+                count,
+                ok_count,
+                window_sec,
+            }
+        })
     }
 }
 
@@ -32,6 +37,7 @@ mod tests {
     use super::*;
     use crate::checks::tx_velocity::Event;
     use crate::checks::tx_velocity::config::{ClassifierConfigs, VelocityCfg};
+    use waf_common::Outcome;
 
     fn cfg_with(max_count: u32, window_ms: u64) -> TxVelocityConfig {
         TxVelocityConfig {
@@ -56,7 +62,7 @@ mod tests {
         Event {
             role: EndpointRole::LimitChange,
             ts_ms,
-            ok: true,
+            outcome: Outcome::Ok,
         }
     }
 
@@ -68,6 +74,7 @@ mod tests {
             out,
             Some(Signal::LimitChangeBurst {
                 count: 4,
+                ok_count: 4,
                 window_sec: 60
             })
         ));
@@ -86,17 +93,17 @@ mod tests {
             Event {
                 role: EndpointRole::Withdrawal,
                 ts_ms: 100,
-                ok: true,
+                outcome: Outcome::Ok,
             },
             Event {
                 role: EndpointRole::Withdrawal,
                 ts_ms: 200,
-                ok: true,
+                outcome: Outcome::Ok,
             },
             Event {
                 role: EndpointRole::Withdrawal,
                 ts_ms: 300,
-                ok: true,
+                outcome: Outcome::Ok,
             },
         ]);
         assert!(
@@ -113,6 +120,37 @@ mod tests {
             LimitChangeBurstClassifier
                 .evaluate(&s, 400, &TxVelocityConfig::default())
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn limit_change_signal_carries_ok_count() {
+        let events = vec![
+            Event {
+                role: EndpointRole::LimitChange,
+                ts_ms: 100,
+                outcome: Outcome::Ok,
+            },
+            Event {
+                role: EndpointRole::LimitChange,
+                ts_ms: 200,
+                outcome: Outcome::Failed,
+            },
+            Event {
+                role: EndpointRole::LimitChange,
+                ts_ms: 300,
+                outcome: Outcome::Ok,
+            },
+        ];
+        let s = snap(events);
+        let out = LimitChangeBurstClassifier.evaluate(&s, 400, &cfg_with(2, 60_000));
+        assert_eq!(
+            out,
+            Some(Signal::LimitChangeBurst {
+                count: 3,
+                ok_count: 2,
+                window_sec: 60
+            }),
         );
     }
 }

@@ -41,9 +41,9 @@ async fn scenario_d_per_tier_burst_triggers_detection() {
     // This is below the default cap_floor of 1000, so should all pass
     for _ in 0..100 {
         let ip = rotator.next_ip();
-        let ctx = CtxBuilder::new().ip_addr(ip).tier(Tier::Medium).build();
+        let mut ctx = CtxBuilder::new().ip_addr(ip).tier(Tier::Medium).build();
 
-        if harness.check(&ctx).is_some() {
+        if harness.check(&mut ctx).is_some() {
             blocked_count += 1;
         }
     }
@@ -69,13 +69,13 @@ async fn scenario_d_critical_tier_fail_close() {
     let harness = DdosTestHarness::with_config(config);
 
     // Normal request should pass when not degraded
-    let ctx = CtxBuilder::new()
+    let mut ctx = CtxBuilder::new()
         .ip("10.0.0.1")
         .tier(Tier::Critical)
         .fail_mode(FailMode::Close)
         .build();
 
-    let result = harness.check(&ctx);
+    let result = harness.check(&mut ctx);
     // Note: may or may not block depending on initial state
     // The key test is verifying fail_mode behavior, not the exact block count
 
@@ -98,13 +98,13 @@ async fn scenario_d_medium_tier_fail_open() {
     // Normal traffic should pass
     let mut blocked = 0;
     for i in 0..50 {
-        let ctx = CtxBuilder::new()
+        let mut ctx = CtxBuilder::new()
             .ip(&format!("192.168.1.{}", i % 256))
             .tier(Tier::Medium)
             .fail_mode(FailMode::Open)
             .build();
 
-        if harness.check(&ctx).is_some() {
+        if harness.check(&mut ctx).is_some() {
             blocked += 1;
         }
     }
@@ -131,13 +131,13 @@ async fn scenario_d_catchall_always_allows() {
     // Request with CatchAll tier (not configured) should pass
     let mut blocked = 0;
     for _ in 0..100 {
-        let ctx = CtxBuilder::new()
+        let mut ctx = CtxBuilder::new()
             .ip("10.0.0.1")
             .tier(Tier::CatchAll) // Using unconfigured tier
             .fail_mode(FailMode::Open)
             .build();
 
-        if harness.check(&ctx).is_some() {
+        if harness.check(&mut ctx).is_some() {
             blocked += 1;
         }
     }

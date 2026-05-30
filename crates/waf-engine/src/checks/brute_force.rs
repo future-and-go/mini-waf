@@ -78,7 +78,7 @@ fn is_login_route(ctx: &RequestCtx) -> bool {
 }
 
 impl Check for BruteForceCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         let dc = &ctx.host_config.defense_config;
         if !dc.brute_force || !is_login_route(ctx) {
             return None;
@@ -215,6 +215,7 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
@@ -227,8 +228,8 @@ mod tests {
             let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
-        let det = checker.check(&ctx).expect("hit");
+        let mut ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
+        let det = checker.check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BF-001");
     }
 
@@ -243,8 +244,8 @@ mod tests {
             let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -258,8 +259,8 @@ mod tests {
         }
         // Default window is 900s; jump well past it.
         clock.advance(Duration::from_secs(1800));
-        let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -272,8 +273,8 @@ mod tests {
             checker.on_response(&ctx, 401);
         }
         // Different IP — no state.
-        let ctx = make_ctx("/login", body, "application/json", "2.2.2.2");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/login", body, "application/json", "2.2.2.2");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -286,13 +287,13 @@ mod tests {
             checker.on_response(&ctx, 401);
         }
         // Next request from same IP — spray detected regardless of username.
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             "/login",
             br#"{"username":"zed","password":"anything"}"#,
             "application/json",
             "9.9.9.9",
         );
-        let det = checker.check(&ctx).expect("hit");
+        let det = checker.check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BF-002");
     }
 
@@ -305,13 +306,13 @@ mod tests {
             let ctx = make_ctx("/login", body.as_bytes(), "application/json", "9.9.9.9");
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             "/login",
             br#"{"username":"x","password":"y"}"#,
             "application/json",
             "9.9.9.9",
         );
-        assert!(checker.check(&ctx).is_none());
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -323,8 +324,8 @@ mod tests {
             let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
             checker.on_response(&ctx, 200);
         }
-        let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -337,8 +338,8 @@ mod tests {
             let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
             checker.on_response(&ctx, 503);
         }
-        let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -350,8 +351,8 @@ mod tests {
             let ctx = make_ctx("/api/health", body, "application/json", "5.5.5.5");
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -367,8 +368,8 @@ mod tests {
             let ctx = make_ctx_dc("/login", body, "application/json", "5.5.5.5", dc.clone());
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx_dc("/login", body, "application/json", "5.5.5.5", dc);
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx_dc("/login", body, "application/json", "5.5.5.5", dc);
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -381,8 +382,8 @@ mod tests {
             let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -405,14 +406,14 @@ mod tests {
             );
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             "/login",
             br#"{"username":"alice","password":"x"}"#,
             "application/json",
             "5.5.5.5",
         );
         let det = checker
-            .check(&ctx)
+            .check(&mut ctx)
             .expect("5 padded failures must collapse to same slot");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BF-001");
     }
@@ -436,13 +437,13 @@ mod tests {
             );
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             "/login",
             br#"{"username":"alice","password":"x"}"#,
             "application/json",
             "5.5.5.5",
         );
-        let det = checker.check(&ctx).expect("hit after combined 5 failures");
+        let det = checker.check(&mut ctx).expect("hit after combined 5 failures");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BF-001");
     }
 
@@ -459,13 +460,13 @@ mod tests {
             );
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             "/login",
             b"username=alice&password=wrong",
             "application/x-www-form-urlencoded",
             "5.5.5.5",
         );
-        assert!(checker.check(&ctx).is_some());
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
@@ -478,8 +479,8 @@ mod tests {
             let ctx = make_ctx("/api/auth/token/refresh", body, "application/json", "5.5.5.5");
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx("/api/auth/token/refresh", body, "application/json", "5.5.5.5");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/api/auth/token/refresh", body, "application/json", "5.5.5.5");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
@@ -491,8 +492,8 @@ mod tests {
             let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
-        let det = checker.check(&ctx).expect("hit");
+        let mut ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
+        let det = checker.check(&mut ctx).expect("hit");
         assert_eq!(det.phase, Phase::BruteForce);
         assert_eq!(det.rule_name, "Brute Force");
         assert!(det.rule_id.as_deref().unwrap_or("").starts_with("BF-"));
@@ -511,8 +512,8 @@ mod tests {
             let ctx = make_ctx_dc("/login", body, "application/json", "5.5.5.5", dc.clone());
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx_dc("/login", body, "application/json", "5.5.5.5", dc);
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx_dc("/login", body, "application/json", "5.5.5.5", dc);
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -524,8 +525,8 @@ mod tests {
             let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
             checker.on_response(&ctx, 403);
         }
-        let ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/login", body, "application/json", "5.5.5.5");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
@@ -543,10 +544,10 @@ mod tests {
             checker.on_response(&ctx, 401);
         }
         // Hit a sibling — should NOT be seen as a login route, so no block.
-        let ctx = make_ctx("/login-page", body, "application/json", "5.5.5.5");
-        assert!(checker.check(&ctx).is_none());
-        let ctx = make_ctx("/loginx", body, "application/json", "5.5.5.5");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/login-page", body, "application/json", "5.5.5.5");
+        assert!(checker.check(&mut ctx).is_none());
+        let mut ctx = make_ctx("/loginx", body, "application/json", "5.5.5.5");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -561,7 +562,7 @@ mod tests {
             let ctx = make_ctx("/api/auth/token", body, "application/json", "5.5.5.5");
             checker.on_response(&ctx, 401);
         }
-        let ctx = make_ctx("/api/auth/tokens-admin", body, "application/json", "5.5.5.5");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/api/auth/tokens-admin", body, "application/json", "5.5.5.5");
+        assert!(checker.check(&mut ctx).is_none());
     }
 }

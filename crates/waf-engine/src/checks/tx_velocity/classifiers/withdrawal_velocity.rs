@@ -5,6 +5,8 @@
 //! not at the most-recent event, so a long-idle actor with one fresh
 //! withdrawal isn't compared against ancient history.
 
+use waf_common::Outcome;
+
 use crate::checks::tx_velocity::EndpointRole;
 use crate::checks::tx_velocity::classifier::Classifier;
 use crate::checks::tx_velocity::config::{TxVelocityConfig, VelocityCfg};
@@ -20,34 +22,42 @@ impl Classifier for WithdrawalVelocityClassifier {
 
     fn evaluate(&self, snap: &ActorTxSnapshot, now_ms: u64, cfg: &TxVelocityConfig) -> Option<Signal> {
         let vcfg = cfg.classifiers.withdrawal_velocity.as_ref()?;
-        evaluate_velocity(snap, now_ms, vcfg, EndpointRole::Withdrawal)
-            .map(|(count, window_sec)| Signal::WithdrawalVelocity { count, window_sec })
+        evaluate_velocity(snap, now_ms, vcfg, EndpointRole::Withdrawal).map(|(count, ok_count, window_sec)| {
+            Signal::WithdrawalVelocity {
+                count,
+                ok_count,
+                window_sec,
+            }
+        })
     }
 }
 
 /// Shared body — counts events of `role` in the trailing window. Returned
-/// `Some((count, window_sec))` only when the threshold is exceeded.
+/// `Some((count, ok_count, window_sec))` only when the threshold is exceeded.
 pub(super) fn evaluate_velocity(
     snap: &ActorTxSnapshot,
     now_ms: u64,
     cfg: &VelocityCfg,
     role: EndpointRole,
-) -> Option<(u32, u32)> {
+) -> Option<(u32, u32, u32)> {
     if cfg.window_ms == 0 {
         return None;
     }
     let cutoff = now_ms.saturating_sub(cfg.window_ms);
-    let count: u32 = snap
+    let (count, ok_count) = snap
         .events
         .iter()
-        .filter(|e| e.role == role && e.ts_ms >= cutoff)
-        .count()
-        .try_into()
-        .unwrap_or(u32::MAX);
+        .filter(|e| e.role == role && e.outcome != Outcome::Pending && e.ts_ms >= cutoff)
+        .fold((0u32, 0u32), |(c, ok), ev| {
+            (
+                c.saturating_add(1),
+                ok.saturating_add(u32::from(ev.outcome == Outcome::Ok)),
+            )
+        });
+    debug_assert!(ok_count <= count, "ok_count <= count invariant violated");
     if count > cfg.max_count {
-        // ms → sec for the signal payload (round up so 500 ms → 1 s).
         let window_sec: u32 = u32::try_from(cfg.window_ms.div_ceil(1_000)).unwrap_or(u32::MAX);
-        Some((count, window_sec))
+        Some((count, ok_count, window_sec))
     } else {
         None
     }
@@ -82,7 +92,7 @@ mod tests {
         Event {
             role: EndpointRole::Withdrawal,
             ts_ms,
-            ok: true,
+            outcome: Outcome::Ok,
         }
     }
 
@@ -94,6 +104,7 @@ mod tests {
             out,
             Some(Signal::WithdrawalVelocity {
                 count: 4,
+                ok_count: 4,
                 window_sec: 60
             })
         ));
@@ -115,6 +126,7 @@ mod tests {
             out,
             Some(Signal::WithdrawalVelocity {
                 count: 1,
+                ok_count: 1,
                 window_sec: 1
             })
         ));
@@ -126,12 +138,12 @@ mod tests {
             Event {
                 role: EndpointRole::Deposit,
                 ts_ms: 100,
-                ok: true,
+                outcome: Outcome::Ok,
             },
             Event {
                 role: EndpointRole::Deposit,
                 ts_ms: 200,
-                ok: true,
+                outcome: Outcome::Ok,
             },
             w(300),
         ]);
@@ -146,6 +158,116 @@ mod tests {
             WithdrawalVelocityClassifier
                 .evaluate(&s, 500, &TxVelocityConfig::default())
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn ok_count_reflects_event_outcome() {
+        let events = vec![
+            Event {
+                role: EndpointRole::Withdrawal,
+                ts_ms: 100,
+                outcome: Outcome::Ok,
+            },
+            Event {
+                role: EndpointRole::Withdrawal,
+                ts_ms: 200,
+                outcome: Outcome::Failed,
+            },
+            Event {
+                role: EndpointRole::Withdrawal,
+                ts_ms: 300,
+                outcome: Outcome::Ok,
+            },
+            Event {
+                role: EndpointRole::Withdrawal,
+                ts_ms: 400,
+                outcome: Outcome::Ok,
+            },
+        ];
+        let s = snap(events);
+        let out = WithdrawalVelocityClassifier.evaluate(&s, 500, &cfg_with(3, 60_000));
+        assert_eq!(
+            out,
+            Some(Signal::WithdrawalVelocity {
+                count: 4,
+                ok_count: 3,
+                window_sec: 60
+            }),
+        );
+    }
+
+    #[test]
+    fn ok_count_zero_when_all_events_denied() {
+        let events = vec![
+            Event {
+                role: EndpointRole::Withdrawal,
+                ts_ms: 100,
+                outcome: Outcome::Failed,
+            },
+            Event {
+                role: EndpointRole::Withdrawal,
+                ts_ms: 200,
+                outcome: Outcome::Failed,
+            },
+            Event {
+                role: EndpointRole::Withdrawal,
+                ts_ms: 300,
+                outcome: Outcome::Failed,
+            },
+            Event {
+                role: EndpointRole::Withdrawal,
+                ts_ms: 400,
+                outcome: Outcome::Failed,
+            },
+        ];
+        let s = snap(events);
+        let out = WithdrawalVelocityClassifier.evaluate(&s, 500, &cfg_with(3, 60_000));
+        assert_eq!(
+            out,
+            Some(Signal::WithdrawalVelocity {
+                count: 4,
+                ok_count: 0,
+                window_sec: 60
+            }),
+            "denied-burst must still fire (count > max) but signal ok_count = 0",
+        );
+    }
+
+    #[test]
+    fn pending_events_excluded_from_count_and_ok_count() {
+        let events = vec![
+            Event {
+                role: EndpointRole::Withdrawal,
+                ts_ms: 100,
+                outcome: Outcome::Pending,
+            },
+            Event {
+                role: EndpointRole::Withdrawal,
+                ts_ms: 200,
+                outcome: Outcome::Ok,
+            },
+            Event {
+                role: EndpointRole::Withdrawal,
+                ts_ms: 300,
+                outcome: Outcome::Ok,
+            },
+            Event {
+                role: EndpointRole::Withdrawal,
+                ts_ms: 400,
+                outcome: Outcome::Pending,
+            },
+        ];
+        let s = snap(events);
+        let out = WithdrawalVelocityClassifier.evaluate(&s, 500, &cfg_with(1, 60_000));
+        assert_eq!(
+            out,
+            Some(Signal::WithdrawalVelocity {
+                count: 2,
+                ok_count: 2,
+                window_sec: 60
+            }),
+            "Pending events must not feed the velocity counters",
         );
     }
 }

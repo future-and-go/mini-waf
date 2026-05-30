@@ -21,7 +21,7 @@ impl CommunityChecker {
 }
 
 impl Check for CommunityChecker {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         let decision = self.blocklist.check_ip(&ctx.client_ip)?;
 
         Some(DetectionResult {
@@ -66,6 +66,7 @@ mod tests {
             tier_policy: RequestCtx::default_tier_policy(),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
@@ -74,7 +75,7 @@ mod tests {
         let client = Arc::new(CommunityClient::new("http://localhost").expect("client"));
         let bl = Arc::new(CommunityBlocklistSync::new(client, "k".to_string(), 60, None));
         let checker = CommunityChecker::new(bl);
-        let ctx = ctx_with_ip("1.2.3.4");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = ctx_with_ip("1.2.3.4");
+        assert!(checker.check(&mut ctx).is_none());
     }
 }

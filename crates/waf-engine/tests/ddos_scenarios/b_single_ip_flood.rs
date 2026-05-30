@@ -34,8 +34,8 @@ async fn scenario_b_single_ip_flood_triggers_ban() {
 
     // Send 1000 requests from single IP
     for i in 0..1000_u32 {
-        let ctx = CtxBuilder::new().ip(attacker_ip).tier(Tier::Medium).build();
-        let result = harness.check(&ctx);
+        let mut ctx = CtxBuilder::new().ip(attacker_ip).tier(Tier::Medium).build();
+        let result = harness.check(&mut ctx);
 
         if result.is_some() {
             total_blocks += 1;
@@ -57,8 +57,8 @@ async fn scenario_b_single_ip_flood_triggers_ban() {
     assert!(harness.is_banned(ip), "attacker IP should be banned");
 
     // Verify: subsequent requests are blocked by ban table
-    let ctx = CtxBuilder::new().ip(attacker_ip).tier(Tier::Medium).build();
-    let result = harness.check(&ctx);
+    let mut ctx = CtxBuilder::new().ip(attacker_ip).tier(Tier::Medium).build();
+    let result = harness.check(&mut ctx);
     assert!(result.is_some(), "banned IP should be blocked");
 
     // Check the block is from ban table (DDOS-BAN rule)
@@ -92,8 +92,8 @@ async fn scenario_b_ban_escalation() {
     // First offense: trigger ban
     let mut first_blocked = false;
     for _ in 0..15 {
-        let ctx = CtxBuilder::new().ip(attacker_ip).tier(Tier::Medium).build();
-        if harness.check(&ctx).is_some() {
+        let mut ctx = CtxBuilder::new().ip(attacker_ip).tier(Tier::Medium).build();
+        if harness.check(&mut ctx).is_some() {
             first_blocked = true;
         }
     }
@@ -124,14 +124,14 @@ async fn scenario_b_different_ips_independent() {
 
     // IP1: exceed threshold
     for _ in 0..25 {
-        let ctx = CtxBuilder::new().ip("192.168.1.1").tier(Tier::Medium).build();
-        harness.check(&ctx);
+        let mut ctx = CtxBuilder::new().ip("192.168.1.1").tier(Tier::Medium).build();
+        harness.check(&mut ctx);
     }
 
     // IP2: under threshold
     for _ in 0..15 {
-        let ctx = CtxBuilder::new().ip("192.168.1.2").tier(Tier::Medium).build();
-        harness.check(&ctx);
+        let mut ctx = CtxBuilder::new().ip("192.168.1.2").tier(Tier::Medium).build();
+        harness.check(&mut ctx);
     }
 
     // Verify: IP1 banned, IP2 not

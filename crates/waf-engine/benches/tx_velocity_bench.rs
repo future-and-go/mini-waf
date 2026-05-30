@@ -18,10 +18,11 @@ use waf_engine::device_fp::aggregator::NoopAggregator;
 fn bench_config() -> TxVelocityConfig {
     TxVelocityConfig {
         enabled: true,
-        signal_cooldown_ms: 60_000, // Long cooldown to avoid signal spam
+        signal_cooldown_ms: 60_000,
         session_ttl_secs: 3600,
         session_cookie: "SESSIONID".to_string(),
         janitor_period_secs: 60,
+        dedupe_window_ms: 0, // Disable dedupe for bench: every call appends
         role_tagger: RoleTagger::empty(),
         classifiers: ClassifierConfigs {
             sequence: Some(SequenceCfg { min_human_ms: 1500 }),
@@ -58,7 +59,7 @@ fn warm_store(session_count: usize) -> (Arc<TxStore>, Arc<ArcSwap<TxVelocityConf
     for i in 0..session_count {
         let key = session_key(i as u32);
         for _ in 0..8 {
-            store.record(&key, EndpointRole::Deposit, true);
+            let _ = store.record(&key, EndpointRole::Deposit);
         }
     }
 
@@ -78,7 +79,7 @@ fn bench_record_existing_session(c: &mut Criterion) {
 
     c.bench_function("tx_velocity_record_existing", |b| {
         b.iter(|| {
-            store.record(black_box(&key), black_box(EndpointRole::Withdrawal), true);
+            let _ = store.record(black_box(&key), black_box(EndpointRole::Withdrawal));
         });
     });
 }
@@ -98,7 +99,7 @@ fn bench_record_new_session(c: &mut Criterion) {
         b.iter(|| {
             counter += 1;
             let key = session_key(counter);
-            store.record(black_box(&key), black_box(EndpointRole::Login), true);
+            let _ = store.record(black_box(&key), black_box(EndpointRole::Login));
         });
     });
 }
@@ -134,7 +135,7 @@ fn bench_full_check_path(c: &mut Criterion) {
 
     c.bench_function("tx_velocity_full_check", |b| {
         b.iter(|| {
-            store.record(black_box(&key), black_box(EndpointRole::Withdrawal), true);
+            let _ = store.record(black_box(&key), black_box(EndpointRole::Withdrawal));
         });
     });
 }
@@ -155,7 +156,7 @@ fn bench_scaling(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("record", session_count), &session_count, |b, _| {
             b.iter(|| {
-                store.record(black_box(&key), black_box(EndpointRole::Deposit), true);
+                let _ = store.record(black_box(&key), black_box(EndpointRole::Deposit));
             });
         });
     }
@@ -188,7 +189,7 @@ fn bench_concurrent_access(c: &mut Criterion) {
                         let _guard = rt.enter();
                         for i in 0..100 {
                             let key = session_key(t * 1000 + i);
-                            store.record(&key, EndpointRole::Withdrawal, true);
+                            let _ = store.record(&key, EndpointRole::Withdrawal);
                         }
                     })
                 })

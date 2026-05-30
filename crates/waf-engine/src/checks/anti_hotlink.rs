@@ -111,7 +111,7 @@ impl Default for AntiHotlinkCheck {
 }
 
 impl Check for AntiHotlinkCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         let host_code = &ctx.host_config.code;
 
         let config = self.configs.get(host_code)?.clone();
@@ -190,6 +190,7 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: std::collections::HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
@@ -207,13 +208,17 @@ mod tests {
         );
 
         // Exact match
-        assert!(checker.check(&make_ctx(Some("https://example.com/page"))).is_none());
+        assert!(checker.check(&mut make_ctx(Some("https://example.com/page"))).is_none());
         // Wildcard match
-        assert!(checker.check(&make_ctx(Some("https://sub.mysite.com/page"))).is_none());
+        assert!(
+            checker
+                .check(&mut make_ctx(Some("https://sub.mysite.com/page")))
+                .is_none()
+        );
         // Not allowed
-        assert!(checker.check(&make_ctx(Some("https://evil.com/page"))).is_some());
+        assert!(checker.check(&mut make_ctx(Some("https://evil.com/page"))).is_some());
         // Empty allowed (allow_empty_referer = true)
-        assert!(checker.check(&make_ctx(None)).is_none());
+        assert!(checker.check(&mut make_ctx(None)).is_none());
     }
 
     #[test]
@@ -229,8 +234,8 @@ mod tests {
             },
         );
 
-        assert!(checker.check(&make_ctx(None)).is_some());
-        assert!(checker.check(&make_ctx(Some("https://example.com/"))).is_none());
+        assert!(checker.check(&mut make_ctx(None)).is_some());
+        assert!(checker.check(&mut make_ctx(Some("https://example.com/"))).is_none());
     }
 
     #[test]
@@ -247,7 +252,7 @@ mod tests {
         );
 
         // Disabled — always passes
-        assert!(checker.check(&make_ctx(Some("https://evil.com/"))).is_none());
+        assert!(checker.check(&mut make_ctx(Some("https://evil.com/"))).is_none());
     }
 
     #[test]

@@ -47,6 +47,7 @@ fn ctx_for(host_code: &str, path: &str) -> RequestCtx {
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 

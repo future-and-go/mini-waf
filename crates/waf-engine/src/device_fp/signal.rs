@@ -45,12 +45,15 @@ pub enum Signal {
         to: EndpointRole,
         interval_ms: u64,
     },
-    /// FR-012 — actor exceeded the withdrawal-velocity threshold inside the
-    /// configured rolling window.
-    WithdrawalVelocity { count: u32, window_sec: u32 },
-    /// FR-012 — actor exceeded the limit-change-burst threshold inside the
-    /// configured rolling window.
-    LimitChangeBurst { count: u32, window_sec: u32 },
+    /// FR-012 — burst of withdrawal-tagged requests within `window_sec`.
+    ///
+    /// `count` = settled attempts (Ok | Failed) in the trailing window;
+    /// `ok_count` = subset where upstream returned 2xx. Both bounded by the
+    /// recorder's ring buffer — ratio is window-local, not lifetime.
+    WithdrawalVelocity { count: u32, ok_count: u32, window_sec: u32 },
+    /// FR-012 — burst of limit-change requests within `window_sec`.
+    /// Same `count`/`ok_count` semantics as `WithdrawalVelocity`.
+    LimitChangeBurst { count: u32, ok_count: u32, window_sec: u32 },
 }
 
 /// Reason an HTTP/2 anomaly was flagged. Closed enum so risk scorer can

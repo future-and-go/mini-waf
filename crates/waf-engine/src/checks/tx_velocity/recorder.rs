@@ -16,6 +16,8 @@ use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use tokio::task::JoinHandle;
 
+use waf_common::{Outcome, TxEventToken};
+
 use super::classifier::Classifier;
 use super::config::TxVelocityConfig;
 use super::session_key::{SessionIdent, SessionKey};
@@ -45,11 +47,12 @@ pub const WINDOW: usize = 16;
 /// cooldown without touching the ring.
 #[derive(Clone, Debug)]
 pub struct ActorTx {
-    events: [Option<Event>; WINDOW],
+    pub(crate) events: [Option<Event>; WINDOW],
     head: usize,
     len: usize,
     pub updated_ms: u64,
     pub last_signal_ms: u64,
+    pub generation: u32,
 }
 
 impl ActorTx {
@@ -60,10 +63,14 @@ impl ActorTx {
             len: 0,
             updated_ms: 0,
             last_signal_ms: 0,
+            generation: 0,
         }
     }
 
     pub fn record(&mut self, event: Event) {
+        if self.len == WINDOW && self.head == 0 {
+            self.generation = self.generation.wrapping_add(1);
+        }
         if let Some(slot) = self.events.get_mut(self.head) {
             *slot = Some(event);
         }
@@ -154,33 +161,72 @@ impl TxStore {
         u64::try_from(self.anchor.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
-    /// Append an event for `key` and run the classifier pipeline. Skips
-    /// when `role == None` (path didn't match any rule) — caller is free to
-    /// call unconditionally.
+    /// Append a `Pending` event for `key`. Returns a `TxEventToken` that
+    /// `set_outcome` uses to flip the exact slot on response.
     ///
-    /// Classifier evaluation is gated by per-actor cooldown
-    /// (`cfg.signal_cooldown_ms`); within the cooldown window the
-    /// recorder still appends the event but skips evaluation entirely.
-    /// Submission to the aggregator is fire-and-forget (`tokio::spawn`).
-    pub fn record(&self, key: &SessionKey, role: EndpointRole, ok: bool) {
-        if matches!(role, EndpointRole::None) {
-            return;
-        }
+    /// Within `dedupe_window_ms`, a same-(key, role, Pending) hit reuses
+    /// the existing slot (mobile retry collapse). Classifiers are NOT run
+    /// here — they execute in `set_outcome` when the outcome is known.
+    pub fn record(&self, key: &SessionKey, role: EndpointRole) -> TxEventToken {
         let now_ms = self.now_ms();
+        let cfg = self.cfg.load();
+        let dedupe_window_ms = cfg.dedupe_window_ms;
+
+        let mut entry = self.actors.entry(key.clone()).or_default();
+
+        // Dedupe: newest slot for this (key, role) within window AND still Pending?
+        if entry.len > 0 {
+            let newest_idx = (entry.head + WINDOW - 1) % WINDOW;
+            if let Some(Some(ev)) = entry.events.get(newest_idx)
+                && ev.role == role
+                && ev.outcome == Outcome::Pending
+                && now_ms.saturating_sub(ev.ts_ms) <= dedupe_window_ms
+            {
+                if let Some(Some(ev)) = entry.events.get_mut(newest_idx) {
+                    ev.ts_ms = now_ms;
+                }
+                #[allow(clippy::cast_possible_truncation)]
+                return TxEventToken {
+                    key: key.clone(),
+                    slot: newest_idx as u8,
+                    generation: entry.generation,
+                };
+            }
+        }
+
         let event = Event {
             role,
             ts_ms: now_ms,
-            ok,
+            outcome: Outcome::Pending,
         };
+        let slot = entry.head;
+        entry.record(event);
+        #[allow(clippy::cast_possible_truncation)]
+        TxEventToken {
+            key: key.clone(),
+            slot: slot as u8,
+            generation: entry.generation,
+        }
+    }
 
-        // Append + capture cooldown marker without holding the shard guard
-        // across classifier evaluation (deadlock-safe).
-        let last_signal_ms = {
-            let mut entry = self.actors.entry(key.clone()).or_default();
-            entry.record(event);
-            entry.last_signal_ms
-        };
+    /// Flip the exact ring slot identified by `tok` to `outcome`, then run
+    /// the classifier pipeline. No-op when the token's generation is stale
+    /// (slot was evicted by ring wrap) or the key was purged.
+    pub fn set_outcome(&self, tok: &TxEventToken, outcome: Outcome) {
+        {
+            let Some(mut entry) = self.actors.get_mut(&tok.key) else {
+                return;
+            };
+            if entry.generation != tok.generation {
+                return;
+            }
+            if let Some(Some(ev)) = entry.events.get_mut(tok.slot as usize) {
+                ev.outcome = outcome;
+            }
+            // Drop guard before classifier work.
+        }
 
+        let now_ms = self.now_ms();
         if self.classifiers.is_empty() {
             return;
         }
@@ -188,12 +234,14 @@ impl TxStore {
         if !cfg.enabled {
             return;
         }
+
+        let last_signal_ms = self.actors.get(&tok.key).map_or(0, |r| r.last_signal_ms);
         if now_ms.saturating_sub(last_signal_ms) < cfg.signal_cooldown_ms && last_signal_ms != 0 {
             return;
         }
 
-        let Some(snap) = self.snapshot(key) else {
-            return; // Race with purge: drop and move on.
+        let Some(snap) = self.snapshot(&tok.key) else {
+            return;
         };
         let signals: Vec<Signal> = self
             .classifiers
@@ -204,11 +252,9 @@ impl TxStore {
             return;
         }
 
-        // `0` is the sentinel for "never fired" — bump to 1 if record-time
-        // happened to hit the anchor instant exactly.
-        self.mark_signal(key, now_ms.max(1));
+        self.mark_signal(&tok.key, now_ms.max(1));
 
-        let fp_key = fp_key_for_submission(key);
+        let fp_key = fp_key_for_submission(&tok.key);
         let aggregator = Arc::clone(&self.aggregator);
         tokio::spawn(async move {
             aggregator.submit(&fp_key, &signals).await;
@@ -302,21 +348,14 @@ mod tests {
     }
 
     #[test]
-    fn record_skips_role_none() {
-        let s = TxStore::new(cfg(600));
-        s.record(&key("a"), EndpointRole::None, true);
-        assert!(s.snapshot(&key("a")).is_none());
-        assert!(s.is_empty());
-    }
-
-    #[test]
     fn record_appends_for_known_role() {
         let s = TxStore::new(cfg(600));
         let k = key("a");
-        s.record(&k, EndpointRole::Login, true);
+        let _tok = s.record(&k, EndpointRole::Login);
         let snap = s.snapshot(&k).expect("snapshot present");
         assert_eq!(snap.events.len(), 1);
         assert_eq!(snap.events.first().map(|e| e.role), Some(EndpointRole::Login));
+        assert_eq!(snap.events.first().map(|e| e.outcome), Some(Outcome::Pending));
     }
 
     #[test]
@@ -324,7 +363,8 @@ mod tests {
         let s = TxStore::new(cfg(600));
         let k = key("b");
         for _ in 0..(WINDOW + 4) {
-            s.record(&k, EndpointRole::Deposit, true);
+            let tok = s.record(&k, EndpointRole::Deposit);
+            s.set_outcome(&tok, Outcome::Ok);
         }
         let snap = s.snapshot(&k).expect("snapshot");
         assert_eq!(snap.events.len(), WINDOW);
@@ -334,7 +374,7 @@ mod tests {
     fn mark_signal_updates_cooldown_marker() {
         let s = TxStore::new(cfg(600));
         let k = key("c");
-        s.record(&k, EndpointRole::Otp, true);
+        let _tok = s.record(&k, EndpointRole::Otp);
         s.mark_signal(&k, 12_345);
         let snap = s.snapshot(&k).expect("snapshot");
         assert_eq!(snap.last_signal_ms, 12_345);
@@ -342,10 +382,9 @@ mod tests {
 
     #[test]
     fn purge_expired_removes_idle_actors() {
-        // ttl=0 ⇒ next tick treats every actor as expired.
         let s = TxStore::new(cfg(0));
         let k = key("d");
-        s.record(&k, EndpointRole::Login, true);
+        let _tok = s.record(&k, EndpointRole::Login);
         std::thread::sleep(Duration::from_millis(2));
         let purged = s.purge_expired();
         assert_eq!(purged, 1);
@@ -356,7 +395,7 @@ mod tests {
     fn purge_keeps_fresh_actors() {
         let s = TxStore::new(cfg(3_600));
         let k = key("e");
-        s.record(&k, EndpointRole::Login, true);
+        let _tok = s.record(&k, EndpointRole::Login);
         let purged = s.purge_expired();
         assert_eq!(purged, 0);
         assert!(s.snapshot(&k).is_some());
@@ -371,7 +410,8 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 for i in 0..50u32 {
                     let k = key(&format!("t{task_id}-k{}", i % 5));
-                    s.record(&k, EndpointRole::Withdrawal, true);
+                    let tok = s.record(&k, EndpointRole::Withdrawal);
+                    s.set_outcome(&tok, Outcome::Ok);
                 }
             }));
         }
@@ -389,7 +429,7 @@ mod tests {
         h.abort();
     }
 
-    // ─── Phase 2 pipeline tests ─────────────────────────────────────────────
+    // ─── Phase 2 pipeline tests (ported to record+set_outcome) ──────────
 
     use crate::checks::tx_velocity::classifiers::default_classifiers;
     use crate::checks::tx_velocity::config::{ClassifierConfigs, SequenceCfg, VelocityCfg};
@@ -412,7 +452,6 @@ mod tests {
         }))
     }
 
-    /// Spin briefly so the fire-and-forget `tokio::spawn` task lands.
     async fn flush() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -429,7 +468,8 @@ mod tests {
 
         let k = key("velocity");
         for _ in 0..3 {
-            store.record(&k, EndpointRole::Withdrawal, true);
+            let tok = store.record(&k, EndpointRole::Withdrawal);
+            store.set_outcome(&tok, Outcome::Ok);
         }
         flush().await;
 
@@ -445,8 +485,6 @@ mod tests {
 
     #[tokio::test]
     async fn pipeline_cooldown_suppresses_duplicate_signals() {
-        // Long cooldown — two breaching record() bursts should produce one
-        // submission, not two.
         let cfg = cfg_pipeline(60_000);
         let agg = LoggingAggregator::new(8);
         let store = TxStore::with_pipeline(
@@ -457,12 +495,13 @@ mod tests {
 
         let k = key("cooldown");
         for _ in 0..3 {
-            store.record(&k, EndpointRole::Withdrawal, true);
+            let tok = store.record(&k, EndpointRole::Withdrawal);
+            store.set_outcome(&tok, Outcome::Ok);
         }
         flush().await;
-        // Trigger again: still over threshold, but cooldown should mute it.
         for _ in 0..3 {
-            store.record(&k, EndpointRole::Withdrawal, true);
+            let tok = store.record(&k, EndpointRole::Withdrawal);
+            store.set_outcome(&tok, Outcome::Ok);
         }
         flush().await;
 
@@ -489,7 +528,8 @@ mod tests {
             Arc::new(agg.clone()),
         );
 
-        store.record(&key("disabled"), EndpointRole::Withdrawal, true);
+        let tok = store.record(&key("disabled"), EndpointRole::Withdrawal);
+        store.set_outcome(&tok, Outcome::Ok);
         flush().await;
         assert!(agg.snapshot().is_empty());
     }
@@ -516,7 +556,8 @@ mod tests {
             },
         };
         for _ in 0..3 {
-            store.record(&k, EndpointRole::Withdrawal, true);
+            let tok = store.record(&k, EndpointRole::Withdrawal);
+            store.set_outcome(&tok, Outcome::Ok);
         }
         flush().await;
 
@@ -524,6 +565,158 @@ mod tests {
         assert!(
             snap.iter().any(|s| s.key == fp),
             "submission should carry fp key: {snap:?}"
+        );
+    }
+
+    // ─── Phase 3 TDD tests ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn record_alone_emits_no_signal_even_on_breach() {
+        let cfg = cfg_pipeline(0);
+        let agg = LoggingAggregator::new(8);
+        let store = TxStore::with_pipeline(
+            cfg,
+            default_classifiers(&TxVelocityConfig::default()),
+            Arc::new(agg.clone()),
+        );
+
+        let k = key("noeval");
+        for _ in 0..3 {
+            let _ = store.record(&k, EndpointRole::Withdrawal);
+        }
+        flush().await;
+        assert!(agg.snapshot().is_empty(), "record() must not run classifiers");
+    }
+
+    #[tokio::test]
+    async fn set_outcome_runs_classifiers_with_real_outcome() {
+        let cfg = cfg_pipeline(0);
+        let agg = LoggingAggregator::new(8);
+        let store = TxStore::with_pipeline(
+            cfg,
+            default_classifiers(&TxVelocityConfig::default()),
+            Arc::new(agg.clone()),
+        );
+
+        let k = key("setoutcome");
+        for _ in 0..3 {
+            let tok = store.record(&k, EndpointRole::Withdrawal);
+            store.set_outcome(&tok, Outcome::Ok);
+        }
+        flush().await;
+
+        assert!(!agg.snapshot().is_empty(), "set_outcome must drive classifier eval");
+    }
+
+    #[tokio::test]
+    async fn set_outcome_flips_exact_slot_by_token() {
+        let cfg = cfg_pipeline(60_000);
+        let store = TxStore::new(cfg);
+        let k = key("flip-by-token");
+
+        let t1 = store.record(&k, EndpointRole::Withdrawal);
+        store.set_outcome(&t1, Outcome::Failed);
+        let t2 = store.record(&k, EndpointRole::Otp);
+        store.set_outcome(&t2, Outcome::Ok);
+        let t3 = store.record(&k, EndpointRole::Withdrawal);
+        store.set_outcome(&t3, Outcome::Ok);
+
+        let snap = store.snapshot(&k).expect("snapshot");
+        let withdrawals: Vec<_> = snap
+            .events
+            .iter()
+            .filter(|e| e.role == EndpointRole::Withdrawal)
+            .collect();
+        assert_eq!(withdrawals.len(), 2);
+        assert_eq!(withdrawals.first().expect("first").outcome, Outcome::Failed);
+        assert_eq!(withdrawals.last().expect("last").outcome, Outcome::Ok);
+    }
+
+    #[tokio::test]
+    async fn set_outcome_with_unknown_token_is_noop() {
+        let cfg = cfg_pipeline(0);
+        let store = TxStore::new(cfg);
+        let ghost = TxEventToken {
+            key: key("ghost"),
+            slot: 0,
+            generation: 0,
+        };
+        store.set_outcome(&ghost, Outcome::Ok);
+        assert!(store.is_empty());
+    }
+
+    #[tokio::test]
+    async fn set_outcome_no_op_when_slot_wraps_out_from_under_token() {
+        let cfg = cfg_pipeline(60_000);
+        let store = TxStore::new(cfg);
+        let k = key("wrap");
+
+        let token = store.record(&k, EndpointRole::Withdrawal);
+
+        for _ in 0..17 {
+            let tok = store.record(&k, EndpointRole::Otp);
+            store.set_outcome(&tok, Outcome::Ok);
+        }
+
+        store.set_outcome(&token, Outcome::Ok);
+
+        let snap = store.snapshot(&k).expect("snapshot");
+        assert!(snap.events.iter().all(|e| e.role == EndpointRole::Otp));
+    }
+
+    #[test]
+    fn record_dedupes_pending_within_window() {
+        let cfg = Arc::new(ArcSwap::from_pointee(TxVelocityConfig {
+            dedupe_window_ms: 5_000,
+            ..TxVelocityConfig::default()
+        }));
+        let store = TxStore::new(cfg);
+        let k = key("retry");
+
+        let t1 = store.record(&k, EndpointRole::Withdrawal);
+        let t2 = store.record(&k, EndpointRole::Withdrawal);
+        assert_eq!(t1.slot, t2.slot, "dedupe must reuse the same slot");
+
+        let snap = store.snapshot(&k).expect("snapshot");
+        assert_eq!(snap.events.len(), 1, "retry must NOT append");
+    }
+
+    #[test]
+    fn record_does_not_dedupe_after_set_outcome() {
+        let cfg = Arc::new(ArcSwap::from_pointee(TxVelocityConfig {
+            dedupe_window_ms: 5_000,
+            ..TxVelocityConfig::default()
+        }));
+        let store = TxStore::new(cfg);
+        let k = key("settled");
+
+        let t1 = store.record(&k, EndpointRole::Withdrawal);
+        store.set_outcome(&t1, Outcome::Ok);
+        let _t2 = store.record(&k, EndpointRole::Withdrawal);
+
+        let snap = store.snapshot(&k).expect("snapshot");
+        assert_eq!(snap.events.len(), 2, "settled outcome must NOT trigger dedupe");
+    }
+
+    #[tokio::test]
+    async fn classifier_ignores_pending_events() {
+        let cfg = cfg_pipeline(0);
+        let agg = LoggingAggregator::new(8);
+        let store = TxStore::with_pipeline(
+            cfg,
+            default_classifiers(&TxVelocityConfig::default()),
+            Arc::new(agg.clone()),
+        );
+        let k = key("waf-blocked");
+
+        for _ in 0..3 {
+            let _ = store.record(&k, EndpointRole::Withdrawal);
+        }
+        flush().await;
+
+        assert!(
+            agg.snapshot().is_empty(),
+            "Pending events must NOT count toward velocity"
         );
     }
 }

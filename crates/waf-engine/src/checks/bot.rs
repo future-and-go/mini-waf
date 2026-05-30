@@ -102,7 +102,7 @@ impl Default for BotCheck {
 }
 
 impl Check for BotCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         if !ctx.host_config.defense_config.bot {
             return None;
         }
@@ -170,59 +170,60 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: std::collections::HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
     #[test]
     fn allows_googlebot() {
         let checker = BotCheck::new();
-        let ctx = make_ctx("Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)");
-        assert!(checker.check(&ctx).is_none(), "Should allow Googlebot");
+        let mut ctx = make_ctx("Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)");
+        assert!(checker.check(&mut ctx).is_none(), "Should allow Googlebot");
     }
 
     #[test]
     fn blocks_scrapy() {
         let checker = BotCheck::new();
-        let ctx = make_ctx("Scrapy/2.6.1 (+https://scrapy.org)");
-        assert!(checker.check(&ctx).is_some(), "Should block Scrapy");
+        let mut ctx = make_ctx("Scrapy/2.6.1 (+https://scrapy.org)");
+        assert!(checker.check(&mut ctx).is_some(), "Should block Scrapy");
     }
 
     #[test]
     fn blocks_headless_chrome() {
         let checker = BotCheck::new();
-        let ctx = make_ctx("Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/91.0.4472.114");
-        assert!(checker.check(&ctx).is_some(), "Should block HeadlessChrome");
+        let mut ctx = make_ctx("Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/91.0.4472.114");
+        assert!(checker.check(&mut ctx).is_some(), "Should block HeadlessChrome");
     }
 
     #[test]
     fn allows_regular_browser() {
         let checker = BotCheck::new();
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         );
-        assert!(checker.check(&ctx).is_none(), "Should allow regular browser");
+        assert!(checker.check(&mut ctx).is_none(), "Should allow regular browser");
     }
 
     #[test]
     fn blocks_go_http_client() {
         let checker = BotCheck::new();
-        let ctx = make_ctx("Go-http-client/1.1");
-        assert!(checker.check(&ctx).is_some(), "Should block bare Go HTTP client");
+        let mut ctx = make_ctx("Go-http-client/1.1");
+        assert!(checker.check(&mut ctx).is_some(), "Should block bare Go HTTP client");
     }
 
     #[test]
     fn blocks_empty_user_agent() {
         // Missing or empty UA is a common scanner/script indicator.
         let checker = BotCheck::new();
-        let ctx = make_ctx("");
-        let det = checker.check(&ctx).expect("empty UA should be blocked");
+        let mut ctx = make_ctx("");
+        let det = checker.check(&mut ctx).expect("empty UA should be blocked");
         assert_eq!(det.phase, waf_common::Phase::Bot);
     }
 
     #[test]
     fn blocks_python_urllib() {
         let checker = BotCheck::new();
-        let ctx = make_ctx("python-urllib/3.11");
-        assert!(checker.check(&ctx).is_some(), "Should block python-urllib");
+        let mut ctx = make_ctx("python-urllib/3.11");
+        assert!(checker.check(&mut ctx).is_some(), "Should block python-urllib");
     }
 }

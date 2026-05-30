@@ -119,7 +119,7 @@ impl FailingStoreHarness {
         Self { check, metrics }
     }
 
-    fn check(&self, ctx: &waf_common::RequestCtx) -> Option<waf_common::DetectionResult> {
+    fn check(&self, ctx: &mut waf_common::RequestCtx) -> Option<waf_common::DetectionResult> {
         self.check.check(ctx)
     }
 }
@@ -136,13 +136,13 @@ async fn scenario_e_redis_down_degrades_to_allow() {
     // When store fails, per-IP detector should degrade to Allow
     let mut blocked = 0;
     for _ in 0..100 {
-        let ctx = CtxBuilder::new()
+        let mut ctx = CtxBuilder::new()
             .ip("192.168.1.1")
             .tier(Tier::Medium)
             .fail_mode(FailMode::Open)
             .build();
 
-        if harness.check(&ctx).is_some() {
+        if harness.check(&mut ctx).is_some() {
             blocked += 1;
         }
     }
@@ -161,14 +161,14 @@ async fn scenario_e_store_error_no_panic() {
 
     // Should not panic even with Critical tier and failing store
     for i in 0..50 {
-        let ctx = CtxBuilder::new()
+        let mut ctx = CtxBuilder::new()
             .ip(&format!("10.0.0.{}", i % 256))
             .tier(Tier::Critical)
             .fail_mode(FailMode::Close)
             .build();
 
         // This should not panic
-        let _ = harness.check(&ctx);
+        let _ = harness.check(&mut ctx);
     }
 
     println!("Scenario E: 50 requests with failing store, no panics");
@@ -184,8 +184,8 @@ async fn scenario_e_degrade_metrics_tracked() {
 
     // Send requests (store will fail)
     for _ in 0..10 {
-        let ctx = CtxBuilder::new().ip("192.168.1.1").tier(Tier::Medium).build();
-        harness.check(&ctx);
+        let mut ctx = CtxBuilder::new().ip("192.168.1.1").tier(Tier::Medium).build();
+        harness.check(&mut ctx);
     }
 
     // Note: Degrade metrics are incremented by the check when circuit breaker
@@ -205,21 +205,21 @@ async fn scenario_e_degrade_metrics_tracked() {
 async fn scenario_e_multi_tier_failmode() {
     // Medium tier: should degrade to allow
     let harness_medium = FailingStoreHarness::new(Tier::Medium);
-    let ctx = CtxBuilder::new()
+    let mut ctx = CtxBuilder::new()
         .ip("10.0.0.1")
         .tier(Tier::Medium)
         .fail_mode(FailMode::Open)
         .build();
-    let result_medium = harness_medium.check(&ctx);
+    let result_medium = harness_medium.check(&mut ctx);
 
     // Critical tier: also degrades at detector level (fail-close is at check level)
     let harness_critical = FailingStoreHarness::new(Tier::Critical);
-    let ctx = CtxBuilder::new()
+    let mut ctx = CtxBuilder::new()
         .ip("10.0.0.1")
         .tier(Tier::Critical)
         .fail_mode(FailMode::Close)
         .build();
-    let result_critical = harness_critical.check(&ctx);
+    let result_critical = harness_critical.check(&mut ctx);
 
     // Both should allow because detector degrades on store error
     // Fail-mode only kicks in when circuit breaker is tripped

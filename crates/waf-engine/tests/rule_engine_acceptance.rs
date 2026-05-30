@@ -108,6 +108,7 @@ impl CtxBuilder {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: self.cookies,
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 }

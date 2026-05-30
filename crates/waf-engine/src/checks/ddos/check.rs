@@ -79,7 +79,7 @@ impl DdosCheck {
 }
 
 impl Check for DdosCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         // Load config snapshot
         let snap = self.cfg.load();
 
@@ -251,6 +251,7 @@ mod tests {
             }),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
@@ -289,8 +290,8 @@ mod tests {
     #[test]
     fn check_allows_when_no_detectors() {
         let check = make_check_no_detectors();
-        let ctx = make_ctx("192.168.1.1");
-        assert!(check.check(&ctx).is_none());
+        let mut ctx = make_ctx("192.168.1.1");
+        assert!(check.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -310,8 +311,8 @@ mod tests {
             Arc::new(DdosMetrics::new()),
         );
 
-        let ctx = make_ctx("192.168.1.1");
-        assert!(check.check(&ctx).is_none());
+        let mut ctx = make_ctx("192.168.1.1");
+        assert!(check.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -323,8 +324,8 @@ mod tests {
         let now_ms = now_epoch_ms();
         check.ban_table.insert(ip, now_ms + 60_000);
 
-        let ctx = make_ctx("10.0.0.1");
-        let result = check.check(&ctx);
+        let mut ctx = make_ctx("10.0.0.1");
+        let result = check.check(&mut ctx);
 
         assert!(result.is_some());
         let r = result.expect("should block");

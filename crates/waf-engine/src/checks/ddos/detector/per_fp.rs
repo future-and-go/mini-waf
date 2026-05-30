@@ -222,6 +222,7 @@ mod tests {
             tier_policy: Arc::new(TierPolicy::default()),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 

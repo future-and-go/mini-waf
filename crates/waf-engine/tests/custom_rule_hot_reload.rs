@@ -145,6 +145,7 @@ fn watcher_loads_pattern_based_rule() {
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     };
     let hit = engine.check(&ctx);
     assert!(hit.is_some(), "pattern rule should match SSRF payload");
@@ -206,7 +207,7 @@ paranoia: 1
         ..HostConfig::default()
     });
 
-    let ctx_forbidden = RequestCtx {
+    let mut ctx_forbidden = RequestCtx {
         req_id: "hr-d1".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
         client_port: 0,
@@ -225,20 +226,21 @@ paranoia: 1
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     };
     assert!(
-        checker.check(&ctx_forbidden).is_some(),
+        checker.check(&mut ctx_forbidden).is_some(),
         "GET /forbidden must be blocked by pm_from_file rule"
     );
 
     // /newbad should NOT be blocked yet
-    let ctx_newbad = RequestCtx {
+    let mut ctx_newbad = RequestCtx {
         path: "/newbad".into(),
         req_id: "hr-d2".into(),
         ..ctx_forbidden.clone()
     };
     assert!(
-        checker.check(&ctx_newbad).is_none(),
+        checker.check(&mut ctx_newbad).is_none(),
         "GET /newbad must pass — not in data file yet"
     );
 
@@ -251,7 +253,7 @@ paranoia: 1
     // Re-load the engine (simulates what hot reload would do)
     let checker2 = OWASPCheck::from_directory(&rules_root);
     assert!(
-        checker2.check(&ctx_newbad).is_some(),
+        checker2.check(&mut ctx_newbad).is_some(),
         "GET /newbad must be blocked after data file update and re-load"
     );
 }

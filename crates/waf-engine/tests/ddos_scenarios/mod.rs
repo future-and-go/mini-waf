@@ -193,7 +193,7 @@ impl DdosTestHarness {
     }
 
     /// Run a single request through the check.
-    pub fn check(&self, ctx: &RequestCtx) -> Option<waf_common::DetectionResult> {
+    pub fn check(&self, ctx: &mut RequestCtx) -> Option<waf_common::DetectionResult> {
         self.check.check(ctx)
     }
 
@@ -293,6 +293,7 @@ impl CtxBuilder {
             }),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 }

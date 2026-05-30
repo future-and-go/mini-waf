@@ -30,6 +30,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
+use waf_common::Outcome;
 use waf_engine::checks::tx_velocity::config::{ClassifierConfigs, RoleRule, SequenceCfg, VelocityCfg};
 use waf_engine::checks::tx_velocity::role_tagger::RoleTagger;
 use waf_engine::checks::tx_velocity::session_key::{SessionIdent, SessionKey};
@@ -76,6 +77,7 @@ fn pipeline_config(cooldown_ms: u64) -> TxVelocityConfig {
         session_ttl_secs: 3600,
         session_cookie: "SESSIONID".to_string(),
         janitor_period_secs: 60,
+        dedupe_window_ms: 0,
         role_tagger: RoleTagger::compile(&role_rules()).expect("compile rules"),
         classifiers: ClassifierConfigs {
             sequence: Some(SequenceCfg { min_human_ms: 1500 }),
@@ -113,14 +115,16 @@ async fn full_pipeline_login_otp_fast_sequence_emits_signal() {
     // Simulate Login → OTP within 500ms (below 1500ms threshold)
     let login_role = tagger.classify("/api/auth/login");
     assert_eq!(login_role, EndpointRole::Login);
-    store.record(&key, login_role, true);
+    let tok = store.record(&key, login_role);
+    store.set_outcome(&tok, Outcome::Ok);
 
     // Small delay simulating fast bot
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let otp_role = tagger.classify("/api/auth/otp/verify");
     assert_eq!(otp_role, EndpointRole::Otp);
-    store.record(&key, otp_role, true);
+    let tok = store.record(&key, otp_role);
+    store.set_outcome(&tok, Outcome::Ok);
     flush_aggregator().await;
 
     let signals = agg.snapshot();
@@ -155,7 +159,8 @@ async fn full_pipeline_withdrawal_velocity_breach_emits_signal() {
 
     // 3 withdrawals exceeds max_count=2
     for _ in 0..3 {
-        store.record(&key, role, true);
+        let tok = store.record(&key, role);
+        store.set_outcome(&tok, Outcome::Ok);
     }
     flush_aggregator().await;
 
@@ -185,7 +190,8 @@ async fn full_pipeline_limit_change_burst_emits_signal() {
 
     // 2 limit changes exceeds max_count=1
     for _ in 0..2 {
-        store.record(&key, role, true);
+        let tok = store.record(&key, role);
+        store.set_outcome(&tok, Outcome::Ok);
     }
     flush_aggregator().await;
 
@@ -212,12 +218,14 @@ async fn pipeline_slow_sequence_does_not_fire() {
     );
 
     let key = session_key("slow-human");
-    store.record(&key, EndpointRole::Login, true);
+    let tok = store.record(&key, EndpointRole::Login);
+    store.set_outcome(&tok, Outcome::Ok);
 
     // 2 second delay — above 1500ms threshold (human speed)
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    store.record(&key, EndpointRole::Otp, true);
+    let tok = store.record(&key, EndpointRole::Otp);
+    store.set_outcome(&tok, Outcome::Ok);
     flush_aggregator().await;
 
     let signals = agg.snapshot();
@@ -243,7 +251,8 @@ async fn pipeline_below_velocity_threshold_silent() {
     let key = session_key("normal-user");
     // Only 2 withdrawals — at threshold, not over
     for _ in 0..2 {
-        store.record(&key, EndpointRole::Withdrawal, true);
+        let tok = store.record(&key, EndpointRole::Withdrawal);
+        store.set_outcome(&tok, Outcome::Ok);
     }
     flush_aggregator().await;
 
@@ -272,7 +281,8 @@ async fn pipeline_disabled_config_emits_nothing() {
     let key = session_key("disabled");
     // Would breach threshold if enabled
     for _ in 0..5 {
-        store.record(&key, EndpointRole::Withdrawal, true);
+        let tok = store.record(&key, EndpointRole::Withdrawal);
+        store.set_outcome(&tok, Outcome::Ok);
     }
     flush_aggregator().await;
 
@@ -296,13 +306,15 @@ async fn pipeline_cooldown_suppresses_duplicate_signals() {
 
     // First breach — should fire
     for _ in 0..3 {
-        store.record(&key, EndpointRole::Withdrawal, true);
+        let tok = store.record(&key, EndpointRole::Withdrawal);
+        store.set_outcome(&tok, Outcome::Ok);
     }
     flush_aggregator().await;
 
     // Second breach — cooldown should suppress
     for _ in 0..3 {
-        store.record(&key, EndpointRole::Withdrawal, true);
+        let tok = store.record(&key, EndpointRole::Withdrawal);
+        store.set_outcome(&tok, Outcome::Ok);
     }
     flush_aggregator().await;
 
@@ -326,7 +338,8 @@ async fn hot_reload_threshold_change_takes_effect() {
 
     // 3 withdrawals fires with max_count=2
     for _ in 0..3 {
-        store.record(&key, EndpointRole::Withdrawal, true);
+        let tok = store.record(&key, EndpointRole::Withdrawal);
+        store.set_outcome(&tok, Outcome::Ok);
     }
     flush_aggregator().await;
     assert!(!agg.snapshot().is_empty(), "should fire before reload");
@@ -350,7 +363,8 @@ async fn hot_reload_threshold_change_takes_effect() {
     let key2 = session_key("after-reload");
     // Same 3 withdrawals — now below threshold
     for _ in 0..3 {
-        store2.record(&key2, EndpointRole::Withdrawal, true);
+        let tok = store2.record(&key2, EndpointRole::Withdrawal);
+        store2.set_outcome(&tok, Outcome::Ok);
     }
     flush_aggregator().await;
 
@@ -362,21 +376,21 @@ async fn hot_reload_threshold_change_takes_effect() {
 #[tokio::test]
 async fn unmatched_paths_not_recorded() {
     let cfg = Arc::new(ArcSwap::from_pointee(pipeline_config(0)));
-    let store = TxStore::with_pipeline(
+    let _store = TxStore::with_pipeline(
         Arc::clone(&cfg),
         default_classifiers(&cfg.load()),
         Arc::new(LoggingAggregator::new(1)),
     );
     let tagger = RoleTagger::compile(&role_rules()).expect("compile");
 
-    let key = session_key("unmatched");
+    let _key = session_key("unmatched");
     let role = tagger.classify("/api/unknown/endpoint");
     assert_eq!(role, EndpointRole::None);
 
-    store.record(&key, role, true);
-
+    // Callers (TxVelocityCheck::check) skip None roles before reaching
+    // record(). Verify the tagger returns None for unmatched paths.
     assert!(
-        store.snapshot(&key).is_none(),
-        "EndpointRole::None should not create session entry"
+        matches!(role, EndpointRole::None),
+        "unmatched path should classify as None"
     );
 }

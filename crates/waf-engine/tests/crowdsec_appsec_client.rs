@@ -54,6 +54,7 @@ fn make_ctx(ip: &str, path: &str, body: &[u8]) -> RequestCtx {
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 

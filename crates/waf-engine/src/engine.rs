@@ -860,6 +860,18 @@ impl WafEngine {
         self.sqli_check.on_response(ctx, status);
     }
 
+    /// Dispatch a request-complete event to every registered `Check`.
+    ///
+    /// Gateway callers invoke this from Pingora's `logging()` hook — fires
+    /// once per request at completion (post-body). `upstream_reached` is
+    /// `false` for WAF-blocked or origin-down requests. FR-012 `tx_velocity`
+    /// uses this to set the honest `Outcome` on recorded events.
+    pub fn on_request_complete(&self, ctx: &RequestCtx, status: u16, upstream_reached: bool) {
+        for check in &self.checkers {
+            check.on_request_complete(ctx, status, upstream_reached);
+        }
+    }
+
     // ── Logging helpers ───────────────────────────────────────────────────────
 
     /// Log a Phase 1/2 event to the `attack_logs` table (fire-and-forget).

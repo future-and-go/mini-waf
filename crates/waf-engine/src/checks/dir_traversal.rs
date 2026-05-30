@@ -79,7 +79,7 @@ impl Default for DirTraversalCheck {
 }
 
 impl Check for DirTraversalCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         if !ctx.host_config.defense_config.dir_traversal {
             return None;
         }
@@ -147,35 +147,36 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: std::collections::HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
     #[test]
     fn detects_dot_dot_slash() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/images/../../../etc/passwd", "");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/images/../../../etc/passwd", "");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_encoded_traversal() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/", "file=%2e%2e%2fetc%2fpasswd");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/", "file=%2e%2e%2fetc%2fpasswd");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_double_encoded() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/%252e%252e/etc/passwd", "");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/%252e%252e/etc/passwd", "");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn allows_clean_path() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/api/v1/users", "page=2");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/api/v1/users", "page=2");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     // ─── FR-015 enhancements: OS targets + recursive decode + null byte ──────
@@ -183,73 +184,73 @@ mod tests {
     #[test]
     fn detects_etc_passwd_in_path() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/files/../../etc/passwd", "");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/files/../../etc/passwd", "");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_proc_self_environ_in_query() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/", "file=/proc/self/environ");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/", "file=/proc/self/environ");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_proc_version_in_query() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/", "file=/proc/123/cmdline");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/", "file=/proc/123/cmdline");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_windows_system32_in_query() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/", "f=C:\\windows\\system32\\config\\sam");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/", "f=C:\\windows\\system32\\config\\sam");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_windows_boot_ini() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/files/boot.ini", "");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/files/boot.ini", "");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_windows_win_ini() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/files/win.ini", "");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/files/win.ini", "");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_overlong_utf8_traversal() {
         // ..%c0%af is overlong UTF-8 for `/`.
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/static/..%c0%af..%c0%afetc%c0%afpasswd", "");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/static/..%c0%af..%c0%afetc%c0%afpasswd", "");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_null_byte_truncation() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/uploads/photo.jpg%00.php", "");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/uploads/photo.jpg%00.php", "");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_recursive_double_encoded_in_path() {
         // %25 → %, then %2e%2e → .. — only catchable via the recursive pass.
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/files/%252e%252e%252fetc%252fpasswd", "");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/files/%252e%252e%252fetc%252fpasswd", "");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_recursive_double_encoded_in_query() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/", "f=%252e%252e%252fetc%252fpasswd");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("/", "f=%252e%252e%252fetc%252fpasswd");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
@@ -257,8 +258,8 @@ mod tests {
         // `/api/passwd-reset` is a common UI route; must NOT trigger the
         // /etc/passwd matcher (it's anchored on `/etc/`).
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/api/passwd-reset", "user=alice");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/api/passwd-reset", "user=alice");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -266,16 +267,16 @@ mod tests {
         // `..hidden.txt` (no `/` or `\` after `..`) must not trigger the
         // classic-traversal regex which requires the path separator.
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/files/..hidden.txt", "");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/files/..hidden.txt", "");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
     fn allows_version_txt_filename() {
         // `version.txt` must not trigger the `/proc/<pid>/version` matcher.
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/docs/version.txt", "");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("/docs/version.txt", "");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -290,7 +291,7 @@ mod tests {
             },
             ..HostConfig::default()
         });
-        assert!(checker.check(&ctx).is_none());
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -299,7 +300,7 @@ mod tests {
         let mut ctx = make_ctx("/", "");
         ctx.headers
             .insert("cookie".to_string(), "next=../../etc/passwd".to_string());
-        assert!(checker.check(&ctx).is_some());
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
@@ -307,14 +308,14 @@ mod tests {
         let checker = DirTraversalCheck::new();
         let mut ctx = make_ctx("/", "");
         ctx.body_preview = Bytes::from("path=/etc/shadow");
-        assert!(checker.check(&ctx).is_some());
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detection_carries_correct_phase_and_rule_id() {
         let checker = DirTraversalCheck::new();
-        let ctx = make_ctx("/files/../../etc/passwd", "");
-        let det = checker.check(&ctx).expect("hit");
+        let mut ctx = make_ctx("/files/../../etc/passwd", "");
+        let det = checker.check(&mut ctx).expect("hit");
         assert_eq!(det.phase, Phase::DirTraversal);
         assert_eq!(det.rule_name, "Directory Traversal");
         assert!(det.rule_id.as_deref().unwrap_or("").starts_with("TRAV-"));

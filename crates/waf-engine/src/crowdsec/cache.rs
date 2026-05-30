@@ -488,7 +488,7 @@ mod tests {
             &CrowdSecConfig::default(),
         );
 
-        let ctx = RequestCtx {
+        let mut ctx = RequestCtx {
             req_id: "test".to_string(),
             client_ip: "9.9.9.9".parse().expect("ip"),
             client_port: 0,
@@ -507,11 +507,12 @@ mod tests {
             tier_policy: RequestCtx::default_tier_policy(),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         };
 
         // Bouncer mode → cache hit
         let bouncer = CrowdSecChecker::new(Arc::clone(&cache), CrowdSecConfig::default());
-        let det = bouncer.check(&ctx).expect("detection");
+        let det = bouncer.check(&mut ctx).expect("detection");
         assert!(det.rule_id.as_deref().unwrap_or("").contains("ssh-bf"));
 
         // AppSec-only mode → checker bails out
@@ -522,6 +523,6 @@ mod tests {
                 ..CrowdSecConfig::default()
             },
         );
-        assert!(appsec_only.check(&ctx).is_none());
+        assert!(appsec_only.check(&mut ctx).is_none());
     }
 }

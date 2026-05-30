@@ -38,7 +38,7 @@ impl Default for RequestBodyAbuseCheck {
 }
 
 impl Check for RequestBodyAbuseCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         let dc = &ctx.host_config.defense_config;
         if !dc.body_abuse {
             return None;
@@ -168,42 +168,43 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
     #[test]
     fn detects_oversized_by_content_length() {
         // Default max_body_size = 64 KiB. Declare 128 KiB via content_length.
-        let ctx = make_ctx(b"{}", "application/json", 128 * 1024);
-        let det = RequestBodyAbuseCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(b"{}", "application/json", 128 * 1024);
+        let det = RequestBodyAbuseCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BODY-002");
     }
 
     #[test]
     fn allows_exactly_at_body_size_cap() {
         // content_length == cap should pass (strictly greater-than).
-        let ctx = make_ctx(b"{}", "application/json", 64 * 1024);
-        assert!(RequestBodyAbuseCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(b"{}", "application/json", 64 * 1024);
+        assert!(RequestBodyAbuseCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn detects_ct_mismatch_json_declared_xml_body() {
-        let ctx = make_ctx(b"<?xml version='1.0'?><root/>", "application/json", 28);
-        let det = RequestBodyAbuseCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(b"<?xml version='1.0'?><root/>", "application/json", 28);
+        let det = RequestBodyAbuseCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BODY-005");
     }
 
     #[test]
     fn detects_ct_mismatch_json_declared_zip_body() {
-        let ctx = make_ctx(b"PK\x03\x04rest", "application/json", 9);
-        let det = RequestBodyAbuseCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(b"PK\x03\x04rest", "application/json", 9);
+        let det = RequestBodyAbuseCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BODY-005");
     }
 
     #[test]
     fn detects_ct_mismatch_text_declared_json_body() {
-        let ctx = make_ctx(b"{\"x\":1}", "text/html", 7);
-        let det = RequestBodyAbuseCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(b"{\"x\":1}", "text/html", 7);
+        let det = RequestBodyAbuseCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BODY-005");
     }
 
@@ -211,15 +212,15 @@ mod tests {
     fn detects_malformed_json() {
         // Valid depth pre-check (`{` then EOF balances below cap) but parse
         // fails — we want BODY-001.
-        let ctx = make_ctx(b"{\"a\":", "application/json", 5);
-        let det = RequestBodyAbuseCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(b"{\"a\":", "application/json", 5);
+        let det = RequestBodyAbuseCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BODY-001");
     }
 
     #[test]
     fn allows_clean_small_json() {
-        let ctx = make_ctx(br#"{"name":"alice","age":30}"#, "application/json", 25);
-        assert!(RequestBodyAbuseCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(br#"{"name":"alice","age":30}"#, "application/json", 25);
+        assert!(RequestBodyAbuseCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
@@ -233,8 +234,8 @@ mod tests {
         for _ in 0..101 {
             s.push('}');
         }
-        let ctx = make_ctx(s.as_bytes(), "application/json", s.len() as u64);
-        let det = RequestBodyAbuseCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(s.as_bytes(), "application/json", s.len() as u64);
+        let det = RequestBodyAbuseCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BODY-003");
     }
 
@@ -248,16 +249,16 @@ mod tests {
         for _ in 0..100 {
             s.push('}');
         }
-        let ctx = make_ctx(s.as_bytes(), "application/json", s.len() as u64);
-        assert!(RequestBodyAbuseCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(s.as_bytes(), "application/json", s.len() as u64);
+        assert!(RequestBodyAbuseCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn detects_adversarial_deep_nesting_does_not_panic() {
         // 10_000 unclosed `{` — depth precheck bails in O(N), no parser invoked.
         let s = "{".repeat(10_000);
-        let ctx = make_ctx(s.as_bytes(), "application/json", s.len() as u64);
-        let det = RequestBodyAbuseCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(s.as_bytes(), "application/json", s.len() as u64);
+        let det = RequestBodyAbuseCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BODY-003");
     }
 
@@ -276,8 +277,8 @@ mod tests {
             max_json_keys: 10,
             ..DefenseConfig::default()
         };
-        let ctx = make_ctx_dc(s.as_bytes(), "application/json", s.len() as u64, dc);
-        let det = RequestBodyAbuseCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx_dc(s.as_bytes(), "application/json", s.len() as u64, dc);
+        let det = RequestBodyAbuseCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BODY-004");
     }
 
@@ -295,14 +296,14 @@ mod tests {
             max_json_keys: 10,
             ..DefenseConfig::default()
         };
-        let ctx = make_ctx_dc(s.as_bytes(), "application/json", s.len() as u64, dc);
-        assert!(RequestBodyAbuseCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx_dc(s.as_bytes(), "application/json", s.len() as u64, dc);
+        assert!(RequestBodyAbuseCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn empty_body_no_detection() {
-        let ctx = make_ctx(b"", "application/json", 0);
-        assert!(RequestBodyAbuseCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(b"", "application/json", 0);
+        assert!(RequestBodyAbuseCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
@@ -311,34 +312,34 @@ mod tests {
             body_abuse: false,
             ..DefenseConfig::default()
         };
-        let ctx = make_ctx_dc(b"<xml/>", "application/json", 6, dc);
-        assert!(RequestBodyAbuseCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx_dc(b"<xml/>", "application/json", 6, dc);
+        assert!(RequestBodyAbuseCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn json_with_charset_parameter_treated_as_json() {
-        let ctx = make_ctx(br#"{"ok":true}"#, "application/json; charset=utf-8", 11);
-        assert!(RequestBodyAbuseCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(br#"{"ok":true}"#, "application/json; charset=utf-8", 11);
+        assert!(RequestBodyAbuseCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn no_content_type_skips_mismatch() {
         // Unknown declared → the mismatch rule is intentionally skipped.
-        let ctx = make_ctx(br#"{"x":1}"#, "", 7);
-        assert!(RequestBodyAbuseCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(br#"{"x":1}"#, "", 7);
+        assert!(RequestBodyAbuseCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn html_declared_html_body_allowed() {
-        let ctx = make_ctx(b"<!DOCTYPE html><html></html>", "text/html", 28);
-        assert!(RequestBodyAbuseCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(b"<!DOCTYPE html><html></html>", "text/html", 28);
+        assert!(RequestBodyAbuseCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn gzip_declared_gzip_body_allowed() {
         let body: &[u8] = &[0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0];
-        let ctx = make_ctx(body, "application/gzip", body.len() as u64);
-        assert!(RequestBodyAbuseCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(body, "application/gzip", body.len() as u64);
+        assert!(RequestBodyAbuseCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
@@ -348,15 +349,15 @@ mod tests {
         for i in 0..120 {
             s.push(if i % 2 == 0 { '[' } else { '{' });
         }
-        let ctx = make_ctx(s.as_bytes(), "application/json", s.len() as u64);
-        let det = RequestBodyAbuseCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(s.as_bytes(), "application/json", s.len() as u64);
+        let det = RequestBodyAbuseCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BODY-003");
     }
 
     #[test]
     fn detection_carries_correct_phase_and_prefix() {
-        let ctx = make_ctx(b"{}", "application/json", 128 * 1024);
-        let det = RequestBodyAbuseCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(b"{}", "application/json", 128 * 1024);
+        let det = RequestBodyAbuseCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.phase, Phase::RequestBodyAbuse);
         assert_eq!(det.rule_name, "Request Body Abuse");
         assert!(det.rule_id.as_deref().unwrap_or("").starts_with("BODY-"));
@@ -366,15 +367,15 @@ mod tests {
     fn chunked_fallback_checks_body_preview_when_content_length_zero() {
         // content_length=0 with a 128 KiB body_preview → fall back to preview size.
         let body = vec![b'a'; 128 * 1024];
-        let ctx = make_ctx(&body, "application/octet-stream", 0);
-        let det = RequestBodyAbuseCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(&body, "application/octet-stream", 0);
+        let det = RequestBodyAbuseCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "BODY-002");
     }
 
     #[test]
     fn unknown_ct_and_unknown_magic_allowed() {
         // No mismatch can be established — rule is defensive, so allow.
-        let ctx = make_ctx(b"plain raw bytes", "text/plain", 15);
-        assert!(RequestBodyAbuseCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(b"plain raw bytes", "text/plain", 15);
+        assert!(RequestBodyAbuseCheck::new().check(&mut ctx).is_none());
     }
 }

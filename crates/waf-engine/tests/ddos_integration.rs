@@ -70,6 +70,7 @@ fn make_ctx(ip: &str, tier: Tier) -> RequestCtx {
         }),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 
@@ -145,8 +146,8 @@ async fn i1_per_ip_burst_triggers_ban() {
 
     // Send 100 requests
     for i in 0..100_u32 {
-        let ctx = make_ctx(attacker_ip, Tier::Medium);
-        let result = check.check(&ctx);
+        let mut ctx = make_ctx(attacker_ip, Tier::Medium);
+        let result = check.check(&mut ctx);
 
         if result.is_some() && first_block_at.is_none() {
             first_block_at = Some(i);
@@ -249,8 +250,8 @@ async fn i2_per_fp_burst_across_ips_fallback_to_per_ip() {
         let ip_addr: IpAddr = ip_str.parse().unwrap();
 
         for _ in 0..requests_per_ip {
-            let ctx = make_ctx_with_fp(&ip_str, Tier::Medium, shared_fp);
-            check.check(&ctx);
+            let mut ctx = make_ctx_with_fp(&ip_str, Tier::Medium, shared_fp);
+            check.check(&mut ctx);
         }
 
         if ban_table.contains(ip_addr, clock.now_ms()) {
@@ -331,9 +332,9 @@ async fn i3_per_tier_burst_triggers_detection() {
     // Send 80 requests from 80 different IPs (under cap_floor of 100)
     for i in 0..80_u32 {
         let ip_str = format!("172.16.{}.{}", i / 256, i % 256);
-        let ctx = make_ctx(&ip_str, Tier::Medium);
+        let mut ctx = make_ctx(&ip_str, Tier::Medium);
 
-        if check.check(&ctx).is_some() {
+        if check.check(&mut ctx).is_some() {
             blocked += 1;
         } else {
             allowed += 1;
@@ -425,8 +426,8 @@ async fn i4_reload_mid_burst_preserves_bans() {
 
     // Phase 1: Trigger ban with config A (threshold=30)
     for _ in 0..40 {
-        let ctx = make_ctx(attacker_ip, Tier::Medium);
-        check.check(&ctx);
+        let mut ctx = make_ctx(attacker_ip, Tier::Medium);
+        check.check(&mut ctx);
     }
 
     // Assert: IP is banned
@@ -453,8 +454,8 @@ async fn i4_reload_mid_burst_preserves_bans() {
     let new_ip_addr: IpAddr = new_ip.parse().unwrap();
 
     for _ in 0..150 {
-        let ctx = make_ctx(new_ip, Tier::Medium);
-        check.check(&ctx);
+        let mut ctx = make_ctx(new_ip, Tier::Medium);
+        check.check(&mut ctx);
     }
 
     // New IP should not be banned (under new threshold of 200)

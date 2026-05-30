@@ -56,6 +56,7 @@ fn make_ctx() -> RequestCtx {
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 
@@ -65,7 +66,7 @@ fn t_sqli_in_url_encoded_body() {
     let mut ctx = make_ctx();
     // %27%20OR%201%3D1 → ' OR 1=1 → request_targets includes body(decoded)
     ctx.body_preview = Bytes::from("q=%27%20OR%201%3D1");
-    assert!(c.check(&ctx).is_some(), "must url-decode body");
+    assert!(c.check(&mut ctx).is_some(), "must url-decode body");
 }
 
 #[test]
@@ -74,7 +75,7 @@ fn t_sqli_in_double_encoded_body() {
     let mut ctx = make_ctx();
     ctx.body_preview = Bytes::from("q=%2527%2520OR%25201%253D1");
     assert!(
-        c.check(&ctx).is_some(),
+        c.check(&mut ctx).is_some(),
         "recursive decode must catch double-encoded SQLi"
     );
 }
@@ -84,7 +85,7 @@ fn t_sqli_in_double_encoded_query() {
     let c = SqlInjectionCheck::new();
     let mut ctx = make_ctx();
     ctx.query = "id=%2527%2520OR%25201%253D1".into();
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
 }
 
 #[test]
@@ -92,7 +93,7 @@ fn t_sqli_in_double_encoded_path() {
     let c = SqlInjectionCheck::new();
     let mut ctx = make_ctx();
     ctx.path = "/api/%2527%2520OR%25201%253D1".into();
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
 }
 
 #[test]
@@ -102,7 +103,7 @@ fn t_clean_request_no_match() {
     ctx.path = "/api/users".into();
     ctx.query = "page=2&limit=20".into();
     ctx.body_preview = Bytes::from("name=alice");
-    assert!(c.check(&ctx).is_none(), "clean request must not match");
+    assert!(c.check(&mut ctx).is_none(), "clean request must not match");
 }
 
 #[test]
@@ -111,14 +112,14 @@ fn t_empty_query_skipped() {
     let mut ctx = make_ctx();
     ctx.path = "/api/list".into();
     ctx.query.clear();
-    assert!(c.check(&ctx).is_none());
+    assert!(c.check(&mut ctx).is_none());
 }
 
 #[test]
 fn t_empty_body_skipped() {
     let c = SqlInjectionCheck::new();
-    let ctx = make_ctx();
-    assert!(c.check(&ctx).is_none());
+    let mut ctx = make_ctx();
+    assert!(c.check(&mut ctx).is_none());
 }
 
 #[test]
@@ -136,5 +137,8 @@ fn t_sqli_disabled_returns_none() {
     let mut ctx = make_ctx();
     ctx.host_config = host_config;
     ctx.path = "/api/%2527%2520OR%25201%253D1".into();
-    assert!(c.check(&ctx).is_none(), "disabled sqli must skip even on attack input");
+    assert!(
+        c.check(&mut ctx).is_none(),
+        "disabled sqli must skip even on attack input"
+    );
 }
