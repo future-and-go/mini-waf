@@ -1,11 +1,48 @@
 ---
 phase: 3
 title: "Ctx Plumbing + Risk/Rule Wiring"
-status: pending
+status: completed
 priority: P1
 effort: "6h"
 dependencies: [2]
 ---
+
+## Completion Note (2026-05-30)
+
+Landed in three surgical chunks (TDD):
+
+- **`crates/gateway/src/context.rs`** — added `WafDecisionMeta` (`action`,
+  `risk_score`, `rule_id`, `mode`) with explicit `Default { action: "allow",
+  mode: "enforce", rule_id: None, risk_score: 0 }`, plus a
+  `from_decision(&WafDecision)` constructor that uses `WafAction::as_contract_str`
+  + `InteropMode::as_contract_str` and clones `rule_id` only when present (no
+  alloc on the allow path). Extended `GatewayCtx` with `waf_decision_meta:
+  Option<WafDecisionMeta>` and `cache_status: CacheStatus` (defaulted to `Bypass`).
+- **`crates/gateway/src/proxy.rs::request_filter`** — snapshot populated on
+  every outcome: access-bypass arm (default meta, mode derived from
+  `host_config.log_only_mode`), post-`inspect()` (built via `from_decision`).
+  `cache_status` upgraded to `Hit`/`Miss` only on the allow path; non-allow
+  decisions stay `Bypass` so high-risk responses never advertise a cache-clean
+  origin.
+- **`crates/waf-engine/src/engine.rs`** — `WafEngine` now holds a
+  `Scorer<MemoryRiskStore>` + an `ArcSwap<RiskConfig>` (defaulted to
+  `enabled = false`, so no behavioural change today). `inspect()` was wrapped
+  around a new private `inspect_pipeline()` so a single scorer call attaches
+  `decision.risk_score` to every outcome without rewriting each early-return
+  arm. Added `replace_risk_config(...)` setter for operators / tests.
+
+Validation: `cargo check --workspace` clean, `cargo clippy -p gateway
+-p waf-engine` (src) clean, `cargo fmt --all -- --check` clean, gateway
+`waf_observability_headers` suite 16/16 pass + 8 ignored (the 8 are Phase 4/5/6
+egress-path stubs), `cargo test -p gateway --lib` 345/345 pass,
+`cargo test -p waf-engine --lib` 1353/1353 pass (no regression to existing
+`inspect()` outcomes). The 9 `proxy_waf_response_writer` failures are
+Phase 1's red scaffold awaiting Phase 4 — confirmed identical pre/post this
+change via `git stash`.
+
+Deferred to Phase 7 per plan: the "scored test request yields NON-zero score"
+end-to-end assertion lives in Phase 7's contract suite, where the test
+harness will configure a real `RiskConfig` and prove non-zero propagation.
 
 # Phase 3: Ctx Plumbing + Risk/Rule Wiring
 

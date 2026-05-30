@@ -11,6 +11,53 @@ use waf_engine::risk::{ChallengeIssuer, ChallengeVerifier};
 use crate::filters::BodyRedactState;
 use crate::filters::response_body_decompressor::DecoderChain;
 use crate::protocol::Protocol;
+use crate::waf_observability_headers::CacheStatus;
+
+/// Lightweight per-request snapshot of WAF decision metadata reachable from
+/// every egress path (`response_filter`, cache HIT writer, error pages).
+///
+/// Avoids cloning the heavy `DetectionResult` from `WafDecision` and provides
+/// safe defaults: `action == "allow"` (NEVER `""`) so passthrough / fast-path
+/// outcomes that never call `engine.inspect()` still emit a contract-legal
+/// `X-WAF-Action` header.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WafDecisionMeta {
+    /// Contract action string (e.g. `"allow"`, `"block"`, `"challenge"`).
+    /// Sourced from `WafAction::as_contract_str()` — always `'static` lifetime.
+    pub action: &'static str,
+    /// Cumulative risk score, clamped to `0..=100`.
+    pub risk_score: u8,
+    /// Originating rule id; `None` on allow (no allocation). Mapped to the
+    /// contract literal `"none"` at injection time.
+    pub rule_id: Option<String>,
+    /// Enforcement mode contract string (`"enforce"` or `"log_only"`).
+    pub mode: &'static str,
+}
+
+impl Default for WafDecisionMeta {
+    fn default() -> Self {
+        Self {
+            action: "allow",
+            risk_score: 0,
+            rule_id: None,
+            mode: "enforce",
+        }
+    }
+}
+
+impl WafDecisionMeta {
+    /// Build a snapshot from a `WafDecision`. Allocates a `String` for `rule_id`
+    /// only when the decision carries one (Allow paths stay alloc-free).
+    #[must_use]
+    pub fn from_decision(decision: &waf_common::WafDecision) -> Self {
+        Self {
+            action: decision.action.as_contract_str(),
+            risk_score: decision.risk_score.min(100),
+            rule_id: decision.rule_id.clone(),
+            mode: decision.mode.as_contract_str(),
+        }
+    }
+}
 
 /// FR-006 Phase 3: Challenge context holding issuer, verifier, and renderer.
 /// Initialized once per `WafProxy` and shared across all requests.
@@ -137,6 +184,16 @@ pub struct GatewayCtx {
     pub device_identity: Option<DeviceIdentity>,
     /// FR-009: buffer a cacheable upstream response for [`crate::cache::ResponseCache::put`].
     pub response_cache_store: Option<ResponseCachePending>,
+    /// Snapshot of the WAF decision metadata, set by `request_filter` on every
+    /// outcome (block, allow, challenge, access-bypass fast-path) so downstream
+    /// egress paths and `response_filter` can emit the contract observability
+    /// headers without reaching back into the engine.
+    pub waf_decision_meta: Option<WafDecisionMeta>,
+    /// Source value for the `X-WAF-Cache` response header. Defaults to
+    /// `Bypass` (fail-safe — never falsely advertise HIT). `request_filter`
+    /// upgrades to `Hit`/`Miss` only on the allow path; non-allow outcomes
+    /// must never report a cache-clean origin response.
+    pub cache_status: CacheStatus,
 }
 
 /// Per-response state for the streaming body masker (AC-17).
