@@ -183,4 +183,36 @@ jobs:
             echo "::endgroup::"
           done
           [ "$FAIL" = 0 ] || { echo "::error::Deploy failed on at least one node"; exit 1; }
-          echo "All nodes deployed."
+          echo "All AWS nodes deployed."
+
+      - name: Deploy to external worker (SSH)
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          WORKER_HOST: ${{ secrets.EXTERNAL_WORKER_HOST }}
+          WORKER_USER: ${{ secrets.EXTERNAL_WORKER_USER }}
+          PRESIGNED_URL: ${{ steps.upload.outputs.url }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WORKER_HOST:-}" ]; then
+            echo "No external worker configured (EXTERNAL_WORKER_HOST empty); skipping."
+            exit 0
+          fi
+          KEYF=$(mktemp)
+          trap 'rm -f "$KEYF"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$KEYF"
+          chmod 600 "$KEYF"
+          SCRIPT_RENDERED=$(python3 - <<'PY'
+          import os, sys
+          body = open(".github/workflows/scripts/deploy-external-worker.sh").read()
+          body = body.replace("__URL__", os.environ["PRESIGNED_URL"])
+          body = body.replace("__SHA__", os.environ["GIT_SHA"])
+          sys.stdout.write(body)
+          PY
+          )
+          ssh -i "$KEYF" \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            "${WORKER_USER:-root}@${WORKER_HOST}" 'bash -s' <<<"$SCRIPT_RENDERED"
+          echo "External worker deployed."
