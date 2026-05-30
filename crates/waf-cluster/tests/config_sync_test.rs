@@ -15,6 +15,7 @@ fn sample_syncable_config() -> SyncableConfig {
         cache: CacheConfig::default(),
         api: ApiConfig {
             listen_addr: "0.0.0.0:9527".into(),
+            tls: Default::default(),
         },
     }
 }
