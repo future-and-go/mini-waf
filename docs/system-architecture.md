@@ -130,6 +130,31 @@ cache snapshot (no per-request leak on HIT). See
 [request-pipeline.md](./request-pipeline.md#egress-§5-observability-header-injection-interop-contract-v23)
 for the full egress inventory.
 
+### Outbound Phase — §3 WAF Decision Classes (Interop Contract v2.3)
+
+`WafAction` enum extended with decision-class variants (Interop v2.3):
+- `Allow` — permit to upstream
+- `Block` — 403 Forbidden (or custom status via `WafAction::Block`)
+- `Challenge` — 429 Too Many Requests or CAPTCHA page (FR-006)
+- `RateLimit(status_code)` — 429 Too Many Requests (FR-004 rate-limit verdict)
+- `Timeout(status_code)` — 503 Service Unavailable (upstream timeout)
+- `CircuitBreaker(status_code, body)` — 502 Bad Gateway (cluster circuit-breaker)
+- `LogOnly` (deprecated variant; mode now lives on `WafDecision`)
+
+`WafDecision` struct enriched with decision metadata:
+- `risk_score: u8` — 0–100 cumulative risk from FR-025 scorer
+- `mode: InteropMode` — `Enforce` (block respected) or `LogOnly` (action suppressed for observability)
+- `rule_id: Option<String>` — triggering rule identifier for audit trail
+
+**Log-only mode semantics**: When `mode == LogOnly`, the intended action (e.g., Block) is preserved in `WafDecision` for audit logging (FR-033), but the gateway response handler suppresses enforcement: request passes through with 2xx status (allow semantics). `X-WAF-Mode` header emitted on every response reflects the mode (never hardcoded).
+
+**HTTP status mapping** (from `proxy_waf_response.rs`):
+- `WafAction::Block` → 403 Forbidden
+- `WafAction::Challenge` → 429 Too Many Requests (or challenge HTML)
+- `WafAction::RateLimit(429)` → 429 Too Many Requests
+- `WafAction::Timeout(503)` → 503 Service Unavailable
+- `WafAction::CircuitBreaker(502, body)` → 502 Bad Gateway
+
 ---
 
 ## Subsystem Summary
