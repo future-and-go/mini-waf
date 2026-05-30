@@ -57,6 +57,7 @@ fn make_ctx(query: &str, body: &str, headers: HashMap<String, String>) -> Reques
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: std::collections::HashMap::new(),
+        device_fp: None,
     }
 }
 

@@ -80,6 +80,7 @@ fn make_ctx(path: &str) -> RequestCtx {
             },
         }),
         cookies: HashMap::new(),
+        device_fp: None,
     }
 }
 

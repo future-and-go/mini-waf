@@ -69,6 +69,7 @@ fn make_ctx(ip: &str, tier: Tier) -> RequestCtx {
             ..TierPolicy::default()
         }),
         cookies: HashMap::new(),
+        device_fp: None,
     }
 }
 

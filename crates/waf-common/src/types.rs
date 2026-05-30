@@ -16,6 +16,45 @@ pub struct GeoIpInfo {
     pub iso_code: String,
 }
 
+/// Concrete computed fingerprint produced by a fingerprint provider.
+///
+/// Stored as the canonical text representation (e.g. `"771,4865-..."` for
+/// JA3 raw, or its MD5/SHA-256 hash).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FingerprintValue(pub String);
+
+impl FingerprintValue {
+    #[must_use]
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Composite identity key — the union of every enabled fingerprint algorithm
+/// for a single connection.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FpKey {
+    /// JA3 (or MD5(JA3)) when TLS capture enabled.
+    pub ja3: Option<FingerprintValue>,
+    /// JA4 hash when enabled.
+    pub ja4: Option<FingerprintValue>,
+    /// Akamai HTTP/2 fingerprint when h2 capture enabled.
+    pub h2_akamai: Option<FingerprintValue>,
+}
+
+impl FpKey {
+    /// True if no fingerprint algorithm produced a value.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.ja3.is_none() && self.ja4.is_none() && self.h2_akamai.is_none()
+    }
+}
+
 /// Request context passed through the WAF pipeline
 #[derive(Debug, Clone)]
 pub struct RequestCtx {
@@ -51,6 +90,11 @@ pub struct RequestCtx {
     /// `Cookie(name)` lookups stay O(1) without re-splitting the header.
     /// Names are case-sensitive per RFC 6265.
     pub cookies: HashMap<String, String>,
+    /// Resolved device fingerprint key when the device-fp pipeline produced a
+    /// non-empty key. `None` when device-fp is disabled or the observation
+    /// produced no values. Consumed by `TxVelocityCheck` to fall back from
+    /// cookie to fingerprint as the session identity.
+    pub device_fp: Option<Arc<FpKey>>,
 }
 
 /// Parse a `Cookie:` header value into a name → value map.
@@ -76,6 +120,31 @@ pub fn parse_cookie_header(header: &str) -> HashMap<String, String> {
         out.insert(name.to_string(), value.trim().to_string());
     }
     out
+}
+
+impl Default for RequestCtx {
+    fn default() -> Self {
+        Self {
+            req_id: String::new(),
+            client_ip: IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+            client_port: 0,
+            method: String::new(),
+            host: String::new(),
+            port: 0,
+            path: String::new(),
+            query: String::new(),
+            headers: HashMap::new(),
+            body_preview: Bytes::new(),
+            content_length: 0,
+            is_tls: false,
+            host_config: Arc::new(HostConfig::default()),
+            geo: None,
+            tier: Tier::CatchAll,
+            tier_policy: Self::default_tier_policy(),
+            cookies: HashMap::new(),
+            device_fp: None,
+        }
+    }
 }
 
 impl RequestCtx {
@@ -972,7 +1041,7 @@ impl Default for DefenseConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{HostConfig, HostUpstreamTimeoutError, UpstreamAlpn, parse_cookie_header};
+    use super::{FingerprintValue, FpKey, HostConfig, HostUpstreamTimeoutError, UpstreamAlpn, parse_cookie_header};
 
     // ── UpstreamAlpn default ────────────────────────────────────────────────
 
@@ -1150,6 +1219,24 @@ mod tests {
         // RFC 6265: cookie names are case-sensitive.
         assert_eq!(m.get("Session").map(String::as_str), Some("abc"));
         assert_eq!(m.get("session").map(String::as_str), Some("xyz"));
+    }
+
+    // ── FpKey compile-guard tests ──────────────────────────────────────────
+
+    #[test]
+    fn fp_key_is_reachable_from_waf_common() {
+        let _: FpKey = FpKey::default();
+        let _: FingerprintValue = FingerprintValue::new("ja3-xxx");
+    }
+
+    #[test]
+    fn fp_key_is_empty_matches_pre_move_semantics() {
+        assert!(FpKey::default().is_empty());
+        let with_ja3 = FpKey {
+            ja3: Some(FingerprintValue::new("x")),
+            ..FpKey::default()
+        };
+        assert!(!with_ja3.is_empty());
     }
 
     // ── RuleAction unit tests ────────────────────────────────────────────────

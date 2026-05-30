@@ -292,6 +292,7 @@ impl CtxBuilder {
                 ..TierPolicy::default()
             }),
             cookies: HashMap::new(),
+            device_fp: None,
         }
     }
 }

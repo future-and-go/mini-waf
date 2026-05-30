@@ -106,6 +106,7 @@ fn ctx_with(method: &str, path: &str, query: &str, body: &[u8], headers: &[(&str
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
+        device_fp: None,
     }
 }
 

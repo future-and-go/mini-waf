@@ -200,6 +200,7 @@ fn classify_ctx(registry: &TierPolicyRegistry, host: &str, path: &str, method: &
         make_host_config(host),
         tier,
         tier_policy,
+        None,
     );
 
     (ctx.tier, fail_mode)

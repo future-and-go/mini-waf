@@ -54,6 +54,7 @@ fn make_clean_ctx() -> RequestCtx {
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: std::collections::HashMap::new(),
+        device_fp: None,
     }
 }
 
@@ -130,6 +131,7 @@ fn make_ctx_query(query: &str, body: &str, cfg: &Arc<HostConfig>) -> RequestCtx 
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: std::collections::HashMap::new(),
+        device_fp: None,
     }
 }
 
@@ -154,6 +156,7 @@ fn make_ctx_header(name: &str, value: &str, cfg: &Arc<HostConfig>) -> RequestCtx
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: std::collections::HashMap::new(),
+        device_fp: None,
     }
 }
 
@@ -178,6 +181,7 @@ fn make_ctx_json(body: &str, cfg: &Arc<HostConfig>) -> RequestCtx {
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: std::collections::HashMap::new(),
+        device_fp: None,
     }
 }
 

@@ -52,8 +52,7 @@ impl Check for TxVelocityCheck {
         }
 
         // Extract session identity (cookie preferred, then fingerprint).
-        // TODO: FR-010 integration — pass actual FpKey when device_fp is wired.
-        let key = extract_session_key(ctx, &snapshot.session_cookie, None)?;
+        let key = extract_session_key(ctx, &snapshot.session_cookie, ctx.device_fp.as_deref(), ctx.client_ip)?;
 
         // Record the event. Classifiers run inside the store and emit signals
         // to the aggregator asynchronously. `ok = true` at request-entry;
@@ -74,11 +73,9 @@ mod tests {
     use super::*;
     use crate::checks::tx_velocity::EndpointRole;
     use crate::checks::tx_velocity::config::{RoleRule, TxVelocityFileConfig};
-    use bytes::Bytes;
     use std::collections::HashMap;
-    use std::net::IpAddr;
-    use waf_common::HostConfig;
-    use waf_common::tier::{Tier, TierPolicy};
+    use waf_common::FingerprintValue;
+    use waf_common::FpKey;
 
     fn cfg_enabled(session_cookie: &str, roles: &[RoleRule]) -> Arc<ArcSwap<TxVelocityConfig>> {
         let yaml = format!(
@@ -103,23 +100,14 @@ tx_velocity:
         let mut cookies = HashMap::new();
         cookies.insert(cookie_name.to_string(), cookie_val.to_string());
         RequestCtx {
-            req_id: "r".to_string(),
-            client_ip: IpAddr::from([10, 0, 0, 1]),
-            client_port: 12345,
+            client_ip: std::net::IpAddr::from([10, 0, 0, 1]),
             method: "POST".to_string(),
             host: "api.example.com".to_string(),
             port: 443,
             path: path.to_string(),
-            query: String::new(),
-            headers: HashMap::new(),
-            body_preview: Bytes::new(),
-            content_length: 0,
             is_tls: true,
-            host_config: Arc::new(HostConfig::default()),
-            geo: None,
-            tier: Tier::CatchAll,
-            tier_policy: Arc::new(TierPolicy::default()),
             cookies,
+            ..Default::default()
         }
     }
 
@@ -163,7 +151,6 @@ tx_velocity:
         let store = Arc::new(TxStore::new(Arc::clone(&cfg)));
         let check = TxVelocityCheck::new(cfg, Arc::clone(&store));
 
-        // No cookie or fingerprint
         let ctx = RequestCtx {
             cookies: HashMap::new(),
             ..ctx_with_path_and_cookie("/api/login", "SID", "")
@@ -208,10 +195,54 @@ tx_velocity:
         let store = Arc::new(TxStore::new(Arc::clone(&cfg)));
         let check = TxVelocityCheck::new(cfg, Arc::clone(&store));
 
-        // Multiple hits should all return None (signal-only).
         for _ in 0..10 {
             let ctx = ctx_with_path_and_cookie("/api/withdraw", "SID", "user456");
             assert!(check.check(&ctx).is_none());
         }
+    }
+
+    #[test]
+    fn cookie_absent_but_fp_present_records_event() {
+        let cfg = cfg_enabled(
+            "SID",
+            &[RoleRule {
+                role: EndpointRole::Withdrawal,
+                path: "^/api/withdraw".to_string(),
+            }],
+        );
+        let store = Arc::new(TxStore::new(Arc::clone(&cfg)));
+        let check = TxVelocityCheck::new(cfg, Arc::clone(&store));
+
+        let mut ctx = ctx_with_path_and_cookie("/api/withdraw", "SID", "");
+        ctx.cookies.clear();
+        ctx.device_fp = Some(Arc::new(FpKey {
+            ja3: Some(FingerprintValue::new("ja3-x")),
+            ..FpKey::default()
+        }));
+
+        assert!(check.check(&ctx).is_none(), "signal-only");
+        assert_eq!(store.len(), 1, "fp fallback should have recorded the event");
+    }
+
+    #[test]
+    fn empty_fp_and_no_cookie_skips_recording() {
+        let cfg = cfg_enabled(
+            "SID",
+            &[RoleRule {
+                role: EndpointRole::Login,
+                path: "^/api/login$".to_string(),
+            }],
+        );
+        let store = Arc::new(TxStore::new(Arc::clone(&cfg)));
+        let check = TxVelocityCheck::new(cfg, Arc::clone(&store));
+
+        let mut ctx = ctx_with_path_and_cookie("/api/login", "SID", "");
+        ctx.cookies.clear();
+        ctx.device_fp = Some(Arc::new(FpKey::default()));
+        assert!(check.check(&ctx).is_none());
+        assert!(
+            store.is_empty(),
+            "empty fp must not bucket all anon traffic under one key"
+        );
     }
 }

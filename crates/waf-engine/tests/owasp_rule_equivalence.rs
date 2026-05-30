@@ -116,6 +116,7 @@ fn ctx_with_query(query: &str) -> RequestCtx {
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
+        device_fp: None,
     }
 }
 
@@ -141,6 +142,7 @@ fn ctx_with_body(body: &str) -> RequestCtx {
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
+        device_fp: None,
     }
 }
 
@@ -166,6 +168,7 @@ fn ctx_with_host_header(host: &str) -> RequestCtx {
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
+        device_fp: None,
     }
 }
 
@@ -347,6 +350,7 @@ fn clean_request_without_query_not_blocked() {
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
+        device_fp: None,
     };
     let verdict = engine.check_with_verdict(&ctx);
     assert!(

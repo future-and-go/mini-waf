@@ -181,6 +181,7 @@ mod tests {
             tier,
             tier_policy: Arc::new(policy),
             cookies,
+            device_fp: None,
         }
     }
 

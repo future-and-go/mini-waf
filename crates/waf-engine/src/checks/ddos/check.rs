@@ -250,6 +250,7 @@ mod tests {
                 ..TierPolicy::default()
             }),
             cookies: HashMap::new(),
+            device_fp: None,
         }
     }
 

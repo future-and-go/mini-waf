@@ -93,6 +93,7 @@ fn ctx_with(ip: IpAddr, headers: HashMap<String, String>) -> RequestCtx {
             },
         }),
         cookies: HashMap::new(),
+        device_fp: None,
     }
 }
 

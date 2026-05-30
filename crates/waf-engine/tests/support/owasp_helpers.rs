@@ -36,6 +36,7 @@ pub fn make_ctx() -> RequestCtx {
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
+        device_fp: None,
     }
 }
 
@@ -67,5 +68,6 @@ pub fn make_ctx_owasp_disabled() -> RequestCtx {
         tier: waf_common::tier::Tier::CatchAll,
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
+        device_fp: None,
     }
 }
