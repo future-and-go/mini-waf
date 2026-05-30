@@ -40,6 +40,10 @@ use crate::logging::{AuditEvent, AuditEventType, AuditSender, DbBatchWriter, DbL
 use crate::rules::custom_file_loader::CustomRuleFileWatcher;
 use crate::rules::engine::{CustomRulesEngine, from_db_rule};
 
+use crate::risk::config::RiskConfig;
+use crate::risk::scorer::Scorer;
+use crate::risk::store::MemoryRiskStore;
+
 /// WAF engine configuration
 #[derive(Debug, Clone, Default)]
 pub struct WafEngineConfig {
@@ -127,6 +131,14 @@ pub struct WafEngine {
     /// Bounded MPSC batch writer for `attack_logs` and `security_events` tables.
     /// Replaces per-detection `tokio::spawn` with a single `try_send`.
     db_batch_writer: OnceLock<DbBatchWriter>,
+    /// Hot-swappable risk-scoring config. Default `RiskConfig` has
+    /// `enabled = false`, so `Scorer.score()` returns score=0 / Allow until
+    /// operators wire a real config via [`Self::replace_risk_config`].
+    risk_cfg: Arc<ArcSwap<RiskConfig>>,
+    /// Risk scorer threaded into `inspect()`. Backed by the in-memory store
+    /// so engine construction stays infrastructure-free. Provides the
+    /// `decision.risk_score` value attached to every WAF decision.
+    scorer: Arc<Scorer<MemoryRiskStore>>,
 }
 
 impl WafEngine {
@@ -204,6 +216,12 @@ impl WafEngine {
             Box::new(RequestBodyAbuseCheck::new()),
         ];
 
+        // Risk scorer with in-memory store and default (disabled) config.
+        // Operators that want real scoring call `replace_risk_config`.
+        let risk_cfg = Arc::new(ArcSwap::from(Arc::new(RiskConfig::default())));
+        let risk_store = Arc::new(MemoryRiskStore::new());
+        let scorer = Arc::new(Scorer::new(risk_store, Arc::clone(&risk_cfg)));
+
         Self {
             store,
             custom_rules,
@@ -232,7 +250,19 @@ impl WafEngine {
             ddos_reloader: OnceLock::new(),
             audit_sender: OnceLock::new(),
             db_batch_writer: OnceLock::new(),
+            risk_cfg,
+            scorer,
         }
+    }
+
+    /// Hot-swap the risk-scoring config snapshot.
+    ///
+    /// `RiskConfig::default()` has `enabled = false`, so the scorer no-ops
+    /// (score=0) until a real config is loaded. Operators wire production
+    /// scoring via this entry point; tests use it to enable scoring on a
+    /// per-test basis.
+    pub fn replace_risk_config(&self, cfg: RiskConfig) {
+        self.risk_cfg.store(Arc::new(cfg));
     }
 
     /// Load `configs/rate-limit.yaml` once and start the hot-reload watcher.
@@ -426,6 +456,42 @@ impl WafEngine {
         let _ = self.audit_sender.set(sender);
     }
 
+    /// Emit a minimal audit-log entry for egress paths that have NO
+    /// `RequestCtx` (fail-closed 503, transport error before inspect).
+    /// Used to correlate a fallback-UUID `X-WAF-Request-Id` with at least
+    /// one audit record so the wire header is never an orphan.
+    ///
+    /// Fire-and-forget — no-op when the audit sender is unset.
+    pub fn emit_minimal_audit_stub(
+        &self,
+        req_id: &str,
+        event_type: AuditEventType,
+        host: &str,
+        method: &str,
+        path: &str,
+        client_ip: &str,
+        detail: &str,
+    ) {
+        let Some(sender) = self.audit_sender.get() else {
+            return;
+        };
+        let event = AuditEvent {
+            timestamp: chrono::Utc::now(),
+            event_type,
+            rule_name: String::new(),
+            rule_id: None,
+            phase: None,
+            client_ip: client_ip.to_string(),
+            host: host.to_string(),
+            method: method.to_string(),
+            path: path.to_string(),
+            tier: None,
+            detail: Some(detail.to_string()),
+            req_id: Some(req_id.to_string()),
+        };
+        sender.send(event);
+    }
+
     /// Plug the batched DB log writer into the engine (called once after init).
     ///
     /// After this call, `log_attack` and `log_security_event` use bounded
@@ -536,6 +602,27 @@ impl WafEngine {
     /// before the checker pipeline runs.  Callers should check
     /// `decision.is_enforcement_allowed()`.
     pub async fn inspect(&self, ctx: &mut RequestCtx) -> WafDecision {
+        // Compute the cumulative risk score once so every outcome the pipeline
+        // below produces carries it. With the default (disabled) `RiskConfig`
+        // this is a no-op (score = 0); operators opt in via `replace_risk_config`.
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let scorer_score = self
+            .scorer
+            .score(ctx, None, &[], None, now_ms)
+            .await
+            .map_or(0, |r| r.score);
+
+        let mut decision = self.inspect_pipeline(ctx).await;
+        // Defensive clamp — the scorer also clamps, but pin the invariant here
+        // since `decision.risk_score` feeds a response header bounded 0..=100.
+        decision.risk_score = scorer_score.min(100);
+        decision
+    }
+
+    /// Original inspection pipeline. Split out of [`Self::inspect`] so the
+    /// outer wrapper can attach the risk score to every decision without
+    /// rewriting each early-return branch.
+    async fn inspect_pipeline(&self, ctx: &mut RequestCtx) -> WafDecision {
         // Skip WAF if guard is disabled for this host
         if !ctx.host_config.guard_status {
             return WafDecision::allow();
