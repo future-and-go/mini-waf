@@ -3,7 +3,7 @@
 //! These tests verify the TLS certificate lifecycle (generate, persist, reuse,
 //! renew) and the HTTP redirect helper.  The end-to-end HTTPS connectivity test
 //! uses a minimal Axum router served directly via axum-server — no real DB or
-//! AppState needed.
+//! `AppState` needed.
 
 #![allow(
     clippy::unwrap_used,
@@ -40,10 +40,10 @@ async fn wait_for_https_ready(port: u16, timeout: Duration) -> bool {
     let deadline = tokio::time::Instant::now() + timeout;
     while tokio::time::Instant::now() < deadline {
         let url = format!("https://127.0.0.1:{port}/health");
-        if let Ok(resp) = client.get(&url).send().await {
-            if resp.status().is_success() {
-                return true;
-            }
+        if let Ok(resp) = client.get(&url).send().await
+            && resp.status().is_success()
+        {
+            return true;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
