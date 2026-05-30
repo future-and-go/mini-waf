@@ -1,10 +1,13 @@
 name: Deploy Cluster (test)
 
 # Deploys the prx-waf binary onto the test cluster.
-# Triggers: automatic on push to main; manual (workflow_dispatch) from
-# main or release/stg. Only these two branches may deploy to the test
-# VMs — enforced authoritatively by the cluster-test-deploy environment's
-# deployment branch policy, and fail-fast by the guard job below.
+# Triggers: automatic on push to main; manual (workflow_dispatch) from main.
+# ONLY main may deploy to the test VMs. The cluster shares one PostgreSQL
+# database; deploying a second branch whose migrations diverge from main
+# (e.g. release/stg's 0017/0018) corrupts the shared migration state, so
+# main is the single source of truth. Enforced authoritatively by the
+# cluster-test-deploy environment's deployment branch policy, and fail-fast
+# by the guard job below.
 # Auth: GitHub OIDC -> AWS IAM role (no long-lived credentials in repo).
 # Transport: S3 presigned URL + SSM Run Command (AWS) / SSH (external worker).
 # Target allowlist: instances tagged project=other env=dev Name=other-test-cluster-*.
@@ -43,19 +46,18 @@ env:
 
 jobs:
   guard-branch:
-    name: Restrict deploy to main and release/stg
+    name: Restrict deploy to main
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Reject disallowed branches
         run: |
-          case "${GITHUB_REF_NAME}" in
-            main|release/stg)
-              echo "branch ${GITHUB_REF_NAME} is allowed to deploy" ;;
-            *)
-              echo "::error::branch ${GITHUB_REF_NAME} is not allowed to deploy to the test cluster (only main, release/stg)"
-              exit 1 ;;
-          esac
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            echo "branch ${GITHUB_REF_NAME} is allowed to deploy"
+          else
+            echo "::error::branch ${GITHUB_REF_NAME} is not allowed to deploy to the test cluster (only main — the cluster shares one DB and main is the single migration source)"
+            exit 1
+          fi
 
   deploy:
     name: Build and deploy to test cluster
