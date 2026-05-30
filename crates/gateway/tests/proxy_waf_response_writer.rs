@@ -519,3 +519,286 @@ async fn write_waf_decision_log_only_block_returns_false() {
         "LogOnly mode must not bump the blocked counter"
     );
 }
+
+// ── §5 Observability headers: every WAF-decision egress path must emit 6 ─────
+//
+// Phase 1 TDD scaffold (plan: phase-01-tdd-test-scaffold.md, steps 5-7).
+// Production code does not inject yet — these tests fail red until Phase 4.
+
+/// Case-insensitive lookup of a header value on the serialised wire bytes.
+/// Returns the trimmed value substring, or None when the header is absent.
+fn wire_header_value<'a>(wire: &'a str, name: &str) -> Option<&'a str> {
+    let lower = wire.to_ascii_lowercase();
+    let needle = format!("\r\n{}:", name.to_ascii_lowercase());
+    let pos = lower.find(&needle)?;
+    let value_start = pos + needle.len();
+    let rest = &wire[value_start..];
+    let line_end = rest.find("\r\n").unwrap_or(rest.len());
+    Some(rest[..line_end].trim())
+}
+
+/// Assert that all 6 X-WAF-* contract headers appear on the wire with the
+/// expected per-path values. `request_id` and `mode` are fixed by the
+/// `make_request_ctx()` fixture; `risk_score` defaults to `"0"` until Phase 3
+/// wires the scorer; `rule_id` is `"none"` unless overridden by the caller.
+fn assert_six_observability_headers(wire: &str, expected_action: &str, expected_rule_id: &str, expected_cache: &str) {
+    assert_eq!(
+        wire_header_value(wire, "x-waf-request-id"),
+        Some("req-1"),
+        "X-WAF-Request-Id missing or wrong on wire: {wire}",
+    );
+    assert_eq!(
+        wire_header_value(wire, "x-waf-risk-score"),
+        Some("0"),
+        "X-WAF-Risk-Score missing or wrong on wire: {wire}",
+    );
+    assert_eq!(
+        wire_header_value(wire, "x-waf-action"),
+        Some(expected_action),
+        "X-WAF-Action mismatch (want `{expected_action}`) on wire: {wire}",
+    );
+    assert_eq!(
+        wire_header_value(wire, "x-waf-rule-id"),
+        Some(expected_rule_id),
+        "X-WAF-Rule-Id mismatch (want `{expected_rule_id}`) on wire: {wire}",
+    );
+    assert_eq!(
+        wire_header_value(wire, "x-waf-cache"),
+        Some(expected_cache),
+        "X-WAF-Cache mismatch (want `{expected_cache}`) on wire: {wire}",
+    );
+    assert_eq!(
+        wire_header_value(wire, "x-waf-mode"),
+        Some("enforce"),
+        "X-WAF-Mode missing or wrong on wire: {wire}",
+    );
+}
+
+#[tokio::test]
+async fn write_waf_decision_block_emits_six_observability_headers() {
+    let (mut session, drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    let decision = WafDecision::block(403, Some("blocked".into()), detection_result());
+
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
+        .await
+        .expect("write_waf_decision");
+    assert!(result);
+
+    drop(session);
+    let bytes = drain.await.expect("drain task");
+    let wire = String::from_utf8_lossy(&bytes);
+    assert_six_observability_headers(&wire, "block", "R-1", "BYPASS");
+}
+
+#[tokio::test]
+async fn write_waf_decision_rate_limit_emits_six_observability_headers() {
+    let (mut session, drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    let decision = WafDecision {
+        action: WafAction::RateLimit {
+            status: 429,
+            body: Some("slow down".into()),
+        },
+        result: Some(detection_result()),
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: Some("R-1".into()),
+    };
+
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
+        .await
+        .expect("write_waf_decision");
+    assert!(result);
+
+    drop(session);
+    let bytes = drain.await.expect("drain task");
+    let wire = String::from_utf8_lossy(&bytes);
+    assert_six_observability_headers(&wire, "rate_limit", "R-1", "BYPASS");
+}
+
+#[tokio::test]
+async fn write_waf_decision_timeout_emits_six_observability_headers() {
+    let (mut session, drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    let decision = WafDecision {
+        action: WafAction::Timeout { status: 504 },
+        result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
+    };
+
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
+        .await
+        .expect("write_waf_decision");
+    assert!(result);
+
+    drop(session);
+    let bytes = drain.await.expect("drain task");
+    let wire = String::from_utf8_lossy(&bytes);
+    assert_six_observability_headers(&wire, "timeout", "none", "BYPASS");
+}
+
+#[tokio::test]
+async fn write_waf_decision_circuit_breaker_emits_six_observability_headers() {
+    let (mut session, drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    let decision = WafDecision {
+        action: WafAction::CircuitBreaker {
+            status: 503,
+            body: Some("upstream down".into()),
+        },
+        result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
+    };
+
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
+        .await
+        .expect("write_waf_decision");
+    assert!(result);
+
+    drop(session);
+    let bytes = drain.await.expect("drain task");
+    let wire = String::from_utf8_lossy(&bytes);
+    assert_six_observability_headers(&wire, "circuit_breaker", "none", "BYPASS");
+}
+
+#[tokio::test]
+async fn write_waf_decision_redirect_emits_six_observability_headers() {
+    // WafAction::Redirect maps to contract action `"allow"` via as_contract_str().
+    // Headers must still be emitted on the 302 response.
+    let (mut session, drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    let decision = WafDecision {
+        action: WafAction::Redirect {
+            url: "https://safe.example.com/landing".into(),
+        },
+        result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
+    };
+
+    let result = write_waf_decision(&mut session, &decision, &ctx, &counter, None)
+        .await
+        .expect("write_waf_decision");
+    assert!(result);
+
+    drop(session);
+    let bytes = drain.await.expect("drain task");
+    let wire = String::from_utf8_lossy(&bytes);
+    assert!(wire.starts_with("HTTP/1.1 302"), "wire: {wire}");
+    assert_six_observability_headers(&wire, "allow", "none", "BYPASS");
+}
+
+// ── write_waf_body_decision: same 6 headers on every enforced arm ────────────
+
+#[tokio::test]
+async fn write_waf_body_decision_block_emits_six_observability_headers() {
+    let (mut session, drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    let decision = WafDecision::block(403, Some("blocked-body".into()), detection_result());
+
+    let _ = write_waf_body_decision(&mut session, &decision, &ctx, &counter)
+        .await
+        .expect_err("body block must Err to halt streaming");
+
+    drop(session);
+    let bytes = drain.await.expect("drain task");
+    let wire = String::from_utf8_lossy(&bytes);
+    assert_six_observability_headers(&wire, "block", "R-1", "BYPASS");
+}
+
+#[tokio::test]
+async fn write_waf_body_decision_rate_limit_emits_six_observability_headers() {
+    let (mut session, drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    let decision = WafDecision {
+        action: WafAction::RateLimit {
+            status: 429,
+            body: Some("rate-limited-body".into()),
+        },
+        result: Some(detection_result()),
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: Some("R-1".into()),
+    };
+
+    let _ = write_waf_body_decision(&mut session, &decision, &ctx, &counter)
+        .await
+        .expect_err("body rate_limit must Err to halt streaming");
+
+    drop(session);
+    let bytes = drain.await.expect("drain task");
+    let wire = String::from_utf8_lossy(&bytes);
+    assert_six_observability_headers(&wire, "rate_limit", "R-1", "BYPASS");
+}
+
+#[tokio::test]
+async fn write_waf_body_decision_timeout_emits_six_observability_headers() {
+    let (mut session, drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    let decision = WafDecision {
+        action: WafAction::Timeout { status: 504 },
+        result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
+    };
+
+    let _ = write_waf_body_decision(&mut session, &decision, &ctx, &counter)
+        .await
+        .expect_err("body timeout must Err to halt streaming");
+
+    drop(session);
+    let bytes = drain.await.expect("drain task");
+    let wire = String::from_utf8_lossy(&bytes);
+    assert_six_observability_headers(&wire, "timeout", "none", "BYPASS");
+}
+
+#[tokio::test]
+async fn write_waf_body_decision_redirect_emits_six_observability_headers() {
+    let (mut session, drain) = session_over_duplex().await;
+    let counter = AtomicU64::new(0);
+    let ctx = make_request_ctx();
+    let decision = WafDecision {
+        action: WafAction::Redirect { url: "/captcha".into() },
+        result: None,
+        risk_score: 0,
+        mode: InteropMode::Enforce,
+        rule_id: None,
+    };
+
+    let _ = write_waf_body_decision(&mut session, &decision, &ctx, &counter)
+        .await
+        .expect_err("body redirect must Err to halt streaming");
+
+    drop(session);
+    let bytes = drain.await.expect("drain task");
+    let wire = String::from_utf8_lossy(&bytes);
+    assert!(wire.starts_with("HTTP/1.1 302"), "wire: {wire}");
+    assert_six_observability_headers(&wire, "allow", "none", "BYPASS");
+}
+
+// ── Phase 4 dependency: challenge-page render needs a real ChallengeCtx ──────
+
+#[tokio::test]
+#[ignore = "Phase 4: challenge page render emits X-WAF-Action: challenge + 6 headers (needs ChallengeCtx fixture)"]
+async fn handle_challenge_page_emits_six_observability_headers_with_action_challenge() {
+    // When ChallengeCtx is wired, this test must:
+    //   1. Drive write_waf_decision(Challenge) with Some(&Arc<ChallengeCtx>)
+    //   2. Assert wire starts with `HTTP/1.1 200` (challenge page) or `403`
+    //   3. Assert all 6 headers, with X-WAF-Action: challenge
+    panic!("Phase 4 stub: implement once ChallengeCtx fixture available");
+}
