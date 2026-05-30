@@ -37,7 +37,7 @@ fn header_count(resp: &pingora_http::ResponseHeader, name: &str) -> usize {
     resp.headers.get_all(name).iter().count()
 }
 
-fn baseline_values<'a>() -> WafHeaderValues<'a> {
+const fn baseline_values<'a>() -> WafHeaderValues<'a> {
     WafHeaderValues {
         request_id: "11111111-2222-3333-4444-555555555555",
         risk_score: 42,
@@ -697,11 +697,10 @@ mod phase5 {
     }
 
     async fn session_over_duplex() -> (Session, tokio::task::JoinHandle<Vec<u8>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let (server_side, mut client_side) = tokio::io::duplex(64 * 1024);
-        use tokio::io::AsyncWriteExt;
         client_side.write_all(&http1_request_bytes()).await.expect("write");
         let drain = tokio::spawn(async move {
-            use tokio::io::AsyncReadExt;
             let mut out = Vec::new();
             let _ = client_side.read_to_end(&mut out).await;
             out
