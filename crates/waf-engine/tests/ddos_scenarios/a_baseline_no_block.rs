@@ -42,10 +42,10 @@ async fn scenario_a_baseline_traffic_no_blocks() {
     // Staying well under per-tier floor (default 1000)
     for _ in 0..500 {
         let ip = rotator.next_ip();
-        let ctx = CtxBuilder::new().ip_addr(ip).tier(Tier::Medium).build();
+        let mut ctx = CtxBuilder::new().ip_addr(ip).tier(Tier::Medium).build();
 
         let start = std::time::Instant::now();
-        let result = harness.check(&ctx);
+        let result = harness.check(&mut ctx);
         latencies.push(start.elapsed());
 
         if result.is_some() {
@@ -95,12 +95,12 @@ async fn scenario_a_sustained_under_threshold() {
     // Send 400 requests (under 500 threshold)
     let mut blocks = 0;
     for i in 0..400 {
-        let ctx = CtxBuilder::new()
+        let mut ctx = CtxBuilder::new()
             .ip(&format!("192.168.{}.{}", i / 256, i % 256))
             .tier(Tier::Medium)
             .build();
 
-        if harness.check(&ctx).is_some() {
+        if harness.check(&mut ctx).is_some() {
             blocks += 1;
         }
     }

@@ -42,8 +42,8 @@ rules:
     action: block
 "#;
     let c = OWASPCheck::from_yaml(yaml);
-    let ctx = make_ctx_owasp_disabled();
-    assert!(c.check(&ctx).is_none(), "disabled owasp must skip");
+    let mut ctx = make_ctx_owasp_disabled();
+    assert!(c.check(&mut ctx).is_none(), "disabled owasp must skip");
 }
 
 #[test]
@@ -138,5 +138,5 @@ rules:
     assert_eq!(c.rule_count(), 1);
     let mut ctx = make_ctx();
     ctx.method = "POST".into();
-    assert!(c.check(&ctx).is_none(), "PL4 rule must be skipped at PL1");
+    assert!(c.check(&mut ctx).is_none(), "PL4 rule must be skipped at PL1");
 }

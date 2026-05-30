@@ -14,27 +14,7 @@ use waf_common::RequestCtx;
 
 use crate::device_fp::types::FpKey;
 
-/// Identity tied to a tracked actor. Cookie values are kept as opaque
-/// `String` so we never have to log or expose them — the value lives only
-/// inside the `DashMap` key.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum SessionIdent {
-    Cookie(String),
-    /// Fingerprint scoped by peer IP to prevent CDN cohort poisoning (shared
-    /// JA3 behind `CloudFront` bucketing unrelated clients together).
-    Fingerprint {
-        fp: FpKey,
-        ip: IpAddr,
-    },
-}
-
-/// Composite key the recorder buckets events under. Host scoping prevents
-/// cross-tenant collision when the same cookie name is reused.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct SessionKey {
-    pub host: String,
-    pub ident: SessionIdent,
-}
+pub use waf_common::session_key::{SessionIdent, SessionKey};
 
 /// Extract the per-request session key. Cookie wins; otherwise fall back
 /// to fingerprint scoped by peer IP. `fp` is `None` when device-fp is

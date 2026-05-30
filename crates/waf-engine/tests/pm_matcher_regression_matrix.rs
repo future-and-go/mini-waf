@@ -121,6 +121,7 @@ fn ctx_with(method: &str, path: &str, query: &str, body: &[u8], headers: &[(&str
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 
@@ -257,9 +258,9 @@ fn pm_from_file_restricted_files_blocks() {
     let patterns = [".env", ".htpasswd", ".htaccess"];
     for p in &patterns {
         let path = format!("/{p}");
-        let ctx = ctx_p4("GET", &path, "", &[], &[]);
+        let mut ctx = ctx_p4("GET", &path, "", &[], &[]);
         assert!(
-            checker.check(&ctx).is_some(),
+            checker.check(&mut ctx).is_some(),
             "CRS-930130: restricted file '{p}' in path should be blocked"
         );
     }
@@ -271,9 +272,9 @@ fn pm_from_file_lfi_os_files_blocks() {
     let patterns = ["config.ini", "/etc/passwd", "boot.ini"];
     for p in &patterns {
         let body = format!("file={p}");
-        let ctx = ctx_p4("POST", "/include", "", body.as_bytes(), &[]);
+        let mut ctx = ctx_p4("POST", "/include", "", body.as_bytes(), &[]);
         assert!(
-            checker.check(&ctx).is_some(),
+            checker.check(&mut ctx).is_some(),
             "CRS-930120: LFI pattern '{p}' in body should be blocked"
         );
     }
@@ -287,9 +288,9 @@ fn pm_from_file_ai_critical_artifacts_blocks() {
     let patterns = [".cursor/", ".claude/", ".aider/"];
     for p in &patterns {
         let path = format!("/{p}config");
-        let ctx = ctx_p4("GET", &path, "", &[], &[]);
+        let mut ctx = ctx_p4("GET", &path, "", &[], &[]);
         assert!(
-            checker.check(&ctx).is_some(),
+            checker.check(&mut ctx).is_some(),
             "CRS-930140: AI artifact '{p}' in path should be blocked"
         );
     }
@@ -301,9 +302,9 @@ fn pm_from_file_php_variables_blocks() {
     let patterns = ["$_SERVER", "$_GET", "$_POST"];
     for p in &patterns {
         let body = format!("code={p}");
-        let ctx = ctx_p4("POST", "/eval", "", body.as_bytes(), &[]);
+        let mut ctx = ctx_p4("POST", "/eval", "", body.as_bytes(), &[]);
         assert!(
-            checker.check(&ctx).is_some(),
+            checker.check(&mut ctx).is_some(),
             "CRS-933130: PHP variable '{p}' in body should be blocked"
         );
     }
@@ -315,9 +316,9 @@ fn pm_from_file_php_functions_blocks() {
     let patterns = ["shell_exec", "base64_decode", "curl_exec"];
     for p in &patterns {
         let body = format!("code={p}()");
-        let ctx = ctx_p4("POST", "/x", "", body.as_bytes(), &[]);
+        let mut ctx = ctx_p4("POST", "/x", "", body.as_bytes(), &[]);
         assert!(
-            checker.check(&ctx).is_some(),
+            checker.check(&mut ctx).is_some(),
             "CRS-933150: PHP function '{p}' in body should be blocked"
         );
     }
@@ -328,9 +329,9 @@ fn pm_from_file_scanner_user_agents_blocks() {
     let checker = load_crs_engine();
     let patterns = ["Nmap Scripting Engine", "sqlmap", "nikto"];
     for p in &patterns {
-        let ctx = ctx_p4("GET", "/home", "", &[], &[("user-agent", p)]);
+        let mut ctx = ctx_p4("GET", "/home", "", &[], &[("user-agent", p)]);
         assert!(
-            checker.check(&ctx).is_some(),
+            checker.check(&mut ctx).is_some(),
             "CRS-913100: scanner UA '{p}' should be blocked"
         );
     }
@@ -423,9 +424,9 @@ fn pm_from_file_ssrf_no_scheme_blocks_isolated() {
 #[test]
 fn pm_from_file_negative_innocuous_path_passes() {
     let checker = load_crs_engine();
-    let ctx = ctx_p4("GET", "/users/profile", "", &[], &[("accept", "*/*")]);
+    let mut ctx = ctx_p4("GET", "/users/profile", "", &[], &[("accept", "*/*")]);
     assert!(
-        checker.check(&ctx).is_none(),
+        checker.check(&mut ctx).is_none(),
         "innocuous GET /users/profile must not match any CRS rule"
     );
 }
@@ -433,8 +434,8 @@ fn pm_from_file_negative_innocuous_path_passes() {
 #[test]
 fn pm_from_file_negative_clean_body_passes() {
     let checker = load_crs_engine();
-    let ctx = ctx_p4("POST", "/api/data", "", b"name=alice", &[("accept", "*/*")]);
-    let result = checker.check(&ctx);
+    let mut ctx = ctx_p4("POST", "/api/data", "", b"name=alice", &[("accept", "*/*")]);
+    let result = checker.check(&mut ctx);
     assert!(
         result.is_none(),
         "clean POST body must not match any CRS rule, got: {result:?}"
@@ -444,7 +445,7 @@ fn pm_from_file_negative_clean_body_passes() {
 #[test]
 fn pm_from_file_negative_normal_user_agent_passes() {
     let checker = load_crs_engine();
-    let ctx = ctx_p4(
+    let mut ctx = ctx_p4(
         "GET",
         "/home",
         "",
@@ -452,7 +453,7 @@ fn pm_from_file_negative_normal_user_agent_passes() {
         &[("user-agent", "CustomApp/1.0"), ("accept", "*/*")],
     );
     assert!(
-        checker.check(&ctx).is_none(),
+        checker.check(&mut ctx).is_none(),
         "normal user-agent must not match scanner rule"
     );
 }
@@ -465,9 +466,9 @@ fn contains_any_xss_keywords_blocks() {
     let keywords = ["document.cookie", "document.domain", "window.location"];
     for kw in &keywords {
         let query = format!("q={kw}");
-        let ctx = ctx_p4("GET", "/search", &query, &[], &[]);
+        let mut ctx = ctx_p4("GET", "/search", &query, &[], &[]);
         assert!(
-            checker.check(&ctx).is_some(),
+            checker.check(&mut ctx).is_some(),
             "CRS-941180: contains_any keyword '{kw}' should be blocked"
         );
     }
@@ -476,9 +477,9 @@ fn contains_any_xss_keywords_blocks() {
 #[test]
 fn contains_any_php_close_tag_blocks() {
     let checker = load_crs_engine();
-    let ctx = ctx_with("POST", "/comment", "", b"text=hello?>evil", &[], 4);
+    let mut ctx = ctx_with("POST", "/comment", "", b"text=hello?>evil", &[], 4);
     assert!(
-        checker.check(&ctx).is_some(),
+        checker.check(&mut ctx).is_some(),
         "CRS-933190: contains_any '?>' should be blocked at paranoia 3+"
     );
 }
@@ -487,9 +488,9 @@ fn contains_any_php_close_tag_blocks() {
 fn contains_any_negative_clean_query_passes() {
     let checker = load_crs_engine();
     // Use paranoia 1 — higher levels trigger aggressive regex rules unrelated to contains_any
-    let ctx = ctx_with("GET", "/items", "id=42", &[], &[("accept", "*/*")], 1);
+    let mut ctx = ctx_with("GET", "/items", "id=42", &[], &[("accept", "*/*")], 1);
     assert!(
-        checker.check(&ctx).is_none(),
+        checker.check(&mut ctx).is_none(),
         "clean query must not match contains_any rules"
     );
 }
@@ -499,9 +500,9 @@ fn contains_any_negative_clean_query_passes() {
 #[test]
 fn encoding_bypass_url_encode_dot_blocks() {
     let checker = load_crs_engine();
-    let ctx = ctx_p4("GET", "/%2Eenv", "", &[], &[]);
+    let mut ctx = ctx_p4("GET", "/%2Eenv", "", &[], &[]);
     assert!(
-        checker.check(&ctx).is_some(),
+        checker.check(&mut ctx).is_some(),
         "URL-encoded .env (%2Eenv) must be blocked"
     );
 }
@@ -509,9 +510,9 @@ fn encoding_bypass_url_encode_dot_blocks() {
 #[test]
 fn encoding_bypass_uppercase_blocks() {
     let checker = load_crs_engine();
-    let ctx = ctx_p4("GET", "/.ENV", "", &[], &[]);
+    let mut ctx = ctx_p4("GET", "/.ENV", "", &[], &[]);
     assert!(
-        checker.check(&ctx).is_some(),
+        checker.check(&mut ctx).is_some(),
         "upper-case .ENV must be blocked (case-insensitive)"
     );
 }
@@ -519,9 +520,9 @@ fn encoding_bypass_uppercase_blocks() {
 #[test]
 fn encoding_bypass_leading_whitespace_in_query() {
     let checker = load_crs_engine();
-    let ctx = ctx_p4("GET", "/x", "file=%20.env", &[], &[]);
+    let mut ctx = ctx_p4("GET", "/x", "file=%20.env", &[], &[]);
     assert!(
-        checker.check(&ctx).is_some(),
+        checker.check(&mut ctx).is_some(),
         "leading whitespace + .env in query should be blocked"
     );
 }
@@ -530,8 +531,8 @@ fn encoding_bypass_leading_whitespace_in_query() {
 fn encoding_bypass_double_encode_behavior() {
     let checker = load_crs_engine();
     // %252E = double-encoded dot. Document whether engine decodes recursively.
-    let ctx = ctx_p4("GET", "/%252Eenv", "", &[], &[]);
-    let detected = checker.check(&ctx).is_some();
+    let mut ctx = ctx_p4("GET", "/%252Eenv", "", &[], &[]);
+    let detected = checker.check(&mut ctx).is_some();
     if detected {
         eprintln!("NOTE: double-encoded %252Eenv is detected — engine decodes recursively");
     }

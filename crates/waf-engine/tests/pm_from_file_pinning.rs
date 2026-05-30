@@ -92,6 +92,7 @@ fn ctx_with(method: &str, path: &str, query: &str, body: &[u8], headers: &[(&str
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 
@@ -100,8 +101,8 @@ fn ctx_with(method: &str, path: &str, query: &str, body: &[u8], headers: &[(&str
 #[test]
 fn pin_dotenv_path_must_block() {
     let checker = load_crs_engine();
-    let ctx = ctx_with("GET", "/.env", "", &[], &[]);
-    let result = checker.check(&ctx);
+    let mut ctx = ctx_with("GET", "/.env", "", &[], &[]);
+    let result = checker.check(&mut ctx);
     assert!(
         result.is_some(),
         "BUG: GET /.env must be blocked by CRS-930130 (restricted-files.data) — \
@@ -112,9 +113,9 @@ fn pin_dotenv_path_must_block() {
 #[test]
 fn pin_dotenvrc_path_must_block() {
     let checker = load_crs_engine();
-    let ctx = ctx_with("GET", "/.envrc", "", &[], &[]);
+    let mut ctx = ctx_with("GET", "/.envrc", "", &[], &[]);
     assert!(
-        checker.check(&ctx).is_some(),
+        checker.check(&mut ctx).is_some(),
         "BUG: GET /.envrc must be blocked by CRS-930130"
     );
 }
@@ -122,9 +123,9 @@ fn pin_dotenvrc_path_must_block() {
 #[test]
 fn pin_dotenv_uppercase_must_block_case_insensitive() {
     let checker = load_crs_engine();
-    let ctx = ctx_with("GET", "/.ENV", "", &[], &[]);
+    let mut ctx = ctx_with("GET", "/.ENV", "", &[], &[]);
     assert!(
-        checker.check(&ctx).is_some(),
+        checker.check(&mut ctx).is_some(),
         "BUG: GET /.ENV must be blocked — pm_from_file must be case-insensitive"
     );
 }
@@ -133,9 +134,9 @@ fn pin_dotenv_uppercase_must_block_case_insensitive() {
 fn pin_dotenv_url_encoded_must_block() {
     let checker = load_crs_engine();
     // %2E == '.' — must be decoded before pattern match.
-    let ctx = ctx_with("GET", "/%2Eenv", "", &[], &[]);
+    let mut ctx = ctx_with("GET", "/%2Eenv", "", &[], &[]);
     assert!(
-        checker.check(&ctx).is_some(),
+        checker.check(&mut ctx).is_some(),
         "BUG: GET /%2Eenv must be blocked — pm_from_file must URL-decode the path"
     );
 }
@@ -143,9 +144,9 @@ fn pin_dotenv_url_encoded_must_block() {
 #[test]
 fn pin_htpasswd_in_subpath_must_block() {
     let checker = load_crs_engine();
-    let ctx = ctx_with("GET", "/path/with/.htpasswd", "", &[], &[]);
+    let mut ctx = ctx_with("GET", "/path/with/.htpasswd", "", &[], &[]);
     assert!(
-        checker.check(&ctx).is_some(),
+        checker.check(&mut ctx).is_some(),
         "BUG: GET /path/with/.htpasswd must be blocked by CRS-930130"
     );
 }
@@ -159,9 +160,9 @@ fn pin_lfi_os_file_in_body_must_block() {
     // other CRS rules — so a hit here proves pm_from_file is wired.
     let checker = load_crs_engine();
     let body = b"file=config.ini";
-    let ctx = ctx_with("POST", "/include", "", body, &[]);
+    let mut ctx = ctx_with("POST", "/include", "", body, &[]);
     assert!(
-        checker.check(&ctx).is_some(),
+        checker.check(&mut ctx).is_some(),
         "BUG: body containing 'config.ini' must be blocked by CRS-930120 (lfi-os-files.data) — \
          currently silent-fails because pm_from_file routes through eval_specialised"
     );
@@ -172,11 +173,11 @@ fn pin_lfi_os_file_in_body_must_block() {
 #[test]
 fn pin_innocuous_path_must_pass() {
     let checker = load_crs_engine();
-    let ctx = ctx_with("GET", "/users/profile", "", &[], &[("accept", "*/*")]);
+    let mut ctx = ctx_with("GET", "/users/profile", "", &[], &[("accept", "*/*")]);
     // No CRS rule should match a benign request — guards against
     // false-positive over-matching after the matcher unification.
     assert!(
-        checker.check(&ctx).is_none(),
+        checker.check(&mut ctx).is_none(),
         "innocuous GET /users/profile must not match any CRS rule"
     );
 }

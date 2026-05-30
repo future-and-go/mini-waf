@@ -100,7 +100,7 @@ proptest! {
             tier: Tier::Medium,
             tier_policy: Arc::new(TierPolicy::default()),
             cookies: HashMap::new(),
-            device_fp: None,
+            device_fp: None, tx_velocity_token: None,
         };
 
         let cfg = DdosTierCfg {
@@ -162,7 +162,7 @@ proptest! {
             tier: Tier::Medium,
             tier_policy: Arc::new(TierPolicy::default()),
             cookies: HashMap::new(),
-            device_fp: None,
+            device_fp: None, tx_velocity_token: None,
         };
 
         let cfg = DdosTierCfg {

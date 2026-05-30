@@ -164,7 +164,7 @@ impl Default for ScannerCheck {
 }
 
 impl Check for ScannerCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         if !ctx.host_config.defense_config.scan {
             return None;
         }
@@ -294,6 +294,7 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: std::collections::HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
@@ -305,22 +306,22 @@ mod tests {
     #[test]
     fn detects_sqlmap() {
         let checker = ScannerCheck::new();
-        let ctx = make_ctx("sqlmap/1.7.6#stable (https://sqlmap.org)");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("sqlmap/1.7.6#stable (https://sqlmap.org)");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_nikto() {
         let checker = ScannerCheck::new();
-        let ctx = make_ctx("Nikto/2.1.5");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("Nikto/2.1.5");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn allows_regular_browser() {
         let checker = ScannerCheck::new();
-        let ctx = make_ctx("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -328,22 +329,22 @@ mod tests {
         // curl is used for health checks, internal services, CI, etc. — never
         // block when block_scripted_clients is the default (false).
         let checker = ScannerCheck::new();
-        let ctx = make_ctx("curl/8.5.0");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("curl/8.5.0");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
     fn allows_python_requests_by_default() {
         let checker = ScannerCheck::new();
-        let ctx = make_ctx("python-requests/2.28.0");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("python-requests/2.28.0");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
     fn allows_go_http_client_by_default() {
         let checker = ScannerCheck::new();
-        let ctx = make_ctx("Go-http-client/2.0");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("Go-http-client/2.0");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -351,8 +352,8 @@ mod tests {
         // Operator opts in via DefenseConfig.block_scripted_clients=true
         // (e.g. browser-only public site). curl is then flagged.
         let checker = ScannerCheck::new();
-        let ctx = make_ctx_with("curl/8.5.0", true);
-        let result = checker.check(&ctx).expect("strict mode should block curl");
+        let mut ctx = make_ctx_with("curl/8.5.0", true);
+        let result = checker.check(&mut ctx).expect("strict mode should block curl");
         assert_eq!(result.rule_name, "Scripted Client");
         assert!(result.detail.contains("curl"));
     }
@@ -360,8 +361,10 @@ mod tests {
     #[test]
     fn blocks_python_requests_when_strict_mode_enabled() {
         let checker = ScannerCheck::new();
-        let ctx = make_ctx_with("python-requests/2.28.0", true);
-        let result = checker.check(&ctx).expect("strict mode should block python-requests");
+        let mut ctx = make_ctx_with("python-requests/2.28.0", true);
+        let result = checker
+            .check(&mut ctx)
+            .expect("strict mode should block python-requests");
         assert_eq!(result.rule_name, "Scripted Client");
     }
 
@@ -370,8 +373,8 @@ mod tests {
         // sqlmap is always blocked, never gated on block_scripted_clients.
         let checker = ScannerCheck::new();
         for strict in [false, true] {
-            let ctx = make_ctx_with("sqlmap/1.7.6", strict);
-            let result = checker.check(&ctx).unwrap_or_else(|| {
+            let mut ctx = make_ctx_with("sqlmap/1.7.6", strict);
+            let result = checker.check(&mut ctx).unwrap_or_else(|| {
                 panic!("sqlmap UA should always be blocked (strict={strict})");
             });
             assert_eq!(result.rule_name, "Scanner");
@@ -399,11 +402,14 @@ mod tests {
         let checker = ScannerCheck::with_clock(clock);
         // Default threshold is 30 distinct paths.
         for i in 0..29 {
-            let ctx = make_ctx_with_method_path("GET", &format!("/p{i}"), "5.6.7.8");
-            assert!(checker.check(&ctx).is_none(), "should not fire at {i} distinct paths");
+            let mut ctx = make_ctx_with_method_path("GET", &format!("/p{i}"), "5.6.7.8");
+            assert!(
+                checker.check(&mut ctx).is_none(),
+                "should not fire at {i} distinct paths"
+            );
         }
-        let ctx = make_ctx_with_method_path("GET", "/p30", "5.6.7.8");
-        let det = checker.check(&ctx).expect("hit at 30 distinct");
+        let mut ctx = make_ctx_with_method_path("GET", "/p30", "5.6.7.8");
+        let det = checker.check(&mut ctx).expect("hit at 30 distinct");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "SCAN-ENUM-001");
     }
 
@@ -412,13 +418,13 @@ mod tests {
         let clock = Arc::new(MockClock::new());
         let checker = ScannerCheck::with_clock(clock.clone());
         for i in 0..29 {
-            let ctx = make_ctx_with_method_path("GET", &format!("/p{i}"), "5.6.7.8");
-            checker.check(&ctx);
+            let mut ctx = make_ctx_with_method_path("GET", &format!("/p{i}"), "5.6.7.8");
+            checker.check(&mut ctx);
         }
         clock.advance(TEST_WINDOW_EXPIRED);
         // After window passage, the buffer is fresh — one new path = 1 distinct.
-        let ctx = make_ctx_with_method_path("GET", "/p_new", "5.6.7.8");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx_with_method_path("GET", "/p_new", "5.6.7.8");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -427,8 +433,8 @@ mod tests {
         let clock = Arc::new(MockClock::new());
         let checker = ScannerCheck::with_clock(clock);
         for i in 0..50 {
-            let ctx = make_ctx_with_method_path("GET", &format!("/api/health?cb={i}"), "5.6.7.8");
-            assert!(checker.check(&ctx).is_none());
+            let mut ctx = make_ctx_with_method_path("GET", &format!("/api/health?cb={i}"), "5.6.7.8");
+            assert!(checker.check(&mut ctx).is_none());
         }
     }
 
@@ -438,11 +444,11 @@ mod tests {
         let checker = ScannerCheck::with_clock(clock);
         // Default threshold is 20.
         for _ in 0..19 {
-            let ctx = make_ctx_with_method_path("OPTIONS", "/api/users", "5.6.7.8");
-            assert!(checker.check(&ctx).is_none());
+            let mut ctx = make_ctx_with_method_path("OPTIONS", "/api/users", "5.6.7.8");
+            assert!(checker.check(&mut ctx).is_none());
         }
-        let ctx = make_ctx_with_method_path("OPTIONS", "/api/users", "5.6.7.8");
-        let det = checker.check(&ctx).expect("hit at 20");
+        let mut ctx = make_ctx_with_method_path("OPTIONS", "/api/users", "5.6.7.8");
+        let det = checker.check(&mut ctx).expect("hit at 20");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "SCAN-OPT-001");
     }
 
@@ -451,12 +457,12 @@ mod tests {
         let clock = Arc::new(MockClock::new());
         let checker = ScannerCheck::with_clock(clock.clone());
         for _ in 0..19 {
-            let ctx = make_ctx_with_method_path("OPTIONS", "/api/users", "5.6.7.8");
-            checker.check(&ctx);
+            let mut ctx = make_ctx_with_method_path("OPTIONS", "/api/users", "5.6.7.8");
+            checker.check(&mut ctx);
         }
         clock.advance(TEST_WINDOW_EXPIRED);
-        let ctx = make_ctx_with_method_path("OPTIONS", "/api/users", "5.6.7.8");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx_with_method_path("OPTIONS", "/api/users", "5.6.7.8");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -465,12 +471,12 @@ mod tests {
         let checker = ScannerCheck::with_clock(clock);
         // IP A racks up 29 distinct paths.
         for i in 0..29 {
-            let ctx = make_ctx_with_method_path("GET", &format!("/p{i}"), "1.1.1.1");
-            checker.check(&ctx);
+            let mut ctx = make_ctx_with_method_path("GET", &format!("/p{i}"), "1.1.1.1");
+            checker.check(&mut ctx);
         }
         // IP B starts cold — single request, no detection.
-        let ctx_b = make_ctx_with_method_path("GET", "/p0", "2.2.2.2");
-        assert!(checker.check(&ctx_b).is_none());
+        let mut ctx_b = make_ctx_with_method_path("GET", "/p0", "2.2.2.2");
+        assert!(checker.check(&mut ctx_b).is_none());
     }
 
     #[test]
@@ -479,7 +485,7 @@ mod tests {
         let checker = ScannerCheck::with_clock(clock);
         let mut ctx = make_ctx_with_method_path("OPTIONS", "/", "5.6.7.8");
         ctx.headers.insert("user-agent".to_string(), "sqlmap/1.7".to_string());
-        let det = checker.check(&ctx).expect("hit");
+        let det = checker.check(&mut ctx).expect("hit");
         // UA hit gives SCAN-001..SCAN-032, never the state-machine SCAN-OPT-001.
         let id = det.rule_id.as_deref().unwrap_or("");
         assert!(id.starts_with("SCAN-") && !id.contains("OPT") && !id.contains("ENUM"));
@@ -499,7 +505,7 @@ mod tests {
             ..waf_common::HostConfig::default()
         });
         for _ in 0..50 {
-            assert!(checker.check(&ctx).is_none());
+            assert!(checker.check(&mut ctx).is_none());
         }
     }
 }

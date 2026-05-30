@@ -33,7 +33,7 @@ impl Default for HeaderInjectionCheck {
 }
 
 impl Check for HeaderInjectionCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         if !ctx.host_config.defense_config.header_injection {
             return None;
         }
@@ -239,6 +239,7 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
@@ -252,48 +253,48 @@ mod tests {
 
     #[test]
     fn detects_raw_crlf_in_referer() {
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             mk("referer", "foo\r\nSet-Cookie: admin=1"),
             "8.8.8.8",
             DefenseConfig::default(),
         );
-        let det = HeaderInjectionCheck::new().check(&ctx).expect("hit");
+        let det = HeaderInjectionCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "HDR-001");
     }
 
     #[test]
     fn detects_raw_lf_only() {
-        let ctx = make_ctx(mk("user-agent", "evil\nfoo"), "8.8.8.8", DefenseConfig::default());
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx(mk("user-agent", "evil\nfoo"), "8.8.8.8", DefenseConfig::default());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_nul_byte_in_value() {
-        let ctx = make_ctx(mk("x-custom", "abc\0def"), "8.8.8.8", DefenseConfig::default());
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx(mk("x-custom", "abc\0def"), "8.8.8.8", DefenseConfig::default());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_some());
     }
 
     // ─── Rule 2: encoded CRLF ────────────────────────────────────────────
 
     #[test]
     fn detects_single_encoded_crlf() {
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             mk("user-agent", "foo%0d%0aSet-Cookie: x"),
             "8.8.8.8",
             DefenseConfig::default(),
         );
-        let det = HeaderInjectionCheck::new().check(&ctx).expect("hit");
+        let det = HeaderInjectionCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "HDR-002");
     }
 
     #[test]
     fn detects_double_encoded_crlf() {
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             mk("cookie", "a=b%250d%250aSet-Cookie:y"),
             "8.8.8.8",
             DefenseConfig::default(),
         );
-        let det = HeaderInjectionCheck::new().check(&ctx).expect("hit");
+        let det = HeaderInjectionCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "HDR-002");
     }
 
@@ -303,8 +304,8 @@ mod tests {
     fn detects_crlf_in_header_name() {
         let mut h = HashMap::new();
         h.insert("evil\nname".to_string(), "value".to_string());
-        let ctx = make_ctx(h, "8.8.8.8", DefenseConfig::default());
-        let det = HeaderInjectionCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(h, "8.8.8.8", DefenseConfig::default());
+        let det = HeaderInjectionCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "HDR-005");
     }
 
@@ -312,38 +313,38 @@ mod tests {
 
     #[test]
     fn detects_host_with_at_sign() {
-        let ctx = make_ctx(mk("host", "evil.com@target.com"), "8.8.8.8", DefenseConfig::default());
-        let det = HeaderInjectionCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(mk("host", "evil.com@target.com"), "8.8.8.8", DefenseConfig::default());
+        let det = HeaderInjectionCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "HDR-003");
     }
 
     #[test]
     fn detects_host_with_space() {
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             mk("host", "target.com target2.com"),
             "8.8.8.8",
             DefenseConfig::default(),
         );
-        let det = HeaderInjectionCheck::new().check(&ctx).expect("hit");
+        let det = HeaderInjectionCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "HDR-003");
     }
 
     #[test]
     fn detects_host_with_comma() {
-        let ctx = make_ctx(mk("host", "a.com,b.com"), "8.8.8.8", DefenseConfig::default());
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx(mk("host", "a.com,b.com"), "8.8.8.8", DefenseConfig::default());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn allows_clean_host_with_port() {
-        let ctx = make_ctx(mk("host", "example.com:8080"), "8.8.8.8", DefenseConfig::default());
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(mk("host", "example.com:8080"), "8.8.8.8", DefenseConfig::default());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn allows_clean_ipv6_host() {
-        let ctx = make_ctx(mk("host", "[2606:4700::1111]:443"), "8.8.8.8", DefenseConfig::default());
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(mk("host", "[2606:4700::1111]:443"), "8.8.8.8", DefenseConfig::default());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
@@ -352,8 +353,8 @@ mod tests {
             host_inbound_whitelist: vec!["legit.com".to_string()],
             ..DefenseConfig::default()
         };
-        let ctx = make_ctx(mk("host", "evil.com"), "8.8.8.8", dc);
-        let det = HeaderInjectionCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(mk("host", "evil.com"), "8.8.8.8", dc);
+        let det = HeaderInjectionCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "HDR-003");
     }
 
@@ -363,8 +364,8 @@ mod tests {
             host_inbound_whitelist: vec!["legit.com".to_string()],
             ..DefenseConfig::default()
         };
-        let ctx = make_ctx(mk("host", "legit.com"), "8.8.8.8", dc);
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(mk("host", "legit.com"), "8.8.8.8", dc);
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
@@ -373,39 +374,39 @@ mod tests {
             host_inbound_whitelist: vec!["legit.com".to_string()],
             ..DefenseConfig::default()
         };
-        let ctx = make_ctx(mk("host", "legit.com:8443"), "8.8.8.8", dc);
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(mk("host", "legit.com:8443"), "8.8.8.8", dc);
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn empty_whitelist_skips_host_check() {
         // Default whitelist is empty — Host validation falls through to syntax
         // checks only. Operators must opt in per host.
-        let ctx = make_ctx(mk("host", "anything.example"), "8.8.8.8", DefenseConfig::default());
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(mk("host", "anything.example"), "8.8.8.8", DefenseConfig::default());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     // ─── Rule 4: X-Forwarded-For ─────────────────────────────────────────
 
     #[test]
     fn detects_xff_leftmost_private_with_public_client() {
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             mk("x-forwarded-for", "10.0.0.1, 1.2.3.4"),
             "1.2.3.4",
             DefenseConfig::default(),
         );
-        let det = HeaderInjectionCheck::new().check(&ctx).expect("hit");
+        let det = HeaderInjectionCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "HDR-004");
     }
 
     #[test]
     fn allows_xff_leftmost_public() {
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             mk("x-forwarded-for", "1.2.3.4, 5.6.7.8"),
             "5.6.7.8",
             DefenseConfig::default(),
         );
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
@@ -415,8 +416,8 @@ mod tests {
             xf2_max_hops: 5,
             ..DefenseConfig::default()
         };
-        let ctx = make_ctx(mk("x-forwarded-for", chain), "1.1.1.1", dc);
-        let det = HeaderInjectionCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(mk("x-forwarded-for", chain), "1.1.1.1", dc);
+        let det = HeaderInjectionCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.rule_id.as_deref().unwrap_or(""), "HDR-004");
     }
 
@@ -426,48 +427,48 @@ mod tests {
             xf2_max_hops: 5,
             ..DefenseConfig::default()
         };
-        let ctx = make_ctx(mk("x-forwarded-for", "1.1.1.1, 2.2.2.2, 3.3.3.3"), "3.3.3.3", dc);
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(mk("x-forwarded-for", "1.1.1.1, 2.2.2.2, 3.3.3.3"), "3.3.3.3", dc);
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn allows_empty_xff() {
-        let ctx = make_ctx(mk("x-forwarded-for", ""), "8.8.8.8", DefenseConfig::default());
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(mk("x-forwarded-for", ""), "8.8.8.8", DefenseConfig::default());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn allows_xff_when_client_ip_is_private() {
         // If our ingress is itself private (e.g. internal mesh request), a
         // private leftmost is plausible — don't false-flag.
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             mk("x-forwarded-for", "10.0.0.1, 192.168.1.5"),
             "10.0.0.1",
             DefenseConfig::default(),
         );
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     // ─── Cross-cutting ────────────────────────────────────────────────────
 
     #[test]
     fn allows_clean_authorization_jwt() {
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             mk("authorization", "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIx.foo"),
             "8.8.8.8",
             DefenseConfig::default(),
         );
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn allows_clean_user_agent() {
-        let ctx = make_ctx(
+        let mut ctx = make_ctx(
             mk("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"),
             "8.8.8.8",
             DefenseConfig::default(),
         );
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
@@ -476,26 +477,26 @@ mod tests {
             header_injection: false,
             ..DefenseConfig::default()
         };
-        let ctx = make_ctx(mk("referer", "foo\r\nSet-Cookie: x"), "8.8.8.8", dc);
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(mk("referer", "foo\r\nSet-Cookie: x"), "8.8.8.8", dc);
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn empty_headers_no_detection() {
-        let ctx = make_ctx(HashMap::new(), "8.8.8.8", DefenseConfig::default());
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(HashMap::new(), "8.8.8.8", DefenseConfig::default());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn allows_utf8_value_with_no_crlf() {
-        let ctx = make_ctx(mk("x-custom", "héllo wörld 你好"), "8.8.8.8", DefenseConfig::default());
-        assert!(HeaderInjectionCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx(mk("x-custom", "héllo wörld 你好"), "8.8.8.8", DefenseConfig::default());
+        assert!(HeaderInjectionCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn detection_carries_correct_phase() {
-        let ctx = make_ctx(mk("referer", "foo\r\n"), "8.8.8.8", DefenseConfig::default());
-        let det = HeaderInjectionCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx(mk("referer", "foo\r\n"), "8.8.8.8", DefenseConfig::default());
+        let det = HeaderInjectionCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.phase, Phase::HeaderInjection);
         assert_eq!(det.rule_name, "Header Injection");
     }

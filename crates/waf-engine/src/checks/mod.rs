@@ -51,13 +51,21 @@ use waf_common::{DetectionResult, RequestCtx};
 /// (rate limiter, brute-force state). The pipeline calls `check()` in
 /// sequence and short-circuits on the first `Some(result)`.
 pub trait Check: Send + Sync {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult>;
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult>;
 
     /// Default no-op response hook. Override in checks that need upstream
     /// status (FR-018 brute force, FR-019 4xx-burst). Body is NOT exposed in
     /// v1: Pingora `response_filter` gives headers + status only; the body
     /// path via `response_body_filter` is deferred.
     fn on_response(&self, _ctx: &RequestCtx, _status: u16) {}
+
+    /// Default no-op completion hook. Override in checks that need
+    /// upstream-confirmation semantics (FR-012 `tx_velocity` uses this to
+    /// distinguish origin-down vs user-denied responses).
+    ///
+    /// `upstream_reached` is `false` when Pingora synthesized the response
+    /// (WAF gate block, origin down, ALPN mismatch, TLS handshake fail).
+    fn on_request_complete(&self, _ctx: &RequestCtx, _status: u16, _upstream_reached: bool) {}
 
     /// Clear runtime state held by this checker. Override in stateful checks
     /// (rate limiter, brute force, tx velocity). Stateless checks inherit the no-op.

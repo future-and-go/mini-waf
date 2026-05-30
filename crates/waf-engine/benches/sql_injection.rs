@@ -55,6 +55,7 @@ fn make_clean_ctx() -> RequestCtx {
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: std::collections::HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 
@@ -132,6 +133,7 @@ fn make_ctx_query(query: &str, body: &str, cfg: &Arc<HostConfig>) -> RequestCtx 
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: std::collections::HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 
@@ -157,6 +159,7 @@ fn make_ctx_header(name: &str, value: &str, cfg: &Arc<HostConfig>) -> RequestCtx
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: std::collections::HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 
@@ -182,6 +185,7 @@ fn make_ctx_json(body: &str, cfg: &Arc<HostConfig>) -> RequestCtx {
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: std::collections::HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 
@@ -189,7 +193,10 @@ fn bench_clean(c: &mut Criterion) {
     let checker = SqlInjectionCheck::new();
     let ctx = make_clean_ctx();
     c.bench_function("sqli_check_clean", |b| {
-        b.iter(|| black_box(checker.check(black_box(&ctx))))
+        b.iter(|| {
+            let mut ctx = ctx.clone();
+            black_box(checker.check(black_box(&mut ctx)))
+        })
     });
 }
 
@@ -198,7 +205,10 @@ fn bench_malicious(c: &mut Criterion) {
     let mut group = c.benchmark_group("sqli_check_malicious");
     for (name, ctx) in malicious_corpus() {
         group.bench_with_input(BenchmarkId::from_parameter(name), &ctx, |b, ctx| {
-            b.iter(|| black_box(checker.check(black_box(ctx))))
+            b.iter(|| {
+                let mut ctx = ctx.clone();
+                black_box(checker.check(black_box(&mut ctx)))
+            })
         });
     }
     group.finish();

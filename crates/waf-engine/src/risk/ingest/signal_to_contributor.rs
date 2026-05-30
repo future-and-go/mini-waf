@@ -192,10 +192,12 @@ mod tests {
             },
             Signal::WithdrawalVelocity {
                 count: 5,
+                ok_count: 5,
                 window_sec: 60,
             },
             Signal::LimitChangeBurst {
                 count: 3,
+                ok_count: 3,
                 window_sec: 60,
             },
         ];

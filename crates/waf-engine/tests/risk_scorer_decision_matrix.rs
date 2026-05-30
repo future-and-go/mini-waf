@@ -89,6 +89,7 @@ fn ctx(ip: IpAddr) -> RequestCtx {
         }),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 

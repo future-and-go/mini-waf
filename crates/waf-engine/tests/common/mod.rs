@@ -71,5 +71,6 @@ pub fn make_ctx(host_code: &str, path: &str, ip: &str) -> RequestCtx {
         tier_policy: RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }

@@ -434,6 +434,7 @@ mod tests {
             }),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 

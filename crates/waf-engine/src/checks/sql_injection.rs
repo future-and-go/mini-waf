@@ -42,7 +42,7 @@ impl Default for SqlInjectionCheck {
 }
 
 impl Check for SqlInjectionCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         if !ctx.host_config.defense_config.sqli {
             return None;
         }
@@ -171,6 +171,7 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: std::collections::HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
@@ -180,8 +181,8 @@ mod tests {
         // in SQLite/MySQL but contains no keywords — caught by SQLI-020 pattern.
         // Regression for: GET /rest/products/search?q=%27%28 bypassing WAF.
         let checker = SqlInjectionCheck::new();
-        let ctx = make_ctx("q=%27%28", "");
-        let result = checker.check(&ctx);
+        let mut ctx = make_ctx("q=%27%28", "");
+        let result = checker.check(&mut ctx);
         assert!(result.is_some(), "Should detect minimal '( SQLi probe");
         let detail = result.unwrap().detail;
         assert!(detail.contains("query.q"), "Should attribute to query.q: {detail}");
@@ -191,37 +192,37 @@ mod tests {
     fn detects_quote_wildcard_probe() {
         // `'%` is another common error probe in LIKE-based search handlers.
         let checker = SqlInjectionCheck::new();
-        let ctx = make_ctx("search=%27%25", "");
-        assert!(checker.check(&ctx).is_some(), "Should detect '% probe");
+        let mut ctx = make_ctx("search=%27%25", "");
+        assert!(checker.check(&mut ctx).is_some(), "Should detect '% probe");
     }
 
     #[test]
     fn detects_union_select() {
         let checker = SqlInjectionCheck::new();
-        let ctx = make_ctx("id=1 UNION SELECT 1,2,3--", "");
-        assert!(checker.check(&ctx).is_some(), "Should detect UNION SELECT");
+        let mut ctx = make_ctx("id=1 UNION SELECT 1,2,3--", "");
+        assert!(checker.check(&mut ctx).is_some(), "Should detect UNION SELECT");
     }
 
     #[test]
     fn detects_sleep() {
         let checker = SqlInjectionCheck::new();
-        let ctx = make_ctx("id=1 AND SLEEP(5)--", "");
-        assert!(checker.check(&ctx).is_some(), "Should detect SLEEP()");
+        let mut ctx = make_ctx("id=1 AND SLEEP(5)--", "");
+        assert!(checker.check(&mut ctx).is_some(), "Should detect SLEEP()");
     }
 
     #[test]
     fn detects_tautology() {
         let checker = SqlInjectionCheck::new();
         // Both sides properly quoted: ' OR '1'='1' (trailing quote required by pattern)
-        let ctx = make_ctx("", "username=admin' OR '1'='1' --");
-        assert!(checker.check(&ctx).is_some(), "Should detect OR tautology");
+        let mut ctx = make_ctx("", "username=admin' OR '1'='1' --");
+        assert!(checker.check(&mut ctx).is_some(), "Should detect OR tautology");
     }
 
     #[test]
     fn allows_clean_request() {
         let checker = SqlInjectionCheck::new();
-        let ctx = make_ctx("name=alice&page=2", "");
-        assert!(checker.check(&ctx).is_none(), "Should allow clean request");
+        let mut ctx = make_ctx("name=alice&page=2", "");
+        assert!(checker.check(&mut ctx).is_none(), "Should allow clean request");
     }
 
     #[test]
@@ -229,7 +230,7 @@ mod tests {
         let checker = SqlInjectionCheck::new();
         let mut ctx = make_ctx("id=1 UNION SELECT 1,2,3--", "");
         Arc::make_mut(&mut ctx.host_config).defense_config.sqli = false;
-        assert!(checker.check(&ctx).is_none(), "Should skip when disabled");
+        assert!(checker.check(&mut ctx).is_none(), "Should skip when disabled");
     }
 
     #[test]
@@ -238,7 +239,7 @@ mod tests {
         let mut ctx = make_ctx("", r#"{"user":{"name":"' OR '1'='1'"}}"#);
         ctx.headers
             .insert("content-type".to_string(), "application/json".to_string());
-        let result = checker.check(&ctx);
+        let result = checker.check(&mut ctx);
         assert!(result.is_some(), "Should detect SQLi in JSON body");
         let detail = result.unwrap().detail;
         assert!(
@@ -250,8 +251,8 @@ mod tests {
     #[test]
     fn detects_query_param_sqli() {
         let checker = SqlInjectionCheck::new();
-        let ctx = make_ctx("id=1+UNION+SELECT+1,2", "");
-        let result = checker.check(&ctx);
+        let mut ctx = make_ctx("id=1+UNION+SELECT+1,2", "");
+        let result = checker.check(&mut ctx);
         assert!(result.is_some(), "Should detect SQLi in query param");
         let detail = result.unwrap().detail;
         assert!(detail.contains("query.id"), "Should attribute to query param: {detail}");
@@ -263,7 +264,7 @@ mod tests {
         let mut ctx = make_ctx("", "not json ' OR '1'='1'");
         ctx.headers
             .insert("content-type".to_string(), "application/json".to_string());
-        let result = checker.check(&ctx);
+        let result = checker.check(&mut ctx);
         assert!(result.is_some(), "Should fallback to raw body scan");
         let detail = result.unwrap().detail;
         assert!(detail.contains("body"), "Should detect in raw body: {detail}");
@@ -274,8 +275,8 @@ mod tests {
         let checker = SqlInjectionCheck::new();
         let mut headers = HashMap::new();
         headers.insert("user-agent".to_string(), "'; DROP TABLE users--".to_string());
-        let ctx = make_ctx_with_headers("", "", headers);
-        let result = checker.check(&ctx);
+        let mut ctx = make_ctx_with_headers("", "", headers);
+        let result = checker.check(&mut ctx);
         assert!(result.is_some(), "Should detect SQLi in User-Agent header");
         let detail = result.unwrap().detail;
         assert!(
@@ -289,8 +290,8 @@ mod tests {
         let checker = SqlInjectionCheck::new();
         let mut headers = HashMap::new();
         headers.insert("content-type".to_string(), "'; DROP TABLE users--".to_string());
-        let ctx = make_ctx_with_headers("", "", headers);
-        let result = checker.check(&ctx);
+        let mut ctx = make_ctx_with_headers("", "", headers);
+        let result = checker.check(&mut ctx);
         assert!(result.is_none(), "Should skip denylisted content-type header");
     }
 
@@ -299,10 +300,10 @@ mod tests {
         let checker = SqlInjectionCheck::new();
         let mut headers = HashMap::new();
         headers.insert("user-agent".to_string(), "'; DROP TABLE users--".to_string());
-        let ctx = make_ctx_with_headers("", "", headers);
+        let mut ctx = make_ctx_with_headers("", "", headers);
 
         // Initial: header scan enabled (default)
-        assert!(checker.check(&ctx).is_some(), "Should detect with default config");
+        assert!(checker.check(&mut ctx).is_some(), "Should detect with default config");
 
         // Reload: disable header scan
         checker.reload_config(SqliScanConfig {
@@ -310,12 +311,12 @@ mod tests {
             ..Default::default()
         });
         assert!(
-            checker.check(&ctx).is_none(),
+            checker.check(&mut ctx).is_none(),
             "Should not detect after disabling header scan"
         );
 
         // Reload: re-enable
         checker.reload_config(SqliScanConfig::default());
-        assert!(checker.check(&ctx).is_some(), "Should detect after re-enabling");
+        assert!(checker.check(&mut ctx).is_some(), "Should detect after re-enabling");
     }
 }

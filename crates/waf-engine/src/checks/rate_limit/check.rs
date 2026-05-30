@@ -69,7 +69,7 @@ impl RateLimitCheck {
 }
 
 impl Check for RateLimitCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         // Single Arc load per request — readers never block writers.
         let snapshot = self.cfg.load();
         // Skip when this tier has no limit configured.
@@ -182,6 +182,7 @@ mod tests {
             tier_policy: Arc::new(policy),
             cookies,
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
@@ -230,8 +231,8 @@ mod tests {
         let cfg = cfg_for_tier(Tier::Critical);
         let store = Arc::new(ScriptedStore::new(vec![]));
         let check = RateLimitCheck::new(store.clone(), cfg);
-        let ctx = make_ctx(Tier::CatchAll, FailMode::Open, false);
-        assert!(check.check(&ctx).is_none());
+        let mut ctx = make_ctx(Tier::CatchAll, FailMode::Open, false);
+        assert!(check.check(&mut ctx).is_none());
         assert_eq!(store.call_count(), 0, "store must not be called");
     }
 
@@ -240,8 +241,8 @@ mod tests {
         let cfg = cfg_for_tier(Tier::CatchAll);
         let store = Arc::new(ScriptedStore::new(vec![Ok(Decision::Allow), Ok(Decision::Allow)]));
         let check = RateLimitCheck::new(store.clone(), cfg);
-        let ctx = make_ctx(Tier::CatchAll, FailMode::Open, true);
-        assert!(check.check(&ctx).is_none());
+        let mut ctx = make_ctx(Tier::CatchAll, FailMode::Open, true);
+        assert!(check.check(&mut ctx).is_none());
         assert_eq!(store.call_count(), 2, "IP + session both queried");
     }
 
@@ -250,8 +251,8 @@ mod tests {
         let cfg = cfg_for_tier(Tier::CatchAll);
         let store = Arc::new(ScriptedStore::new(vec![Ok(Decision::BurstExceeded)]));
         let check = RateLimitCheck::new(store.clone(), cfg);
-        let ctx = make_ctx(Tier::CatchAll, FailMode::Open, true);
-        let result = check.check(&ctx).expect("must block on IP burst");
+        let mut ctx = make_ctx(Tier::CatchAll, FailMode::Open, true);
+        let result = check.check(&mut ctx).expect("must block on IP burst");
         assert_eq!(result.rule_id.as_deref(), Some("RL-IP"));
         assert_eq!(store.call_count(), 1, "session must NOT be queried after IP block");
     }
@@ -264,8 +265,8 @@ mod tests {
             Ok(Decision::SustainedExceeded),
         ]));
         let check = RateLimitCheck::new(store, cfg);
-        let ctx = make_ctx(Tier::CatchAll, FailMode::Open, true);
-        let result = check.check(&ctx).expect("must block on session sustained");
+        let mut ctx = make_ctx(Tier::CatchAll, FailMode::Open, true);
+        let result = check.check(&mut ctx).expect("must block on session sustained");
         assert_eq!(result.rule_id.as_deref(), Some("RL-SESSION"));
     }
 
@@ -274,8 +275,8 @@ mod tests {
         let cfg = cfg_for_tier(Tier::CatchAll);
         let store = Arc::new(ScriptedStore::new(vec![Ok(Decision::Allow)]));
         let check = RateLimitCheck::new(store.clone(), cfg);
-        let ctx = make_ctx(Tier::CatchAll, FailMode::Open, false);
-        assert!(check.check(&ctx).is_none());
+        let mut ctx = make_ctx(Tier::CatchAll, FailMode::Open, false);
+        assert!(check.check(&mut ctx).is_none());
         assert_eq!(store.call_count(), 1, "no cookie → only IP key");
     }
 
@@ -284,8 +285,8 @@ mod tests {
         let cfg = cfg_for_tier(Tier::CatchAll);
         let store = Arc::new(ScriptedStore::new(vec![Err(anyhow::anyhow!("backend down"))]));
         let check = RateLimitCheck::new(store, cfg);
-        let ctx = make_ctx(Tier::CatchAll, FailMode::Open, true);
-        assert!(check.check(&ctx).is_none(), "fail-open must pass on store error");
+        let mut ctx = make_ctx(Tier::CatchAll, FailMode::Open, true);
+        assert!(check.check(&mut ctx).is_none(), "fail-open must pass on store error");
     }
 
     #[test]
@@ -293,8 +294,8 @@ mod tests {
         let cfg = cfg_for_tier(Tier::CatchAll);
         let store = Arc::new(ScriptedStore::new(vec![Err(anyhow::anyhow!("backend down"))]));
         let check = RateLimitCheck::new(store, cfg);
-        let ctx = make_ctx(Tier::CatchAll, FailMode::Close, true);
-        let result = check.check(&ctx).expect("fail-close must block");
+        let mut ctx = make_ctx(Tier::CatchAll, FailMode::Close, true);
+        let result = check.check(&mut ctx).expect("fail-close must block");
         assert_eq!(result.rule_id.as_deref(), Some("RL-ERR"));
     }
 
@@ -306,8 +307,8 @@ mod tests {
         let cfg = cfg_for_tier(Tier::CatchAll);
         let store = Arc::new(ScriptedStore::new(vec![Ok(Decision::BurstExceeded)]));
         let check = RateLimitCheck::new(store, cfg);
-        let ctx = make_ctx(Tier::CatchAll, FailMode::Open, true);
-        let result = check.check(&ctx).expect("must produce detection result");
+        let mut ctx = make_ctx(Tier::CatchAll, FailMode::Open, true);
+        let result = check.check(&mut ctx).expect("must produce detection result");
         assert_eq!(result.phase, Phase::RateLimit);
     }
 
@@ -331,11 +332,11 @@ mod tests {
             tiers,
         })));
         let check = RateLimitCheck::new(store, cfg);
-        let ctx = make_ctx(Tier::CatchAll, FailMode::Open, false);
+        let mut ctx = make_ctx(Tier::CatchAll, FailMode::Open, false);
         // burst=2 → first 2 allowed. Each call consumes 1 IP token.
-        assert!(check.check(&ctx).is_none());
-        assert!(check.check(&ctx).is_none());
-        let result = check.check(&ctx).expect("3rd request must be blocked");
+        assert!(check.check(&mut ctx).is_none());
+        assert!(check.check(&mut ctx).is_none());
+        let result = check.check(&mut ctx).expect("3rd request must be blocked");
         assert_eq!(result.rule_id.as_deref(), Some("RL-IP"));
     }
 }

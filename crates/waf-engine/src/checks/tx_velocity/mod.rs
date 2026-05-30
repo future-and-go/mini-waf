@@ -26,6 +26,7 @@ pub use role_tagger::RoleTagger;
 pub use session_key::{SessionIdent, SessionKey, extract_session_key};
 
 use serde::{Deserialize, Serialize};
+use waf_common::Outcome;
 
 /// Endpoint roles tracked by the velocity classifiers. Path → role mapping
 /// lives in `TxVelocityConfig::endpoint_roles` (regex, hot-reloadable).
@@ -49,8 +50,7 @@ pub enum EndpointRole {
 pub struct Event {
     pub role: EndpointRole,
     pub ts_ms: u64,
-    /// Whether the upstream returned a successful (2xx) response. Phase 1
-    /// records this as `false` by default; downstream phases may surface
-    /// the real outcome via response-side hooks.
-    pub ok: bool,
+    /// Tristate outcome: `Pending` at record time, flipped to `Ok`/`Failed`
+    /// by `set_outcome` on response. Classifiers ignore `Pending` events.
+    pub outcome: Outcome,
 }

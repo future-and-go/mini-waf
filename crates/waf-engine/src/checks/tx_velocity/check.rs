@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use waf_common::{DetectionResult, RequestCtx};
+use waf_common::{DetectionResult, Outcome, RequestCtx};
 
 use super::config::TxVelocityConfig;
 use super::recorder::TxStore;
@@ -39,28 +39,42 @@ impl TxVelocityCheck {
 }
 
 impl Check for TxVelocityCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         let snapshot = self.cfg.load();
         if !snapshot.enabled {
             return None;
         }
 
-        // Classify the endpoint role from the request path.
         let role = snapshot.role_tagger.classify(&ctx.path);
         if matches!(role, super::EndpointRole::None) {
             return None;
         }
 
-        // Extract session identity (cookie preferred, then fingerprint).
         let key = extract_session_key(ctx, &snapshot.session_cookie, ctx.device_fp.as_deref(), ctx.client_ip)?;
 
-        // Record the event. Classifiers run inside the store and emit signals
-        // to the aggregator asynchronously. `ok = true` at request-entry;
-        // response-side enrichment deferred to a follow-up phase.
-        self.store.record(&key, role, true);
+        let token = self.store.record(&key, role);
+        ctx.tx_velocity_token = Some(token);
 
-        // Signal-only: never block here.
         None
+    }
+
+    fn on_request_complete(&self, ctx: &RequestCtx, status: u16, upstream_reached: bool) {
+        let snapshot = self.cfg.load();
+        if !snapshot.enabled {
+            return;
+        }
+        if !upstream_reached || status == 0 {
+            return;
+        }
+        let Some(token) = ctx.tx_velocity_token.as_ref() else {
+            return;
+        };
+        let outcome = if (200..300).contains(&status) {
+            Outcome::Ok
+        } else {
+            Outcome::Failed
+        };
+        self.store.set_outcome(token, outcome);
     }
 
     fn reset_state(&self) {
@@ -117,8 +131,8 @@ tx_velocity:
         let store = Arc::new(TxStore::new(Arc::clone(&cfg)));
         let check = TxVelocityCheck::new(cfg, Arc::clone(&store));
 
-        let ctx = ctx_with_path_and_cookie("/api/login", "SID", "user123");
-        assert!(check.check(&ctx).is_none());
+        let mut ctx = ctx_with_path_and_cookie("/api/login", "SID", "user123");
+        assert!(check.check(&mut ctx).is_none());
         assert!(store.is_empty(), "store should remain empty when disabled");
     }
 
@@ -134,8 +148,8 @@ tx_velocity:
         let store = Arc::new(TxStore::new(Arc::clone(&cfg)));
         let check = TxVelocityCheck::new(cfg, Arc::clone(&store));
 
-        let ctx = ctx_with_path_and_cookie("/api/other", "SID", "user123");
-        assert!(check.check(&ctx).is_none());
+        let mut ctx = ctx_with_path_and_cookie("/api/other", "SID", "user123");
+        assert!(check.check(&mut ctx).is_none());
         assert!(store.is_empty(), "unmatched path should not record");
     }
 
@@ -151,11 +165,11 @@ tx_velocity:
         let store = Arc::new(TxStore::new(Arc::clone(&cfg)));
         let check = TxVelocityCheck::new(cfg, Arc::clone(&store));
 
-        let ctx = RequestCtx {
+        let mut ctx = RequestCtx {
             cookies: HashMap::new(),
             ..ctx_with_path_and_cookie("/api/login", "SID", "")
         };
-        assert!(check.check(&ctx).is_none());
+        assert!(check.check(&mut ctx).is_none());
         assert!(store.is_empty(), "no session identity should skip recording");
     }
 
@@ -177,8 +191,8 @@ tx_velocity:
         let store = Arc::new(TxStore::new(Arc::clone(&cfg)));
         let check = TxVelocityCheck::new(cfg, Arc::clone(&store));
 
-        let ctx = ctx_with_path_and_cookie("/api/login", "SID", "user123");
-        let result = check.check(&ctx);
+        let mut ctx = ctx_with_path_and_cookie("/api/login", "SID", "user123");
+        let result = check.check(&mut ctx);
         assert!(result.is_none(), "check should never block");
         assert_eq!(store.len(), 1, "event should be recorded");
     }
@@ -196,8 +210,8 @@ tx_velocity:
         let check = TxVelocityCheck::new(cfg, Arc::clone(&store));
 
         for _ in 0..10 {
-            let ctx = ctx_with_path_and_cookie("/api/withdraw", "SID", "user456");
-            assert!(check.check(&ctx).is_none());
+            let mut ctx = ctx_with_path_and_cookie("/api/withdraw", "SID", "user456");
+            assert!(check.check(&mut ctx).is_none());
         }
     }
 
@@ -220,7 +234,7 @@ tx_velocity:
             ..FpKey::default()
         }));
 
-        assert!(check.check(&ctx).is_none(), "signal-only");
+        assert!(check.check(&mut ctx).is_none(), "signal-only");
         assert_eq!(store.len(), 1, "fp fallback should have recorded the event");
     }
 
@@ -239,7 +253,7 @@ tx_velocity:
         let mut ctx = ctx_with_path_and_cookie("/api/login", "SID", "");
         ctx.cookies.clear();
         ctx.device_fp = Some(Arc::new(FpKey::default()));
-        assert!(check.check(&ctx).is_none());
+        assert!(check.check(&mut ctx).is_none());
         assert!(
             store.is_empty(),
             "empty fp must not bucket all anon traffic under one key"

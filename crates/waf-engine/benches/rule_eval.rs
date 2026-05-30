@@ -107,6 +107,7 @@ fn make_ctx(path: &str) -> RequestCtx {
         tier_policy: waf_common::RequestCtx::default_tier_policy(),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 

@@ -45,13 +45,13 @@ async fn scenario_c_botnet_same_fp_per_ip_fallback() {
 
         // Send requests from this IP
         for _ in 0..requests_per_ip {
-            let ctx = CtxBuilder::new()
+            let mut ctx = CtxBuilder::new()
                 .ip_addr(ip)
                 .tier(Tier::Medium)
                 .header("x-device-fp", botnet_fp) // Shared fingerprint
                 .build();
 
-            harness.check(&ctx);
+            harness.check(&mut ctx);
         }
 
         // Check if this IP got banned
@@ -84,12 +84,12 @@ async fn scenario_c_legitimate_traffic_not_affected() {
     // Legitimate user: single IP, moderate traffic
     let legit_ip = "10.0.0.1";
     for _ in 0..30 {
-        let ctx = CtxBuilder::new()
+        let mut ctx = CtxBuilder::new()
             .ip(legit_ip)
             .tier(Tier::Medium)
             .header("x-device-fp", "ja4-legitimate-user")
             .build();
-        harness.check(&ctx);
+        harness.check(&mut ctx);
     }
 
     // Verify: legitimate IP not banned
@@ -99,12 +99,12 @@ async fn scenario_c_legitimate_traffic_not_affected() {
     // Attacker: exceed threshold
     let attacker_ip = "10.0.0.2";
     for _ in 0..60 {
-        let ctx = CtxBuilder::new()
+        let mut ctx = CtxBuilder::new()
             .ip(attacker_ip)
             .tier(Tier::Medium)
             .header("x-device-fp", "ja4-attacker")
             .build();
-        harness.check(&ctx);
+        harness.check(&mut ctx);
     }
 
     // Verify: attacker banned, legitimate user still not banned
@@ -136,8 +136,8 @@ async fn scenario_c_concurrent_attack() {
 
             // Each attacker sends 30 requests (above threshold of 20)
             for _ in 0..30 {
-                let ctx = CtxBuilder::new().ip(&ip_str).tier(Tier::Medium).build();
-                h.check(&ctx);
+                let mut ctx = CtxBuilder::new().ip(&ip_str).tier(Tier::Medium).build();
+                h.check(&mut ctx);
             }
 
             ip_str

@@ -45,10 +45,10 @@ rules:
     assert_eq!(c.rule_count(), 1);
     let mut ctx = make_ctx();
     ctx.query = "x=1&payload=evil-token&y=2".into();
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
     let mut ctx2 = make_ctx();
     ctx2.query = "x=1".into();
-    assert!(c.check(&ctx2).is_none());
+    assert!(c.check(&mut ctx2).is_none());
 }
 
 #[test]
@@ -88,9 +88,9 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.content_length = 2;
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
     ctx.content_length = 50;
-    assert!(c.check(&ctx).is_none());
+    assert!(c.check(&mut ctx).is_none());
 }
 
 #[test]

@@ -36,6 +36,9 @@ const fn default_session_ttl_secs() -> u64 {
 const fn default_janitor_period_secs() -> u64 {
     60
 }
+const fn default_dedupe_window_ms() -> u64 {
+    5_000
+}
 fn default_session_cookie() -> String {
     "SESSIONID".to_string()
 }
@@ -67,6 +70,10 @@ pub struct TxVelocityFileConfig {
     pub session_ttl_secs: u64,
     #[serde(default = "default_janitor_period_secs")]
     pub janitor_period_secs: u64,
+    /// Collapse same-(key, role, Pending) events within this window into
+    /// one slot. Defuses mobile retry storms.
+    #[serde(default = "default_dedupe_window_ms")]
+    pub dedupe_window_ms: u64,
     /// Path-pattern → role rules. Evaluated in order; first match wins.
     #[serde(default)]
     pub endpoint_roles: Vec<RoleRule>,
@@ -84,6 +91,7 @@ impl Default for TxVelocityFileConfig {
             signal_cooldown_ms: default_signal_cooldown_ms(),
             session_ttl_secs: default_session_ttl_secs(),
             janitor_period_secs: default_janitor_period_secs(),
+            dedupe_window_ms: default_dedupe_window_ms(),
             endpoint_roles: Vec::new(),
             classifiers: ClassifierConfigs::default(),
         }
@@ -136,6 +144,7 @@ pub struct TxVelocityConfig {
     pub signal_cooldown_ms: u64,
     pub session_ttl_secs: u64,
     pub janitor_period_secs: u64,
+    pub dedupe_window_ms: u64,
     pub role_tagger: RoleTagger,
     pub classifiers: ClassifierConfigs,
 }
@@ -148,6 +157,7 @@ impl Default for TxVelocityConfig {
             signal_cooldown_ms: default_signal_cooldown_ms(),
             session_ttl_secs: default_session_ttl_secs(),
             janitor_period_secs: default_janitor_period_secs(),
+            dedupe_window_ms: default_dedupe_window_ms(),
             role_tagger: RoleTagger::empty(),
             classifiers: ClassifierConfigs::default(),
         }
@@ -212,6 +222,7 @@ impl TxVelocityFileConfig {
             signal_cooldown_ms: self.signal_cooldown_ms,
             session_ttl_secs: self.session_ttl_secs,
             janitor_period_secs: self.janitor_period_secs,
+            dedupe_window_ms: self.dedupe_window_ms,
             role_tagger,
             classifiers: self.classifiers,
         })

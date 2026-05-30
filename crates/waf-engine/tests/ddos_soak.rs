@@ -139,7 +139,7 @@ impl SoakHarness {
     }
 
     fn process_request(&self, ip: IpAddr) {
-        let ctx = RequestCtx {
+        let mut ctx = RequestCtx {
             req_id: format!("soak-{}", self.request_count.fetch_add(1, Ordering::Relaxed)),
             client_ip: ip,
             client_port: 12345,
@@ -161,9 +161,10 @@ impl SoakHarness {
             }),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         };
 
-        self.check.check(&ctx);
+        self.check.check(&mut ctx);
     }
 
     fn total_requests(&self) -> u64 {

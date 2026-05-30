@@ -46,7 +46,7 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.query = "q=%3Cscript%3E".into();
-    assert!(c.check(&ctx).is_some(), "single-field regex must url-decode");
+    assert!(c.check(&mut ctx).is_some(), "single-field regex must url-decode");
 }
 
 #[test]
@@ -67,7 +67,7 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.query = "x=%2565vil".into();
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
 }
 
 #[test]
@@ -88,7 +88,7 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.query = "name=alice".into();
-    assert!(c.check(&ctx).is_none());
+    assert!(c.check(&mut ctx).is_none());
 }
 
 #[test]
@@ -109,7 +109,7 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.headers.insert("host".into(), "localhost:8080".into());
-    assert!(c.check(&ctx).is_none(), "host header should be skipped");
+    assert!(c.check(&mut ctx).is_none(), "host header should be skipped");
 }
 
 #[test]
@@ -130,7 +130,7 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.headers.insert("x-custom".into(), "evilpayload".into());
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
 }
 
 #[test]
@@ -151,7 +151,7 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.body_preview = Bytes::from("payload=evilbody");
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
 }
 
 #[test]
@@ -172,5 +172,5 @@ rules:
     let c = OWASPCheck::from_yaml(yaml);
     let mut ctx = make_ctx();
     ctx.query = "x=%3Cscript%3E".into();
-    assert!(c.check(&ctx).is_some());
+    assert!(c.check(&mut ctx).is_some());
 }

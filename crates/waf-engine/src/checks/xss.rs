@@ -86,7 +86,7 @@ impl Default for XssCheck {
 }
 
 impl Check for XssCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         if !ctx.host_config.defense_config.xss {
             return None;
         }
@@ -203,86 +203,87 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: std::collections::HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
     #[test]
     fn detects_script_tag() {
         let checker = XssCheck::new();
-        let ctx = make_ctx("q=<script>alert(1)</script>", "");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("q=<script>alert(1)</script>", "");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_event_handler() {
         let checker = XssCheck::new();
-        let ctx = make_ctx("", "name=<img onerror=alert(1)>");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("", "name=<img onerror=alert(1)>");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_javascript_uri() {
         let checker = XssCheck::new();
-        let ctx = make_ctx("url=javascript:alert(1)", "");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("url=javascript:alert(1)", "");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn allows_clean_request() {
         let checker = XssCheck::new();
-        let ctx = make_ctx("q=hello+world&page=1", "");
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx("q=hello+world&page=1", "");
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
     fn detects_script_tag_double_encoded_in_query() {
         // %253Cscript%253E → %3Cscript%3E → <script> after recursive decode.
         let checker = XssCheck::new();
-        let ctx = make_ctx("q=%253Cscript%253Ealert(1)%253C/script%253E", "");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("q=%253Cscript%253Ealert(1)%253C/script%253E", "");
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_xss_in_json_body_with_path_attribution() {
         let checker = XssCheck::new();
-        let ctx = make_ctx_with("", r#"{"a":{"b":"<script>"}}"#, "application/json", true);
-        let det = checker.check(&ctx).expect("hit");
+        let mut ctx = make_ctx_with("", r#"{"a":{"b":"<script>"}}"#, "application/json", true);
+        let det = checker.check(&mut ctx).expect("hit");
         assert!(det.detail.contains("body.json.a.b"));
     }
 
     #[test]
     fn detects_xss_in_json_array() {
         let checker = XssCheck::new();
-        let ctx = make_ctx_with("", r#"["safe","<img onerror=x>"]"#, "application/json", true);
-        let det = checker.check(&ctx).expect("hit");
+        let mut ctx = make_ctx_with("", r#"["safe","<img onerror=x>"]"#, "application/json", true);
+        let det = checker.check(&mut ctx).expect("hit");
         assert!(det.detail.contains("body.json[1]"));
     }
 
     #[test]
     fn detects_xss_in_form_urlencoded_body() {
         let checker = XssCheck::new();
-        let ctx = make_ctx_with(
+        let mut ctx = make_ctx_with(
             "",
             "q=%3Cscript%3Ealert(1)%3C/script%3E",
             "application/x-www-form-urlencoded",
             true,
         );
-        let det = checker.check(&ctx).expect("hit");
+        let det = checker.check(&mut ctx).expect("hit");
         assert!(det.detail.contains("body.form.q"));
     }
 
     #[test]
     fn allows_clean_json_body() {
         let checker = XssCheck::new();
-        let ctx = make_ctx_with("", r#"{"name":"Alice"}"#, "application/json", true);
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx_with("", r#"{"name":"Alice"}"#, "application/json", true);
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
     fn allows_clean_form_body() {
         let checker = XssCheck::new();
-        let ctx = make_ctx_with("", "q=hello+world&page=1", "application/x-www-form-urlencoded", true);
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx_with("", "q=hello+world&page=1", "application/x-www-form-urlencoded", true);
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
@@ -290,34 +291,34 @@ mod tests {
         // Walker bails None on bad JSON; raw `request_targets()` then scans
         // the bytes — `<script>` substring still gets caught.
         let checker = XssCheck::new();
-        let ctx = make_ctx_with("", "not-json-but-<script>here", "application/json", true);
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx_with("", "not-json-but-<script>here", "application/json", true);
+        assert!(checker.check(&mut ctx).is_some());
     }
 
     #[test]
     fn skipped_when_xss_disabled() {
         let checker = XssCheck::new();
-        let ctx = make_ctx_with("", r#"{"x":"<script>"}"#, "application/json", false);
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx_with("", r#"{"x":"<script>"}"#, "application/json", false);
+        assert!(checker.check(&mut ctx).is_none());
     }
 
     #[test]
     fn markdown_body_skipped_but_query_still_scanned() {
         // `<script>` in a markdown body is allowed (false-positive mitigation).
         let checker = XssCheck::new();
-        let ctx = make_ctx_with("", "Here is some `<script>` in a code block", "text/markdown", true);
-        assert!(checker.check(&ctx).is_none());
+        let mut ctx = make_ctx_with("", "Here is some `<script>` in a code block", "text/markdown", true);
+        assert!(checker.check(&mut ctx).is_none());
 
         // Query string still scans even with markdown content type.
-        let ctx2 = make_ctx_with("q=<script>", "ignored", "text/markdown", true);
-        assert!(checker.check(&ctx2).is_some());
+        let mut ctx2 = make_ctx_with("q=<script>", "ignored", "text/markdown", true);
+        assert!(checker.check(&mut ctx2).is_some());
     }
 
     #[test]
     fn detection_carries_correct_phase_and_rule_id_prefix() {
         let checker = XssCheck::new();
-        let ctx = make_ctx("q=<script>", "");
-        let det = checker.check(&ctx).expect("hit");
+        let mut ctx = make_ctx("q=<script>", "");
+        let det = checker.check(&mut ctx).expect("hit");
         assert_eq!(det.phase, waf_common::Phase::Xss);
         assert_eq!(det.rule_name, "XSS");
         assert!(det.rule_id.as_deref().unwrap_or("").starts_with("XSS-"));
@@ -336,9 +337,9 @@ mod tests {
         for _ in 0..200 {
             s.push('}');
         }
-        let ctx = make_ctx_with("", &s, "application/json", true);
+        let mut ctx = make_ctx_with("", &s, "application/json", true);
         // Should NOT panic. May or may not detect (walker bails past depth cap).
-        let _ = checker.check(&ctx);
+        let _ = checker.check(&mut ctx);
     }
 
     #[test]
@@ -347,8 +348,8 @@ mod tests {
         // explicit event list, but the broadened on[a-z]{2,20}= pattern and
         // libinjection should both flag it.
         let checker = XssCheck::new();
-        let ctx = make_ctx("x=<details+open+ontoggle%3Dalert(1)>", "");
-        let det = checker.check(&ctx).expect("hit");
+        let mut ctx = make_ctx("x=<details+open+ontoggle%3Dalert(1)>", "");
+        let det = checker.check(&mut ctx).expect("hit");
         assert!(det.rule_id.as_deref().unwrap_or("").starts_with("XSS-"));
     }
 
@@ -357,8 +358,8 @@ mod tests {
         // A <script> vector via libinjection path; rule_id may be XSS-LIB or
         // XSS-001 depending on which detection fires first.
         let checker = XssCheck::new();
-        let ctx = make_ctx("q=%3Cscript%3Ealert(1)%3C%2Fscript%3E", "");
-        let det = checker.check(&ctx).expect("hit");
+        let mut ctx = make_ctx("q=%3Cscript%3Ealert(1)%3C%2Fscript%3E", "");
+        let det = checker.check(&mut ctx).expect("hit");
         assert_eq!(det.phase, waf_common::Phase::Xss);
     }
 
@@ -366,7 +367,7 @@ mod tests {
     fn broadened_event_handler_catches_onauxclick() {
         // onauxclick is an HTML5 event handler not in the old explicit list.
         let checker = XssCheck::new();
-        let ctx = make_ctx("", "<div onauxclick=alert(1)>");
-        assert!(checker.check(&ctx).is_some());
+        let mut ctx = make_ctx("", "<div onauxclick=alert(1)>");
+        assert!(checker.check(&mut ctx).is_some());
     }
 }

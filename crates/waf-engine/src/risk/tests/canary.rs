@@ -81,6 +81,7 @@ fn make_ctx(path: &str) -> RequestCtx {
         }),
         cookies: HashMap::new(),
         device_fp: None,
+        tx_velocity_token: None,
     }
 }
 

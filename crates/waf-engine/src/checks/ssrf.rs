@@ -35,7 +35,7 @@ impl Default for SsrfCheck {
 }
 
 impl Check for SsrfCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         if !ctx.host_config.defense_config.ssrf {
             return None;
         }
@@ -141,33 +141,34 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
     #[test]
     fn detects_rfc1918_in_body_json() {
-        let ctx = make_ctx("", r#"{"webhook_url":"http://10.1.2.3/api"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"webhook_url":"http://10.1.2.3/api"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_172_16_range_in_query() {
-        let ctx = make_ctx("target=http://172.16.0.1/", "");
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("target=http://172.16.0.1/", "");
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_192_168_range_in_referer() {
         let mut h = HashMap::new();
         h.insert("referer".to_string(), "http://192.168.1.1/admin".to_string());
-        let ctx = make_ctx_with("", "", h, DefenseConfig::default());
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx_with("", "", h, DefenseConfig::default());
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_loopback() {
-        let ctx = make_ctx("", r#"{"target":"http://127.0.0.1:8080/"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"target":"http://127.0.0.1:8080/"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
@@ -177,9 +178,9 @@ mod tests {
         // denylist before DNS lands (Pre-merge Finding R1).
         for host in ["localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback"] {
             let body = format!(r#"{{"target":"http://{host}/admin"}}"#);
-            let ctx = make_ctx("", &body);
+            let mut ctx = make_ctx("", &body);
             assert!(
-                SsrfCheck::new().check(&ctx).is_some(),
+                SsrfCheck::new().check(&mut ctx).is_some(),
                 "expected SSRF detection for hostname {host}"
             );
         }
@@ -187,32 +188,32 @@ mod tests {
 
     #[test]
     fn detects_aws_metadata() {
-        let ctx = make_ctx("", r#"{"u":"http://169.254.169.254/latest/meta-data/"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"u":"http://169.254.169.254/latest/meta-data/"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_gcp_metadata() {
-        let ctx = make_ctx("", r#"{"u":"http://metadata.google.internal/"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"u":"http://metadata.google.internal/"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_alibaba_metadata() {
-        let ctx = make_ctx("", r#"{"u":"http://100.100.100.200/"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"u":"http://100.100.100.200/"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_consul_metadata() {
-        let ctx = make_ctx("", r#"{"u":"http://metadata.service.consul/v1/"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"u":"http://metadata.service.consul/v1/"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_ipv6_mapped_ipv4_metadata() {
-        let ctx = make_ctx("", r#"{"u":"http://[::ffff:169.254.169.254]/"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"u":"http://[::ffff:169.254.169.254]/"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
@@ -222,44 +223,44 @@ mod tests {
         // `::ffff:100.100.100.200` needs an explicit re-check against the
         // metadata regex set, otherwise it bypasses SSRF entirely even though
         // the bare `100.100.100.200` is caught.
-        let ctx = make_ctx("", r#"{"u":"http://[::ffff:100.100.100.200]/"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"u":"http://[::ffff:100.100.100.200]/"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_ipv6_loopback() {
-        let ctx = make_ctx("", r#"{"u":"http://[::1]/admin"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"u":"http://[::1]/admin"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_obfuscated_decimal_dword() {
-        let ctx = make_ctx("", r#"{"u":"http://2130706433/"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"u":"http://2130706433/"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_obfuscated_hex_dword() {
-        let ctx = make_ctx("", r#"{"u":"http://0x7f000001/"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"u":"http://0x7f000001/"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_obfuscated_octal_dword() {
-        let ctx = make_ctx("", r#"{"u":"http://017700000001/"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"u":"http://017700000001/"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn allows_clean_public_url() {
-        let ctx = make_ctx("", r#"{"webhook":"https://api.stripe.com/v1/charges"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx("", r#"{"webhook":"https://api.stripe.com/v1/charges"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn allows_clean_example_com() {
-        let ctx = make_ctx("", r#"{"webhook":"https://example.com/hooks/abc"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx("", r#"{"webhook":"https://example.com/hooks/abc"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
@@ -268,32 +269,32 @@ mod tests {
             ssrf: false,
             ..DefenseConfig::default()
         };
-        let ctx = make_ctx_with("", r#"{"u":"http://169.254.169.254/"}"#, HashMap::new(), dc);
-        assert!(SsrfCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx_with("", r#"{"u":"http://169.254.169.254/"}"#, HashMap::new(), dc);
+        assert!(SsrfCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn detects_url_in_nested_json_object() {
-        let ctx = make_ctx("", r#"{"outer":{"inner":{"hook":"http://10.0.0.5/"}}}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"outer":{"inner":{"hook":"http://10.0.0.5/"}}}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detects_url_in_json_array() {
-        let ctx = make_ctx("", r#"{"hooks":["https://api.public.com/", "http://10.20.30.40/"]}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"hooks":["https://api.public.com/", "http://10.20.30.40/"]}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn empty_body_no_detection() {
-        let ctx = make_ctx("", "");
-        assert!(SsrfCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx("", "");
+        assert!(SsrfCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn detects_form_urlencoded_body_after_decode() {
-        let ctx = make_ctx("", "webhook=http%3A//10.0.0.1/&user=alice");
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", "webhook=http%3A//10.0.0.1/&user=alice");
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
@@ -301,23 +302,23 @@ mod tests {
         // Capital One 2019 — substring filters defeated by `user@host`.
         // url::Url::parse treats `google.com` as userinfo and the metadata IP
         // as host, so detection still fires.
-        let ctx = make_ctx("", r#"{"u":"http://google.com@169.254.169.254/latest/meta-data/"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx("", r#"{"u":"http://google.com@169.254.169.254/latest/meta-data/"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn allows_metadata_ip_as_userinfo_only() {
         // Inverse: 169.254.169.254 in the userinfo position is harmless
         // because the actual host is google.com.
-        let ctx = make_ctx("", r#"{"u":"http://169.254.169.254@google.com/"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx("", r#"{"u":"http://169.254.169.254@google.com/"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn malformed_url_skipped_not_panicked() {
         // Unclosed bracket — Url::parse fails, we skip rather than crash.
-        let ctx = make_ctx("", r#"{"u":"http://[::1"}"#);
-        let _ = SsrfCheck::new().check(&ctx);
+        let mut ctx = make_ctx("", r#"{"u":"http://[::1"}"#);
+        let _ = SsrfCheck::new().check(&mut ctx);
     }
 
     #[test]
@@ -326,8 +327,8 @@ mod tests {
             ssrf_outbound_host_allowlist: vec!["10.0.0.42".to_string()],
             ..DefenseConfig::default()
         };
-        let ctx = make_ctx_with("", r#"{"u":"http://10.0.0.42/internal"}"#, HashMap::new(), dc);
-        assert!(SsrfCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx_with("", r#"{"u":"http://10.0.0.42/internal"}"#, HashMap::new(), dc);
+        assert!(SsrfCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
@@ -336,25 +337,25 @@ mod tests {
             ssrf_outbound_host_allowlist: vec!["Internal.Service".to_string()],
             ..DefenseConfig::default()
         };
-        let ctx = make_ctx_with("", r#"{"u":"http://internal.service/api"}"#, HashMap::new(), dc);
+        let mut ctx = make_ctx_with("", r#"{"u":"http://internal.service/api"}"#, HashMap::new(), dc);
         // Hostname only — no IP resolution — but allowlist match should
         // exempt regardless. (Defense in depth: even if a future rule starts
         // flagging hostnames, allowlist still wins.)
-        assert!(SsrfCheck::new().check(&ctx).is_none());
+        assert!(SsrfCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn detects_destination_header() {
         let mut h = HashMap::new();
         h.insert("destination".to_string(), "http://10.0.0.5/".to_string());
-        let ctx = make_ctx_with("", "", h, DefenseConfig::default());
-        assert!(SsrfCheck::new().check(&ctx).is_some());
+        let mut ctx = make_ctx_with("", "", h, DefenseConfig::default());
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]
     fn detection_carries_correct_phase_and_rule_id() {
-        let ctx = make_ctx("", r#"{"u":"http://169.254.169.254/"}"#);
-        let det = SsrfCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx("", r#"{"u":"http://169.254.169.254/"}"#);
+        let det = SsrfCheck::new().check(&mut ctx).expect("hit");
         assert_eq!(det.phase, Phase::Ssrf);
         assert_eq!(det.rule_name, "SSRF");
         assert!(det.rule_id.as_deref().unwrap_or("").starts_with("SSRF-"));
@@ -362,14 +363,14 @@ mod tests {
 
     #[test]
     fn allows_public_ip_addresses() {
-        let ctx = make_ctx("", r#"{"u":"http://8.8.8.8/dns"}"#);
-        assert!(SsrfCheck::new().check(&ctx).is_none());
+        let mut ctx = make_ctx("", r#"{"u":"http://8.8.8.8/dns"}"#);
+        assert!(SsrfCheck::new().check(&mut ctx).is_none());
     }
 
     #[test]
     fn first_malicious_url_short_circuits() {
-        let ctx = make_ctx("", r#"{"a":"http://10.0.0.1/", "b":"https://api.public.com/"}"#);
-        let det = SsrfCheck::new().check(&ctx).expect("hit");
+        let mut ctx = make_ctx("", r#"{"a":"http://10.0.0.1/", "b":"https://api.public.com/"}"#);
+        let det = SsrfCheck::new().check(&mut ctx).expect("hit");
         assert!(det.detail.contains("10.0.0.1"));
     }
 }

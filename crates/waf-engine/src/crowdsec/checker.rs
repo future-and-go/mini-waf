@@ -24,7 +24,7 @@ impl CrowdSecChecker {
 }
 
 impl Check for CrowdSecChecker {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         // Skip if mode is AppSec-only (no local cache checks)
         if self.config.mode == CrowdSecMode::Appsec {
             return None;

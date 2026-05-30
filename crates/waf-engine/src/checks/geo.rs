@@ -148,7 +148,7 @@ impl Default for GeoCheck {
 }
 
 impl Check for GeoCheck {
-    fn check(&self, ctx: &RequestCtx) -> Option<DetectionResult> {
+    fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
         // If geo info was not populated (GeoIP disabled or xdb missing) skip.
         let Some(geo) = &ctx.geo else {
             return None;
@@ -199,6 +199,7 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: std::collections::HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         }
     }
 
@@ -216,11 +217,11 @@ mod tests {
             }],
         );
 
-        let ctx = make_ctx("KP", "North Korea");
-        assert!(check.check(&ctx).is_some());
+        let mut ctx = make_ctx("KP", "North Korea");
+        assert!(check.check(&mut ctx).is_some());
 
-        let ctx2 = make_ctx("US", "United States");
-        assert!(check.check(&ctx2).is_none());
+        let mut ctx2 = make_ctx("US", "United States");
+        assert!(check.check(&mut ctx2).is_none());
     }
 
     #[test]
@@ -237,7 +238,7 @@ mod tests {
             }],
         );
         let host_config = Arc::new(HostConfig::default());
-        let ctx = RequestCtx {
+        let mut ctx = RequestCtx {
             req_id: "t".into(),
             client_ip: "127.0.0.1".parse().unwrap(),
             client_port: 80,
@@ -256,7 +257,8 @@ mod tests {
             tier_policy: waf_common::RequestCtx::default_tier_policy(),
             cookies: std::collections::HashMap::new(),
             device_fp: None,
+            tx_velocity_token: None,
         };
-        assert!(check.check(&ctx).is_none());
+        assert!(check.check(&mut ctx).is_none());
     }
 }
