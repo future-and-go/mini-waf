@@ -516,7 +516,7 @@ fn parse_not_after_from_der(der: &CertificateDer<'_>) -> Result<OffsetDateTime> 
 /// Minimal ASN.1 walk to extract notAfter from an X.509 certificate DER.
 ///
 /// X.509 structure (simplified):
-/// ```
+/// ```text
 /// SEQUENCE {           -- Certificate
 ///   SEQUENCE {         -- TBSCertificate
 ///     [0]              -- version (explicit, optional)
