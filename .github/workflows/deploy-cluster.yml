@@ -179,16 +179,16 @@ jobs:
               source "$HOME/.cargo/env"
               cargo build --release -p prx-waf --features gateway/valkey
             '
-          GLIBC=$(objdump -T target/release/prx-waf | grep -oE "GLIBC_[0-9.]+" | sort -V | tail -1)
-          echo "Built target/release/prx-waf (max ${GLIBC})"
+          GLIBC=$(objdump -T target/release/waf | grep -oE "GLIBC_[0-9.]+" | sort -V | tail -1)
+          echo "Built target/release/waf (max ${GLIBC})"
 
       - name: Upload binary to S3
         id: upload
         run: |
           set -euo pipefail
-          KEY="releases/${GITHUB_SHA}/prx-waf"
+          KEY="releases/${GITHUB_SHA}/waf"
           BUCKET="${{ secrets.AWS_DEPLOY_BUCKET }}"
-          aws s3 cp target/release/prx-waf "s3://${BUCKET}/${KEY}" --no-progress
+          aws s3 cp target/release/waf "s3://${BUCKET}/${KEY}" --no-progress
           URL=$(aws s3 presign "s3://${BUCKET}/${KEY}" --expires-in 1800)
           echo "url=${URL}" >> "$GITHUB_OUTPUT"
           echo "Uploaded s3://${BUCKET}/${KEY}"
