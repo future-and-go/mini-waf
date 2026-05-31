@@ -17,12 +17,22 @@ chmod +x "$TMP"
 install -o miniwaf -g miniwaf -m 0755 "$TMP" /opt/mini-waf/bin/mini-waf.new
 mv -f /opt/mini-waf/bin/mini-waf.new /opt/mini-waf/bin/mini-waf
 
+# Admin API TLS is on by default (auto self-signed). Auto mode persists the cert
+# under /var/lib/prx-waf/admin-tls; the non-root service user can't create that
+# path itself, so pre-create it owned by the service user. Without this the admin
+# API fails to bootstrap TLS and never binds 9527.
+mkdir -p /var/lib/prx-waf/admin-tls
+chown miniwaf:miniwaf /var/lib/prx-waf/admin-tls
+chmod 0700 /var/lib/prx-waf/admin-tls
+
 systemctl restart mini-waf
 sleep 6
 systemctl is-active mini-waf
 
+# Admin API serves HTTPS (self-signed) once TLS bootstraps, so probe over TLS
+# and skip cert verification for the loopback self-signed cert.
 for i in 1 2 3 4 5; do
-  if curl -fsS --max-time 5 http://127.0.0.1:9527/health >/dev/null; then
+  if curl -fsSk --max-time 5 https://127.0.0.1:9527/health >/dev/null; then
     break
   fi
   if [ "$i" = 5 ]; then

@@ -20,13 +20,22 @@ chmod +x "$TMP"
 install -o miniwaf -g miniwaf -m 0755 "$TMP" /opt/mini-waf/bin/mini-waf.new
 mv -f /opt/mini-waf/bin/mini-waf.new /opt/mini-waf/bin/mini-waf
 
+# Admin API TLS is on by default (auto self-signed). Auto mode persists the cert
+# under /var/lib/prx-waf/admin-tls; the non-root service user can't create that
+# path itself, so pre-create it owned by the service user. Without this the admin
+# API fails to bootstrap TLS and never binds 9527.
+mkdir -p /var/lib/prx-waf/admin-tls
+chown miniwaf:miniwaf /var/lib/prx-waf/admin-tls
+chmod 0700 /var/lib/prx-waf/admin-tls
+
 systemctl restart mini-waf
 
 # Bounded health gate (~30s). --connect-timeout caps a half-open socket while
-# the process is still binding 9527, so no single probe can stall. Exit on the
-# first success so the remote shell returns promptly and the SSH session closes.
+# the process is still binding 9527, so no single probe can stall. Admin API
+# serves HTTPS (self-signed) so probe over TLS with -k. Exit on the first
+# success so the remote shell returns promptly and the SSH session closes.
 for _ in $(seq 1 15); do
-  if curl -fsS --connect-timeout 3 --max-time 5 http://127.0.0.1:9527/health >/dev/null 2>&1; then
+  if curl -fsSk --connect-timeout 3 --max-time 5 https://127.0.0.1:9527/health >/dev/null 2>&1; then
     echo "external worker deploy OK: __SHA__"
     exit 0
   fi
