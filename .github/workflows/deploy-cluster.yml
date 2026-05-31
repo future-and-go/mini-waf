@@ -258,6 +258,9 @@ jobs:
           echo "All AWS nodes deployed."
 
       - name: Deploy to external worker (SSH)
+        # Hard step bound: a slow/unreachable external node can never wedge the
+        # whole deploy. The runner-side `timeout` below is the inner guard.
+        timeout-minutes: 12
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           WORKER_HOST: ${{ secrets.EXTERNAL_WORKER_HOST }}
@@ -282,9 +285,13 @@ jobs:
           sys.stdout.write(body)
           PY
           )
-          ssh -i "$KEYF" \
+          # ServerAliveInterval tears down a dead channel in ~60s; the outer
+          # `timeout` is the hard backstop if the session stalls while alive.
+          timeout 480 ssh -i "$KEYF" \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
             "${WORKER_USER:-root}@${WORKER_HOST}" 'bash -s' <<<"$SCRIPT_RENDERED"
           echo "External worker deployed."

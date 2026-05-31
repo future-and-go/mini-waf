@@ -22,16 +22,17 @@ mv -f /opt/mini-waf/bin/mini-waf.new /opt/mini-waf/bin/mini-waf
 
 systemctl restart mini-waf
 
-for i in 1 2 3 4 5; do
-  if curl -fsS --max-time 5 http://127.0.0.1:9527/health >/dev/null; then
-    break
-  fi
-  if [ "$i" = 5 ]; then
-    echo "post-deploy /health failed after 5 tries" >&2
-    journalctl -u mini-waf -n 80 --no-pager >&2 || true
-    exit 1
+# Bounded health gate (~30s). --connect-timeout caps a half-open socket while
+# the process is still binding 9527, so no single probe can stall. Exit on the
+# first success so the remote shell returns promptly and the SSH session closes.
+for _ in $(seq 1 15); do
+  if curl -fsS --connect-timeout 3 --max-time 5 http://127.0.0.1:9527/health >/dev/null 2>&1; then
+    echo "external worker deploy OK: __SHA__"
+    exit 0
   fi
   sleep 2
 done
 
-echo "external worker deploy OK: __SHA__"
+echo "post-deploy /health failed after ~30s" >&2
+journalctl -u mini-waf -n 80 --no-pager >&2 || true
+exit 1
