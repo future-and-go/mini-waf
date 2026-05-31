@@ -86,14 +86,15 @@ services:
       - ./rules:/app/rules:ro
       - waf_tls:/etc/prx-waf/tls:ro               # TLS cert/key — populated by tls-init service
       - waf_certs:/app/certs
-      - waf_data:/app/data                          # geoip xdb + auto-generated self-signed TLS cert
+      - waf_data:/app/data                          # geoip xdb + admin TLS cert (persisted at data/admin-tls/)
       - vlogs_data:/var/lib/prx-waf/victoria-logs   # binary + log partitions (persistent)
     ports:
       - "16880:80"    # HTTP proxy
       - "16843:443"   # HTTPS proxy
-      - "16827:9527"  # Management API + Admin Panel (embedded React/Refine SPA at /ui/)
+      - "16827:9527"  # Management API + Admin Panel (embedded React/Refine SPA at /ui/ — served over HTTPS)
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9527/health || exit 1"]
+      # Admin API now serves HTTPS with a self-signed cert — use -k/--insecure.
+      test: ["CMD-SHELL", "curl -ksf https://localhost:9527/health || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 30s
@@ -107,7 +108,9 @@ services:
 
   # NOTE: The admin panel (web/admin-panel — React/Refine/AntD) is now embedded
   # directly into the prx-waf binary via `rust_embed` and served at
-  # http://localhost:16827/ui/. No standalone nginx container is needed.
+  # https://localhost:16827/ui/. No standalone nginx container is needed.
+  # The self-signed admin TLS certificate is auto-generated on first startup
+  # and persisted in the `admin_tls_data` volume.
 
   # ── OWASP Juice Shop (test target — DELIBERATELY VULNERABLE) ─────────────────
   # Reverse-proxied through prx-waf to exercise the WAF rules end-to-end.

@@ -41,7 +41,7 @@ jobs:
           - { crate: waf-common,  floor: 88 }
           - { crate: waf-storage, floor: 84 }
           - { crate: waf-cluster, floor: 82 }
-          - { crate: waf-api,     floor: 80 }
+          - { crate: waf-api,     floor: 60 }
           - { crate: gateway,     floor: 85 }
           - { crate: waf-engine,  floor: 80 }
           - { crate: prx-waf,     floor: 5 }

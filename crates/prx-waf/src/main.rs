@@ -1240,7 +1240,7 @@ fn run_server(
     ))?;
 
     // Start the management API in a background thread
-    let api_listen = config.api.listen_addr.clone();
+    let api_cfg = config.api.clone();
     let api_state_bg = Arc::clone(&api_state);
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
@@ -1251,7 +1251,7 @@ fn run_server(
             }
         };
         rt.block_on(async move {
-            if let Err(e) = start_api_server(&api_listen, api_state_bg).await {
+            if let Err(e) = start_api_server(&api_cfg, api_state_bg).await {
                 tracing::error!("API server error: {}", e);
             }
         });

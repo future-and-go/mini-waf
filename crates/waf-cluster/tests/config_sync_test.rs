@@ -3,7 +3,7 @@
 
 use waf_cluster::protocol::ConfigSync;
 use waf_cluster::sync::config::{ConfigSyncer, SyncableConfig};
-use waf_common::config::{ApiConfig, CacheConfig, ProxyConfig, RulesConfig};
+use waf_common::config::{AdminTlsConfig, ApiConfig, CacheConfig, ProxyConfig, RulesConfig};
 
 fn sample_syncable_config() -> SyncableConfig {
     SyncableConfig {
@@ -15,6 +15,7 @@ fn sample_syncable_config() -> SyncableConfig {
         cache: CacheConfig::default(),
         api: ApiConfig {
             listen_addr: "0.0.0.0:9527".into(),
+            tls: AdminTlsConfig::default(),
         },
     }
 }
