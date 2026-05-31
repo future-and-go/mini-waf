@@ -27,6 +27,7 @@ pub mod state;
 pub mod static_files;
 pub mod stats;
 pub mod tier_policies_api;
+pub mod tls;
 pub mod tunnels;
 pub mod websocket;
 
