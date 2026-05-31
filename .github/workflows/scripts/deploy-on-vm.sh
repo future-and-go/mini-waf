@@ -17,6 +17,16 @@ chmod +x "$TMP"
 install -o miniwaf -g miniwaf -m 0755 "$TMP" /opt/mini-waf/bin/mini-waf.new
 mv -f /opt/mini-waf/bin/mini-waf.new /opt/mini-waf/bin/mini-waf
 
+# Admin API TLS now defaults on (auto self-signed). The auto cert dir falls back
+# to /var/lib/prx-waf/admin-tls, which this non-root (miniwaf) service can't
+# create — the admin API then fails to start and the health check below times
+# out. The cluster admin API is HTTP on loopback/internal by design, so pin TLS
+# off when the node config hasn't set [api.tls] explicitly.
+CFG=/opt/mini-waf/configs/prod.toml
+if [ -f "$CFG" ] && ! grep -q '^\[api\.tls\]' "$CFG"; then
+  printf '\n[api.tls]\nenabled = false\n' >>"$CFG"
+fi
+
 systemctl restart mini-waf
 sleep 6
 systemctl is-active mini-waf
