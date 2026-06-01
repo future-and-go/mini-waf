@@ -60,6 +60,16 @@ pub fn validate_access_token(token: &str, secret: &str) -> anyhow::Result<Claims
     Ok(data.claims)
 }
 
+/// Validate a JWT and require the `admin` role. Signature/expiry are checked
+/// first; a structurally valid token for a non-admin role is rejected.
+pub fn validate_admin_token(token: &str, secret: &str) -> anyhow::Result<Claims> {
+    let claims = validate_access_token(token, secret)?;
+    if claims.role != "admin" {
+        anyhow::bail!("admin role required");
+    }
+    Ok(claims)
+}
+
 pub fn hash_token(token: &str) -> String {
     let mut h = Sha256::new();
     h.update(token.as_bytes());
@@ -280,6 +290,30 @@ mod tests {
     #[test]
     fn token_hash_deterministic() {
         assert_eq!(hash_token("abc"), hash_token("abc"));
+    }
+
+    #[test]
+    fn validate_admin_token_accepts_admin_role() {
+        let user_id = uuid::Uuid::new_v4();
+        let secret = "admin-gate-secret";
+        let token = generate_access_token(user_id, "alice", "admin", secret).unwrap();
+        let claims = validate_admin_token(&token, secret).expect("admin claims");
+        assert_eq!(claims.role, "admin");
+    }
+
+    #[test]
+    fn validate_admin_token_rejects_non_admin_role() {
+        let user_id = uuid::Uuid::new_v4();
+        let secret = "admin-gate-secret";
+        let token = generate_access_token(user_id, "carol", "viewer", secret).unwrap();
+        let err = validate_admin_token(&token, secret).expect_err("viewer must be denied");
+        assert!(err.to_string().contains("admin role required"));
+    }
+
+    #[test]
+    fn validate_admin_token_rejects_invalid_token() {
+        let result = validate_admin_token("not-a-jwt", "any-secret");
+        assert!(result.is_err());
     }
 
     #[test]

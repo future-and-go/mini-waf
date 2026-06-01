@@ -431,6 +431,13 @@ pub fn client() -> reqwest::Client {
         .expect("build reqwest client")
 }
 
+/// Mint a viewer-role JWT against the test server's secret. Used by tests
+/// that assert RBAC paths (401 for viewer on PUT/POST/PATCH/DELETE).
+#[must_use]
+pub fn issue_viewer_token(s: &TestServer) -> String {
+    generate_access_token(uuid::Uuid::new_v4(), "viewer", "viewer", &s.state.jwt_secret).expect("viewer token")
+}
+
 /// Host code used by [`seed_one_of_each`] and shared across stats integration
 /// tests. Tests that filter by host_code (`?host_code=h1`) MUST use this
 /// constant so a single rename here doesn't silently turn assertions into
