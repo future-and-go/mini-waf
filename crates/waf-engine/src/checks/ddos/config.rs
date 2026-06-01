@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use waf_common::tier::Tier;
 
@@ -19,7 +19,7 @@ use super::{DdosConfig, DdosTierCfg};
 const SCHEMA_VERSION: u32 = 1;
 
 /// Top-level YAML wrapper: `ddos:` is the single root key.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DdosDocument {
     #[serde(default)]
@@ -29,7 +29,7 @@ pub struct DdosDocument {
 /// Operator-facing YAML schema for `DDoS` configuration.
 ///
 /// Empty file ⇒ inert (no tiers protected).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DdosFileConfig {
     #[serde(default = "default_schema_version")]
@@ -82,7 +82,7 @@ const fn default_max_keys() -> usize {
 }
 
 /// Tier map keyed by `snake_case` names matching `Tier` variants.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DdosTierMap {
     #[serde(default)]
@@ -96,7 +96,7 @@ pub struct DdosTierMap {
 }
 
 /// One tier's `DDoS` threshold knobs.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TierThresholdCfg {
     /// Per-fingerprint request threshold (e.g., per-IP).
@@ -110,7 +110,7 @@ pub struct TierThresholdCfg {
 }
 
 /// Optional Redis backend block (parsed but unused until phase 4).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RedisCfg {
     pub url: String,
