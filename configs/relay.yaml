@@ -1,40 +1,21 @@
-# FR-007 Relay & Proxy Intel — default configuration.
+# Relay & Proxy Intel — default configuration.
 # Hot-reloaded on file save.
 
-enabled: false
-
-providers:
-  asn_classifier:
-    enabled: true
-    risk_weight: 15
-  tor_exit:
-    enabled: true
-    risk_weight: 30
-  datacenter:
-    enabled: true
-    risk_weight: 15
-  proxy_chain:
-    enabled: true
-    risk_weight: 20
-  xff_validator:
-    enabled: true
-    risk_weight: 10
-    max_chain_depth: 3
-    reject_private_in_chain: false
-
-intel:
-  asn_feed:
-    url: ""
-    refresh_secs: 86400
-  tor_feed:
-    url: "https://check.torproject.org/torbulkexitlist"
-    refresh_secs: 3600
-  datacenter_set:
-    path: ""
-
-trusted_proxies: []
-
-risk_weights:
-  tor: 30
-  datacenter: 15
-  bad_asn: 25
+relay_detection:
+  trusted_proxies: []
+  max_chain_depth: 3
+  headers:
+    forwarded_for:
+      - "X-Forwarded-For"
+      - "X-Real-IP"
+  asn:
+    provider: null
+    fail_close: false
+  tor:
+    list_path: null
+  signals:
+    enabled: []
+    risk_score_delta:
+      tor_exit: 30
+      datacenter: 15
+      bad_asn: 25

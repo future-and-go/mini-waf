@@ -12,7 +12,7 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use ipnet::IpNet;
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const HEADER_NAME_RE: &str = r"^[A-Za-z][A-Za-z0-9-]*$";
 
@@ -21,13 +21,14 @@ const HEADER_NAME_RE: &str = r"^[A-Za-z][A-Za-z0-9-]*$";
 /// `relay_detection:` is the single root key per brainstorm §4.6. Everything
 /// else is optional → empty file parses to a "no signals enabled" snapshot
 /// (D4 fail-open at config layer).
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RelayDetectionDocument {
     #[serde(default)]
     pub relay_detection: RelayConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct RelayConfig {
     #[serde(default)]
     pub trusted_proxies: Vec<IpNet>,
@@ -60,7 +61,7 @@ const fn default_chain_depth() -> u8 {
     3
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct HeaderConfig {
     #[serde(default = "default_xff_headers")]
     pub forwarded_for: Vec<String>,
@@ -78,7 +79,7 @@ fn default_xff_headers() -> Vec<String> {
     vec!["X-Forwarded-For".to_string(), "X-Real-IP".to_string()]
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct AsnConfig {
     /// `"ipinfo_lite"` (default mmdb), `"iptoasn"` (TSV fallback). When None
     /// and no `mmdb_path` is set, the classifier runs with `EmptyAsnDb`
@@ -99,7 +100,7 @@ pub struct AsnConfig {
     pub fail_close: bool,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct TorConfig {
     #[serde(default)]
     pub list_path: Option<PathBuf>,
@@ -107,17 +108,21 @@ pub struct TorConfig {
     pub refresh: Option<RefreshConfig>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct RefreshConfig {
     #[serde(default)]
     pub url: Option<String>,
-    #[serde(default, deserialize_with = "deser_duration_opt")]
+    #[serde(
+        default,
+        deserialize_with = "deser_duration_opt",
+        serialize_with = "ser_duration_opt"
+    )]
     pub interval: Option<Duration>,
     #[serde(default)]
     pub etag: bool,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct SignalConfig {
     #[serde(default)]
     pub enabled: Vec<String>,
@@ -162,8 +167,30 @@ impl RelayConfig {
     }
 }
 
-/// Accept human-friendly durations: `24h`, `30m`, `45s`, `500ms`. Empty/None
-/// → `None`. Anything else → error with context.
+#[allow(clippy::ref_option)]
+fn ser_duration_opt<S>(dur: &Option<Duration>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match dur {
+        None => s.serialize_none(),
+        Some(d) => {
+            let secs = d.as_secs();
+            let millis = d.subsec_millis();
+            let repr = if millis > 0 {
+                format!("{}ms", secs * 1000 + u64::from(millis))
+            } else if secs >= 3600 && secs % 3600 == 0 {
+                format!("{}h", secs / 3600)
+            } else if secs >= 60 && secs % 60 == 0 {
+                format!("{}m", secs / 60)
+            } else {
+                format!("{secs}s")
+            };
+            s.serialize_str(&repr)
+        }
+    }
+}
+
 fn deser_duration_opt<'de, D>(d: D) -> Result<Option<Duration>, D::Error>
 where
     D: serde::Deserializer<'de>,
