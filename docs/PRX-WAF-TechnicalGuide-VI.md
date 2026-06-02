@@ -3,6 +3,8 @@
 > **F&G WAF** (tên kỹ thuật: `mini-waf`) · Tường Lửa Ứng Dụng Web · **Phiên bản 1.1.0** · Viết bằng ngôn ngữ Rust (ấn bản 2024) · Dựa trên nền Cloudflare Pingora
 >
 > 📖 **Tài liệu này được viết cho mọi người** — kể cả khi bạn *không phải dân kỹ thuật*. Mỗi thuật ngữ chuyên ngành đều có chú thích bằng tiếng Việt dễ hiểu, kèm ví dụ và sơ đồ minh hoạ. Nếu gặp một từ lạ, hãy tra ngay trong [Bảng Thuật Ngữ](#-bảng-thuật-ngữ-tra-cứu-nhanh) ở đầu tài liệu.
+>
+> 📚 **Muốn đi sâu hơn?** Xem tài liệu đồng hành [**46 Tính Năng Chi Tiết (Bản Kỹ Thuật Mở Rộng)**](./F&G-WAF-46-tinh-nang-chi-tiet-VI.md) — phân tích từng yêu cầu chức năng FR-001 → FR-046 kèm 31 sơ đồ kỹ thuật.
 
 ---
 
