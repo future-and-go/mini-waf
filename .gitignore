@@ -1,0 +1,37 @@
+/target
+*.swp
+*.swo
+.DS_Store
+node_modules/
+web/admin-ui/dist/
+web/admin-panel/dist/
+# ip2region xdb binary data files — download with `prx-waf geoip download`
+data/*.xdb
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Root-level tools/ was a duplicate of rules/tools/ — canonical path is rules/tools/
+/tools/
+.idea
+.repomixignore
+release-manifest.json
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+.claude
+.gitnexus
+.kiro
+.cargo
+.opencode
+AGENTS.md
+
+# Session-local context written by ck:cook (rules.md line 3); never committed.
+/context.md
+/TODO.md
+/rules.md
