@@ -488,6 +488,10 @@ impl WafEngine {
             tier: None,
             detail: Some(detail.to_string()),
             req_id: Some(req_id.to_string()),
+            risk_score: 0,
+            mode: InteropMode::Enforce,
+            query: String::new(),
+            contract_action: "error",
         };
         sender.send(event);
     }
@@ -602,10 +606,8 @@ impl WafEngine {
     /// before the checker pipeline runs.  Callers should check
     /// `decision.is_enforcement_allowed()`.
     pub async fn inspect(&self, ctx: &mut RequestCtx) -> WafDecision {
-        // Compute the cumulative risk score once so every outcome the pipeline
-        // below produces carries it. With the default (disabled) `RiskConfig`
-        // this is a no-op (score = 0); operators opt in via `replace_risk_config`.
-        let now_ms = chrono::Utc::now().timestamp_millis();
+        let inspect_time = chrono::Utc::now();
+        let now_ms = inspect_time.timestamp_millis();
         let scorer_score = self
             .scorer
             .score(ctx, None, &[], None, now_ms)
@@ -613,9 +615,8 @@ impl WafEngine {
             .map_or(0, |r| r.score);
 
         let mut decision = self.inspect_pipeline(ctx).await;
-        // Defensive clamp — the scorer also clamps, but pin the invariant here
-        // since `decision.risk_score` feeds a response header bounded 0..=100.
         decision.risk_score = scorer_score.min(100);
+        self.send_audit_event(ctx, &decision, inspect_time);
         decision
     }
 
@@ -648,7 +649,6 @@ impl WafEngine {
         if !ip_blacklist.is_enforcement_allowed() {
             self.log_attack(ctx, &ip_blacklist);
             self.report_community_signal(ctx, &ip_blacklist);
-            self.send_audit_event(ctx, &ip_blacklist);
             return ip_blacklist;
         }
 
@@ -663,7 +663,6 @@ impl WafEngine {
         if !url_bl.is_enforcement_allowed() {
             self.log_attack(ctx, &url_bl);
             self.report_community_signal(ctx, &url_bl);
-            self.send_audit_event(ctx, &url_bl);
             return url_bl;
         }
 
@@ -686,7 +685,6 @@ impl WafEngine {
             let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -706,7 +704,6 @@ impl WafEngine {
             let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -730,7 +727,6 @@ impl WafEngine {
 
                 self.log_security_event(ctx, &decision);
                 self.report_community_signal(ctx, &decision);
-                self.send_audit_event(ctx, &decision);
                 return decision;
             }
         }
@@ -741,7 +737,6 @@ impl WafEngine {
             let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -754,7 +749,6 @@ impl WafEngine {
                     let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
                     self.log_security_event(ctx, &decision);
                     self.report_community_signal(ctx, &decision);
-                    self.send_audit_event(ctx, &decision);
                     return decision;
                 }
                 AppSecResult::Allow | AppSecResult::Unavailable => {}
@@ -786,7 +780,6 @@ impl WafEngine {
             }
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            self.send_audit_event(ctx, &decision);
             // Allow/Log: log the match but continue pipeline (phases 13-16 still run)
             // Block/Challenge: return immediately. In log-only mode enforcement is
             // bypassed (mode = LogOnly), so even a Block intent continues the pipeline.
@@ -801,7 +794,6 @@ impl WafEngine {
             let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -811,7 +803,6 @@ impl WafEngine {
             let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -821,7 +812,6 @@ impl WafEngine {
             let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            self.send_audit_event(ctx, &decision);
             return decision;
         }
 
@@ -989,11 +979,8 @@ impl WafEngine {
     /// Fire-and-forget: drops silently when the audit sender is unset
     /// (`[victoria_logs] enabled = false`) or its buffer is saturated.
     /// The hot path never blocks on observability.
-    fn send_audit_event(&self, ctx: &RequestCtx, decision: &WafDecision) {
+    fn send_audit_event(&self, ctx: &RequestCtx, decision: &WafDecision, timestamp: chrono::DateTime<chrono::Utc>) {
         let Some(sender) = self.audit_sender.get() else {
-            return;
-        };
-        let Some(result) = &decision.result else {
             return;
         };
 
@@ -1008,19 +995,33 @@ impl WafEngine {
             WafAction::Redirect { .. } | WafAction::Challenge => AuditEventType::Challenge,
         };
 
+        let (rule_name, rule_id, phase, detail) = match &decision.result {
+            Some(r) => (
+                r.rule_name.clone(),
+                r.rule_id.clone(),
+                Some(r.phase.to_string()),
+                Some(r.detail.clone()),
+            ),
+            None => (String::new(), None, None, None),
+        };
+
         let event = AuditEvent {
-            timestamp: chrono::Utc::now(),
+            timestamp,
             event_type,
-            rule_name: result.rule_name.clone(),
-            rule_id: result.rule_id.clone(),
-            phase: Some(result.phase.to_string()),
+            rule_name,
+            rule_id,
+            phase,
             client_ip: ctx.client_ip.to_string(),
             host: ctx.host.clone(),
             method: ctx.method.clone(),
             path: ctx.path.clone(),
             tier: Some(format!("{:?}", ctx.tier)),
-            detail: Some(result.detail.clone()),
+            detail,
             req_id: Some(ctx.req_id.clone()),
+            risk_score: decision.risk_score,
+            mode: decision.mode,
+            query: ctx.query.clone(),
+            contract_action: decision.action.as_contract_str(),
         };
         sender.send(event);
     }

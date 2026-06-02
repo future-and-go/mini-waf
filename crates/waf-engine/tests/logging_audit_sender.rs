@@ -40,6 +40,10 @@ fn make_event(event_type: AuditEventType, req_path: &str) -> AuditEvent {
         tier: Some("standard".to_string()),
         detail: Some("test detail".to_string()),
         req_id: Some("req-abc".to_string()),
+        risk_score: 0,
+        mode: waf_common::types::InteropMode::Enforce,
+        query: String::new(),
+        contract_action: "allow",
     }
 }
 
@@ -183,6 +187,10 @@ async fn optional_fields_none_serialize_gracefully() {
         tier: None,
         detail: None,
         req_id: None,
+        risk_score: 0,
+        mode: waf_common::types::InteropMode::Enforce,
+        query: String::new(),
+        contract_action: "rate_limit",
     };
     sender.send(event);
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
