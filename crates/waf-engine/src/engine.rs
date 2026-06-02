@@ -995,6 +995,7 @@ impl WafEngine {
             WafAction::Redirect { .. } | WafAction::Challenge => AuditEventType::Challenge,
         };
 
+        #[allow(clippy::option_if_let_else)]
         let (rule_name, rule_id, phase, detail) = match &decision.result {
             Some(r) => (
                 r.rule_name.clone(),

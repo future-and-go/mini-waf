@@ -101,7 +101,7 @@ impl AuditSender {
     }
 }
 
-/// Build the VictoriaLogs JSON payload from an audit event. Extracted from
+/// Build the `VictoriaLogs` JSON payload from an audit event. Extracted from
 /// `AuditSender::send` so unit tests can verify the payload schema without
 /// needing a live `BatchSender`.
 fn build_vl_payload(event: AuditEvent) -> serde_json::Value {
@@ -148,6 +148,7 @@ fn build_vl_payload(event: AuditEvent) -> serde_json::Value {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
 
@@ -214,7 +215,7 @@ mod tests {
         let event = make_test_event();
         let payload = build_vl_payload(event);
         // 2026-01-01T00:00:00Z in epoch millis
-        assert_eq!(payload["ts_ms"], 1767225600000_i64);
+        assert_eq!(payload["ts_ms"], 1_767_225_600_000_i64);
         // _time (RFC3339) and ts_ms represent the same instant
         assert_eq!(payload["_time"], "2026-01-01T00:00:00+00:00");
     }
