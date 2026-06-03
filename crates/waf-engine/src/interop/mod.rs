@@ -1,3 +1,4 @@
+pub mod checker_feature_map;
 pub mod feature_catalog;
 pub mod mode_registry;
 

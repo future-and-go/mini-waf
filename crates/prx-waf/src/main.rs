@@ -1802,6 +1802,8 @@ async fn init_async(
     api_state.log_level_setter = log_level_setter;
     api_state.interop_config = config.interop.clone();
 
+    engine.set_mode_registry(api_state.mode_registry.clone());
+
     // Phase 4: create default admin user if none exist
     {
         let tmp_state = Arc::new(api_state.clone());

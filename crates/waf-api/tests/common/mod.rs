@@ -84,6 +84,9 @@ pub async fn start_test_server() -> TestServer {
         AppState::new(Arc::clone(&db), Arc::clone(&engine), Arc::clone(&router), cache).expect("AppState::new"),
     );
 
+    // Mirror production wiring (main.rs): share ModeRegistry between AppState and engine.
+    engine.set_mode_registry(state.mode_registry.clone());
+
     // Seed admin user with a known password.
     let admin_password = "test-admin-password".to_string();
     let hash = hash_password(&admin_password).expect("hash password");
