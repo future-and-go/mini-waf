@@ -13,6 +13,8 @@ use waf_storage::{
 
 use crate::block_page::render_block_page;
 use crate::checker::{RuleStore, check_ip_blacklist, check_ip_whitelist, check_url_blacklist, check_url_whitelist};
+use crate::interop::ModeRegistry;
+use crate::interop::checker_feature_map::phase_feature_identity;
 use waf_common::config::SqliScanConfig;
 
 use crate::checks::ddos::action::{BanAction, CombinedAction};
@@ -131,6 +133,8 @@ pub struct WafEngine {
     /// Bounded MPSC batch writer for `attack_logs` and `security_events` tables.
     /// Replaces per-detection `tokio::spawn` with a single `try_send`.
     db_batch_writer: OnceLock<DbBatchWriter>,
+    // ── Interop: per-feature mode resolution ────────────────────────────────
+    mode_registry: OnceLock<ModeRegistry>,
     /// Hot-swappable risk-scoring config. Default `RiskConfig` has
     /// `enabled = false`, so `Scorer.score()` returns score=0 / Allow until
     /// operators wire a real config via [`Self::replace_risk_config`].
@@ -250,6 +254,7 @@ impl WafEngine {
             ddos_reloader: OnceLock::new(),
             audit_sender: OnceLock::new(),
             db_batch_writer: OnceLock::new(),
+            mode_registry: OnceLock::new(),
             risk_cfg,
             scorer,
         }
@@ -504,6 +509,20 @@ impl WafEngine {
         let _ = self.db_batch_writer.set(writer);
     }
 
+    pub fn set_mode_registry(&self, mr: ModeRegistry) {
+        let _ = self.mode_registry.set(mr);
+    }
+
+    fn apply_mode(&self, ctx: &RequestCtx, decision: &mut WafDecision, feature: &str, policy: Option<&str>) {
+        let registry_log_only = self
+            .mode_registry
+            .get()
+            .is_some_and(|mr| mr.resolve(feature, policy) == InteropMode::LogOnly);
+        if registry_log_only || ctx.host_config.log_only_mode {
+            decision.mode = InteropMode::LogOnly;
+        }
+    }
+
     /// Return a reference to the `GeoCheck` so callers can load rules.
     pub const fn geo_check(&self) -> &Arc<GeoCheck> {
         &self.geo_check
@@ -645,7 +664,8 @@ impl WafEngine {
         }
 
         // ── Phase 2: IP Blacklist — block if matched ───────────────────────────
-        let ip_blacklist = check_ip_blacklist(ctx, &self.store);
+        let mut ip_blacklist = check_ip_blacklist(ctx, &self.store);
+        self.apply_mode(ctx, &mut ip_blacklist, "access_control", Some("ip_blacklist"));
         if !ip_blacklist.is_enforcement_allowed() {
             self.log_attack(ctx, &ip_blacklist);
             self.report_community_signal(ctx, &ip_blacklist);
@@ -659,7 +679,8 @@ impl WafEngine {
         }
 
         // ── Phase 4: URL Blacklist — block if matched ──────────────────────────
-        let url_bl = check_url_blacklist(ctx, &self.store);
+        let mut url_bl = check_url_blacklist(ctx, &self.store);
+        self.apply_mode(ctx, &mut url_bl, "access_control", Some("url_blacklist"));
         if !url_bl.is_enforcement_allowed() {
             self.log_attack(ctx, &url_bl);
             self.report_community_signal(ctx, &url_bl);
@@ -670,8 +691,11 @@ impl WafEngine {
         // Runs AFTER allowlist/blacklist (fast-path) and BEFORE rate-limit.
         // Banned IPs are blocked here; burst detection may trigger new bans.
         if let Some(result) = self.ddos_check.check(ctx) {
+            let phase = result.phase;
             let rule_name = result.rule_name.clone();
-            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let mut decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let (feat, pol) = phase_feature_identity(phase);
+            self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             return decision;
@@ -681,8 +705,11 @@ impl WafEngine {
         if let Some(cs) = self.crowdsec_checker.get()
             && let Some(result) = cs.check(ctx)
         {
+            let phase = result.phase;
             let rule_name = result.rule_name.clone();
-            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let mut decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let (feat, pol) = phase_feature_identity(phase);
+            self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             return decision;
@@ -692,16 +719,22 @@ impl WafEngine {
         if let Some(cc) = self.community_checker.get()
             && let Some(result) = cc.check(ctx)
         {
+            let phase = result.phase;
             let rule_name = result.rule_name.clone();
-            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let mut decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let (feat, pol) = phase_feature_identity(phase);
+            self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             return decision;
         }
 
         // ── Phase 17: GeoIP access control ────────────────────────────────────
         if let Some(result) = self.geo_check.check(ctx) {
+            let phase = result.phase;
             let rule_name = result.rule_name.clone();
-            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let mut decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let (feat, pol) = phase_feature_identity(phase);
+            self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             return decision;
@@ -710,19 +743,19 @@ impl WafEngine {
         // ── Phase 5-11: Attack detection pipeline ─────────────────────────────
         for checker in &self.checkers {
             if let Some(result) = checker.check(ctx) {
+                let phase = result.phase;
                 let rule_name = result.rule_name.clone();
 
-                // Rate-limit breaches are a distinct decision class (HTTP 429),
-                // not a security block. Other checker phases stay as 403 blocks.
-                let decision = if result.phase == waf_common::Phase::RateLimit {
+                let decision = if phase == waf_common::Phase::RateLimit {
                     let body = render_block_page(ctx, &rule_name);
                     let mut d = WafDecision::rate_limit(429, Some(body), result);
-                    if ctx.host_config.log_only_mode {
-                        d.mode = InteropMode::LogOnly;
-                    }
+                    self.apply_mode(ctx, &mut d, "rate_limiting", Some("per_ip"));
                     d
                 } else {
-                    Self::make_block_decision(ctx, &rule_name, result, 403)
+                    let mut d = Self::make_block_decision(ctx, &rule_name, result, 403);
+                    let (feat, pol) = phase_feature_identity(phase);
+                    self.apply_mode(ctx, &mut d, feat, pol);
+                    d
                 };
 
                 self.log_security_event(ctx, &decision);
@@ -733,8 +766,11 @@ impl WafEngine {
 
         // ── SQLi check (separate for hot-reload support) ─────────────────────
         if let Some(result) = self.sqli_check.check(ctx) {
+            let phase = result.phase;
             let rule_name = result.rule_name.clone();
-            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let mut decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let (feat, pol) = phase_feature_identity(phase);
+            self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             return decision;
@@ -745,8 +781,11 @@ impl WafEngine {
             match appsec.check_request(ctx).await {
                 AppSecResult::Block { message } => {
                     let result = appsec_to_detection(message);
+                    let phase = result.phase;
                     let rule_name = result.rule_name.clone();
-                    let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+                    let mut decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+                    let (feat, pol) = phase_feature_identity(phase);
+                    self.apply_mode(ctx, &mut decision, feat, pol);
                     self.log_security_event(ctx, &decision);
                     self.report_community_signal(ctx, &decision);
                     return decision;
@@ -775,9 +814,7 @@ impl WafEngine {
                 mode: InteropMode::Enforce,
                 rule_id,
             };
-            if ctx.host_config.log_only_mode {
-                decision.mode = InteropMode::LogOnly;
-            }
+            self.apply_mode(ctx, &mut decision, "custom_rules", None);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             // Allow/Log: log the match but continue pipeline (phases 13-16 still run)
@@ -790,8 +827,11 @@ impl WafEngine {
 
         // ── Phase 13: OWASP CRS ────────────────────────────────────────────────
         if let Some(result) = self.owasp.check(ctx) {
+            let phase = result.phase;
             let rule_name = result.rule_name.clone();
-            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let mut decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let (feat, pol) = phase_feature_identity(phase);
+            self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             return decision;
@@ -799,8 +839,11 @@ impl WafEngine {
 
         // ── Phase 14: Sensitive data ───────────────────────────────────────────
         if let Some(result) = self.sensitive.check(ctx) {
+            let phase = result.phase;
             let rule_name = result.rule_name.clone();
-            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let mut decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let (feat, pol) = phase_feature_identity(phase);
+            self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             return decision;
@@ -808,8 +851,11 @@ impl WafEngine {
 
         // ── Phase 15: Anti-hotlinking ──────────────────────────────────────────
         if let Some(result) = self.hotlink.check(ctx) {
+            let phase = result.phase;
             let rule_name = result.rule_name.clone();
-            let decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let mut decision = Self::make_block_decision(ctx, &rule_name, result, 403);
+            let (feat, pol) = phase_feature_identity(phase);
+            self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
             return decision;
@@ -818,19 +864,12 @@ impl WafEngine {
         WafDecision::allow()
     }
 
-    /// Build a Block decision, honouring per-host log-only mode.
-    ///
-    /// The intended action (`Block { status, body }`) is always preserved so
-    /// logging/audit see the real action. When the host runs in log-only mode
-    /// the enforcement bypass is signalled via `mode = LogOnly`, leaving
-    /// `is_enforcement_allowed()` true so the gateway forwards upstream.
+    /// Build a Block decision. Mode resolution (`LogOnly` / `Enforce`) is
+    /// handled by `apply_mode()` at each call site — this function is a pure
+    /// decision factory.
     fn make_block_decision(ctx: &RequestCtx, rule_name: &str, result: DetectionResult, status: u16) -> WafDecision {
         let body = render_block_page(ctx, rule_name);
-        let mut decision = WafDecision::block(status, Some(body), result);
-        if ctx.host_config.log_only_mode {
-            decision.mode = InteropMode::LogOnly;
-        }
-        decision
+        WafDecision::block(status, Some(body), result)
     }
 
     /// Dispatch an upstream response status to every registered `Check`.
