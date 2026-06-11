@@ -34,6 +34,7 @@ playwright/.cache/
 .cargo
 .opencode
 AGENTS.md
+analysis/
 
 # Deploy secrets — generated from .env.example by scripts/deploy.sh.
 .env
