@@ -11,9 +11,9 @@ Binary: ./waf   Start: ./waf run   Config: ./waf.yaml|toml   Logs: ./waf_audit.l
 
 | ID | Title | Lane | Status | §
 | --- | --- | --- | --- | --- |
-| US-1601 | `./waf run` starts and listens before startup timeout | normal | in_progress | §8 |
-| US-1602 | Config from ./waf.yaml|toml in cwd; upstream + port from config | normal | in_progress | §8 |
-| US-1603 | Health endpoint returns 200 when ready; audit log created on first request | normal | in_progress | §8 |
+| US-1601 | `./waf run` starts and listens before startup timeout | normal | implemented | §8 |
+| US-1602 | Config from ./waf.yaml|toml in cwd; upstream + port from config | normal | implemented | §8 |
+| US-1603 | Health endpoint returns 200 when ready; audit log created on first request | normal | implemented | §8 |
 
 ## Acceptance criteria (per story)
 

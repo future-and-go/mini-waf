@@ -2,7 +2,7 @@
 
 ## Status
 
-in_progress
+implemented
 
 ## Lane
 
@@ -58,5 +58,9 @@ booleans set via harness-cli after verification.
 
 ## Evidence
 
-CLI/bootstrap in `crates/prx-waf`; health in `crates/waf-api`. Durable proof unset
-pending `harness-cli story verify`.
+Health handler in `crates/waf-api` (`GET /health`); audit sink in
+`crates/waf-engine/.../audit_file_sink.rs`. Unit + integration proof: `audit_file_sink`
+unit tests + `audit_file_sink_integration` confirm `./waf_audit.log` is lazily created
+on the first event and stays append-only across restart. The `handler_health` test
+(health `200` when ready) exists but its Postgres testcontainer is unavailable in this
+environment, so the health half was not executed here; e2e/platform stay unset.

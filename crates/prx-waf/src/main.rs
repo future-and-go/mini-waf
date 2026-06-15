@@ -1892,3 +1892,73 @@ async fn init_async(
 
     Ok((engine, router, Arc::new(api_state), guards))
 }
+
+#[cfg(test)]
+#[allow(clippy::disallowed_types, clippy::disallowed_methods)]
+mod resolve_config_path_tests {
+    use super::resolve_config_path;
+    use std::sync::Mutex;
+
+    // `set_current_dir` mutates process-global state; serialize the cwd-touching
+    // cases so they cannot race each other inside the test binary.
+    static CWD_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Restores the working directory when the scope ends — even on a failed
+    /// assertion — so a temp cwd never leaks into a sibling test.
+    struct CwdGuard {
+        original: std::path::PathBuf,
+    }
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original);
+        }
+    }
+
+    #[test]
+    fn explicit_path_wins() {
+        // An explicit --config short-circuits cwd discovery regardless of
+        // require_cwd, so this case needs no cwd mutation or lock.
+        let resolved = resolve_config_path(Some("custom/x.toml"), true).unwrap();
+        assert_eq!(resolved, "custom/x.toml");
+    }
+
+    #[test]
+    fn discovers_cwd_yaml() {
+        let _lock = CWD_LOCK.lock().unwrap();
+        let original = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("waf.yaml"), "").unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let _guard = CwdGuard { original };
+
+        let resolved = resolve_config_path(None, true).unwrap();
+        assert_eq!(resolved, "waf.yaml");
+    }
+
+    #[test]
+    fn run_without_config_is_error() {
+        let _lock = CWD_LOCK.lock().unwrap();
+        let original = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let _guard = CwdGuard { original };
+
+        // `run` must fail fast instead of silently defaulting, so the benchmarker
+        // never waits on a WAF pointed at the wrong config.
+        let err = resolve_config_path(None, true).unwrap_err().to_string();
+        assert!(err.contains("waf.yaml"), "error should name waf.yaml: {err}");
+        assert!(err.contains("waf.toml"), "error should name waf.toml: {err}");
+    }
+
+    #[test]
+    fn non_run_falls_back_to_default() {
+        let _lock = CWD_LOCK.lock().unwrap();
+        let original = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let _guard = CwdGuard { original };
+
+        let resolved = resolve_config_path(None, false).unwrap();
+        assert_eq!(resolved, "configs/default.toml");
+    }
+}

@@ -2,7 +2,7 @@
 
 ## Status
 
-in_progress
+implemented
 
 ## Lane
 
@@ -60,5 +60,9 @@ booleans set via harness-cli after verification.
 
 ## Evidence
 
-CLI/bootstrap in `crates/prx-waf`; health in `crates/waf-api`. Durable proof unset
-pending `harness-cli story verify`.
+CLI/bootstrap in `crates/prx-waf`; health in `crates/waf-api`. Unit proof:
+`resolve_config_path_tests` (run fast-fails on missing config so boot never hangs,
+cwd config discovery, explicit `--config` wins); binary `[[bin]] name = "waf"` and
+`Commands::Run` entrypoint verified by compile. Integration boot→health-within-timeout
+needs a live Postgres + benchmark harness not available in this environment, so that
+layer stays unset.
