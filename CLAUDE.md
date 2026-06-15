@@ -35,183 +35,21 @@ Four guardrails against the most common LLM coding failures (source: Andrej Karp
 - "Refactor X" → "Ensure tests pass before and after"
 - Multi-step plans must have explicit verify conditions per step
 
-## Role & Responsibilities
+<!-- HARNESS:BEGIN -->
+## Harness
 
-Your role is to analyze user requirements, delegate tasks to appropriate sub-agents, and ensure cohesive delivery of features that meet specifications and architectural standards.
+Claude Code loads this file into every session, but it does not auto-load
+`AGENTS.md`. The bare `@` lines below import the always-required harness
+context (the "Must in all lanes" set from `docs/CONTEXT_RULES.md`) at
+context-load time. Never wrap them in backticks; that disables the import.
 
-## Workflows
+@AGENTS.md
 
-- Primary workflow: `./.claude/rules/primary-workflow.md`
-- Development rules: `./.claude/rules/development-rules.md`
-- Orchestration protocols: `./.claude/rules/orchestration-protocol.md`
-- Documentation management: `./.claude/rules/documentation-management.md`
-- And other workflows: `./.claude/rules/*`
+@docs/FEATURE_INTAKE.md
 
-**IMPORTANT:** Analyze the skills catalog and activate the skills that are needed for the task during the process.
-**IMPORTANT:** DO NOT modify skills in `~/.claude/skills` directory directly. **MUST** modify skills in this current working directory. Unless you are asked to do so.
-**IMPORTANT:** You must follow strictly the development rules in `./.claude/rules/development-rules.md` file.
-**IMPORTANT:** Before you plan or proceed any implementation, always read the `./README.md` file first to get context.
-**IMPORTANT:** Sacrifice grammar for the sake of concision when writing reports.
-**IMPORTANT:** In reports, list any unresolved questions at the end, if any.
+Also run `scripts/bin/harness-cli query matrix` before starting work.
 
-## Git
-
-**DO NOT** use `chore` and `docs` in commit messages of file changes in `.claude` directory.
-
-## Hook Response Protocol
-
-### Privacy Block Hook (`@@PRIVACY_PROMPT@@`)
-
-When a tool call is blocked by the privacy-block hook, the output contains a JSON marker between `@@PRIVACY_PROMPT_START@@` and `@@PRIVACY_PROMPT_END@@`. **You MUST use the `AskUserQuestion` tool** to get proper user approval.
-
-**Required Flow:**
-
-1. Parse the JSON from the hook output
-2. Use `AskUserQuestion` with the question data from the JSON
-3. Based on user's selection:
-   - **"Yes, approve access"** → Use `bash cat "filepath"` to read the file (bash is auto-approved)
-   - **"No, skip this file"** → Continue without accessing the file
-
-**Example AskUserQuestion call:**
-
-```json
-{
-  "questions": [
-    {
-      "question": "I need to read \".env\" which may contain sensitive data. Do you approve?",
-      "header": "File Access",
-      "options": [
-        {
-          "label": "Yes, approve access",
-          "description": "Allow reading .env this time"
-        },
-        {
-          "label": "No, skip this file",
-          "description": "Continue without accessing this file"
-        }
-      ],
-      "multiSelect": false
-    }
-  ]
-}
-```
-
-**IMPORTANT:** Always ask the user via `AskUserQuestion` first. Never try to work around the privacy block without explicit user approval.
-
-## Python Scripts (Skills)
-
-When running Python scripts from `.claude/skills/`, use the venv Python interpreter:
-
-- **Linux/macOS:** `.claude/skills/.venv/bin/python3 scripts/xxx.py`
-- **Windows:** `.claude\skills\.venv\Scripts\python.exe scripts\xxx.py`
-
-This ensures packages installed by `install.sh` (google-genai, pypdf, etc.) are available.
-
-**IMPORTANT:** When scripts of skills failed, don't stop, try to fix them directly.
-
-## [IMPORTANT] Consider Modularization
-
-- If a code file exceeds 200 lines of code, consider modularizing it
-- Check existing modules before creating new
-- Analyze logical separation boundaries (functions, classes, concerns)
-- Use kebab-case naming with long descriptive names, it's fine if the file name is long because this ensures file names are self-documenting for LLM tools (Grep, Glob, Search)
-- Write descriptive code comments
-- After modularization, continue with main task
-- When not to modularize: Markdown files, plain text files, bash scripts, configuration files, environment variables files, etc.
-
-## Documentation Management
-
-We keep all important docs in `./docs` folder and keep updating them, structure like below:
-
-```
-./docs
-├── project-overview-pdr.md
-├── code-standards.md
-├── codebase-summary.md
-├── design-guidelines.md
-├── deployment-guide.md
-├── system-architecture.md
-└── project-roadmap.md
-```
-
-**IMPORTANT:** _MUST READ_ and _MUST COMPLY_ all _INSTRUCTIONS_ in project `./CLAUDE.md`, especially _WORKFLOWS_ section is _CRITICALLY IMPORTANT_, this rule is _MANDATORY. NON-NEGOTIABLE. NO EXCEPTIONS. MUST REMEMBER AT ALL TIMES!!!_
-
-## Rust Edition: 2024
-
-## Seven Iron Rules (Strictly Enforced)
-
-1. NO panic-capable unwrapping — .unwrap(), .expect(), any panic shorthand BANNED in production code
-2. NO dead code — zero unused variables, parameters, imports. Zero warnings.
-3. NO incomplete implementations — todo!(), unimplemented!(), placeholder returns, empty arms BANNED
-4. Business logic must be verifiable — must pass cargo check, no speculative interfaces
-5. Validate with cargo check and cargo fix — not cargo run/build
-6. Explicit error handling — validate external inputs, never panic instead of error branch
-7. Minimize allocations — prefer &str over String, Cow over clone, Arc over deep copy
-
-## Pre-Push Formatting (MANDATORY)
-
-**Always run `cargo fmt --all` before `git push`.** CI enforces `cargo fmt --all -- --check` strictly — any drift fails the Lint job and blocks the PR.
-
-- Run `cargo fmt --all` to apply formatting (modifies files)
-- Verify with `cargo fmt --all -- --check` (exits non-zero on any diff)
-- Format-only commits use `style:` prefix (no behavior change → not `fix:`)
-
-## Upstream TLS Options
-
-### Per-host ALPN (`upstream_alpn`)
-
-`HostConfig::upstream_alpn` (default `H2H1`) controls the ALPN advertisement
-in the upstream TLS ClientHello. Canonical DB/API strings:
-
-| Value | Meaning |
-|-------|---------|
-| `"h2h1"` | Advertise h2 + http/1.1 (default — negotiates best) |
-| `"h1_only"` | Advertise only http/1.1 — for legacy origins that reject h2 |
-| `"h2_only"` | Advertise only h2 — for gRPC / strict h2 backends |
-
-No-op when `ssl: false`. Parsed from DB via `UpstreamAlpn::from_db_str()`
-(logs `WARN` on unrecognised values, falls back to `H2H1`).
-
-### Per-host TLS verification skip (`upstream_skip_ssl_verify`)
-
-`HostConfig::upstream_skip_ssl_verify` (default `false`) controls whether
-Pingora verifies the upstream certificate chain and hostname. When `true`,
-both checks are disabled via the vendored `NoVerifyServerCertVerifier` in
-`vendor/pingora/pingora-core/src/connectors/tls/rustls/mod.rs`.
-
-⚠️ **Security note**: Enabling this makes the upstream connection vulnerable
-to MITM. Use only for self-signed origins in controlled test environments,
-or when the system CA store is unavailable in slim Docker images. Every
-request with this enabled emits a `WARN` log including the host name for
-audit purposes.
-
-No-op when `ssl: false`.
-
-## Docker
-
-```bash
-podman-compose down && podman-compose up -d --build
-# Uses Dockerfile.prebuilt (local binary, fast)
-# Ports: 16880 (HTTP), 16843 (HTTPS), 16827 (API/Admin UI)
-# Admin UI: http://localhost:16827/ui/  (admin / admin123)
-```
-
-## Rust Safety Rules (Non-Negotiable)
-
-### NO .unwrap() in Production Code
-
-- BANNED: `.unwrap()` outside `#[cfg(test)]`
-- Use: `?`, `.unwrap_or_default()`, `.unwrap_or(val)`, `if let`, `.expect("BUG: reason")`
-- `.expect()` only for compile-time constants
-
-### Error Handling
-
-- `?` with `.context("msg")` for anyhow propagation
-- Never silently swallow errors — log before `.ok()`
-- `tracing::warn!()` when intentionally discarding errors
-
-### Mutex
-
-- Sync: `parking_lot::Mutex` (no poison, no unwrap)
-- Async: `tokio::sync::Mutex` (.lock().await)
-- BANNED: `std::sync::Mutex` in production
+Lane-dependent context (`README.md`, `docs/HARNESS.md`, `docs/ARCHITECTURE.md`,
+`docs/CONTEXT_RULES.md`, product docs, stories, decisions) is intentionally not
+imported — read it per lane, as `docs/CONTEXT_RULES.md` prescribes.
+<!-- HARNESS:END -->

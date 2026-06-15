@@ -35,3 +35,15 @@ AGENTS.md
 /context.md
 /TODO.md
 /rules.md
+
+# Harness durable layer
+harness.db
+harness.db-wal
+harness.db-shm
+scripts/bin/harness-cli
+scripts/bin/harness-cli.exe
+
+# Generated dumps / scratch artifacts — never committed
+repomix-output.xml
+.harness-backup/
+gaps.md
