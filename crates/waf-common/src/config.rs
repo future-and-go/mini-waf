@@ -1060,21 +1060,35 @@ impl Default for InteropConfig {
     }
 }
 
-/// Load configuration from a TOML file.
+/// Load configuration from a TOML or YAML file.
 ///
-/// After parsing the TOML, environment variables can override individual
-/// fields so docker-compose / kubernetes can flip backends without rewriting
-/// the mounted config. Currently supported overrides:
+/// The format is chosen by file extension: `.yaml` / `.yml` parse as YAML,
+/// everything else parses as TOML. Both deserialize into the same `AppConfig`
+/// via serde, so the two forms produce an identical effective config.
+///
+/// After parsing, environment variables can override individual fields so
+/// docker-compose / kubernetes can flip backends without rewriting the mounted
+/// config. Currently supported overrides:
 ///
 /// | Env var          | Field             | Accepted values                              |
 /// |------------------|-------------------|----------------------------------------------|
 /// | `CACHE_BACKEND`  | `cache.backend`   | `memory` · `embedded` · `standalone` · `cluster` |
 pub fn load_config(path: &str) -> anyhow::Result<AppConfig> {
     let content = std::fs::read_to_string(path)?;
-    let mut config: AppConfig = toml::from_str(&content)?;
+    let mut config: AppConfig = if is_yaml_path(path) {
+        serde_yaml::from_str(&content)?
+    } else {
+        toml::from_str(&content)?
+    };
     apply_env_overrides(&mut config)?;
     config.api.tls.validate()?;
     Ok(config)
+}
+
+/// True when the path names a YAML file (`.yaml` / `.yml`, case-insensitive).
+fn is_yaml_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".yaml") || lower.ends_with(".yml")
 }
 
 fn apply_env_overrides(config: &mut AppConfig) -> anyhow::Result<()> {

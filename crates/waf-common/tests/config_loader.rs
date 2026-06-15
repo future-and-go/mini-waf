@@ -53,6 +53,54 @@ fn load_config_missing_file_errors() {
 }
 
 #[test]
+fn load_minimal_valid_yaml() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let mut f = tempfile::Builder::new().suffix(".yaml").tempfile().unwrap();
+    write!(
+        f,
+        "proxy:\n  listen_addr: \"0.0.0.0:80\"\n  listen_addr_tls: \"0.0.0.0:443\"\napi:\n  listen_addr: \"127.0.0.1:9527\"\nstorage:\n  database_url: \"postgresql://u:p@127.0.0.1/db\"\n  max_connections: 7\n"
+    )
+    .unwrap();
+    let cfg = load_config(f.path().to_str().unwrap()).expect("yaml must load");
+    assert_eq!(cfg.storage.max_connections, 7);
+}
+
+#[test]
+fn yaml_and_toml_load_to_same_effective_config() {
+    let _g = ENV_LOCK.lock().unwrap();
+
+    let mut toml_f = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    writeln!(
+        toml_f,
+        r#"
+[proxy]
+listen_addr = "0.0.0.0:8080"
+listen_addr_tls = "0.0.0.0:8443"
+[api]
+listen_addr = "127.0.0.1:9527"
+[storage]
+database_url = "postgresql://u:p@127.0.0.1/db"
+max_connections = 9
+"#
+    )
+    .unwrap();
+
+    let mut yaml_f = tempfile::Builder::new().suffix(".yaml").tempfile().unwrap();
+    write!(
+        yaml_f,
+        "proxy:\n  listen_addr: \"0.0.0.0:8080\"\n  listen_addr_tls: \"0.0.0.0:8443\"\napi:\n  listen_addr: \"127.0.0.1:9527\"\nstorage:\n  database_url: \"postgresql://u:p@127.0.0.1/db\"\n  max_connections: 9\n"
+    )
+    .unwrap();
+
+    let from_toml = load_config(toml_f.path().to_str().unwrap()).expect("toml load");
+    let from_yaml = load_config(yaml_f.path().to_str().unwrap()).expect("yaml load");
+
+    assert_eq!(from_toml.storage.max_connections, from_yaml.storage.max_connections);
+    assert_eq!(from_toml.proxy.listen_addr, from_yaml.proxy.listen_addr);
+    assert_eq!(from_toml.proxy.listen_addr_tls, from_yaml.proxy.listen_addr_tls);
+}
+
+#[test]
 fn load_config_bad_toml_errors() {
     let mut f = NamedTempFile::new().unwrap();
     writeln!(f, "this is = not valid toml = at all").unwrap();

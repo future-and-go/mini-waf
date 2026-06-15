@@ -23,9 +23,10 @@ use waf_storage::Database;
 #[derive(Parser, Debug)]
 #[command(name = "prx-waf", version, about)]
 struct Cli {
-    /// Path to configuration file
-    #[arg(short, long, default_value = "configs/default.toml")]
-    config: String,
+    /// Path to configuration file. When omitted, `./waf.yaml` or `./waf.toml`
+    /// in the working directory is used (required for `run`).
+    #[arg(short, long)]
+    config: Option<String>,
 
     #[command(subcommand)]
     command: Commands,
@@ -308,10 +309,22 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     info!("F&G WAF v{}", env!("CARGO_PKG_VERSION"));
 
-    let config = load_config(&cli.config).unwrap_or_else(|e| {
-        tracing::warn!("Failed to load config from {}: {}. Using defaults.", cli.config, e);
-        AppConfig::default()
-    });
+    // The startup contract launches via `./waf run` and reads `./waf.yaml` or
+    // `./waf.toml` from the working directory; absence is a hard startup error
+    // so the benchmarker never waits on a WAF that silently booted on defaults.
+    // Other subcommands keep the lenient repo-default fallback.
+    let is_run = matches!(cli.command, Commands::Run);
+    let config_path = resolve_config_path(cli.config.as_deref(), is_run)?;
+    let config = match load_config(&config_path) {
+        Ok(c) => c,
+        Err(e) if is_run => {
+            return Err(e).context(format!("failed to load WAF config from {config_path}"));
+        }
+        Err(e) => {
+            warn!("Failed to load config from {config_path}: {e}. Using defaults.");
+            AppConfig::default()
+        }
+    };
 
     match cli.command {
         Commands::Migrate => {
@@ -335,7 +348,7 @@ fn main() -> anyhow::Result<()> {
                     .map_err(|e| anyhow::anyhow!("failed to reload filter: {e}"))?;
                 Ok(())
             });
-            run_server(&config, &cli.config, Some(log_level_setter))?;
+            run_server(&config, &config_path, Some(log_level_setter))?;
         }
         Commands::Crowdsec(sub) => {
             tokio::runtime::Builder::new_current_thread()
@@ -1177,6 +1190,27 @@ fn app_config_to_crowdsec(config: &AppConfig) -> CrowdSecConfig {
         appsec,
         pusher,
     }
+}
+
+/// Resolve which config file to load. An explicit `--config` always wins.
+/// Otherwise the startup contract looks for `./waf.yaml` / `./waf.toml` in the
+/// working directory. `require_cwd` (set for `run`) makes their absence a hard
+/// error; other subcommands fall back to the repo `configs/default.toml`.
+fn resolve_config_path(explicit: Option<&str>, require_cwd: bool) -> anyhow::Result<String> {
+    if let Some(path) = explicit {
+        return Ok(path.to_string());
+    }
+    for candidate in ["waf.yaml", "waf.yml", "waf.toml"] {
+        if std::path::Path::new(candidate).exists() {
+            return Ok(candidate.to_string());
+        }
+    }
+    if require_cwd {
+        anyhow::bail!(
+            "no config file found: expected ./waf.yaml or ./waf.toml in the working directory (or pass --config <path>)"
+        );
+    }
+    Ok("configs/default.toml".to_string())
 }
 
 /// Start the full server: async init → API server thread → Pingora proxy
