@@ -5,10 +5,10 @@
 #        cargo build --release
 #
 #   2. Generate cluster certificates (one-time setup):
-#        podman-compose -f docker-compose.cluster.yml run --rm cluster-init
+#        docker compose -f docker-compose.cluster.yml run --rm cluster-init
 #
 #   3. Start the cluster:
-#        podman-compose -f docker-compose.cluster.yml up -d
+#        docker compose -f docker-compose.cluster.yml up -d
 #
 #   4. Verify all nodes are healthy:
 #        tests/e2e-cluster.sh
@@ -44,7 +44,7 @@ services:
   # mounted read-only into each node container.
   #
   # Run manually before starting the cluster:
-  #   podman-compose -f docker-compose.cluster.yml run --rm cluster-init
+  #   docker compose -f docker-compose.cluster.yml run --rm cluster-init
   cluster-init:
     build:
       context: .

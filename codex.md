@@ -21,7 +21,7 @@ cargo build --release
 
 ## Docker
 ```bash
-podman-compose down && podman-compose up -d --build
+docker compose down && docker compose up -d --build
 ```
 
 ## More Rules
