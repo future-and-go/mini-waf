@@ -105,14 +105,21 @@ impl AuditSender {
 /// `AuditSender::send` so unit tests can verify the payload schema without
 /// needing a live `BatchSender`.
 fn build_vl_payload(event: AuditEvent) -> serde_json::Value {
-    let path = if event.path.len() > PATH_TRUNCATE_AT {
+    // Contract §6: the `path` field is the request path *including* the query
+    // string. The standalone `query` field is kept as an extra for FE filters.
+    let full_path = if event.query.is_empty() {
+        event.path
+    } else {
+        format!("{}?{}", event.path, event.query)
+    };
+    let path = if full_path.len() > PATH_TRUNCATE_AT {
         let mut end = PATH_TRUNCATE_AT;
-        while end > 0 && !event.path.is_char_boundary(end) {
+        while end > 0 && !full_path.is_char_boundary(end) {
             end -= 1;
         }
-        format!("{}…", &event.path[..end])
+        format!("{}…", &full_path[..end])
     } else {
-        event.path
+        full_path
     };
 
     json!({
@@ -140,6 +147,7 @@ fn build_vl_payload(event: AuditEvent) -> serde_json::Value {
         // Contract §6 fields
         "ts_ms": event.timestamp.timestamp_millis(),
         "request_id": event.req_id,
+        "ip": event.client_ip,
         "action": event.contract_action,
         "risk_score": event.risk_score,
         "mode": event.mode.as_contract_str(),
@@ -244,6 +252,34 @@ mod tests {
         event2.query = String::new();
         let payload2 = build_vl_payload(event2);
         assert_eq!(payload2["query"], "");
+    }
+
+    #[test]
+    fn vl_payload_has_contract_ip_field() {
+        let event = make_test_event();
+        let payload = build_vl_payload(event);
+        // Contract §6 requires a field named `ip` (TCP peer address).
+        assert_eq!(payload["ip"], "1.2.3.4");
+        // `client_ip` retained as an extra field for the admin-panel FE.
+        assert_eq!(payload["client_ip"], "1.2.3.4");
+    }
+
+    #[test]
+    fn vl_payload_path_includes_query_string() {
+        // Contract §6: `path` = request path including query string.
+        let event = make_test_event();
+        let payload = build_vl_payload(event);
+        assert_eq!(payload["path"], "/api/users?id=1&sort=name");
+        // Standalone `query` extra field still present.
+        assert_eq!(payload["query"], "id=1&sort=name");
+    }
+
+    #[test]
+    fn vl_payload_path_without_query_has_no_separator() {
+        let mut event = make_test_event();
+        event.query = String::new();
+        let payload = build_vl_payload(event);
+        assert_eq!(payload["path"], "/api/users");
     }
 
     #[test]
