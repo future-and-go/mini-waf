@@ -53,6 +53,7 @@ mod tests {
         let ctx = RequestCtx {
             req_id: "t".into(),
             client_ip: client,
+            peer_ip: client,
             client_port: 0,
             method: "GET".into(),
             host: "h".into(),

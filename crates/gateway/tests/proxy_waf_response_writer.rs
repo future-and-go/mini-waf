@@ -37,6 +37,7 @@ fn make_request_ctx() -> RequestCtx {
     RequestCtx {
         req_id: "req-1".into(),
         client_ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        peer_ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
         client_port: 1234,
         method: "GET".into(),
         host: "example.com".into(),

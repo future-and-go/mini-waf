@@ -34,6 +34,7 @@ mod tests {
         let ctx = RequestCtx {
             req_id: "t".into(),
             client_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            peer_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
             client_port: 0,
             method: "GET".into(),
             host: "h".into(),

@@ -491,6 +491,7 @@ mod tests {
         let mut ctx = RequestCtx {
             req_id: "test".to_string(),
             client_ip: "9.9.9.9".parse().expect("ip"),
+            peer_ip: "9.9.9.9".parse().expect("ip"),
             client_port: 0,
             method: "GET".to_string(),
             host: "example.com".to_string(),

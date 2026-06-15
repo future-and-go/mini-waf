@@ -115,6 +115,7 @@ tx_velocity:
         cookies.insert(cookie_name.to_string(), cookie_val.to_string());
         RequestCtx {
             client_ip: std::net::IpAddr::from([10, 0, 0, 1]),
+            peer_ip: std::net::IpAddr::from([10, 0, 0, 1]),
             method: "POST".to_string(),
             host: "api.example.com".to_string(),
             port: 443,

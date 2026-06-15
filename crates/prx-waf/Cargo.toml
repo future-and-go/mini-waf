@@ -26,11 +26,6 @@ uuid = { workspace = true }
 regex = { workspace = true }
 ipnet = { workspace = true }
 
-# VictoriaLogs sidecar installer (Phase 1.2): download + SHA-256 verify
-reqwest = { workspace = true }
-sha2 = { workspace = true }
-hex = { workspace = true }
-
 pingora-core = { workspace = true }
 pingora-proxy = { workspace = true }
 
@@ -39,12 +34,6 @@ pingora-proxy = { workspace = true }
 # because both `ring` and `aws-lc-rs` are linked via transitive deps and
 # rustls 0.23+ refuses to auto-pick a CryptoProvider in that case.
 rustls = { workspace = true }
-
-[dev-dependencies]
-tempfile = "3"
-wiremock = "0.6"
-flate2 = "1"
-tar = "0.4"
 
 [lints]
 workspace = true

@@ -157,6 +157,7 @@ mod tests {
         RequestCtx {
             req_id: "t".to_string(),
             client_ip: "1.2.3.4".parse().expect("ip"),
+            peer_ip: "1.2.3.4".parse().expect("ip"),
             client_port: 0,
             method: "GET".to_string(),
             host: "example.com".to_string(),

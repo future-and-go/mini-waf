@@ -190,6 +190,7 @@ fn classify_ctx(registry: &TierPolicyRegistry, host: &str, path: &str, method: &
 
     let ctx = build_from_parts(
         IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
+        IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
         12345,
         method.to_string(),
         path.to_string(),

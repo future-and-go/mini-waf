@@ -602,6 +602,7 @@ impl ProxyHttp for WafProxy {
                 session.req_header().method.as_str(),
                 session.req_header().uri.path_and_query().map_or("/", |pq| pq.as_str()),
                 &peer_ip,
+                "circuit_breaker",
                 "fail-closed: missing request context",
             );
             inject_for_pre_inspect_or_error(&mut headers, ctx, "circuit_breaker", &fallback_req_id)?;
@@ -1164,6 +1165,7 @@ impl ProxyHttp for WafProxy {
                             session.req_header().method.as_str(),
                             session.req_header().uri.path_and_query().map_or("/", |pq| pq.as_str()),
                             &peer_ip,
+                            action,
                             "fail_to_proxy: transport error (ctx-None)",
                         );
                         id

@@ -572,6 +572,7 @@ mod tests {
         RequestCtx {
             req_id: "test".into(),
             client_ip: "1.2.3.4".parse().unwrap(),
+            peer_ip: "1.2.3.4".parse().unwrap(),
             client_port: 0,
             method: method.into(),
             host: "example.com".into(),
@@ -606,6 +607,7 @@ mod tests {
         RequestCtx {
             req_id: "test".into(),
             client_ip: "1.2.3.4".parse().unwrap(),
+            peer_ip: "1.2.3.4".parse().unwrap(),
             client_port: 0,
             method: "GET".into(),
             host: "example.com".into(),

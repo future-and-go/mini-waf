@@ -1330,6 +1330,7 @@ mod tests {
         RequestCtx {
             req_id: "test".into(),
             client_ip: ip.parse().unwrap(),
+            peer_ip: ip.parse().unwrap(),
             client_port: 12345,
             method: method.into(),
             host: "example.com".into(),

@@ -84,6 +84,11 @@ impl FpKey {
 pub struct RequestCtx {
     pub req_id: String,
     pub client_ip: IpAddr,
+    /// Raw TCP peer address, independent of `trust_proxy_headers`. Unlike
+    /// `client_ip` (which becomes the `X-Forwarded-For` value under proxy
+    /// trust), this always reflects the immediate transport peer. Used for the
+    /// contract §6 audit `ip` field so it stays peer-pure regardless of config.
+    pub peer_ip: IpAddr,
     pub client_port: u16,
     pub method: String,
     pub host: String,
@@ -155,6 +160,7 @@ impl Default for RequestCtx {
         Self {
             req_id: String::new(),
             client_ip: IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+            peer_ip: IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
             client_port: 0,
             method: String::new(),
             host: String::new(),

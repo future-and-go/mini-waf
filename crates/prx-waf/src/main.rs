@@ -1,7 +1,5 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
-mod victoria_logs;
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -14,7 +12,7 @@ use gateway::{HostRouter, TunnelConfig, WafProxy};
 use pingora_core::listeners::tls::TlsSettings;
 use waf_api::{AppState, LogLevelSetter, start_api_server};
 use waf_common::config::{AppConfig, load_config};
-use waf_engine::logging::{AuditSender, BatchConfig, LayerSlot, VictoriaLogsLayer, spawn_batch_flusher};
+use waf_engine::logging::{AuditFileSink, AuditSender};
 use waf_engine::{
     CrowdSecClient, CrowdSecConfig, ExportFormat, GeoIpService, RuleManager, WafEngine, WafEngineConfig, XdbUpdater,
     cache_policy_from_str, init_community, init_crowdsec, spawn_auto_updater,
@@ -298,13 +296,6 @@ fn main() -> anyhow::Result<()> {
         Err(_) => eprintln!("rustls: another CryptoProvider was already installed (ignored)"),
     }
 
-    // The VictoriaLogs tracing layer needs a `BatchSender` that can only be
-    // built once the Tokio runtime is up.  We register the layer here with
-    // an empty slot; `init_async` plugs the real sender in afterwards. Until
-    // then the layer is inert (events drop on the floor), so CLI commands
-    // that don't go through `run_server` are unaffected.
-    let (vlogs_layer, vlogs_layer_slot) = VictoriaLogsLayer::new();
-
     let env_filter =
         EnvFilter::from_default_env().add_directive(tracing_subscriber::filter::Directive::from(tracing::Level::INFO));
     let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
@@ -312,7 +303,6 @@ fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
         .with(filter_layer)
         .with(fmt::layer())
-        .with(vlogs_layer)
         .init();
 
     let cli = Cli::parse();
@@ -345,7 +335,7 @@ fn main() -> anyhow::Result<()> {
                     .map_err(|e| anyhow::anyhow!("failed to reload filter: {e}"))?;
                 Ok(())
             });
-            run_server(&config, &cli.config, vlogs_layer_slot, Some(log_level_setter))?;
+            run_server(&config, &cli.config, Some(log_level_setter))?;
         }
         Commands::Crowdsec(sub) => {
             tokio::runtime::Builder::new_current_thread()
@@ -1193,7 +1183,6 @@ fn app_config_to_crowdsec(config: &AppConfig) -> CrowdSecConfig {
 fn run_server(
     config: &AppConfig,
     config_file_path: &str,
-    vlogs_layer_slot: LayerSlot,
     log_level_setter: Option<LogLevelSetter>,
 ) -> anyhow::Result<()> {
     use pingora_core::server::Server;
@@ -1225,17 +1214,11 @@ fn run_server(
     // `_shutdown_guards` holds the watch senders that signal background workers
     // to stop.  They are dropped automatically when `run_server` returns (after
     // `server.run_forever()` exits), which sends the shutdown signal.
-    //
-    // `vlogs_sidecar` is `Some` when `[victoria_logs] enabled = true`. It is
-    // shut down explicitly after the proxy stops so the child gets SIGTERM
-    // (with a 5 s grace period) while the runtime is still alive — Drop alone
-    // can only fire SIGKILL.
-    let (engine, router, api_state, _shutdown_guards, vlogs_sidecar) = rt.block_on(init_async(
+    let (engine, router, api_state, _shutdown_guards) = rt.block_on(init_async(
         config,
         config_file_path,
         cluster_state_for_api,
         panel_config_path,
-        vlogs_layer_slot,
         log_level_setter,
     ))?;
 
@@ -1458,19 +1441,6 @@ fn run_server(
     info!("Management API listening on {}", config.api.listen_addr);
     info!("Press Ctrl+C to stop");
 
-    // The VictoriaLogs supervisor listens for SIGTERM/SIGINT on its own and
-    // performs graceful shutdown directly. Pingora's `run_forever` returns
-    // `!` (calls `std::process::exit(0)`), so any cleanup we'd write here
-    // would be unreachable. Hand the handle to a `Box::leak` so the
-    // supervisor task can react to signals for the duration of the
-    // process; pingora's exit terminates everything in lock-step at the
-    // end. Using leak (rather than a `_` binding) sidesteps the
-    // `no_effect_underscore_binding` clippy lint since the side effect is
-    // intentional.
-    if let Some(sidecar) = vlogs_sidecar {
-        Box::leak(Box::new(sidecar));
-    }
-
     server.run_forever();
 }
 
@@ -1533,29 +1503,14 @@ fn resolve_panel_config_path(main_config_file: &str, configured: Option<&str>) -
     })
 }
 
-/// Async initialization: database, engine, rules, Phases 5 & 6
+/// Async initialization: database, engine, rules
 async fn init_async(
     config: &AppConfig,
     config_file_path: &str,
     cluster_state: Option<Arc<waf_cluster::NodeState>>,
     panel_config_path: Option<std::path::PathBuf>,
-    vlogs_layer_slot: LayerSlot,
     log_level_setter: Option<LogLevelSetter>,
-) -> anyhow::Result<(
-    Arc<WafEngine>,
-    Arc<HostRouter>,
-    Arc<AppState>,
-    ShutdownGuards,
-    Option<victoria_logs::VictoriaLogsSidecar>,
-)> {
-    // ── VictoriaLogs sidecar (Phase 1) ───────────────────────────────────────
-    // Install the binary (no-op when disabled or already present) and spawn
-    // the child *before* anything else so log forwarding is in place by the
-    // time the rest of init starts emitting `tracing` events. A spawn failure
-    // is fail-fast: if the operator opted into VictoriaLogs we refuse to
-    // start without it rather than silently degrade.
-    victoria_logs::ensure_binary(&config.victoria_logs).await?;
-    let vlogs_sidecar = victoria_logs::VictoriaLogsSidecar::spawn(&config.victoria_logs).await?;
+) -> anyhow::Result<(Arc<WafEngine>, Arc<HostRouter>, Arc<AppState>, ShutdownGuards)> {
 
     info!("Connecting to database...");
     let db = Arc::new(Database::connect(&config.storage.database_url, config.storage.max_connections).await?);
@@ -1596,39 +1551,12 @@ async fn init_async(
         engine.start_rate_limit_watcher(std::path::Path::new(rl_path));
     }
 
-    // ── Phase 02: VictoriaLogs logging pipeline ──────────────────────────────
-    // Two independent batch flushers (tracing + audit) sharing the same
-    // ingest URL. The tracing slot is filled lazily here; the audit sender
-    // is plugged into the engine. Both are no-ops when VictoriaLogs is
-    // disabled, keeping the feature opt-in and zero-cost.
-    if config.victoria_logs.enabled {
-        let ingest_url = config.victoria_logs.ingest_url();
-
-        let tracing_sender = spawn_batch_flusher(BatchConfig::for_tracing(
-            ingest_url.clone(),
-            config.victoria_logs.batch_size,
-            config.victoria_logs.flush_interval_ms,
-            config.victoria_logs.channel_capacity,
-        ));
-        // The tracing layer was registered at process start with an empty
-        // slot; this fills it.  Subsequent `tracing::*!` calls (anywhere
-        // in the workspace) flow into VictoriaLogs from now on.
-        if vlogs_layer_slot.set(tracing_sender).is_err() {
-            tracing::warn!("VictoriaLogs tracing slot already filled — ignoring duplicate init");
-        }
-
-        let audit_sender = spawn_batch_flusher(BatchConfig::for_audit(
-            ingest_url,
-            config.victoria_logs.batch_size,
-            config.victoria_logs.flush_interval_ms,
-            config.victoria_logs.channel_capacity,
-        ));
-        engine.set_audit_sender(Arc::new(AuditSender::new(audit_sender)));
-
-        info!("VictoriaLogs logging pipeline active");
-    } else {
-        // Drop the slot so nothing holds the unused `Arc` longer than needed.
-        drop(vlogs_layer_slot);
+    // ── Audit log file sink (interop §6/§8/§10) ──────────────────────────────
+    // The JSONL audit file is the sole audit sink. Created lazily on the first
+    // processed request; append-only; off the request hot path.
+    engine.set_audit_sender(Arc::new(AuditSender::new(AuditFileSink::spawn(&config.audit))));
+    if config.audit.enabled {
+        info!("Audit log file sink active: {}", config.audit.log_path);
     }
 
     // GeoIP service
@@ -1792,13 +1720,6 @@ async fn init_async(
     api_state.panel_config_path = panel_config_path;
     api_state.main_config_file = Some(config_file_path.to_string());
 
-    // Phase 03: expose the VictoriaLogs base URL to the API layer so the
-    // logs proxy endpoints know where to forward.  Stays `None` when the
-    // sidecar is disabled; the handlers then return 503 with a clear message.
-    if config.victoria_logs.enabled {
-        api_state.victoria_logs_base_url = Some(config.victoria_logs.base_url());
-    }
-
     api_state.log_level_setter = log_level_setter;
     api_state.interop_config = config.interop.clone();
 
@@ -1935,5 +1856,5 @@ async fn init_async(
         _embedded_valkey: embedded_supervisor,
     };
 
-    Ok((engine, router, Arc::new(api_state), guards, vlogs_sidecar))
+    Ok((engine, router, Arc::new(api_state), guards))
 }

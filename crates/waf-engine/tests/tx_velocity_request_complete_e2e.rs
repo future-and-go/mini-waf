@@ -55,6 +55,7 @@ fn build_request_ctx(path: &str, cookie_name: &str, cookie_val: &str) -> Request
     RequestCtx {
         req_id: "r".to_string(),
         client_ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+        peer_ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
         method: "POST".to_string(),
         host: "bank.example.com".to_string(),
         port: 443,

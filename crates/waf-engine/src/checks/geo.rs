@@ -179,6 +179,7 @@ mod tests {
         RequestCtx {
             req_id: "test".into(),
             client_ip: "1.2.3.4".parse::<IpAddr>().unwrap(),
+            peer_ip: "1.2.3.4".parse::<IpAddr>().unwrap(),
             client_port: 12345,
             method: "GET".into(),
             host: "example.com".into(),
@@ -241,6 +242,7 @@ mod tests {
         let mut ctx = RequestCtx {
             req_id: "t".into(),
             client_ip: "127.0.0.1".parse().unwrap(),
+            peer_ip: "127.0.0.1".parse().unwrap(),
             client_port: 80,
             method: "GET".into(),
             host: "localhost".into(),

@@ -92,6 +92,7 @@ impl CtxBuilder {
         RequestCtx {
             req_id: "ac".into(),
             client_ip: self.ip.parse().unwrap(),
+            peer_ip: self.ip.parse().unwrap(),
             client_port: 12345,
             method: self.method,
             host: "example.com".into(),

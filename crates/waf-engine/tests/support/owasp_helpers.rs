@@ -21,6 +21,7 @@ pub fn make_ctx() -> RequestCtx {
     RequestCtx {
         req_id: "t".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
+        peer_ip: "1.2.3.4".parse().unwrap(),
         client_port: 0,
         method: "GET".into(),
         host: "example.com".into(),
@@ -54,6 +55,7 @@ pub fn make_ctx_owasp_disabled() -> RequestCtx {
     RequestCtx {
         req_id: "t".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
+        peer_ip: "1.2.3.4".parse().unwrap(),
         client_port: 0,
         method: "GET".into(),
         host: "h".into(),

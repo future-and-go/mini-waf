@@ -163,6 +163,9 @@ mod tests {
             client_ip: "10.0.0.1"
                 .parse::<IpAddr>()
                 .unwrap_or_else(|_| IpAddr::from([0, 0, 0, 0])),
+            peer_ip: "10.0.0.1"
+                .parse::<IpAddr>()
+                .unwrap_or_else(|_| IpAddr::from([0, 0, 0, 0])),
             client_port: 0,
             method: "GET".to_string(),
             host: "h".to_string(),

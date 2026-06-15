@@ -375,6 +375,7 @@ mod phase6 {
         RequestCtx {
             req_id: req_id.into(),
             client_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            peer_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
             client_port: 1234,
             method: "GET".into(),
             host: "example.com".into(),
@@ -587,6 +588,7 @@ mod phase5 {
         RequestCtx {
             req_id: req_id.into(),
             client_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            peer_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
             client_port: 1234,
             method: "GET".into(),
             host: "example.com".into(),
@@ -890,6 +892,7 @@ mod phase7 {
         let request_ctx = RequestCtx {
             req_id: req_id.into(),
             client_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            peer_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
             client_port: 1234,
             method: "GET".into(),
             host: "example.com".into(),
@@ -963,6 +966,7 @@ mod phase7 {
         let ctx = RequestCtx {
             req_id: "rs-test".into(),
             client_ip: IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)),
+            peer_ip: IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)),
             client_port: 9000,
             method: "GET".into(),
             host: "example.com".into(),

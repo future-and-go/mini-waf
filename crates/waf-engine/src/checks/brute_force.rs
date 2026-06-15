@@ -196,6 +196,7 @@ mod tests {
         RequestCtx {
             req_id: "test".to_string(),
             client_ip: ip.parse::<IpAddr>().unwrap(),
+            peer_ip: ip.parse::<IpAddr>().unwrap(),
             client_port: 0,
             method: "POST".to_string(),
             host: "example.com".to_string(),

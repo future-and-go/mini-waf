@@ -101,6 +101,7 @@ fn ctx_with_query(query: &str) -> RequestCtx {
     RequestCtx {
         req_id: "owasp-eq".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
+        peer_ip: "1.2.3.4".parse().unwrap(),
         client_port: 12345,
         method: "GET".into(),
         host: "example.com".into(),
@@ -128,6 +129,7 @@ fn ctx_with_body(body: &str) -> RequestCtx {
     RequestCtx {
         req_id: "owasp-eq".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
+        peer_ip: "1.2.3.4".parse().unwrap(),
         client_port: 12345,
         method: "POST".into(),
         host: "example.com".into(),
@@ -155,6 +157,7 @@ fn ctx_with_host_header(host: &str) -> RequestCtx {
     RequestCtx {
         req_id: "owasp-eq".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
+        peer_ip: "1.2.3.4".parse().unwrap(),
         client_port: 12345,
         method: "GET".into(),
         host: host.into(),
@@ -338,6 +341,7 @@ fn clean_request_without_query_not_blocked() {
     let ctx = RequestCtx {
         req_id: "owasp-eq".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
+        peer_ip: "1.2.3.4".parse().unwrap(),
         client_port: 12345,
         method: "GET".into(),
         host: "example.com".into(),

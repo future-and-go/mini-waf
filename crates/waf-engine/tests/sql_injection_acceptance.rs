@@ -42,6 +42,7 @@ fn make_ctx(query: &str, body: &str, headers: HashMap<String, String>) -> Reques
     RequestCtx {
         req_id: "test".to_string(),
         client_ip: "127.0.0.1".parse::<IpAddr>().unwrap(),
+        peer_ip: "127.0.0.1".parse::<IpAddr>().unwrap(),
         client_port: 12345,
         method: "GET".to_string(),
         host: "example.com".to_string(),

@@ -10,7 +10,6 @@ use waf_common::config::{
     ClusterHealthConfig, ClusterSyncConfig, CommunityConfig, CrowdSecConfig, EmbeddedValkeyConfig,
     GeoIpAutoUpdateConfig, GeoIpConfig, HeaderFilterConfig, Http3Config, NodeRole, ProxyConfig, RateLimitFileRef,
     RuleSourceEntry, RulesConfig, SecurityConfig, SqliScanConfig, StorageConfig, ValkeyClientConfig,
-    VictoriaLogsConfig,
 };
 
 #[test]
@@ -194,16 +193,7 @@ fn cluster_subconfig_defaults() {
 }
 
 #[test]
-fn vlogs_and_app_defaults() {
-    let v = VictoriaLogsConfig::default();
-    assert!(!v.enabled);
-    assert_eq!(v.listen_addr, "127.0.0.1:9428");
-    assert_eq!(v.retention_period, "30d");
-    assert!(v.auto_install);
-    assert_eq!(v.batch_size, 100);
-    assert_eq!(v.flush_interval_ms, 1000);
-    assert_eq!(v.channel_capacity, 10_000);
-
+fn app_defaults() {
     let a = AppConfig::default();
     assert!(a.hosts.is_empty());
     assert!(a.cluster.is_none());

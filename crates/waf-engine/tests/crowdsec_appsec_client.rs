@@ -38,6 +38,7 @@ fn make_ctx(ip: &str, path: &str, body: &[u8]) -> RequestCtx {
     RequestCtx {
         req_id: "test-req".to_string(),
         client_ip: ip.parse().expect("ip"),
+        peer_ip: ip.parse().expect("ip"),
         client_port: 12345,
         method: "POST".to_string(),
         host: "example.com".to_string(),

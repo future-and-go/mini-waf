@@ -274,6 +274,7 @@ impl CtxBuilder {
         RequestCtx {
             req_id: format!("test-{}", uuid_lite()),
             client_ip: self.ip,
+            peer_ip: self.ip,
             client_port: 12345,
             method: self.method,
             host: "test.example.com".to_string(),

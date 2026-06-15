@@ -51,6 +51,7 @@ fn make_ctx(ip: &str, tier: Tier) -> RequestCtx {
     RequestCtx {
         req_id: format!("test-{ip}"),
         client_ip: ip.parse().expect("valid IP"),
+        peer_ip: ip.parse().expect("valid IP"),
         client_port: 12345,
         method: "GET".to_string(),
         host: "test.example.com".to_string(),

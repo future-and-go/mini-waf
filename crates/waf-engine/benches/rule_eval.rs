@@ -91,6 +91,7 @@ fn make_ctx(path: &str) -> RequestCtx {
     RequestCtx {
         req_id: "bench".into(),
         client_ip: "192.168.1.1".parse().unwrap(),
+        peer_ip: "192.168.1.1".parse().unwrap(),
         client_port: 12345,
         method: "GET".into(),
         host: "example.com".into(),

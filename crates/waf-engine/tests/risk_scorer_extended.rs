@@ -43,6 +43,7 @@ fn ctx_with(ip: IpAddr, headers: HashMap<String, String>) -> RequestCtx {
     RequestCtx {
         req_id: "x".to_string(),
         client_ip: ip,
+        peer_ip: ip,
         client_port: 0,
         method: "GET".to_string(),
         host: "h".to_string(),

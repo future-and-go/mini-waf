@@ -44,7 +44,6 @@ use crate::handlers::{
 };
 use crate::health::health_check;
 use crate::interop_control;
-use crate::logs::{logs_query, logs_stats, logs_streams};
 use crate::middleware::require_auth;
 use crate::notifications::{
     create_notification, delete_notification, list_notifications, notification_log, test_notification,
@@ -266,10 +265,6 @@ pub fn build_router(state: Arc<AppState>, tls_enabled: bool) -> Router {
         )
         .route("/api/crowdsec/stats", get(crowdsec_stats))
         .route("/api/crowdsec/events", get(list_crowdsec_events))
-        // Phase 02 (VictoriaLogs): admin-only LogsQL proxy.
-        .route("/api/v1/logs/query", get(logs_query))
-        .route("/api/v1/logs/stats", get(logs_stats))
-        .route("/api/v1/logs/streams", get(logs_streams))
         // Dynamic log level control
         .route("/api/admin/logs/level", post(set_log_level))
         // FR-002 Tier Policies

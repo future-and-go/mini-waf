@@ -142,6 +142,7 @@ impl SoakHarness {
         let mut ctx = RequestCtx {
             req_id: format!("soak-{}", self.request_count.fetch_add(1, Ordering::Relaxed)),
             client_ip: ip,
+            peer_ip: ip,
             client_port: 12345,
             method: "GET".to_string(),
             host: "soak.test.com".to_string(),

@@ -127,6 +127,7 @@ impl<'a> RequestCtxBuilder<'a> {
 
         build_from_parts(
             client_ip,
+            peer_addr.ip(),
             peer_addr.port(),
             self.session.req_header().method.to_string(),
             path_str,
@@ -165,6 +166,7 @@ fn host_for_classify(headers: &HashMap<String, String>, hc: &Arc<HostConfig>) ->
 #[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
 pub fn build_from_parts(
     client_ip: IpAddr,
+    peer_ip: IpAddr,
     client_port: u16,
     method: String,
     path: String,
@@ -184,6 +186,7 @@ pub fn build_from_parts(
     RequestCtx {
         req_id: Uuid::new_v4().to_string(),
         client_ip,
+        peer_ip,
         client_port,
         method,
         host: host_config.host.clone(),
@@ -276,6 +279,7 @@ mod tests {
         let hc = make_host_config("example.com", 443, true);
         let ctx = build_from_parts(
             IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
+            IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
             12345,
             "GET".into(),
             "/".into(),
@@ -298,6 +302,7 @@ mod tests {
         let hc = make_host_config("example.com", 80, false);
         let ctx = build_from_parts(
             IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
             54321,
             "POST".into(),
             "/api".into(),
@@ -319,6 +324,7 @@ mod tests {
     fn test_missing_host_header_uses_host_config() {
         let hc = make_host_config("fallback.example.com", 8080, false);
         let ctx = build_from_parts(
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
             IpAddr::V4(Ipv4Addr::UNSPECIFIED),
             0,
             "GET".into(),
@@ -343,6 +349,7 @@ mod tests {
         let hc = make_host_config("site.com", 80, false);
         let ctx = build_from_parts(
             ip,
+            ip,
             9999,
             "GET".into(),
             "/".into(),
@@ -364,6 +371,7 @@ mod tests {
         let ip = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
         let hc = make_host_config("v6site.com", 443, true);
         let ctx = build_from_parts(
+            ip,
             ip,
             1234,
             "GET".into(),
@@ -388,6 +396,7 @@ mod tests {
         // unconditionally without an Option.
         let hc = make_host_config("example.com", 80, false);
         let ctx = build_from_parts(
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
             IpAddr::V4(Ipv4Addr::UNSPECIFIED),
             0,
             "GET".into(),
@@ -485,6 +494,7 @@ mod tests {
         let hc2 = make_host_config("b.com", 80, false);
         let ctx1 = build_from_parts(
             IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
             0,
             "GET".into(),
             "/".into(),
@@ -498,6 +508,7 @@ mod tests {
             None,
         );
         let ctx2 = build_from_parts(
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
             IpAddr::V4(Ipv4Addr::UNSPECIFIED),
             0,
             "GET".into(),

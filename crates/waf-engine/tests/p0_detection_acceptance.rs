@@ -29,6 +29,7 @@ fn ctx(path: &str, method: &str, body: &[u8], ct: &str, headers: HashMap<String,
     RequestCtx {
         req_id: "p0-acc".to_string(),
         client_ip: "5.5.5.5".parse::<IpAddr>().unwrap(),
+        peer_ip: "5.5.5.5".parse::<IpAddr>().unwrap(),
         client_port: 0,
         method: method.to_string(),
         host: "example.com".to_string(),

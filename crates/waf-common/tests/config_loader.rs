@@ -16,7 +16,7 @@
 use std::io::Write;
 use std::sync::Mutex;
 use tempfile::NamedTempFile;
-use waf_common::config::{AppConfig, CacheBackendKind, VictoriaLogsConfig, load_config};
+use waf_common::config::{AppConfig, CacheBackendKind, load_config};
 
 // `cargo test` runs tests within a binary on multiple threads; env
 // mutation must serialize.
@@ -44,7 +44,6 @@ max_connections = 5
     .unwrap();
     let cfg = load_config(f.path().to_str().unwrap()).expect("must load");
     assert_eq!(cfg.storage.max_connections, 5);
-    assert!(!cfg.victoria_logs.enabled);
 }
 
 #[test]
@@ -74,8 +73,6 @@ fn load_repo_default_toml() {
     }
     let cfg = load_config(candidate.to_str().unwrap()).expect("default.toml must load");
     assert!(cfg.cache.enabled);
-    assert!(cfg.victoria_logs.enabled);
-    assert!(cfg.victoria_logs.listen_addr.starts_with("127."));
 }
 
 #[test]
@@ -140,96 +137,11 @@ max_connections = 1
 }
 
 #[test]
-fn vlogs_validate_disabled_short_circuits() {
-    let v = VictoriaLogsConfig::default();
-    v.validate().expect("disabled must pass");
-}
-
-#[test]
-fn vlogs_validate_rejects_external_listener() {
-    let v = VictoriaLogsConfig {
-        enabled: true,
-        listen_addr: "0.0.0.0:9428".into(),
-        ..VictoriaLogsConfig::default()
-    };
-    let err = v.validate().expect_err("external bind must be rejected");
-    assert!(err.to_string().contains("loopback"));
-}
-
-#[test]
-fn vlogs_validate_rejects_empty_paths() {
-    let v = VictoriaLogsConfig {
-        enabled: true,
-        binary_path: String::new(),
-        ..VictoriaLogsConfig::default()
-    };
-    assert!(v.validate().is_err());
-
-    let v = VictoriaLogsConfig {
-        enabled: true,
-        storage_data_path: String::new(),
-        ..VictoriaLogsConfig::default()
-    };
-    assert!(v.validate().is_err());
-}
-
-#[test]
-fn vlogs_validate_rejects_bad_socket_addr() {
-    let v = VictoriaLogsConfig {
-        enabled: true,
-        listen_addr: "not-an-addr".into(),
-        ..VictoriaLogsConfig::default()
-    };
-    let e = v.validate().expect_err("bad addr must err");
-    assert!(e.to_string().contains("victoria_logs.listen_addr"));
-}
-
-#[test]
-fn vlogs_url_helpers_use_listen_addr() {
-    let v = VictoriaLogsConfig::default();
-    let ingest = v.ingest_url();
-    assert!(ingest.starts_with("http://"));
-    assert!(ingest.ends_with("/insert/jsonline"));
-    let base = v.base_url();
-    assert_eq!(base, format!("http://{}", v.listen_addr));
-}
-
-#[test]
-fn load_with_invalid_vlogs_addr_errors() {
-    let _g = ENV_LOCK.lock().unwrap();
-    // Boot must reject an enabled VictoriaLogs pointing at a public bind.
-    let mut f = NamedTempFile::new().unwrap();
-    writeln!(
-        f,
-        r#"
-[proxy]
-listen_addr = "0.0.0.0:80"
-listen_addr_tls = "0.0.0.0:443"
-[api]
-listen_addr = "127.0.0.1:9527"
-[storage]
-database_url = "x"
-max_connections = 1
-
-[victoria_logs]
-enabled = true
-listen_addr = "0.0.0.0:9428"
-binary_path = "/tmp/v"
-storage_data_path = "/tmp/d"
-"#
-    )
-    .unwrap();
-    let err = load_config(f.path().to_str().unwrap()).unwrap_err();
-    assert!(err.to_string().contains("loopback"));
-}
-
-#[test]
 fn app_config_round_trip_via_toml() {
     let _g = ENV_LOCK.lock().unwrap();
     let cfg = AppConfig::default();
     let s = toml::to_string(&cfg).expect("serialize");
-    // Defaults should round-trip back through load (with vlogs disabled,
-    // validation is a no-op).
+    // Defaults should round-trip back through load.
     let mut f = NamedTempFile::new().unwrap();
     write!(f, "{s}").unwrap();
     let back = load_config(f.path().to_str().unwrap()).expect("reload");

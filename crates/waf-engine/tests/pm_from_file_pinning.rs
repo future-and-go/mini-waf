@@ -76,6 +76,7 @@ fn ctx_with(method: &str, path: &str, query: &str, body: &[u8], headers: &[(&str
     RequestCtx {
         req_id: "pin".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
+        peer_ip: "1.2.3.4".parse().unwrap(),
         client_port: 0,
         method: method.into(),
         host: "example.com".into(),

@@ -219,6 +219,7 @@ where
     let mut request_ctx = RequestCtx {
         req_id: Uuid::new_v4().to_string(),
         client_ip: peer.ip(),
+        peer_ip: peer.ip(),
         client_port: peer.port(),
         method,
         host: host_config.host.clone(),

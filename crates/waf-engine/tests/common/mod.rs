@@ -55,6 +55,7 @@ pub fn make_ctx(host_code: &str, path: &str, ip: &str) -> RequestCtx {
     RequestCtx {
         req_id: "fx".into(),
         client_ip: ip.parse::<IpAddr>().expect("ip parse"),
+        peer_ip: ip.parse::<IpAddr>().expect("ip parse"),
         client_port: 12345,
         method: "GET".into(),
         host: "example.com".into(),

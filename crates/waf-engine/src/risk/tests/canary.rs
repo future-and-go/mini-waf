@@ -30,6 +30,7 @@ fn make_ctx(path: &str) -> RequestCtx {
     RequestCtx {
         req_id: "test-canary".to_string(),
         client_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)),
+        peer_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)),
         client_port: 12345,
         method: "GET".to_string(),
         host: "example.com".to_string(),

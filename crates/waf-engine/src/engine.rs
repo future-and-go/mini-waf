@@ -124,10 +124,10 @@ pub struct WafEngine {
     /// File watcher for `configs/ddos.yaml`. Lazy via
     /// `start_ddos_watcher`; held to keep the OS watch alive.
     ddos_reloader: OnceLock<DdosReloader>,
-    // ── Phase 02: VictoriaLogs audit sender ───────────────────────────────────
+    // ── Audit file sink sender ────────────────────────────────────────────────
     /// Structured audit-event sink. `None` until [`set_audit_sender`] is
     /// called by the binary boot path.  When set, every non-Allow decision
-    /// from `inspect()` is mirrored into `VictoriaLogs` as an audit record.
+    /// from `inspect()` is written to the JSONL audit file sink.
     audit_sender: OnceLock<Arc<AuditSender>>,
     // ── Phase 03: Batched DB log writer ──────────────────────────────────────
     /// Bounded MPSC batch writer for `attack_logs` and `security_events` tables.
@@ -455,8 +455,8 @@ impl WafEngine {
         let _ = self.geoip.set(service);
     }
 
-    /// Plug the `VictoriaLogs` audit sender into the engine (called once
-    /// after init when `[victoria_logs] enabled = true`).
+    /// Plug the audit file sink sender into the engine (called once during
+    /// server init when `[audit] enabled = true`).
     pub fn set_audit_sender(&self, sender: Arc<AuditSender>) {
         let _ = self.audit_sender.set(sender);
     }
@@ -474,7 +474,8 @@ impl WafEngine {
         host: &str,
         method: &str,
         path: &str,
-        client_ip: &str,
+        peer_ip: &str,
+        action: &'static str,
         detail: &str,
     ) {
         let Some(sender) = self.audit_sender.get() else {
@@ -486,7 +487,8 @@ impl WafEngine {
             rule_name: String::new(),
             rule_id: None,
             phase: None,
-            client_ip: client_ip.to_string(),
+            peer_ip: peer_ip.to_string(),
+            client_ip: peer_ip.to_string(),
             host: host.to_string(),
             method: method.to_string(),
             path: path.to_string(),
@@ -496,7 +498,7 @@ impl WafEngine {
             risk_score: 0,
             mode: InteropMode::Enforce,
             query: String::new(),
-            contract_action: "error",
+            contract_action: action,
         };
         sender.send(event);
     }
@@ -1013,10 +1015,10 @@ impl WafEngine {
         }
     }
 
-    /// Mirror a non-Allow decision into the `VictoriaLogs` audit stream.
+    /// Write a non-Allow decision to the audit file sink.
     ///
     /// Fire-and-forget: drops silently when the audit sender is unset
-    /// (`[victoria_logs] enabled = false`) or its buffer is saturated.
+    /// (no `[audit]` config) or its buffer is saturated.
     /// The hot path never blocks on observability.
     fn send_audit_event(&self, ctx: &RequestCtx, decision: &WafDecision, timestamp: chrono::DateTime<chrono::Utc>) {
         let Some(sender) = self.audit_sender.get() else {
@@ -1051,6 +1053,7 @@ impl WafEngine {
             rule_name,
             rule_id,
             phase,
+            peer_ip: ctx.peer_ip.to_string(),
             client_ip: ctx.client_ip.to_string(),
             host: ctx.host.clone(),
             method: ctx.method.clone(),

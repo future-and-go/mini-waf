@@ -220,6 +220,7 @@ mod tests {
         RequestCtx {
             req_id: "test".to_string(),
             client_ip: client_ip.parse().unwrap(),
+            peer_ip: client_ip.parse().unwrap(),
             client_port: 0,
             method: "GET".to_string(),
             host: "example.com".to_string(),

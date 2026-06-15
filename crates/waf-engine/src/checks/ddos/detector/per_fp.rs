@@ -206,6 +206,7 @@ mod tests {
         RequestCtx {
             req_id: "test-req".to_string(),
             client_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            peer_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
             client_port: 12345,
             method: "GET".to_string(),
             host: "example.com".to_string(),

@@ -129,6 +129,7 @@ fn watcher_loads_pattern_based_rule() {
     let ctx = RequestCtx {
         req_id: "hr-pat".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
+        peer_ip: "1.2.3.4".parse().unwrap(),
         client_port: 12345,
         method: "POST".into(),
         host: "example.com".into(),
@@ -210,6 +211,7 @@ paranoia: 1
     let mut ctx_forbidden = RequestCtx {
         req_id: "hr-d1".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
+        peer_ip: "1.2.3.4".parse().unwrap(),
         client_port: 0,
         method: "GET".into(),
         host: "example.com".into(),

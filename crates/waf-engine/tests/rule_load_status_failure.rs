@@ -31,6 +31,7 @@ fn ctx_for(host_code: &str, path: &str) -> RequestCtx {
     RequestCtx {
         req_id: "load-status-test".into(),
         client_ip: "1.2.3.4".parse().unwrap(),
+        peer_ip: "1.2.3.4".parse().unwrap(),
         client_port: 12345,
         method: "GET".into(),
         host: "example.com".into(),

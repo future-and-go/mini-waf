@@ -40,6 +40,7 @@ fn login_ctx(body: &[u8], ct: &str, defense: DefenseConfig) -> RequestCtx {
     RequestCtx {
         req_id: "fr018-dispatch".to_string(),
         client_ip: TEST_IP.parse::<IpAddr>().unwrap(),
+        peer_ip: TEST_IP.parse::<IpAddr>().unwrap(),
         client_port: 0,
         method: "POST".to_string(),
         host: "example.com".to_string(),

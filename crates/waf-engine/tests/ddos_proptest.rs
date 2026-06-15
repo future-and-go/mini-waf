@@ -85,6 +85,7 @@ proptest! {
         let ctx = RequestCtx {
             req_id: "test".into(),
             client_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            peer_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
             client_port: 0,
             method: "GET".into(),
             host: "test".into(),
@@ -147,6 +148,7 @@ proptest! {
         let ctx = RequestCtx {
             req_id: "test".into(),
             client_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            peer_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
             client_port: 0,
             method: "GET".into(),
             host: "test".into(),

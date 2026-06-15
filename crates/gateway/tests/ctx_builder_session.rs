@@ -229,6 +229,28 @@ async fn build_honours_xff_only_when_trust_proxy_headers_enabled() {
 }
 
 #[tokio::test]
+async fn build_peer_ip_stays_tcp_peer_under_proxy_trust() {
+    // Contract §6: the audit `ip` field is the raw TCP peer, independent of
+    // `trust_proxy_headers`. Even when XFF is trusted and `client_ip` becomes
+    // the forwarded value, `peer_ip` must remain the immediate transport peer
+    // (UNSPECIFIED for the mock session).
+    let req = b"GET / HTTP/1.1\r\nHost: ex.com\r\nX-Forwarded-For: 198.51.100.7, 10.0.0.1\r\n\r\n";
+    let session = session_for(req).await;
+
+    let ctx = RequestCtxBuilder::new(&session, true, &[]).build();
+    assert_eq!(
+        ctx.client_ip.to_string(),
+        "198.51.100.7",
+        "trusted XFF drives client_ip"
+    );
+    assert!(
+        ctx.peer_ip.is_unspecified(),
+        "peer_ip must stay the TCP peer (UNSPECIFIED), not the XFF value, got {}",
+        ctx.peer_ip
+    );
+}
+
+#[tokio::test]
 async fn build_xff_ignored_when_peer_outside_trusted_cidr() {
     // Mock peer is UNSPECIFIED (0.0.0.0). A CIDR that excludes 0.0.0.0/32
     // must cause XFF to be dropped — peer_ip wins.

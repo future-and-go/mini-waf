@@ -39,6 +39,7 @@ fn make_clean_ctx() -> RequestCtx {
     RequestCtx {
         req_id: "bench-clean-001".to_string(),
         client_ip: "192.168.1.100".parse::<IpAddr>().unwrap(),
+        peer_ip: "192.168.1.100".parse::<IpAddr>().unwrap(),
         client_port: 54321,
         method: "GET".to_string(),
         host: "api.example.com".to_string(),
@@ -117,6 +118,7 @@ fn make_ctx_query(query: &str, body: &str, cfg: &Arc<HostConfig>) -> RequestCtx 
     RequestCtx {
         req_id: "bench".to_string(),
         client_ip: "127.0.0.1".parse().unwrap(),
+        peer_ip: "127.0.0.1".parse().unwrap(),
         client_port: 12345,
         method: "GET".to_string(),
         host: "example.com".to_string(),
@@ -143,6 +145,7 @@ fn make_ctx_header(name: &str, value: &str, cfg: &Arc<HostConfig>) -> RequestCtx
     RequestCtx {
         req_id: "bench".to_string(),
         client_ip: "127.0.0.1".parse().unwrap(),
+        peer_ip: "127.0.0.1".parse().unwrap(),
         client_port: 12345,
         method: "GET".to_string(),
         host: "example.com".to_string(),
@@ -169,6 +172,7 @@ fn make_ctx_json(body: &str, cfg: &Arc<HostConfig>) -> RequestCtx {
     RequestCtx {
         req_id: "bench".to_string(),
         client_ip: "127.0.0.1".parse().unwrap(),
+        peer_ip: "127.0.0.1".parse().unwrap(),
         client_port: 12345,
         method: "POST".to_string(),
         host: "example.com".to_string(),
