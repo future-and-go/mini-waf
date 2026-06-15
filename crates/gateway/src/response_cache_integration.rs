@@ -35,6 +35,24 @@ pub async fn write_cached_entry(
     Ok(())
 }
 
+/// Reconcile the recorded cache status with the upstream-response cacheability
+/// verdict (§5.3 / §9).
+///
+/// `request_filter` records `Miss` for any cache-eligible GET that misses the
+/// store, *before* the response is seen. If the response then turns out to be
+/// non-cacheable (`begin_upstream_cache_capture` returned `false`: compressed
+/// body, non-2xx, `Vary`, or active body mutation), that recorded `Miss` can
+/// never become a `HIT`. The contract requires `BYPASS` for such non-cacheable
+/// routes, so downgrade `Miss → Bypass` when capture was not kept. `Hit` and
+/// `Bypass` are already final and pass through unchanged.
+#[must_use]
+pub const fn finalize_cache_status(recorded: CacheStatus, capture_kept: bool) -> CacheStatus {
+    match recorded {
+        CacheStatus::Miss if !capture_kept => CacheStatus::Bypass,
+        other => other,
+    }
+}
+
 fn collect_response_headers(resp: &pingora_http::ResponseHeader) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for (name, value) in &resp.headers {
@@ -380,6 +398,29 @@ mod tests {
             "boundary: only `x-waf-` (with dash) strips"
         );
         assert!(lower.iter().any(|k| k == "x-keep"));
+    }
+
+    // ── finalize_cache_status (§5.3 / §9) ─────────────────────────────────────
+
+    #[test]
+    fn finalize_downgrades_miss_to_bypass_when_capture_refused() {
+        // Non-cacheable response (gzip / non-2xx / Vary / masked) → BYPASS, never
+        // a MISS that can never become a HIT.
+        assert_eq!(finalize_cache_status(CacheStatus::Miss, false), CacheStatus::Bypass);
+    }
+
+    #[test]
+    fn finalize_keeps_miss_when_capture_kept() {
+        // Genuinely cacheable response → MISS stays MISS so the next request HITs.
+        assert_eq!(finalize_cache_status(CacheStatus::Miss, true), CacheStatus::Miss);
+    }
+
+    #[test]
+    fn finalize_leaves_hit_and_bypass_unchanged() {
+        for kept in [true, false] {
+            assert_eq!(finalize_cache_status(CacheStatus::Hit, kept), CacheStatus::Hit);
+            assert_eq!(finalize_cache_status(CacheStatus::Bypass, kept), CacheStatus::Bypass);
+        }
     }
 
     // ── cache_store_on_body_chunk ──────────────────────────────────────────────

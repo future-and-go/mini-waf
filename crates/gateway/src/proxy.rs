@@ -998,15 +998,24 @@ impl ProxyHttp for WafProxy {
         // Cache capture reads `Content-Encoding` from the same header map Pingora will
         // stream (after response_chain above when host config exists), so misses without
         // host context still observe identity/absent CE correctly.
-        if let Some(pending) = ctx.response_cache_store.as_mut()
-            && !crate::response_cache_integration::begin_upstream_cache_capture(
+        let capture_kept = if let Some(pending) = ctx.response_cache_store.as_mut() {
+            let kept = crate::response_cache_integration::begin_upstream_cache_capture(
                 pending,
                 upstream_response,
                 ctx.body_mask.enabled,
-            )
-        {
-            ctx.response_cache_store = None;
-        }
+            );
+            if !kept {
+                ctx.response_cache_store = None;
+            }
+            kept
+        } else {
+            false
+        };
+        // §5.3 / §9: a recorded MISS whose response we refuse to store is
+        // non-cacheable in practice and must advertise BYPASS, not a MISS that
+        // can never become a HIT.
+        ctx.cache_status =
+            crate::response_cache_integration::finalize_cache_status(ctx.cache_status, capture_kept);
 
         // §5 phase-5 ordering invariant: inject the six contract observability
         // headers as the FINAL step — after (a) response_chain.apply_all,
