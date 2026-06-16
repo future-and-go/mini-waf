@@ -12,12 +12,12 @@ All endpoints local/admin-only, secret-gated, never proxied upstream.
 
 | ID | Title | Lane | Status | §
 | --- | --- | --- | --- | --- |
-| US-1001 | Mount control plane local-only, never proxied upstream | high-risk | planned | §2.1 |
-| US-1002 | Benchmark-secret auth, 403 on missing/invalid | high-risk | planned | §2.2 |
-| US-1003 | GET /capabilities discovery response | normal | planned | §2.3 |
-| US-1004 | POST /reset_state synchronous/atomic, audit preserved | high-risk | planned | §2.4 |
-| US-1005 | POST /set_profile scope/mode + unsupported partial-success | high-risk | planned | §2.5 |
-| US-1006 | POST /flush_cache | normal | planned | §2.6 |
+| US-1001 | Mount control plane local-only, never proxied upstream | high-risk | implemented | §2.1 |
+| US-1002 | Benchmark-secret auth, 403 on missing/invalid | high-risk | implemented | §2.2 |
+| US-1003 | GET /capabilities discovery response | normal | implemented | §2.3 |
+| US-1004 | POST /reset_state synchronous/atomic, audit preserved | high-risk | implemented | §2.4 |
+| US-1005 | POST /set_profile scope/mode + unsupported partial-success | high-risk | implemented | §2.5 |
+| US-1006 | POST /flush_cache | normal | implemented | §2.6 |
 
 ## Acceptance criteria (per story)
 
