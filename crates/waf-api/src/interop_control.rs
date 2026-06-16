@@ -258,3 +258,28 @@ async fn flush_cache_handler(State(state): State<Arc<AppState>>) -> impl IntoRes
         "ts_ms": epoch_ms_now(),
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::constant_time_eq;
+
+    #[test]
+    fn equal_inputs_match() {
+        let secret = b"waf-hackathon-2026-ctrl";
+        assert!(constant_time_eq(secret, secret));
+        assert!(constant_time_eq(b"", b""));
+    }
+
+    #[test]
+    fn differing_same_length_inputs_do_not_match() {
+        assert!(!constant_time_eq(b"waf-hackathon-2026-ctrl", b"waf-hackathon-2026-xxxx"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+    }
+
+    #[test]
+    fn differing_length_inputs_do_not_match() {
+        assert!(!constant_time_eq(b"waf-hackathon-2026-ctrl", b"waf-hackathon-2026-ctr"));
+        assert!(!constant_time_eq(b"short", b""));
+        assert!(!constant_time_eq(b"", b"x"));
+    }
+}
