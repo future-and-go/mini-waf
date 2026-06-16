@@ -2,7 +2,7 @@
 
 ## Status
 
-in_progress
+implemented
 
 ## Lane
 
@@ -64,5 +64,11 @@ booleans set via harness-cli after verification.
 
 ## Evidence
 
-Action enum + mapping in crates/waf-common + crates/gateway. Durable proof unset
-pending `harness-cli story verify`.
+Code-verified + tests green 2026-06-16. Unit: `waf-common` `as_contract_str`
+covers all six classes (`waf_action_contract_strings_cover_all_six_classes`).
+Integration: `gateway/tests/proxy_waf_response_writer.rs` (26 tests) — `block`→403,
+`rate_limit`→429, `timeout`→504, `circuit_breaker`→503, `challenge`, and
+`allow`/`log_only` passthrough, each carrying a consistent `X-WAF-Action` plus the
+six observability headers; `proxy.rs` unit tests map transport errors →
+503 ↔ `circuit_breaker` with `Retry-After` on 503 only. Durable proof set
+unit=1, integration=1, e2e=0, platform=0.

@@ -1328,4 +1328,104 @@ mod tests {
             assert_eq!(action, back);
         }
     }
+
+    // ── Decision-class contract strings (interop §3/§4) ─────────────────────
+    //
+    // Each of the six wire decision classes maps to exactly one `X-WAF-Action`
+    // string; the two internal-only variants (`Redirect`, deprecated `LogOnly`)
+    // collapse to `"allow"` on the contract wire.
+
+    #[test]
+    fn waf_action_contract_strings_cover_all_six_classes() {
+        assert_eq!(WafAction::Allow.as_contract_str(), "allow");
+        assert_eq!(WafAction::Block { status: 403, body: None }.as_contract_str(), "block");
+        assert_eq!(WafAction::Challenge.as_contract_str(), "challenge");
+        assert_eq!(WafAction::RateLimit { status: 429, body: None }.as_contract_str(), "rate_limit");
+        assert_eq!(WafAction::Timeout { status: 504 }.as_contract_str(), "timeout");
+        assert_eq!(
+            WafAction::CircuitBreaker { status: 503, body: None }.as_contract_str(),
+            "circuit_breaker",
+        );
+        // Internal-only variant: not a wire class, reported as allow.
+        assert_eq!(WafAction::Redirect { url: "/login".into() }.as_contract_str(), "allow");
+    }
+
+    // ── Threat-category → action acceptable-set membership ──────────────────
+    //
+    // Source: docs/product/decision-classes.md §3.1 (interop contract v2.3).
+    // The contract checks *membership* in the acceptable set, not an exact
+    // action match. Each row pairs the canonical action the WAF produces for a
+    // threat with the documented acceptable/unacceptable sets, and asserts the
+    // produced action's contract string is in the acceptable set and never in
+    // the unacceptable set. Action-production sites: `block` from
+    // `WafDecision::block(403, ..)` (engine checks), `rate_limit` from
+    // `WafDecision::rate_limit(429, ..)` (engine rate-limit phase),
+    // `circuit_breaker`/`timeout` from the gateway upstream path
+    // (`crates/gateway/src/proxy.rs`, status→action mapping).
+    #[test]
+    fn threat_category_actions_are_within_acceptable_set() {
+        // (category, produced action, acceptable set, unacceptable set)
+        let cases: &[(&str, WafAction, &[&str], &[&str])] = &[
+            (
+                "high-confidence injection (SQLi/XSS/cmd/SSRF)",
+                WafAction::Block { status: 403, body: None },
+                &["block", "challenge"],
+                &["rate_limit", "timeout", "allow"],
+            ),
+            (
+                "low-confidence injection (heuristic)",
+                WafAction::Block { status: 403, body: None },
+                &["block", "challenge", "log_only"],
+                &[],
+            ),
+            (
+                "auth abuse (cred stuffing, brute force)",
+                WafAction::Block { status: 403, body: None },
+                &["rate_limit", "challenge", "block"],
+                &["timeout", "circuit_breaker"],
+            ),
+            (
+                "volumetric abuse, single source",
+                WafAction::RateLimit { status: 429, body: None },
+                &["rate_limit", "block"],
+                &["circuit_breaker"],
+            ),
+            (
+                "slow-loris / connection exhaustion",
+                WafAction::Timeout { status: 504 },
+                &["timeout", "block"],
+                &["rate_limit"],
+            ),
+            (
+                "upstream degradation (WAF-detected)",
+                WafAction::CircuitBreaker { status: 503, body: None },
+                &["circuit_breaker"],
+                &["block", "rate_limit"],
+            ),
+            (
+                "recon / scanning",
+                WafAction::Block { status: 403, body: None },
+                &["block", "rate_limit", "challenge"],
+                &[],
+            ),
+            (
+                "known malicious IP (blacklist)",
+                WafAction::Block { status: 403, body: None },
+                &["block"],
+                &[],
+            ),
+        ];
+
+        for (category, action, acceptable, unacceptable) in cases {
+            let got = action.as_contract_str();
+            assert!(
+                acceptable.contains(&got),
+                "{category}: action `{got}` must be in the acceptable set {acceptable:?}",
+            );
+            assert!(
+                !unacceptable.contains(&got),
+                "{category}: action `{got}` must NOT be in the unacceptable set {unacceptable:?}",
+            );
+        }
+    }
 }

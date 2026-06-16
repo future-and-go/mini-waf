@@ -8,6 +8,12 @@ listen_addr_tls = "0.0.0.0:443"
 [api]
 listen_addr = "0.0.0.0:9527"
 
+# The compose healthcheck and asserter reach the admin API over plain HTTP.
+# The product default enables admin TLS (mode = "auto"), so the suite must
+# turn it off to keep the healthcheck (curl http://localhost:9527/health) green.
+[api.tls]
+enabled = false
+
 [storage]
 database_url    = "postgresql://prx_waf:prx_waf@postgres:5432/prx_waf"
 max_connections = 5

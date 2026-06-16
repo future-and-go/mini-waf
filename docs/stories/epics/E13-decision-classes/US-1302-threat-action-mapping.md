@@ -2,7 +2,7 @@
 
 ## Status
 
-in_progress
+implemented
 
 ## Lane
 
@@ -69,5 +69,13 @@ booleans set via harness-cli after verification.
 
 ## Evidence
 
-Action enum + mapping in crates/waf-common + crates/gateway. Durable proof unset
-pending `harness-cli story verify`.
+Code-verified + unit test green 2026-06-16. Unit:
+`threat_category_actions_are_within_acceptable_set` (`waf-common` `types.rs`)
+encodes the §3.1 table and asserts, for all eight categories, the produced
+action's contract string is in the acceptable set and never in the unacceptable
+set — injection/auth-abuse/recon/blacklist → `block`, volumetric → `rate_limit`,
+upstream degradation → `circuit_breaker`, slow-loris → `timeout`. Behavior
+unchanged: the engine emits `block`/`rate_limit`/`challenge`; the gateway emits
+`circuit_breaker`/`timeout` on the upstream path (`crates/gateway/src/proxy.rs`,
+status→action map). The DDoS fail-close 503 (`Block`) is a WAF safeguard, not a
+§3.1 threat category. Durable proof set unit=1, integration=0, e2e=0, platform=0.

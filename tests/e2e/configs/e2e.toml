@@ -10,6 +10,12 @@ listen_addr_tls = "0.0.0.0:443"
 [api]
 listen_addr = "0.0.0.0:9527"
 
+# The E2E suites, the compose healthcheck, and admin_ip_allowlist all talk to
+# the admin API over plain HTTP. The product default enables admin TLS
+# (mode = "auto"), so the suite must turn it off to reach the API over HTTP.
+[api.tls]
+enabled = false
+
 [storage]
 database_url    = "postgresql://prx_waf:prx_waf@postgres:5432/prx_waf"
 max_connections = 10

@@ -10,8 +10,8 @@ Every request yields exactly one of six decisions, each with consistent HTTP beh
 
 | ID | Title | Lane | Status | §
 | --- | --- | --- | --- | --- |
-| US-1301 | Six decision classes map to correct HTTP status/body | normal | in_progress | §3, §4 |
-| US-1302 | Threat category → action acceptable-set mapping | normal | in_progress | §3.1 |
+| US-1301 | Six decision classes map to correct HTTP status/body | normal | implemented | §3, §4 |
+| US-1302 | Threat category → action acceptable-set mapping | normal | implemented | §3.1 |
 
 ## Acceptance criteria (per story)
 
