@@ -24,13 +24,12 @@ classified `allowed_after_challenge`, not counted as a false positive.
 ## Acceptance Criteria
 
 - `POST <submit_url>` with body `{"challenge_token","nonce"}` and a valid nonce
-  returns `200`.
-- The successful solve response carries a session cookie/token.
-- Replaying the original request with that session cookie/token lets it proceed
-  (no second challenge).
+  returns `200` with `Set-Cookie: __waf_cc=<opaque_token>; Path=/; HttpOnly; SameSite=Lax`.
+- The token is single-use and HMAC-signed; subsequent requests carrying `__waf_cc`
+  bypass the challenge.
 - A legit challenged-then-solved request is classified `allowed_after_challenge`,
   not a false positive.
-- An invalid or missing nonce does not yield a passing session token.
+- An invalid or missing nonce returns `403` without a session cookie.
 
 ## Design Notes
 

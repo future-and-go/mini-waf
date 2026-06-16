@@ -35,10 +35,14 @@ noscript h2{color:#c00;font-size:1rem;margin-bottom:.5rem}
 </style>
 </head>
 <body>
+<!-- proof-of-work challenge -->
 <div class="c">
 <div class="s"></div>
 <h1>{{title}}</h1>
 <p>{{message}}</p>
+<form action="/challenge/verify" method="POST">
+<input type="hidden" name="challenge_token" value="{{token}}">
+</form>
 <noscript>
 <div class="b">
 <h2>JavaScript Required</h2>
@@ -65,8 +69,7 @@ return true
 function w(n){
 h(t+n).then(function(x){
 if(c(x,d)){
-document.cookie="__waf_cc="+t+"."+n+";path=/;max-age=300;SameSite=Strict";
-location.href=r
+fetch("/challenge/verify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({challenge_token:t,nonce:""+n})}).then(function(resp){if(resp.ok)location.href=r})
 }else{
 setTimeout(function(){w(n+1)},0)
 }
@@ -153,12 +156,33 @@ mod tests {
     }
 
     #[test]
-    fn contains_cookie_setting() {
+    fn contains_challenge_literal() {
         let ctx = make_ctx();
         let html = render_challenge_page(&ctx);
 
-        assert!(html.contains("__waf_cc="));
-        assert!(html.contains("SameSite=Strict"));
+        // Contract §4 detection: body must contain "challenge" (case-insensitive).
+        assert!(html.to_lowercase().contains("challenge"));
+    }
+
+    #[test]
+    fn contains_format_b_form() {
+        let ctx = make_ctx();
+        let html = render_challenge_page(&ctx);
+
+        // Format B: parseable form posting to the verify endpoint with the token.
+        assert!(html.contains(r#"<form action="/challenge/verify" method="POST">"#));
+        assert!(html.contains(r#"<input type="hidden" name="challenge_token" value="abc123">"#));
+    }
+
+    #[test]
+    fn js_posts_to_verify_endpoint() {
+        let ctx = make_ctx();
+        let html = render_challenge_page(&ctx);
+
+        // Solver submits {challenge_token, nonce} to /challenge/verify, then redirects.
+        assert!(html.contains(r#"fetch("/challenge/verify""#));
+        assert!(html.contains("challenge_token:t"));
+        assert!(html.contains("location.href=r"));
     }
 
     #[test]

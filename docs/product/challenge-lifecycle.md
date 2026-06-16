@@ -13,16 +13,21 @@ programmatically. Two formats are supported.
   "difficulty": 4, "submit_url": "/challenge/verify", "submit_method": "POST" }
 ```
 
+`difficulty` is the number of leading zero hex characters required in the hash
+(e.g., `4` requires 4 hex chars = 16 bits of leading zeros).
+
 ## Format B — HTML challenge
 
 Body MUST contain `challenge` (case-insensitive) for detection; includes a form
-with `action`/`method` and a hidden `challenge_token`; JS computes the nonce.
+with `action="/challenge/verify"` `method="POST"` and a hidden `challenge_token`
+input. JS computes the nonce, POSTs the solve to `/challenge/verify`, and
+redirects on successful `200` response.
 
 ## Solve flow
 
 1. Benchmarker submits `POST <submit_url>` with `{"challenge_token":"...","nonce":"..."}`.
-2. On success the WAF returns `200` with a session cookie/token that allows the
-   original request to proceed.
+2. On success the WAF returns `200` with `Set-Cookie: __waf_cc=<token>; Path=/; HttpOnly; SameSite=Lax`.
+   The token is opaque (HMAC-based) and single-use; it allows the original request to proceed.
 3. A legitimate request that is challenged and then succeeds is classified
    `allowed_after_challenge`, not a false positive (`docs/product/decision-classes.md`).
 

@@ -18,6 +18,7 @@ Pingora-based reverse-proxy data plane. Terminates TLS, routes HTTP/1, HTTP/2, a
 - **Access phase**: dedicated pipeline stage running access-control + relay + device-fp checks before upstream selection.
 - **Upstream ALPN** (per-host): configurable TLS ALPN advertisement toward the origin, default `H2H1`.
 - **Transaction velocity dispatch (FR-012)**: `logging()` hook calls `engine.on_request_complete(ctx, status, upstream_response_observed)` once per request at completion. `upstream_response_observed` is set in `response_filter` (only fires for real upstream responses). WAF-blocked and origin-down requests keep events as `Outcome::Pending`; classifiers ignore them.
+- **Challenge endpoint (FR-006)**: `POST /challenge/verify` intercepts and verifies proof-of-work solutions, returning `200` + `Set-Cookie: __waf_cc` on valid nonce or `403` on failure. Never forwarded upstream.
 
 ## Upstream ALPN
 

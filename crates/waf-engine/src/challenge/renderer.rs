@@ -92,14 +92,16 @@ impl ChallengeRenderer for JsChallengeRenderer {
         if ctx.token.is_empty() {
             return Err(ChallengeError::InvalidConfig("token cannot be empty".into()));
         }
-        // Validate token contains only safe characters (prevents JS string injection)
+        // Validate token contains only safe characters (prevents JS string injection).
+        // The real issuer emits `base64url(payload).base64url(hmac)`, so the dot
+        // separator must be allowed alongside the base64url alphabet.
         if !ctx
             .token
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
         {
             return Err(ChallengeError::InvalidConfig(
-                "token must be alphanumeric with dashes/underscores only".into(),
+                "token must be base64url with dot separator only".into(),
             ));
         }
         if ctx.difficulty == 0 || ctx.difficulty > 32 {
@@ -177,6 +179,20 @@ mod tests {
             ..Default::default()
         };
         assert!(renderer.render(&ctx_high).is_err());
+    }
+
+    #[test]
+    fn accepts_real_issuer_token_with_dot() {
+        // Real issuer emits base64url(payload).base64url(hmac) — contains a dot.
+        let renderer = JsChallengeRenderer::new();
+        let ctx = ChallengeContext {
+            token: "eyJhIjoxfQ.c2lnbmF0dXJl-_123".into(),
+            difficulty: 4,
+            redirect_url: "/original".into(),
+            ..Default::default()
+        };
+        let resp = renderer.render(&ctx).expect("dotted token should render");
+        assert!(resp.body.contains("eyJhIjoxfQ.c2lnbmF0dXJl-_123"));
     }
 
     #[test]

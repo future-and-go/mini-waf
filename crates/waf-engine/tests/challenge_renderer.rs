@@ -38,7 +38,12 @@ fn render_challenge_page_contains_all_required_elements() {
     assert!(html.contains("Verifying your browser"), "branding message missing");
     assert!(html.contains("<noscript>"), "noscript fallback missing");
     assert!(html.contains("JavaScript Required"), "noscript message missing");
-    assert!(html.contains("__waf_cc="), "cookie name missing");
+    // The solution is submitted to the verify endpoint, which sets the credit
+    // cookie server-side via Set-Cookie — the page no longer writes the cookie.
+    assert!(
+        html.contains(r#"action="/challenge/verify""#),
+        "verify endpoint submission missing"
+    );
 }
 
 #[test]

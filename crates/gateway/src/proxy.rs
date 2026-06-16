@@ -44,7 +44,7 @@ use crate::filters::{
 };
 use crate::pipeline::{AccessGateOutcome, AccessPhaseGate, FilterCtx, RequestFilterChain, ResponseFilterChain};
 use crate::protocol::{ProtoCounters, detect_from_session};
-use crate::proxy_waf_response::{write_waf_body_decision, write_waf_decision};
+use crate::proxy_waf_response::{handle_challenge_verify, write_waf_body_decision, write_waf_decision};
 use crate::router::HostRouter;
 use crate::waf_observability_headers::{CacheStatus, inject_for_pre_inspect_or_error};
 
@@ -619,6 +619,16 @@ impl ProxyHttp for WafProxy {
             inject_for_pre_inspect_or_error(&mut resp, ctx, "allow", "")?;
             session.write_response_header(Box::new(resp), true).await?;
             return Ok(true);
+        }
+
+        // Challenge solve endpoint: intercept before the WAF engine so the POST
+        // is not itself blocked. Only active when the challenge subsystem is
+        // configured; otherwise the path proxies upstream like any other.
+        if self.challenge_ctx.is_some()
+            && request_ctx.method == "POST"
+            && request_ctx.path == "/challenge/verify"
+        {
+            return handle_challenge_verify(session, ctx).await;
         }
 
         // HTTP → HTTPS redirect (301).

@@ -185,6 +185,29 @@ mod tests {
     }
 
     #[test]
+    fn test_verify_pow_canonical_16_bits_accept_reject() {
+        // Challenge lifecycle canonical difficulty: 16 leading zero bits
+        // (== 4 leading zero hex chars). A solved nonce must verify; the
+        // unsolved nonce 0 must not.
+        let token = "challenge-token-abc.def";
+        let mut nonce = 0u64;
+        loop {
+            if verify_pow(token, &nonce.to_string(), 16) == PowVerifyResult::Valid {
+                break;
+            }
+            nonce += 1;
+            assert!(nonce <= 10_000_000, "no 16-bit nonce found in budget");
+        }
+        assert_eq!(verify_pow(token, &nonce.to_string(), 16), PowVerifyResult::Valid);
+        // A nonce one off the solution almost certainly fails the 16-bit gate.
+        assert_ne!(
+            verify_pow(token, &(nonce + 1).to_string(), 16),
+            PowVerifyResult::Valid,
+            "neighbor nonce should not satisfy 16 bits"
+        );
+    }
+
+    #[test]
     fn test_verify_pow_invalid_difficulty() {
         // Nonce 0 is very unlikely to satisfy difficulty 20
         let result = verify_pow("random_token", "0", 20);
