@@ -47,3 +47,6 @@ scripts/bin/harness-cli.exe
 repomix-output.xml
 .harness-backup/
 gaps.md
+
+# Generated E2E run output (junit/results/summary) — never committed
+tests/e2e/out/
