@@ -1,0 +1,12 @@
+# Keep Docker build contexts small. Without this, `docker build` ships the
+# whole repo (multi-GB target/ trees), which is slow and can exhaust the
+# builder's disk. Dockerfile.prebuilt needs only the release binary from
+# target/, so exclude target/ but keep that one file. The from-source
+# Dockerfile rebuilds from scratch and needs none of these.
+target
+!target/release/waf
+target-linux
+.git
+node_modules
+**/node_modules
+*.log
