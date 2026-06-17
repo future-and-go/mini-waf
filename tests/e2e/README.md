@@ -14,6 +14,7 @@ tests/e2e/
 ├── run-rules-engine.sh          # verifies every rule category in rules/
 ├── run-gateway.sh               # crates/gateway proxy behaviour
 ├── run-api.sh                   # crates/waf-api admin endpoints
+├── run-interop.sh               # interop v2.3 benchmark contract (E10–E17)
 ├── run-cluster.sh               # wraps tests/e2e-cluster.sh (crates/waf-cluster)
 ├── render-report.sh             # aggregates per-suite JSON → Markdown + HTML
 └── out/                         # per-suite results.json / junit.xml / summary.md
@@ -33,6 +34,7 @@ docker compose -f tests/e2e/docker-compose.e2e.yml up -d --build
 bash tests/e2e/run-rules-engine.sh
 bash tests/e2e/run-gateway.sh
 bash tests/e2e/run-api.sh
+bash tests/e2e/run-interop.sh
 
 # 4. Cluster suite — uses docker-compose.cluster.yml (separate stack)
 bash tests/e2e/run-cluster.sh

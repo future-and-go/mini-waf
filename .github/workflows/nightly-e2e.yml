@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       suites:
-        description: "Comma-separated list of suites to run (rules-engine,gateway,waf-api,cluster) — empty = all"
+        description: "Comma-separated list of suites to run (rules-engine,gateway,waf-api,interop,cluster) — empty = all"
         required: false
         default: ""
   # TEMPORARY — auto-trigger on push to the e2e-test feature branch so GitHub
@@ -288,7 +288,69 @@ jobs:
         if: steps.suite.outcome == 'failure'
         run: exit 1
 
-  # ── 2d) Cluster suite (3-node bootstrap, election, sync) ───────────────────
+  # ── 2d) Interop suite (v2.3 benchmark contract — E10–E17) ──────────────────
+  interop:
+    name: Interop E2E
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ inputs.suites == '' || contains(inputs.suites, 'interop') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: prx-waf-bin, path: target/release }
+      - run: chmod +x target/release/waf tests/e2e/*.sh
+
+      - name: Prepare workspace for Dockerfile.prebuilt
+        run: mkdir -p data web/admin-panel/dist
+
+      - name: Start E2E stack
+        run: docker compose -f tests/e2e/docker-compose.e2e.yml up -d --build
+
+      - name: Wait for prx-waf to become healthy
+        run: |
+          for i in $(seq 1 30); do
+            state=$(docker inspect -f '{{.State.Health.Status}}' e2e-prx-waf 2>/dev/null || echo "missing")
+            echo "  attempt $i: state=$state"
+            [[ "$state" == "healthy" ]] && exit 0
+            [[ "$state" == "missing" ]] && { docker compose -f tests/e2e/docker-compose.e2e.yml ps; exit 1; }
+            sleep 5
+          done
+          echo "::warning::prx-waf never reached healthy state — dumping logs for diagnostics"
+          docker compose -f tests/e2e/docker-compose.e2e.yml logs --tail=200 prx-waf
+          exit 1
+        continue-on-error: true
+
+      - name: Run interop suite
+        id: suite
+        run: bash tests/e2e/run-interop.sh
+        continue-on-error: true
+
+      - name: Container logs (always)
+        if: always()
+        run: |
+          echo "=== docker compose ps ==="
+          docker compose -f tests/e2e/docker-compose.e2e.yml ps || true
+          echo "=== prx-waf logs (tail 300) ==="
+          docker compose -f tests/e2e/docker-compose.e2e.yml logs --tail=300 prx-waf || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f tests/e2e/docker-compose.e2e.yml down -v
+
+      - name: Upload suite artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-interop
+          path: tests/e2e/out/interop
+          retention-days: 14
+
+      - name: Fail step if suite failed
+        if: steps.suite.outcome == 'failure'
+        run: exit 1
+
+  # ── 2e) Cluster suite (3-node bootstrap, election, sync) ───────────────────
   cluster:
     name: Cluster E2E
     needs: build
@@ -342,7 +404,7 @@ jobs:
   # ── 3) Aggregate report (always runs, even if some suites failed) ──────────
   report:
     name: Aggregated Report
-    needs: [rules-engine, gateway, waf-api, cluster]
+    needs: [rules-engine, gateway, waf-api, interop, cluster]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: always()
@@ -357,7 +419,7 @@ jobs:
       - name: Stage suite results
         run: |
           mkdir -p tests/e2e/out
-          for s in rules-engine gateway waf-api cluster; do
+          for s in rules-engine gateway waf-api interop cluster; do
             if [[ -d "artifacts/e2e-$s" ]]; then
               mv "artifacts/e2e-$s" "tests/e2e/out/$s"
             fi

@@ -1,4 +1,5 @@
 /target
+/target-linux
 *.swp
 *.swo
 .DS_Store
