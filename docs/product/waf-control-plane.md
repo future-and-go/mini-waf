@@ -59,3 +59,53 @@ If not implemented, MAY return a clear not-supported response.
 
 Every proxied response carries `X-WAF-Mode` reflecting the mode of the policy that
 produced the final reported `X-WAF-Action`. See `docs/product/enforcement-modes.md`.
+
+## Capability catalog
+
+`capabilities` advertises a fixed catalog of 17 features, each `supported:true`,
+`toggleable:true`. Source: `crates/waf-engine/src/interop/feature_catalog.rs`.
+Phase→(feature,policy) binding: `crates/waf-engine/src/interop/checker_feature_map.rs`.
+
+| Feature | Policies | Protection |
+| --- | --- | --- |
+| `access_control` | `ip_whitelist`, `ip_blacklist`, `url_whitelist`, `url_blacklist` | IP/URL allow + block lists |
+| `injection_control` | `sqli`, `xss`, `rce` | SQL injection, XSS, RCE |
+| `path_traversal` | `dir_traversal` | Directory traversal |
+| `network_protection` | `ssrf`, `header_injection` | SSRF + header injection |
+| `rate_limiting` | `per_ip`, `per_session` | Rate limiting |
+| `ddos_protection` | `per_ip_burst`, `per_tier` | DDoS burst + per-tier thresholds |
+| `bot_detection` | `scanner`, `bot` | Scanner + bot detection |
+| `owasp_rules` | `core_ruleset` | OWASP CRS |
+| `custom_rules` | `yaml_rules`, `rhai_scripts`, `wasm_plugins` | Custom YAML / Rhai / WASM logic |
+| `geo_protection` | `geo_blocking` | Geo restriction |
+| `data_protection` | `sensitive_data`, `anti_hotlink` | Sensitive-data + anti-hotlink |
+| `reputation` | `crowdsec`, `community_blocklist` | CrowdSec + community blocklist |
+| `risk_assessment` | `cumulative_risk` | Cumulative risk scoring |
+| `velocity_control` | `tx_velocity` | Transaction velocity |
+| `device_intelligence` | `fingerprint_analysis` | Device fingerprinting |
+| `auth_protection` | `brute_force` | Brute-force / auth protection |
+| `payload_protection` | `body_abuse` | Request-body abuse |
+
+The catalog is static: `supported`/`toggleable` describe what the interop layer
+*names*, not what the running config currently enables. A `set_profile` mode
+override is stored per arbitrary feature/policy key regardless of detector wiring.
+
+Known gap: the catalog advertises `ddos_protection.per_tier`, but no detection
+phase binds to it (only `per_ip_burst` is mapped). A policy-scoped `set_profile`
+on `per_tier` returns `ok:true` yet has no hot-path effect.
+
+## Configuration boundary
+
+The control plane is a **mode dial, not a configuration manager**. `set_profile`
+only switches `enforce`/`log_only`; it never enables a detector or sets a
+threshold, list, or band. Each capability is governed across three planes:
+
+| Plane | Surface | Controls |
+| --- | --- | --- |
+| Config | startup `./waf.yaml`/`.toml`, hot-reload | Enable flags, thresholds, DB paths (e.g. `ddos.enabled`, `ddos.tiers.*.per_fp_threshold`, GeoIP `ipv4_path`/`ipv6_path`, risk bands) |
+| Admin | admin API + Postgres + admin UI | Operator-managed rules and lists (e.g. geo country block/allow rules, IP/URL lists, custom rules) |
+| Control | `/__waf_control/set_profile` | `enforce` ↔ `log_only` only, per scope |
+
+Consequence: a detector disabled in config produces no verdict, so toggling its
+mode via `set_profile` has no effect. Enabling and tuning a capability is always
+a config or admin-plane operation, never a control-plane one.
