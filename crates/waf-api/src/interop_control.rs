@@ -81,9 +81,27 @@ fn build_active_snapshot(state: &AppState) -> serde_json::Value {
     })
 }
 
-// ── GET /capabilities ────────────────────────────────────────────────────────
+// ── Shared core fns ───────────────────────────────────────────────────────────
+//
+// Single source of truth for the control-plane behavior. Both the secret-gated
+// `/__waf_control/*` handlers and the JWT-guarded `/api/enforcement/*` handlers
+// (see `enforcement.rs`) delegate here, so the JSON shapes stay byte-identical.
 
-async fn capabilities_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+/// Body shape for the set-profile action, shared by both route groups.
+#[derive(Debug, Deserialize)]
+pub(crate) struct SetProfileRequest {
+    scope: String,
+    mode: String,
+    #[serde(default)]
+    features: Option<Vec<String>>,
+    #[serde(default)]
+    feature: Option<String>,
+    #[serde(default)]
+    policies: Option<Vec<String>>,
+}
+
+/// Build the capabilities snapshot: feature catalog plus the active mode state.
+pub(crate) fn capabilities_value(state: &AppState) -> serde_json::Value {
     let catalog = FeatureCatalog::all();
 
     let mut features = serde_json::Map::new();
@@ -98,16 +116,15 @@ async fn capabilities_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
         );
     }
 
-    Json(json!({
+    json!({
         "ok": true,
         "features": features,
-        "active": build_active_snapshot(&state),
-    }))
+        "active": build_active_snapshot(state),
+    })
 }
 
-// ── POST /reset_state ────────────────────────────────────────────────────────
-
-async fn reset_state_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+/// Reset runtime state, cache, CrowdSec cache, and mode overrides.
+pub(crate) async fn reset_state_value(state: &AppState) -> serde_json::Value {
     state.engine.reset_runtime_state();
     state.cache.flush().await;
     if let Some(cc) = &state.crowdsec_cache {
@@ -115,38 +132,25 @@ async fn reset_state_handler(State(state): State<Arc<AppState>>) -> impl IntoRes
     }
     state.mode_registry.reset();
 
-    Json(json!({
+    json!({
         "ok": true,
         "action": "reset_state",
         "audit_log_preserved": true,
         "ts_ms": epoch_ms_now(),
-    }))
+    })
 }
 
-// ── POST /set_profile ────────────────────────────────────────────────────────
-
-#[derive(Debug, Deserialize)]
-struct SetProfileRequest {
-    scope: String,
-    mode: String,
-    #[serde(default)]
-    features: Option<Vec<String>>,
-    #[serde(default)]
-    feature: Option<String>,
-    #[serde(default)]
-    policies: Option<Vec<String>>,
-}
-
-async fn set_profile_handler(State(state): State<Arc<AppState>>, Json(req): Json<SetProfileRequest>) -> Response {
+/// Apply a mode profile to the registry. Returns the HTTP status to use plus the
+/// response body (`BAD_REQUEST` for validation errors, `OK` on success).
+pub(crate) fn set_profile_value(state: &AppState, req: SetProfileRequest) -> (StatusCode, serde_json::Value) {
     let Some(mode) = InteropMode::from_contract_str(&req.mode) else {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({
+            json!({
                 "ok": false,
                 "error": format!("invalid mode: '{}'. Must be 'enforce' or 'log_only'", req.mode)
-            })),
-        )
-            .into_response();
+            }),
+        );
     };
 
     let (applied, unsupported) = match req.scope.as_str() {
@@ -160,12 +164,11 @@ async fn set_profile_handler(State(state): State<Arc<AppState>>, Json(req): Json
                 _ => {
                     return (
                         StatusCode::BAD_REQUEST,
-                        Json(json!({
+                        json!({
                             "ok": false,
                             "error": "scope 'features' requires non-empty 'features' array"
-                        })),
-                    )
-                        .into_response();
+                        }),
+                    );
                 }
             };
             let (supported, unsupported) = FeatureCatalog::validate_features(features);
@@ -188,12 +191,11 @@ async fn set_profile_handler(State(state): State<Arc<AppState>>, Json(req): Json
                 _ => {
                     return (
                         StatusCode::BAD_REQUEST,
-                        Json(json!({
+                        json!({
                             "ok": false,
                             "error": "scope 'policies' requires 'feature' field"
-                        })),
-                    )
-                        .into_response();
+                        }),
+                    );
                 }
             };
             let policies = match &req.policies {
@@ -201,12 +203,11 @@ async fn set_profile_handler(State(state): State<Arc<AppState>>, Json(req): Json
                 _ => {
                     return (
                         StatusCode::BAD_REQUEST,
-                        Json(json!({
+                        json!({
                             "ok": false,
                             "error": "scope 'policies' requires non-empty 'policies' array"
-                        })),
-                    )
-                        .into_response();
+                        }),
+                    );
                 }
             };
             let (supported, unsupported) = FeatureCatalog::validate_policies(feature, policies);
@@ -227,36 +228,55 @@ async fn set_profile_handler(State(state): State<Arc<AppState>>, Json(req): Json
         other => {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({
+                json!({
                     "ok": false,
                     "error": format!("invalid scope: '{other}'. Must be 'all', 'features', or 'policies'")
-                })),
-            )
-                .into_response();
+                }),
+            );
         }
     };
 
-    Json(json!({
-        "ok": true,
-        "action": "set_profile",
-        "applied": applied,
-        "active": build_active_snapshot(&state),
-        "unsupported": unsupported,
-        "ts_ms": epoch_ms_now(),
-    }))
-    .into_response()
+    (
+        StatusCode::OK,
+        json!({
+            "ok": true,
+            "action": "set_profile",
+            "applied": applied,
+            "active": build_active_snapshot(state),
+            "unsupported": unsupported,
+            "ts_ms": epoch_ms_now(),
+        }),
+    )
 }
 
-// ── POST /flush_cache ────────────────────────────────────────────────────────
-
-async fn flush_cache_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+/// Flush the response cache.
+pub(crate) async fn flush_cache_value(state: &AppState) -> serde_json::Value {
     state.cache.flush().await;
 
-    Json(json!({
+    json!({
         "ok": true,
         "action": "flush_cache",
         "ts_ms": epoch_ms_now(),
-    }))
+    })
+}
+
+// ── Secret-gated handlers (delegate to the core fns) ──────────────────────────
+
+async fn capabilities_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(capabilities_value(&state))
+}
+
+async fn reset_state_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(reset_state_value(&state).await)
+}
+
+async fn set_profile_handler(State(state): State<Arc<AppState>>, Json(req): Json<SetProfileRequest>) -> Response {
+    let (status, body) = set_profile_value(&state, req);
+    (status, Json(body)).into_response()
+}
+
+async fn flush_cache_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(flush_cache_value(&state).await)
 }
 
 #[cfg(test)]

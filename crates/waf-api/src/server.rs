@@ -32,6 +32,9 @@ use crate::crowdsec::{
 };
 use crate::ddos_api::{delete_ban_entry, get_ddos_config, get_ddos_metrics, list_ban_table, put_ddos_config};
 use crate::device_fp_api::{get_device_fp_config, list_fp_conflicts, list_recent_fps, put_device_fp_config};
+use crate::enforcement::{
+    enforcement_capabilities, enforcement_flush_cache, enforcement_reset_state, enforcement_set_profile,
+};
 use crate::geo_api::{create_geo_rule, delete_geo_rule, list_geo_rules, lookup_ip, patch_geo_rule};
 use crate::handlers::{
     create_allow_ip, create_allow_url, create_block_ip, create_block_url, create_custom_rule, create_host,
@@ -301,6 +304,12 @@ pub fn build_router(state: Arc<AppState>, tls_enabled: bool) -> Router {
         .route("/api/geoip/rules", get(list_geo_rules).post(create_geo_rule))
         .route("/api/geoip/rules/{id}", patch(patch_geo_rule).delete(delete_geo_rule))
         .route("/api/geoip/lookup", post(lookup_ip))
+        // E10: enforcement console — JWT-guarded mirror of /__waf_control/*.
+        // No X-Benchmark-Secret; same mode_registry services both groups.
+        .route("/api/enforcement/capabilities", get(enforcement_capabilities))
+        .route("/api/enforcement/set-profile", post(enforcement_set_profile))
+        .route("/api/enforcement/reset-state", post(enforcement_reset_state))
+        .route("/api/enforcement/flush-cache", post(enforcement_flush_cache))
         .layer(middleware::from_fn_with_state(state.clone(), require_auth))
         .layer(middleware::from_fn_with_state(
             state.clone(),

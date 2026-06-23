@@ -55,7 +55,7 @@ spec's TS types omit it — add it).
 
 | Phase | Name | Status | Priority | Depends on |
 |-------|------|--------|----------|-----------|
-| 1 | [Backend Enforcement Proxy Routes](./phase-01-backend-enforcement-proxy-routes.md) | Pending | P1 | — |
+| 1 | [Backend Enforcement Proxy Routes](./phase-01-backend-enforcement-proxy-routes.md) | In Review | P1 | — |
 | 2 | [Backend WAF-Mode Persistence](./phase-02-backend-waf-mode-persistence.md) | Pending | P2 | — |
 | 3 | [Frontend Foundation](./phase-03-frontend-foundation.md) | Pending | P1 | 1 |
 | 4 | [Enforcement Console and Capability Catalog](./phase-04-enforcement-console-and-capability-catalog.md) | Pending | P1 | 3 |
@@ -91,6 +91,12 @@ No cross-plan blockers detected. Related prior plans (read-only context):
 `260526-1626-admin-panel-gap-requirement` (admin-panel conventions).
 
 ## Open questions
+
+> **Resolved (Phase 1, 2026-06-23) — interop-disabled response.** When
+> `interop_config.enabled = false`, `/api/enforcement/*` returns
+> `404 {ok:false, error:"interop disabled"}`, mirroring the secret plane's 404.
+> The FE Result branch treats 404 as "control plane disabled". Implemented in
+> `crates/waf-api/src/enforcement.rs`.
 
 1. **Flush-cache semantics.** Current `/__waf_control/flush_cache` returns
    `{ok, action, ts_ms}` with no `supported` field. The spec's FE wants a

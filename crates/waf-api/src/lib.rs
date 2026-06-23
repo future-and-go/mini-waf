@@ -7,6 +7,7 @@ pub mod cluster;
 pub mod crowdsec;
 pub mod ddos_api;
 pub mod device_fp_api;
+pub mod enforcement;
 pub mod error;
 pub mod geo_api;
 pub mod handlers;
