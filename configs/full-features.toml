@@ -142,8 +142,10 @@ detect_pii_in_values        = false
 enabled = true
 log_path = "./waf_audit.log"
 
-# ── Benchmark interop control plane — OFF (excluded; defaults ON in code) ─────
-# Leaving this section out would leave /__waf_control/* enabled with a known
-# default secret. Explicitly disabled for the demo deployment.
+# ── Benchmark interop control plane — ON ─────────────────────────────────────
+# Exposes /__waf_control/* for external benchmark harnesses to drive WAF
+# mode/state. Authenticated by X-Benchmark-Secret. The secret below is the
+# well-known default; override it before any internet-facing deployment.
 [interop]
-enabled = false
+enabled = true
+benchmark_secret = "waf-hackathon-2026-ctrl"
