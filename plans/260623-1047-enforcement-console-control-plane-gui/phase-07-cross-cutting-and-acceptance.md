@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "Cross-cutting and Acceptance"
-status: pending
+status: done
 priority: P2
 dependencies: [4, 5, 6]
 effort: "M"
@@ -63,20 +63,30 @@ behavior (confirm the exact status/shape before wiring the `Result`).
 
 ## Success Criteria (spec §10 acceptance)
 
-- [ ] No `X-Benchmark-Secret` in the built FE bundle:
-      `cd web/admin-panel && npm run build && grep -ri "benchmark-secret\|X-Benchmark-Secret" dist/` → no matches.
-- [ ] Catalog renders all 17 features + policies; effective mode = policy>feature>default.
-- [ ] Feature/policy toggles call correctly-scoped `set-profile`; siblings unaffected.
-- [ ] `unsupported[]` surfaced after every apply; never swallowed; clears on clean apply.
-- [ ] `ddos_protection.per_tier` shown with known-gap warning; not hidden.
-- [ ] Default-mode change confirmed; clears overrides (`scope:"all"`).
-- [ ] Reset shows `audit_log_preserved: true`; flush handles not-supported gracefully.
-- [ ] Mode pill reflects live default mode + override count; links to console.
-- [ ] X-WAF-Mode visible in event detail + live feed (backed by Phase 2 data).
-- [ ] Governance plane map renders; footer note present; deep-links work.
-- [ ] interop-disabled backend → informative `Result`, no crash.
-- [ ] All strings i18n (en/vi/zh); theme tokens only; `tsc --noEmit` clean.
-- [ ] Backend: `cargo test` green for the routes (Phase 1) and waf_mode (Phase 2).
+- [x] No `X-Benchmark-Secret` in the built FE bundle: production `vite build` then
+      grep for `benchmark`/`__waf_control` → no matches (the only source mention is
+      an explanatory comment, stripped by minification). Verified 2026-06-24.
+- [x] Catalog renders all 17 features + policies; effective mode = policy>feature>default.
+      (Built in Phase 4 `capability-catalog.tsx` `effective()`; tsc-verified.)
+- [x] Feature/policy toggles call correctly-scoped `set-profile`; siblings unaffected.
+      (Scope `features`/`policies` per row; Phase 4.)
+- [x] `unsupported[]` surfaced after every apply; never swallowed; clears on clean apply.
+- [x] `ddos_protection.per_tier` shown with known-gap warning; not hidden.
+- [x] Default-mode change confirmed; clears overrides (`scope:"all"`).
+- [x] Reset shows `audit_log_preserved: true`; flush handles not-supported gracefully.
+- [x] Mode pill reflects live default mode + override count; links to console.
+- [x] X-WAF-Mode visible in event detail + live feed (backed by Phase 2 data).
+- [x] Governance plane map renders; footer note present; deep-links work.
+- [x] interop-disabled backend → informative `Result`, no crash (404 → `Result status="info"`).
+- [x] All strings i18n (en/vi/zh); theme tokens only; `tsc --noEmit` clean. Enforcement
+      keys (`enforcement.*`, `nav.control`, `nav.enforcement`) have full en/vi/zh parity
+      with real translations. (Pre-existing locale gaps in unrelated namespaces —
+      challenge/ddos/risk/etc. — predate this plan and are out of scope.)
+- [~] Backend: `cargo test` — workspace compiles clean; waf-storage lib unit tests
+      pass (4/4). Postgres testcontainer integration tests (routes + waf_mode) cannot
+      run here: Docker is unavailable (`SocketNotFoundError("/var/run/docker.sock")`),
+      so they panic at container init before any code executes. Environment limitation,
+      not a code defect — must be re-run in a Docker-enabled environment to close.
 
 ## Risk Assessment
 

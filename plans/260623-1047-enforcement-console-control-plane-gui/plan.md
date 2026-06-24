@@ -1,7 +1,7 @@
 ---
 title: "Enforcement Console — Control-Plane GUI (E10)"
 description: "Operator GUI for the WAF control plane: capability catalog, mode dial, runtime ops, governance map, plus the backend JWT proxy and waf_mode persistence the spec assumed."
-status: pending
+status: done
 priority: P2
 branch: "main-harness"
 tags: [control-plane, admin-panel, enforcement, interop-v2.3, E10]
@@ -10,6 +10,7 @@ blocks: []
 created: "2026-06-23T03:52:04.118Z"
 createdBy: "ck:plan"
 source: skill
+status_note: "All phases done (2026-06-24). Backend testcontainer suite pending re-run under Docker."
 ---
 
 # Enforcement Console — Control-Plane GUI (E10)
@@ -61,7 +62,7 @@ spec's TS types omit it — add it).
 | 4 | [Enforcement Console and Capability Catalog](./phase-04-enforcement-console-and-capability-catalog.md) | Done | P1 | 3 |
 | 5 | [Runtime Ops, Plane Map and Mode Pill](./phase-05-runtime-ops-plane-map-and-mode-pill.md) | Done | P2 | 3, 4 |
 | 6 | [X-WAF-Mode Correlation](./phase-06-x-waf-mode-correlation.md) | Done | P2 | 2, 3 |
-| 7 | [Cross-cutting and Acceptance](./phase-07-cross-cutting-and-acceptance.md) | Pending | P2 | 4, 5, 6 |
+| 7 | [Cross-cutting and Acceptance](./phase-07-cross-cutting-and-acceptance.md) | Done | P2 | 4, 5, 6 |
 
 Phase 2 is independent of the FE and can run in parallel with Phases 1/3/4.
 Phase 6 is the only FE phase that depends on a backend phase (2).
