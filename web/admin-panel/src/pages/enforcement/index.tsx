@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import { useEnforcementCapabilities } from "../../hooks/use-enforcement-capabilities";
 import { DefaultModeControl } from "./default-mode-control";
 import { CapabilityCatalog } from "./capability-catalog";
+import { RuntimeOperations } from "./runtime-operations";
+import { PlaneMap } from "./plane-map";
 
 const { Title, Paragraph } = Typography;
 
@@ -55,6 +57,8 @@ export const EnforcementConsolePage: React.FC = () => {
               active={caps.active}
               onRefetch={() => query.refetch()}
             />
+            <RuntimeOperations onRefetch={() => query.refetch()} />
+            <PlaneMap />
           </>
         ) : null}
       </Space>

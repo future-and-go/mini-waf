@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Runtime Ops, Plane Map and Mode Pill"
-status: pending
+status: done
 priority: P2
 dependencies: [3, 4]
 effort: "M"

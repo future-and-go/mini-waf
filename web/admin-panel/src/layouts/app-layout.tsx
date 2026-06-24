@@ -14,6 +14,7 @@ import { useGetIdentity, useLogout, useGo, useCustom } from "@refinedev/core";
 import { useLocation } from "react-router-dom";
 import { navItems, type NavItem } from "../utils/nav-items";
 import { useUiStore } from "../stores/ui-store";
+import { ModePill } from "../components/mode-pill";
 
 const { Sider, Header, Content } = Layout;
 
@@ -196,6 +197,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           />
 
           <Space size="middle">
+            <ModePill />
             <Select
               size="small"
               value={i18n.language?.split("-")[0] ?? "en"}

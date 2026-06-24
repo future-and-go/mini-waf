@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from "react";
-import { Card, Table, Segmented, Input, Space, Tag, Tooltip, Alert, App } from "antd";
+import { Card, Table, Segmented, Input, Space, Tag, Tooltip, Alert, Badge, App } from "antd";
 import { WarningOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { useCustomMutation } from "@refinedev/core";
+import { useCustomMutation, useGo } from "@refinedev/core";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -14,6 +14,7 @@ import type {
 } from "../../types/api";
 import { ENFORCEMENT_ROUTES } from "../../providers/enforcement-provider";
 import { ModeTag } from "../../components/mode-tag";
+import { governanceFor } from "../../utils/governance-map";
 
 interface Props {
   features: Record<string, CapabilityInfo>;
@@ -35,6 +36,7 @@ const KNOWN_GAP = "ddos_protection.per_tier";
 export const CapabilityCatalog: React.FC<Props> = ({ features, active, onRefetch }) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const go = useGo();
   const { mutate } = useCustomMutation<SetProfileResponse>();
 
   const [pendingKey, setPendingKey] = useState<string | null>(null);
@@ -140,6 +142,27 @@ export const CapabilityCatalog: React.FC<Props> = ({ features, active, onRefetch
     },
   ];
 
+  // Purely-informational plane dots (S6 mapping); the Admin dot deep-links out.
+  const planeBadges = (feature: string) => {
+    const gov = governanceFor(feature);
+    if (!gov) return null;
+    return (
+      <Space size={4}>
+        {gov.config && (
+          <Tooltip title={t("enforcement.colConfigPlane")}><Badge color="geekblue" /></Tooltip>
+        )}
+        {gov.adminPath && (
+          <Tooltip title={t("enforcement.colAdminPlane")}>
+            <span style={{ cursor: "pointer" }} onClick={() => go({ to: gov.adminPath as string })}>
+              <Badge color="cyan" />
+            </span>
+          </Tooltip>
+        )}
+        <Tooltip title={t("enforcement.colControlPlane")}><Badge color="green" /></Tooltip>
+      </Space>
+    );
+  };
+
   const columns: ColumnsType<FeatureRow> = [
     {
       title: t("enforcement.colCapability"),
@@ -147,6 +170,7 @@ export const CapabilityCatalog: React.FC<Props> = ({ features, active, onRefetch
       render: (feature: string, row) => (
         <Space>
           <strong>{feature}</strong>
+          {planeBadges(feature)}
           <Tag>{row.info.policies.length}</Tag>
           {isOverridden(feature) && <Tag color="blue">{t("enforcement.overridden")}</Tag>}
           {!row.info.toggleable && <Tag>{t("enforcement.notToggleable")}</Tag>}
