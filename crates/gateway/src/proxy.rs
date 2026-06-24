@@ -27,7 +27,7 @@ use waf_engine::device_fp::behavior::Recorder as BehaviorRecorder;
 use waf_engine::device_fp::capture::ConnCtx as DeviceFpConnCtx;
 use waf_engine::logging::AuditEventType;
 use waf_engine::relay::RelayDetector;
-use waf_engine::{HeaderFilter, WafEngine};
+use waf_engine::{HeaderFilter, MinimalAuditStub, WafEngine};
 
 use crate::tiered::TierPolicyRegistry;
 
@@ -595,16 +595,16 @@ impl ProxyHttp for WafProxy {
                 .and_then(|a| a.as_inet())
                 .map(|s| s.ip().to_string())
                 .unwrap_or_default();
-            self.engine.emit_minimal_audit_stub(
-                &fallback_req_id,
-                AuditEventType::Block,
-                &host_for_log,
-                session.req_header().method.as_str(),
-                session.req_header().uri.path_and_query().map_or("/", |pq| pq.as_str()),
-                &peer_ip,
-                "circuit_breaker",
-                "fail-closed: missing request context",
-            );
+            self.engine.emit_minimal_audit_stub(&MinimalAuditStub {
+                req_id: &fallback_req_id,
+                event_type: AuditEventType::Block,
+                host: &host_for_log,
+                method: session.req_header().method.as_str(),
+                path: session.req_header().uri.path_and_query().map_or("/", |pq| pq.as_str()),
+                peer_ip: &peer_ip,
+                action: "circuit_breaker",
+                detail: "fail-closed: missing request context",
+            });
             inject_for_pre_inspect_or_error(&mut headers, ctx, "circuit_breaker", &fallback_req_id)?;
             session.write_response_header(Box::new(headers), false).await?;
             session.write_response_body(Some(body), true).await?;
@@ -1168,16 +1168,16 @@ impl ProxyHttp for WafProxy {
                             .and_then(|v| std::str::from_utf8(v.as_bytes()).ok())
                             .unwrap_or_default()
                             .to_string();
-                        self.engine.emit_minimal_audit_stub(
-                            &id,
-                            AuditEventType::Block,
-                            &host,
-                            session.req_header().method.as_str(),
-                            session.req_header().uri.path_and_query().map_or("/", |pq| pq.as_str()),
-                            &peer_ip,
+                        self.engine.emit_minimal_audit_stub(&MinimalAuditStub {
+                            req_id: &id,
+                            event_type: AuditEventType::Block,
+                            host: &host,
+                            method: session.req_header().method.as_str(),
+                            path: session.req_header().uri.path_and_query().map_or("/", |pq| pq.as_str()),
+                            peer_ip: &peer_ip,
                             action,
-                            "fail_to_proxy: transport error (ctx-None)",
-                        );
+                            detail: "fail_to_proxy: transport error (ctx-None)",
+                        });
                         id
                     } else {
                         String::new()

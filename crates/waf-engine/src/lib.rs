@@ -27,7 +27,7 @@ pub use crowdsec::{
     CacheStats, CrowdSecChecker, CrowdSecClient, CrowdSecComponents, CrowdSecConfig, Decision, DecisionCache,
     init_crowdsec,
 };
-pub use engine::{WafEngine, WafEngineConfig};
+pub use engine::{MinimalAuditStub, WafEngine, WafEngineConfig};
 pub use geoip::{GeoIpService, cache_policy_from_str};
 pub use geoip_updater::{UpdateResult, XdbUpdater, spawn_auto_updater};
 pub use outbound::{HeaderFilter, OutboundConfigError};

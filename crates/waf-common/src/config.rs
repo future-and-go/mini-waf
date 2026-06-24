@@ -1087,8 +1087,9 @@ pub fn load_config(path: &str) -> anyhow::Result<AppConfig> {
 
 /// True when the path names a YAML file (`.yaml` / `.yml`, case-insensitive).
 fn is_yaml_path(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    lower.ends_with(".yaml") || lower.ends_with(".yml")
+    std::path::Path::new(path)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"))
 }
 
 fn apply_env_overrides(config: &mut AppConfig) -> anyhow::Result<()> {

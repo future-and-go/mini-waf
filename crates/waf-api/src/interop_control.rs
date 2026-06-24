@@ -123,7 +123,7 @@ pub(crate) fn capabilities_value(state: &AppState) -> serde_json::Value {
     })
 }
 
-/// Reset runtime state, cache, CrowdSec cache, and mode overrides.
+/// Reset runtime state, cache, `CrowdSec` cache, and mode overrides.
 pub(crate) async fn reset_state_value(state: &AppState) -> serde_json::Value {
     state.engine.reset_runtime_state();
     state.cache.flush().await;
@@ -142,7 +142,7 @@ pub(crate) async fn reset_state_value(state: &AppState) -> serde_json::Value {
 
 /// Apply a mode profile to the registry. Returns the HTTP status to use plus the
 /// response body (`BAD_REQUEST` for validation errors, `OK` on success).
-pub(crate) fn set_profile_value(state: &AppState, req: SetProfileRequest) -> (StatusCode, serde_json::Value) {
+pub(crate) fn set_profile_value(state: &AppState, req: &SetProfileRequest) -> (StatusCode, serde_json::Value) {
     let Some(mode) = InteropMode::from_contract_str(&req.mode) else {
         return (
             StatusCode::BAD_REQUEST,
@@ -271,7 +271,7 @@ async fn reset_state_handler(State(state): State<Arc<AppState>>) -> impl IntoRes
 }
 
 async fn set_profile_handler(State(state): State<Arc<AppState>>, Json(req): Json<SetProfileRequest>) -> Response {
-    let (status, body) = set_profile_value(&state, req);
+    let (status, body) = set_profile_value(&state, &req);
     (status, Json(body)).into_response()
 }
 

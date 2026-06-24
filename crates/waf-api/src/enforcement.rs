@@ -38,7 +38,7 @@ pub(crate) async fn enforcement_set_profile(State(state): State<Arc<AppState>>, 
     if !state.interop_config.enabled {
         return disabled_response();
     }
-    let (status, body) = set_profile_value(&state, req);
+    let (status, body) = set_profile_value(&state, &req);
     (status, Json(body)).into_response()
 }
 

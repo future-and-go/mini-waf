@@ -71,7 +71,7 @@ impl AuditFileSink {
             return;
         };
         match sender.try_send(line) {
-            Ok(()) | Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {}
+            Ok(()) | Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {}
         }
     }
 
@@ -118,6 +118,8 @@ fn run_consumer(log_path: &str, rx: &std::sync::mpsc::Receiver<String>) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing)]
+
     use super::*;
     use serde_json::json;
     use std::time::Instant;

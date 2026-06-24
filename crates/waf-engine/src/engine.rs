@@ -53,6 +53,19 @@ pub struct WafEngineConfig {
     pub log_whitelist_hits: bool,
 }
 
+/// Borrowed request identity for [`WafEngine::emit_minimal_audit_stub`], used on
+/// egress paths that have no `RequestCtx` to source these fields from.
+pub struct MinimalAuditStub<'a> {
+    pub req_id: &'a str,
+    pub event_type: AuditEventType,
+    pub host: &'a str,
+    pub method: &'a str,
+    pub path: &'a str,
+    pub peer_ip: &'a str,
+    pub action: &'static str,
+    pub detail: &'a str,
+}
+
 /// Main WAF engine — runs all detection phases.
 ///
 /// Phase 1-4  : IP / URL whitelist + blacklist (fast-path)
@@ -467,38 +480,28 @@ impl WafEngine {
     /// one audit record so the wire header is never an orphan.
     ///
     /// Fire-and-forget — no-op when the audit sender is unset.
-    pub fn emit_minimal_audit_stub(
-        &self,
-        req_id: &str,
-        event_type: AuditEventType,
-        host: &str,
-        method: &str,
-        path: &str,
-        peer_ip: &str,
-        action: &'static str,
-        detail: &str,
-    ) {
+    pub fn emit_minimal_audit_stub(&self, stub: &MinimalAuditStub) {
         let Some(sender) = self.audit_sender.get() else {
             return;
         };
         let event = AuditEvent {
             timestamp: chrono::Utc::now(),
-            event_type,
+            event_type: stub.event_type,
             rule_name: String::new(),
             rule_id: None,
             phase: None,
-            peer_ip: peer_ip.to_string(),
-            client_ip: peer_ip.to_string(),
-            host: host.to_string(),
-            method: method.to_string(),
-            path: path.to_string(),
+            peer_ip: stub.peer_ip.to_string(),
+            client_ip: stub.peer_ip.to_string(),
+            host: stub.host.to_string(),
+            method: stub.method.to_string(),
+            path: stub.path.to_string(),
             tier: None,
-            detail: Some(detail.to_string()),
-            req_id: Some(req_id.to_string()),
+            detail: Some(stub.detail.to_string()),
+            req_id: Some(stub.req_id.to_string()),
             risk_score: 0,
             mode: InteropMode::Enforce,
             query: String::new(),
-            contract_action: action,
+            contract_action: stub.action,
         };
         sender.send(event);
     }
