@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "X-WAF-Mode Correlation"
-status: pending
+status: done
 priority: P2
 dependencies: [2, 3]
 effort: "S"
@@ -60,12 +60,13 @@ render change.
 
 ## Success Criteria
 
-- [ ] Event detail shows Enforcement mode paired with action.
-- [ ] Recent-events feed shows a Mode column when value present; hidden/blank when
-      absent.
-- [ ] Same `ModeTag` styling as the pill and catalog.
-- [ ] Value comes from the API `waf_mode` field (Phase 2), never client-inferred.
-- [ ] `tsc --noEmit` clean; labels i18n in all three locales.
+- [x] Event detail shows Enforcement mode paired with action.
+- [x] Recent-events feed shows a Mode column when value present; hidden/blank when
+      absent. Backend `RecentEvent` extended to carry `waf_mode` so the feed
+      populates (the recent-events query did not select it before).
+- [x] Same `ModeTag` styling as the pill and catalog.
+- [x] Value comes from the API `waf_mode` field (Phase 2), never client-inferred.
+- [x] `tsc --noEmit` clean; labels i18n in all three locales.
 
 ## Risk Assessment
 

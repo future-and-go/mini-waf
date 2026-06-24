@@ -1362,6 +1362,7 @@ impl Database {
                 rule_id, \
                 rule_name, \
                 action, \
+                waf_mode, \
                 COALESCE(geo_info->>'country', '') AS country, \
                 category_of(rule_id) AS category \
              FROM security_events \
@@ -1392,6 +1393,7 @@ impl Database {
                 } else {
                     Some(country_str)
                 },
+                waf_mode: row.get("waf_mode"),
             }
         })
         .fetch_all(&self.pool)

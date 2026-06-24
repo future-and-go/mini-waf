@@ -170,6 +170,8 @@ export interface SecurityEvent {
   rule_name: string;
   rule_id: string | null;
   action: string;
+  // Persisted enforcement mode (Phase 2). Optional for pre-Phase-2 / mixed rows.
+  waf_mode?: InteropMode;
   detail: string | null;
   geo_info: {
     country?: string;
@@ -335,6 +337,7 @@ export interface RecentEvent {
   action: string;
   category: string;
   country?: string;
+  waf_mode?: InteropMode;
 }
 
 export interface TrafficPoint {

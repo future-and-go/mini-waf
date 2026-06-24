@@ -42,7 +42,8 @@ import { TrafficChart } from "../../components/traffic-chart";
 import { EngineBadge } from "../../components/engine-badge";
 import { EndpointHeatmap } from "../../components/endpoint-heatmap";
 import { DashboardFilters } from "../../components/dashboard-filters";
-import type { RecentEvent, StatsOverview, TopEntry, TrafficPoint, EndpointHeatmap as EndpointHeatmapData } from "../../types/api";
+import { ModeTag } from "../../components/mode-tag";
+import type { RecentEvent, StatsOverview, TopEntry, TrafficPoint, EndpointHeatmap as EndpointHeatmapData, InteropMode } from "../../types/api";
 import { fmtNum, fmtPct, fmtTime } from "../../utils/format";
 
 const ENGINES = [
@@ -310,6 +311,12 @@ export const DashboardPage: React.FC = () => {
           {v}
         </Tag>
       ),
+    },
+    {
+      title: t("enforcement.mode"),
+      dataIndex: "waf_mode",
+      width: 110,
+      render: (v?: InteropMode) => (v ? <ModeTag mode={v} showIcon={false} /> : null),
     },
   ];
 

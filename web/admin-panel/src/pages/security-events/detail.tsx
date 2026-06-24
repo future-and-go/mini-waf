@@ -19,6 +19,7 @@ import type { ColumnsType } from "antd/es/table";
 import type { SecurityEvent } from "../../types/api";
 import { deriveCategory } from "../../types/api";
 import { actionColors } from "../../components/category-bars";
+import { ModeTag } from "../../components/mode-tag";
 import { fmtDateTime } from "../../utils/format";
 
 interface IdentityShape {
@@ -297,9 +298,12 @@ export const SecurityEventDetailPage: React.FC = () => {
               <strong>{event.rule_name}</strong>
             </Descriptions.Item>
             <Descriptions.Item label={t("security.action")}>
-              <Tag color={actionColors[event.action] ?? "default"} style={{ color: "#fff" }}>
-                {event.action}
-              </Tag>
+              <Space>
+                <Tag color={actionColors[event.action] ?? "default"} style={{ color: "#fff" }}>
+                  {event.action}
+                </Tag>
+                {event.waf_mode && <ModeTag mode={event.waf_mode} showIcon={false} />}
+              </Space>
             </Descriptions.Item>
             <Descriptions.Item label="Category">
               <Tag>{category}</Tag>

@@ -556,6 +556,8 @@ pub struct RecentEvent {
     pub action: String,
     pub category: String,
     pub country: Option<String>,
+    /// Persisted enforcement mode (enforce | log_only) for the live feed.
+    pub waf_mode: String,
 }
 
 /// `GeoIP` distribution statistics
