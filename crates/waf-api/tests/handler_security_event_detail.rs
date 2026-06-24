@@ -58,6 +58,7 @@ async fn get_security_event_200_for_existing_event() {
         action: "block".into(),
         detail: Some("seed".into()),
         geo_info: None,
+        waf_mode: "log_only".into(),
     })
     .await
     .expect("seed event");
@@ -85,4 +86,5 @@ async fn get_security_event_200_for_existing_event() {
     assert_eq!(body["data"]["id"].as_str().expect("id"), id);
     assert_eq!(body["data"]["rule_id"].as_str().expect("rule_id"), "SQLI-001");
     assert_eq!(body["data"]["action"].as_str().expect("action"), "block");
+    assert_eq!(body["data"]["waf_mode"].as_str().expect("waf_mode"), "log_only");
 }

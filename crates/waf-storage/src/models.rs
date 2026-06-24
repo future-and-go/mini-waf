@@ -114,6 +114,7 @@ pub struct SecurityEvent {
     pub action: String,
     pub detail: Option<String>,
     pub geo_info: Option<serde_json::Value>,
+    pub waf_mode: String,
     pub created_at: DateTime<Utc>,
 }
 
@@ -314,6 +315,7 @@ pub struct CreateSecurityEvent {
     pub action: String,
     pub detail: Option<String>,
     pub geo_info: Option<serde_json::Value>,
+    pub waf_mode: String,
 }
 
 /// Security event query parameters

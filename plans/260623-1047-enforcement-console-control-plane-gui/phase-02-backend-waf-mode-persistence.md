@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Backend WAF-Mode Persistence"
-status: pending
+status: done
 priority: P2
 dependencies: []
 effort: "M"

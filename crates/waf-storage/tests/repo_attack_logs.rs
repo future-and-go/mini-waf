@@ -157,6 +157,7 @@ async fn stats_overview_aggregates_attack_logs_and_security_events() {
             action: "block".into(),
             detail: None,
             geo_info: Some(json!({"country": "Vietnam", "iso_code": "VN", "isp": "TestISP"})),
+            waf_mode: "enforce".into(),
         })
         .await
         .unwrap();
@@ -192,6 +193,7 @@ async fn timeseries_returns_buckets_when_data_present() {
             action: "block".into(),
             detail: None,
             geo_info: None,
+            waf_mode: "enforce".into(),
         })
         .await
         .unwrap();
@@ -225,6 +227,7 @@ async fn geo_stats_returns_top_countries_and_distribution() {
                     "city": "City",
                     "isp": "ISP",
                 })),
+                waf_mode: "enforce".into(),
             })
             .await
             .unwrap();

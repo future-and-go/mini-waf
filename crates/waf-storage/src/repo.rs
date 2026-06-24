@@ -425,8 +425,8 @@ impl Database {
     pub async fn create_security_event(&self, req: CreateSecurityEvent) -> Result<(), StorageError> {
         sqlx::query(
             r"INSERT INTO security_events
-               (host_code, client_ip, method, path, rule_id, rule_name, action, detail, geo_info)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+               (host_code, client_ip, method, path, rule_id, rule_name, action, detail, geo_info, waf_mode)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(&req.host_code)
         .bind(&req.client_ip)
@@ -437,6 +437,7 @@ impl Database {
         .bind(&req.action)
         .bind(&req.detail)
         .bind(&req.geo_info)
+        .bind(&req.waf_mode)
         .execute(&self.pool)
         .await?;
 
@@ -489,7 +490,7 @@ impl Database {
         for chunk in events.chunks(1000) {
             let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
                 "INSERT INTO security_events (host_code, client_ip, method, path, \
-                 rule_id, rule_name, action, detail, geo_info) ",
+                 rule_id, rule_name, action, detail, geo_info, waf_mode) ",
             );
             qb.push_values(chunk, |mut b, ev| {
                 b.push_bind(&ev.host_code)
@@ -500,7 +501,8 @@ impl Database {
                     .push_bind(&ev.rule_name)
                     .push_bind(&ev.action)
                     .push_bind(&ev.detail)
-                    .push_bind(&ev.geo_info);
+                    .push_bind(&ev.geo_info)
+                    .push_bind(&ev.waf_mode);
             });
             qb.push(" ON CONFLICT DO NOTHING");
             qb.build().execute(&self.pool).await?;

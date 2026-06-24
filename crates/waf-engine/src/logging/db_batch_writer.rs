@@ -123,6 +123,7 @@ mod tests {
                 action: "block".into(),
                 detail: None,
                 geo_info: None,
+                waf_mode: "enforce".into(),
             })
         };
 
@@ -212,6 +213,7 @@ mod tests {
             action: "block".into(),
             detail: None,
             geo_info: None,
+            waf_mode: "enforce".into(),
         }));
 
         // Both events should be in the channel

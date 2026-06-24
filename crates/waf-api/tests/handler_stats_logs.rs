@@ -131,6 +131,7 @@ async fn stats_timeseries_by_category_buckets_seeded_event() {
         action: "block".into(),
         detail: None,
         geo_info: None,
+        waf_mode: "enforce".into(),
     })
     .await
     .expect("seed event");

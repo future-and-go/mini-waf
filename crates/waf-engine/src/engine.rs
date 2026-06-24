@@ -1001,6 +1001,7 @@ impl WafEngine {
                     "iso_code": g.iso_code,
                 })
             }),
+            waf_mode: decision.mode.as_contract_str().to_string(),
         };
 
         if let Some(writer) = self.db_batch_writer.get() {

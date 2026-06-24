@@ -410,6 +410,7 @@ pub async fn seed_one_of_each(db: &waf_storage::Database) {
         action: "block".into(),
         detail: None,
         geo_info: None,
+        waf_mode: "enforce".into(),
     })
     .await
     .expect("seed security_event");
@@ -437,6 +438,7 @@ pub async fn insert_security_event(
         action: action.into(),
         detail: None,
         geo_info: None,
+        waf_mode: "enforce".into(),
     })
     .await
     .expect("insert_security_event");
