@@ -1,0 +1,39 @@
+name: project-triage
+
+# Adds newly opened issues to the org board and tags them for triage.
+# Manual run: gh workflow run project-triage.yml --ref main -f issue=<number>
+
+on:
+  issues:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Issue number to triage
+        required: true
+
+permissions:
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    env:
+      ADD_TO_PROJECT_PAT: ${{ secrets.ADD_TO_PROJECT_PAT }}
+    steps:
+      - name: Apply triage label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.inputs.issue || github.event.issue.number }}
+        run: |
+          gh issue edit "$ISSUE" --repo "$REPO" --add-label "status:triage"
+
+      - name: Add issue to org project board
+        # Requires a PAT with 'project' scope stored as the ADD_TO_PROJECT_PAT secret.
+        # Skipped automatically if the secret is not configured.
+        if: ${{ env.ADD_TO_PROJECT_PAT != '' }}
+        uses: actions/add-to-project@v1.0.2
+        with:
+          project-url: https://github.com/orgs/future-and-go/projects/2
+          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}

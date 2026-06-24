@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Harness intake (docs)
+    url: https://github.com/future-and-go/mini-waf/blob/main/docs/FEATURE_INTAKE.md
+    about: Read the intake gate before filing larger specs or high-risk work.
