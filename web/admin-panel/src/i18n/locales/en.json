@@ -1189,6 +1189,7 @@
     "retry": "Retry",
     "disabledTitle": "Control plane disabled",
     "disabledMessage": "The control plane is disabled in config (interop.enabled = false).",
-    "open": "Open"
+    "open": "Open",
+    "applied": "Enforcement mode applied"
   }
 }

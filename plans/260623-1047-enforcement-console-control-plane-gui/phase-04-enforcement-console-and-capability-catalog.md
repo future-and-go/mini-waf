@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Enforcement Console and Capability Catalog"
-status: pending
+status: done
 priority: P1
 dependencies: [3]
 effort: "L"

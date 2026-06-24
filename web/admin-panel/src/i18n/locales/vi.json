@@ -865,6 +865,7 @@
     "retry": "Thử lại",
     "disabledTitle": "Mặt phẳng điều khiển đã tắt",
     "disabledMessage": "Mặt phẳng điều khiển bị tắt trong cấu hình (interop.enabled = false).",
-    "open": "Mở"
+    "open": "Mở",
+    "applied": "Đã áp dụng chế độ thực thi"
   }
 }
