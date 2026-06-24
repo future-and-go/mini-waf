@@ -7,8 +7,6 @@
 // - control is implicitly always true — all 17 are mode-toggleable.
 // adminPath values are real nav-items routes so deep-links resolve.
 
-export type Plane = "config" | "admin" | "control";
-
 export interface GovernanceEntry {
   feature: string;
   config: boolean;

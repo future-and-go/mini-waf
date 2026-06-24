@@ -27,14 +27,14 @@ fn disabled_response() -> Response {
     (StatusCode::NOT_FOUND, Json(json!({"ok": false, "error": "interop disabled"}))).into_response()
 }
 
-pub async fn enforcement_capabilities(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn enforcement_capabilities(State(state): State<Arc<AppState>>) -> Response {
     if !state.interop_config.enabled {
         return disabled_response();
     }
     Json(capabilities_value(&state)).into_response()
 }
 
-pub async fn enforcement_set_profile(State(state): State<Arc<AppState>>, Json(req): Json<SetProfileRequest>) -> Response {
+pub(crate) async fn enforcement_set_profile(State(state): State<Arc<AppState>>, Json(req): Json<SetProfileRequest>) -> Response {
     if !state.interop_config.enabled {
         return disabled_response();
     }
@@ -42,14 +42,14 @@ pub async fn enforcement_set_profile(State(state): State<Arc<AppState>>, Json(re
     (status, Json(body)).into_response()
 }
 
-pub async fn enforcement_reset_state(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn enforcement_reset_state(State(state): State<Arc<AppState>>) -> Response {
     if !state.interop_config.enabled {
         return disabled_response();
     }
     Json(reset_state_value(&state).await).into_response()
 }
 
-pub async fn enforcement_flush_cache(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn enforcement_flush_cache(State(state): State<Arc<AppState>>) -> Response {
     if !state.interop_config.enabled {
         return disabled_response();
     }
