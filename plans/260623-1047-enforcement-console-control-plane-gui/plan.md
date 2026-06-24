@@ -57,7 +57,7 @@ spec's TS types omit it — add it).
 |-------|------|--------|----------|-----------|
 | 1 | [Backend Enforcement Proxy Routes](./phase-01-backend-enforcement-proxy-routes.md) | In Review | P1 | — |
 | 2 | [Backend WAF-Mode Persistence](./phase-02-backend-waf-mode-persistence.md) | Done | P2 | — |
-| 3 | [Frontend Foundation](./phase-03-frontend-foundation.md) | Pending | P1 | 1 |
+| 3 | [Frontend Foundation](./phase-03-frontend-foundation.md) | Done | P1 | 1 |
 | 4 | [Enforcement Console and Capability Catalog](./phase-04-enforcement-console-and-capability-catalog.md) | Pending | P1 | 3 |
 | 5 | [Runtime Ops, Plane Map and Mode Pill](./phase-05-runtime-ops-plane-map-and-mode-pill.md) | Pending | P2 | 3, 4 |
 | 6 | [X-WAF-Mode Correlation](./phase-06-x-waf-mode-correlation.md) | Pending | P2 | 2, 3 |

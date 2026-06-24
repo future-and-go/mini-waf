@@ -30,6 +30,7 @@ import {
   ShareAltOutlined,
   EyeInvisibleOutlined,
   FilterOutlined,
+  ControlOutlined,
 } from "@ant-design/icons";
 import type { ComponentType } from "react";
 
@@ -48,6 +49,9 @@ export const navItems: NavItem[] = [
   { key: "hosts", i18nKey: "nav.hosts", path: "/hosts", icon: GlobalOutlined },
   { key: "security-events", i18nKey: "nav.securityEvents", path: "/security-events", icon: AlertOutlined },
   { key: "logs", i18nKey: "nav.logs", path: "/logs", icon: ContainerOutlined },
+
+  // nav.control
+  { key: "enforcement", i18nKey: "nav.enforcement", path: "/enforcement", icon: ControlOutlined, section: "nav.control" },
 
   // nav.protection
   { key: "tier-policies", i18nKey: "nav.tierPolicies", path: "/tier-policies", icon: ApartmentOutlined, section: "nav.protection" },

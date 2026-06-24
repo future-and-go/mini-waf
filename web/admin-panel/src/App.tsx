@@ -58,6 +58,7 @@ import { DeviceFingerprintingPage } from "./pages/device-fingerprinting";
 import { RelayIntelPage } from "./pages/relay-intel";
 import { GeoRestrictionPage } from "./pages/geo-restriction";
 import { ResponseFilteringPage } from "./pages/response-filtering";
+import { EnforcementConsolePage } from "./pages/enforcement";
 
 // Each Refine `resource` is what binds list/create/edit/delete pages,
 // the data provider, and the navigation system. Path on resource is what
@@ -68,6 +69,7 @@ const resources = [
   { name: "ip-rules", list: "/ip-rules" },
   { name: "url-rules", list: "/url-rules" },
   { name: "security-events", list: "/security-events", show: "/security-events/:id" },
+  { name: "enforcement", list: "/enforcement" },
   { name: "rule-analytics", list: "/rule-analytics" },
   { name: "logs", list: "/logs", meta: { dataProviderName: "vlogs" } },
   {
@@ -152,6 +154,7 @@ export const App: React.FC = () => {
                   <Route path="/url-rules" element={<UrlRulesPage />} />
                   <Route path="/security-events" element={<SecurityEventsPage />} />
                   <Route path="/security-events/:id" element={<SecurityEventDetailPage />} />
+                  <Route path="/enforcement" element={<EnforcementConsolePage />} />
                   <Route path="/rule-analytics" element={<RuleAnalyticsPage />} />
                   <Route path="/logs" element={<AdminOnly><LogsPage /></AdminOnly>} />
                   <Route path="/custom-rules" element={<CustomRulesPage />} />

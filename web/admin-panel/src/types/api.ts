@@ -361,3 +361,58 @@ export interface EndpointHeatmap {
   cells: HeatmapCell[];
   metadata: HeatmapMetadata;
 }
+
+// ─── Enforcement control plane (E10) ──────────────────────────────────────────
+// Mirrors the JWT-guarded /api/enforcement/* proxy (waf-api/src/enforcement.rs),
+// which returns the raw control-plane object (no { data } envelope). InteropMode
+// serializes as "enforce" | "log_only".
+export type InteropMode = "enforce" | "log_only";
+
+export interface CapabilityInfo {
+  supported: boolean;
+  toggleable: boolean;
+  policies: string[];
+}
+
+export interface ActiveModes {
+  default_mode: InteropMode;
+  // Keyed by feature name or "feature.policy"; precedence policy > feature > default.
+  overrides: Record<string, InteropMode>;
+}
+
+export interface CapabilitiesResponse {
+  ok: boolean;
+  features: Record<string, CapabilityInfo>;
+  active: ActiveModes;
+}
+
+export interface SetProfileBody {
+  scope: "all" | "features" | "policies";
+  mode: InteropMode;
+  features?: string[];
+  feature?: string;
+  policies?: string[];
+}
+
+export interface SetProfileResponse {
+  ok: boolean;
+  action: "set_profile";
+  applied: unknown;
+  unsupported: string[];
+  active: ActiveModes;
+  ts_ms: number;
+}
+
+export interface ResetStateResponse {
+  ok: boolean;
+  action: "reset_state";
+  audit_log_preserved: boolean;
+  ts_ms: number;
+}
+
+export interface FlushCacheResponse {
+  ok: boolean;
+  action?: "flush_cache";
+  supported?: boolean;
+  ts_ms?: number;
+}

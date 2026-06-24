@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Frontend Foundation"
-status: pending
+status: done
 priority: P1
 dependencies: [1]
 effort: "M"
