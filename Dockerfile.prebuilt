@@ -1,4 +1,9 @@
-FROM debian:bookworm-slim
+# Base image is overridable so a binary built on a newer host (glibc) can run on
+# a matching runtime. Default stays bookworm-slim — unchanged for existing
+# consumers (cluster, e2e, CI). The all-features deploy override passes a
+# newer-glibc base via BASE_IMAGE.
+ARG BASE_IMAGE=debian:bookworm-slim
+FROM ${BASE_IMAGE}
 
 WORKDIR /app
 

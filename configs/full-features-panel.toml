@@ -1,0 +1,50 @@
+# Admin panel runtime config for the all-features demo deployment.
+# Stronger posture than configs/waf-panel.toml: enforce mode + auto-block ON.
+# Schema: crates/waf-common/src/panel_config.rs (deny_unknown_fields — exact keys).
+
+# Enforce decisions (block/challenge), not just observe.
+shadow_mode = false
+
+# Risk bands (must satisfy risk_allow < risk_challenge < risk_block).
+risk_allow = 51
+risk_challenge = 74
+risk_block = 75
+challenge_type = "js_challenge"
+
+honeypot_paths = [
+    "/.env",
+    "/.git/config",
+    "/wp-admin/install.php",
+    "/phpmyadmin",
+    "/.aws/credentials",
+    "/actuator/env",
+]
+
+[response_filtering]
+block_stack_traces = true
+json_redact_fields = [
+    "password",
+    "token",
+    "secret",
+    "api_key",
+]
+
+[trusted_waf_bypass]
+cidrs = [
+    "127.0.0.1/32",
+    "::1/128",
+]
+
+[rate_limits]
+default_rps = 100
+burst = 200
+session_expiry_secs = 3600
+global_rps = 0
+request_timeout_secs = 30
+fail_open = false
+
+# Auto-block repeat offenders — ON.
+[auto_block]
+enabled = true
+min_events = 5
+window_secs = 60

@@ -1,0 +1,27 @@
+# All-features deploy override — use WITH the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d
+# (scripts/deploy.sh does this for you.)
+#
+# Only the deltas vs docker-compose.yml live here:
+#   - build from the prebuilt binary (needs `cargo build --release` on host)
+#   - run configs/full-features.toml instead of default.toml
+#   - publish 443/udp for the HTTP/3 (QUIC) listener
+#   - load secrets (JWT_SECRET, ADMIN_PASSWORD, …) from .env
+services:
+  prx-waf:
+    build:
+      # context (.) is inherited from the base file; only swap the Dockerfile.
+      dockerfile: Dockerfile.prebuilt
+      args:
+        # The host-built binary links the host's glibc; a newer host needs a
+        # runtime base with glibc >= host. trixie-slim (glibc 2.41) covers
+        # current build hosts; bookworm-slim (2.36) is too old.
+        BASE_IMAGE: debian:trixie-slim
+    # Inject .env into the container: ADMIN_PASSWORD (deterministic first-run
+    # admin), JWT_SECRET, CACHE_BACKEND, RUST_LOG. Functional env (DATABASE_URL,
+    # SSL_CERT_FILE, …) stays in the base file.
+    env_file: .env
+    command: ["/usr/local/bin/waf", "--config", "/app/configs/full-features.toml", "run"]
+    ports:
+      # Additive to the base TCP maps (16880:80, 16843:443, 16827:9527).
+      - "16843:443/udp"   # HTTP/3 QUIC

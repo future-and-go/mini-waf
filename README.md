@@ -184,8 +184,15 @@ Full design in [System Architecture](./docs/system-architecture.md).
 | Target | Command |
 | --- | --- |
 | Single node (Docker) | `docker compose up -d` |
+| Single node, all features (one-click) | `./scripts/deploy.sh` |
 | Multi-node cluster | `docker compose -f docker-compose.cluster.yml up -d` |
 | Systemd (bare-metal) | See [Deployment Guide](./docs/deployment-guide.md) — unit file in repo root |
+
+`./scripts/deploy.sh` is a local/demo one-click deploy: it builds the artifacts,
+brings up the stack with **every single-node feature enabled** (HTTP/3, outbound
+header-strip, OWASP CRS, auto-block, sqli-scan, audit, Valkey cache) from
+`configs/full-features.toml`, and routes the bundled Juice Shop behind the WAF as
+a live test target. See [All-Features Docker Deploy](./docs/all-features-docker-deploy.md).
 
 Liveness probe: `GET /health` on the admin API port. JSON response includes `status`, `version`, and component health for `database`, `waf_engine`, `cache`, `plugins`, `tunnels`.
 
@@ -214,6 +221,7 @@ Admin UI: `http://<host>:9527/ui/` — Dashboard, Hosts, Rules, Certificates, Se
 - [System Architecture](./docs/system-architecture.md) — components, topology, storage layer
 - [Request Pipeline](./docs/request-pipeline.md) — phases and decision flow
 - [Deployment Guide](./docs/deployment-guide.md) — Docker, systemd, cluster, config reference
+- [All-Features Docker Deploy](./docs/all-features-docker-deploy.md) — one-click single-node deploy with every feature on
 - [Code Standards](./docs/code-standards.md) — Rust 2024 conventions, error handling
 - [Custom Rules Syntax](./docs/custom-rules-syntax.md) — YAML rule schemas
 - [Access Lists](./docs/access-lists.md) — IP / host allow + block lists

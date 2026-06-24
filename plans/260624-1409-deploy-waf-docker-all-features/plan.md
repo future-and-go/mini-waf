@@ -1,7 +1,7 @@
 ---
 title: "Deploy WAF via Docker with all single-node features + one-click script"
 description: "Self-signed local/demo Docker deployment of prx-waf with every single-node feature enabled, driven by one deploy script."
-status: pending
+status: complete
 priority: P2
 branch: "main-harness"
 tags: [deployment, docker, config]
@@ -33,10 +33,10 @@ Grounded facts from the codebase (do not re-litigate):
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [All-Features Config](./phase-01-all-features-config.md) | Pending |
-| 2 | [Deploy Orchestration](./phase-02-deploy-orchestration.md) | Pending |
-| 3 | [One-Click Script](./phase-03-one-click-script.md) | Pending |
-| 4 | [Verify and Document](./phase-04-verify-and-document.md) | Pending |
+| 1 | [All-Features Config](./phase-01-all-features-config.md) | Complete |
+| 2 | [Deploy Orchestration](./phase-02-deploy-orchestration.md) | Complete |
+| 3 | [One-Click Script](./phase-03-one-click-script.md) | Complete |
+| 4 | [Verify and Document](./phase-04-verify-and-document.md) | Complete |
 
 ## Dependencies
 
@@ -55,3 +55,14 @@ Grounded facts from the codebase (do not re-litigate):
 ## Out of Scope
 
 Cluster HA, community/CrowdSec enrollment, ACME, production hardening (real domain, secret vaulting beyond a generated `.env`).
+
+## Result (verified live)
+
+Stack brought up via `docker-compose.yml` + `docker-compose.deploy.yml`; all acceptance criteria met:
+
+- `/health` → HTTP 200 `{"status":"ok", ...}` (the binary reports `ok`, not the literal word `healthy`), `database` + `waf_engine` = `ok`. Auto-migrate + auto-create-admin confirmed — zero manual steps.
+- `configs/full-features.toml` active: Valkey standalone cache connected (not memory fallback), HTTP/3 listener on `0.0.0.0:443`, outbound header-leak prevention enabled, audit JSONL sink writing, OWASP CRS + 2 host routes registered, `[interop]` off.
+- SQLi probe to `Host: juice.local` blocked with **HTTP 403** and recorded in `/api/security-events` (`rule_id: SQLI-LIB`, `action: block`, libinjection). Benign request proxied 200. Outbound responses carry no `X-Powered-By`/`Server` fingerprint.
+- No edits to `configs/default.toml` or any Rust crate.
+
+**One deploy defect found and fixed during verification:** the host builds the release binary against glibc 2.39 (Ubuntu 24.04), but `Dockerfile.prebuilt` based on `debian:bookworm-slim` (glibc 2.36), so the host binary crash-looped with `GLIBC_2.38/2.39 not found`. Fix: parameterized `Dockerfile.prebuilt`'s base via `ARG BASE_IMAGE` (default unchanged `debian:bookworm-slim`, so cluster/e2e/CI consumers are untouched); the deploy override passes `BASE_IMAGE: debian:trixie-slim` (glibc 2.41). Code-reviewed DONE, no must-fix.
