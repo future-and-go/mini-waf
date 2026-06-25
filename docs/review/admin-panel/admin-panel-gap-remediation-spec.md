@@ -197,3 +197,93 @@ These render fine but aren't backed by live data. Fix = either feed from a real 
 ---
 
 *All FE contracts above are transcribed from the current `web/admin-panel/src` sources; all backend pointers verified against `crates/` on 2026-06-25. Before implementing, run the intake step in `docs/FEATURE_INTAKE.md` and create the story packet under the cited epic (or a new `E18-admin-api-completeness` epic if you prefer to group these).*
+
+---
+
+# G. 📋 Summary Overview (to complete the admin-panel)
+
+Quick-reference tables aggregating everything above. Use the **Fix** column to jump to the detailed work item (A1, B1a, …) and the **Req IDs** column for the story packet.
+
+## G.1 API mismatch master table — every broken / stub / missing endpoint
+
+| # | GUI feature (page) | Endpoint | HTTP verb | Status | Symptom in UI | Fix | Req IDs |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Logs | `/api/v1/logs/query` | GET | 🔴 404 (removed) | Log table never loads | A1 | FR-029, FR-032, US-1205, dec-0010 |
+| 2 | Logs | `/api/v1/logs/stats` | GET | 🔴 404 (removed) | "Entries (24h)" always "—" | A1 | FR-032 |
+| 3 | Logs | `/api/v1/logs/streams` | GET | 🔴 404 (removed) | Filter dropdowns empty | A1 | FR-032 |
+| 4 | Response Filtering | `/api/response-filtering/preview` | POST | 🔴 404 (never built) | Preview always errors | A2a | FR-033, FR-034, FR-035 |
+| 5 | Response Filtering | `/api/hosts/{id}/response-filter` | GET | 🔴 404 (never built) | Per-Host tab load fails | A2b | FR-033, FR-034, FR-035 |
+| 6 | Response Filtering | `/api/hosts/{id}/response-filter` | PUT | 🔴 404 (never built) | Per-Host Save fails | A2b | FR-033, FR-034, FR-035 |
+| 7 | DDoS Protection | `/api/ddos/metrics` | GET | 🟠 stub zeros | 4 KPI cards always 0 | B1a | FR-005, FR-004 |
+| 8 | DDoS Protection | `/api/ddos/ban-table` | GET | 🟠 stub `[]` | Ban table always empty | B1b | FR-005 |
+| 9 | DDoS Protection | `/api/ddos/ban-table/{ip}` | DELETE | 🟠 no-op | Unban button does nothing | B1c | FR-005 |
+| 10 | Challenge Engine | `/api/challenge/stats` | GET | 🟠 stub zeros | KPI cards always 0 | B2a | FR-006, US-1701/1702 |
+| 11 | Challenge Engine | `/api/challenge/preview` | POST | ⚠️ unauth `fetch()` | 401 if route gated | B2c | FR-006 |
+| 12 | CC Protection | `/api/hotlink-config` | GET | ⚠️ exists, unused | Form never shows saved state | C1 | FR-007, FR-035 |
+| 13 | CC Protection | *(no CC/rate-limit endpoint called)* | — | ⚠️ mislabeled | Page name ≠ function | C1 | FR-004, FR-005 |
+| 14 | TX Velocity | `/api/tx-velocity/config` | GET+PUT | ❌ missing | Threshold card read-only/static | C2 | FR-012 |
+| 15 | Dashboard | *(none — hardcoded `ENGINES`)* | — | 🔵 static | Engines always all-green | D1 | FR-030, FR-031 |
+| 16 | Enforcement → Plane Map | *(none — static `GOVERNANCE_MAP`)* | — | 🔵 static | Control-plane always ✓ | D2 | E14, E10/US-1003 |
+| 17 | Settings → Threat Intel | `/api/threat-intel/feeds` | GET | ❌ missing (synthesized) | Feed table is faked from rules | D3 | FR-042, FR-008 |
+| 18 | Geo Restriction | `/api/geoip/countries` | GET | ❌ missing (31 hardcoded) | Country picker incomplete | D4 | FR-041 |
+| 19 | Geo Restriction | `/api/stats/geo` (no 24h/blocked filter) | GET | ⚠️ label overstates | "(24h) Top Blocked" misleading | D4 | FR-041 |
+| 20 | Create-Rule-from-Event | `/api/custom-rules/test` | POST | ❌ missing (browser sim) | Preview count approximate | D (client-side) | FR-003, FR-021/022 |
+| 21 | Rule Analytics | `/api/stats/endpoints` (group-by-URI) | GET | ⚠️ partial (client group) | Top URIs under-counts | D (client-side) | FR-030 |
+| 22 | Risk Scoring | `/api/risk/metrics` (no `distribution`) | GET | ⚠️ partial (client bins) | Histogram = current page only | D (client-side) | FR-025, FR-027 |
+
+**Counts:** 🔴 6 broken · 🟠 4 stub · ❌ 4 missing-new · ⚠️ 8 partial/mislabeled/unauth.
+
+## G.2 Backend exists but NO GUI surface (wire-up to complete coverage)
+
+| Endpoint (verified live) | Status | Suggested GUI surface | Req IDs |
+| --- | --- | --- | --- |
+| `GET /api/audit-log` | ✅ works, unused | Re-point the Logs page here (item A1) | FR-032, FR-029 |
+| `GET /api/device-fp/conflicts` | ✅ works, unused | New "Conflicts" tab on Device Fingerprinting | FR-010, FR-011 |
+| `DELETE /api/cache/host/{host}` | ✅ works, unused | Per-host purge button on Cache page | FR-009 |
+| `DELETE /api/cache/key` | ✅ works, unused | Per-key purge input on Cache page | FR-009 |
+| `GET /api/cache/tags` | ✅ works, unused | Tag browser on Cache page | FR-009 |
+| `GET /api/hotlink-config` | ✅ works, unused | Load into CC-Protection hotlink form (item C1) | FR-007, FR-035 |
+
+## G.3 Requirement coverage matrix (FR → admin-panel)
+
+Status of each functional requirement **as surfaced in the admin-panel** (engine-level implementation not separately audited; ✅ = GUI fully wired to a working endpoint).
+
+| Req ID | Requirement | Admin-panel page | GUI status |
+| --- | --- | --- | --- |
+| FR-001 | Full reverse proxy | *(infra — no admin page)* | n/a |
+| FR-002 | Tiered protection | Tier Policies | ✅ wired |
+| FR-003 | Rule engine | Custom Rules / Rule Manager | ✅ wired |
+| FR-004 | Rate limiting | Hosts `defense_json` / CC Protection | ⚠️ partial (CC page mislabeled — C1) |
+| FR-005 | DDoS protection | DDoS Protection | 🟠 stub metrics/ban-table (B1) |
+| FR-006 | Challenge engine | Challenge Engine | 🟠 stub stats; PoW disabled (B2) |
+| FR-007 | Relay & proxy detection | Relay Intel | ✅ wired |
+| FR-008 | Whitelist + blacklist | Access Lists / IP Rules / URL Rules | ✅ wired |
+| FR-009 | Smart caching | Cache | ✅ wired (3 purge endpoints unused — G.2) |
+| FR-010/011 | Device fingerprint / anomaly | Device Fingerprinting | ✅ wired (conflicts tab missing — G.2) |
+| FR-012 | Transaction velocity | TX Velocity | ⚠️ config has no API (C2) |
+| FR-013…020 | Detection (SQLi/XSS/LFI/SSRF/…) | Rule Manager / Custom Rules | ✅ wired (rule CRUD) |
+| FR-021…024 | Rule hot-reload / format / scope / priority | Rule Manager / Rule Sources / Custom Rules | ✅ wired |
+| FR-025 | Cumulative risk scoring | Risk Scoring | ✅ wired (distribution approx — G.1#22) |
+| FR-026 | Risk dynamics | Risk Scoring (config) | ✅ wired |
+| FR-027 | Decision thresholds | Risk Scoring / Tier Policies | ✅ wired |
+| FR-028 | Canary / honeypot | Security Events (honeypot tab, `rule_id=HONEY`) | ✅ wired |
+| FR-029 | Live request feed | Dashboard (live events) / Logs | ⚠️ Dashboard ✅, **Logs 🔴 broken** (A1) |
+| FR-030 | Attack visualization | Dashboard / Rule Analytics | ✅ wired (some client-side approx) |
+| FR-031 | Hot config | Settings (reload) | ✅ wired |
+| FR-032 | Structured audit log | Logs | 🔴 broken — `/api/audit-log` unused (A1) |
+| FR-033/034/035 | Response filtering / redaction / header leak | Response Filtering / Sensitive Patterns | 🔴 preview + per-host broken (A2); Sensitive Patterns ✅ |
+| FR-036…039 | Resilience (fail-open/close, circuit breaker) | *(config in DDoS/Tier — no dedicated page)* | n/a (config-file) |
+| FR-040 | HTTPS / TLS termination | SSL Certificates | ✅ wired |
+| FR-041 | Geographic restriction | Geo Restriction | ✅ wired (country list hardcoded — D4) |
+| FR-042 | IP reputation feed | Settings → Threat Intel | 🔵 synthesized, no feeds API (D3) |
+| FR-043 | Multi-region deployment | *(none)* | ❌ no GUI |
+| FR-044 | Zero-downtime config sync | Cluster → Sync | ✅ wired |
+| FR-045 | Auto scaling | *(none)* | ❌ no GUI |
+| FR-046 | Behavioral ML scoring | *(none)* | ❌ no GUI |
+
+**Admin-panel completion gaps at a glance:**
+- **Must-fix (P0 features degraded):** FR-032 (Logs 🔴), FR-033/034/035 (Response Filtering 🔴), FR-005 (DDoS 🟠), FR-006 (Challenge 🟠), FR-012 (TX config ❌).
+- **Polish:** FR-004 (CC label), FR-041 (country list), FR-042 (feeds API), FR-009/FR-010 (unused endpoints → new GUI).
+- **Not surfaced at all (P1 bonus):** FR-043, FR-045, FR-046 — no admin-panel page exists.
+
+> **Note on doc paths:** this file now lives at `docs/review/admin-panel/`. The inline `../analysis/…`, `../crates/…`, `../web/…` links in sections A–F were written for the original `docs/` location and now resolve one level too high — adjust to `../../../…` if you rely on click-through. Want me to fix them?
