@@ -1,4 +1,4 @@
-# Admin Panel — Gap Remediation Spec (per-GUI-feature, AI-ready)
+# Admin Panel — Gap Remediation Spec (per-GUI-feature)
 
 **Date:** 2026-06-25
 **Companion to:** [`admin-panel-fe-be-gap-review.md`](admin-panel-fe-be-gap-review.md) (the findings report).
