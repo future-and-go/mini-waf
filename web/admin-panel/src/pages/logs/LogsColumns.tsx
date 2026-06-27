@@ -128,16 +128,6 @@ export const buildBuiltinColumns = (
     def: { title: "Host", dataIndex: "host", width: 160, ellipsis: true },
   },
   {
-    id: "tier",
-    label: "Tier",
-    def: {
-      title: "Tier",
-      dataIndex: "tier",
-      width: 100,
-      render: (v: unknown) => (typeof v === "string" && v ? <Tag>{v}</Tag> : "—"),
-    },
-  },
-  {
     id: "detail",
     label: "Detail",
     def: {
