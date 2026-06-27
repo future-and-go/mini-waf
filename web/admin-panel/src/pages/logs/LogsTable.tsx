@@ -20,8 +20,9 @@ import { CSS } from "@dnd-kit/utilities";
 import { LogsColumnsPicker } from "./LogsColumnsPicker";
 import { buildBuiltinColumns, renderGenericCell } from "./LogsColumns";
 
-// Each row is a free-form JSON object (NDJSON line from VictoriaLogs). We
-// type the well-known shape but tolerate extra fields in the expand row.
+// Each row is a free-form JSON object mapped from a `/api/security-events`
+// record. We type the well-known shape but tolerate extra fields in the
+// expand row (e.g. `waf_mode`, `country`) so they remain discoverable.
 export interface LogRow {
   _time?: string;
   _msg?: string;
@@ -57,6 +58,12 @@ interface Props {
   loading: boolean;
   pageSize: number;
   setPageSize: (n: number) => void;
+  /** Server-side total row count (drives the pager). */
+  total: number;
+  /** Current 1-based page (controlled — server pagination). */
+  currentPage: number;
+  /** Page change request → re-fetch upstream. */
+  onPageChange: (page: number) => void;
   /** Click → set client_ip filter to this value upstream. */
   onFilterClientIp: (ip: string) => void;
   /** Click → set rule_name filter to this value upstream. */
@@ -68,6 +75,9 @@ export const LogsTable: React.FC<Props> = ({
   loading,
   pageSize,
   setPageSize,
+  total,
+  currentPage,
+  onPageChange,
   onFilterClientIp,
   onFilterRuleName,
 }) => {
@@ -196,10 +206,17 @@ export const LogsTable: React.FC<Props> = ({
             </div>
           )}
           pagination={{
+            current: currentPage,
             pageSize,
+            total,
             showSizeChanger: true,
-            pageSizeOptions: [50, 100, 500],
-            onShowSizeChange: (_c, ps) => setPageSize(ps),
+            // Backend clamps page_size to 100 (list_security_events); offering a
+            // larger option would desync the pager from the rows actually returned.
+            pageSizeOptions: [50, 100],
+            onChange: (p, ps) => {
+              onPageChange(p);
+              if (ps !== pageSize) setPageSize(ps);
+            },
             showTotal: (n) => `Total: ${n}`,
           }}
           expandable={{

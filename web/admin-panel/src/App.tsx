@@ -10,7 +10,6 @@ import { HashRouter, Outlet, Route, Routes } from "react-router-dom";
 import { ConfigProvider, App as AntdApp } from "antd";
 
 import { dataProvider } from "./providers/data-provider";
-import { victoriaLogsDataProvider } from "./providers/victoria-logs-data-provider";
 import { authProvider } from "./providers/auth-provider";
 import { i18nProvider } from "./providers/i18n-provider";
 import { liveProvider } from "./providers/live-provider";
@@ -71,7 +70,7 @@ const resources = [
   { name: "security-events", list: "/security-events", show: "/security-events/:id" },
   { name: "enforcement", list: "/enforcement" },
   { name: "rule-analytics", list: "/rule-analytics" },
-  { name: "logs", list: "/logs", meta: { dataProviderName: "vlogs" } },
+  { name: "logs", list: "/logs" },
   {
     name: "custom-rules",
     list: "/custom-rules",
@@ -119,10 +118,7 @@ export const App: React.FC = () => {
          <ErrorBoundary>
           <RefineKbarProvider>
             <Refine
-              dataProvider={{
-                default: dataProvider,
-                vlogs: victoriaLogsDataProvider,
-              }}
+              dataProvider={dataProvider}
               authProvider={authProvider}
               i18nProvider={i18nProvider}
               liveProvider={liveProvider}
