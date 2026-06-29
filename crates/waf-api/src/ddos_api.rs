@@ -3,20 +3,36 @@
 //!
 //! Config source: `configs/ddos.yaml`. Ban-table is in-memory only (no persistence yet).
 
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     Json,
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
+    extract::{Path, State, connect_info::ConnectInfo},
+    http::{HeaderMap, header::AUTHORIZATION},
 };
 use serde_json::{Value, json};
 
 use waf_engine::checks::ddos::config::{DdosDocument, DdosFileConfig};
 
+use crate::auth::validate_access_token;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+
+/// Current wall-clock epoch milliseconds.
+fn now_epoch_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
+/// Best-effort admin username from the bearer token for audit attribution.
+/// `require_auth` already validated the token; a miss just yields `None`.
+fn bearer_username(headers: &HeaderMap, secret: &str) -> Option<String> {
+    let token = headers.get(AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ")?;
+    validate_access_token(token, secret).ok().map(|c| c.sub)
+}
 
 fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
     state.main_config_file.as_ref().map_or_else(
@@ -72,24 +88,92 @@ pub async fn put_ddos_config(State(state): State<Arc<AppState>>, Json(body): Jso
     Ok(Json(json!({ "success": true, "data": data })))
 }
 
-pub async fn get_ddos_metrics(_: State<Arc<AppState>>) -> ApiResult<Json<Value>> {
+/// `GET /api/ddos/metrics` — live `DDoS` counters (B1a).
+///
+/// `active_bans` is the **live** ban-table size after pruning expired entries
+/// (more honest than the drifting `bans_active` metric). `bursts_1h` /
+/// `bans_issued_1h` are **lifetime** totals from the engine (the engine keeps
+/// no 1-hour window; the FE cards are labeled "(total)").
+pub async fn get_ddos_metrics(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
+    let metrics = state.engine.ddos_metrics();
+    let ban_table = state.engine.ddos_ban_table();
+    // Purge expired bans and keep `bans_active` in sync — the counter is
+    // incremented on ban but otherwise never decremented, so wiring the
+    // decrement into the purge path stops it drifting upward (plan B1 §8).
+    let purged = ban_table.purge_expired(now_epoch_ms());
+    if purged > 0 {
+        metrics.dec_bans_active(u64::try_from(purged).unwrap_or(u64::MAX));
+    }
+
     Ok(Json(json!({
         "success": true,
-        "data": { "active_bans": 0, "bursts_1h": 0, "bans_issued_1h": 0, "store_errors": 0 }
+        "data": {
+            "active_bans": ban_table.len(),
+            "bursts_1h": metrics.burst_total(),
+            "bans_issued_1h": metrics.bans_total(),
+            "store_errors": metrics.store_errors(),
+        }
     })))
 }
 
-/// **STUB — v1 placeholder.**
-///
-/// Returns an empty ban table; in-memory `DDoS` ban tracking is not yet wired
-/// into the API layer. Frontend should treat `data: []` as "no data available"
-/// rather than "no active bans". Will be backed by the live ban store in a
-/// future release.
-pub async fn list_ban_table(_: State<Arc<AppState>>) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "success": true, "data": [], "total": 0 })))
+/// `GET /api/ddos/ban-table` — enumerate the live (non-expired) bans (B1b).
+pub async fn list_ban_table(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
+    let now = now_epoch_ms();
+    let rows: Vec<Value> = state
+        .engine
+        .ddos_ban_table()
+        .snapshot(now)
+        .into_iter()
+        .map(|r| {
+            json!({
+                "ip": r.ip.to_string(),
+                "banned_until_ms": r.expires_ms,
+                "ban_level": r.ban_level,
+                "last_rps": r.last_rps,
+                "reason": r.reason,
+            })
+        })
+        .collect();
+    let total = rows.len();
+    Ok(Json(json!({ "success": true, "data": rows, "total": total })))
 }
 
-pub async fn delete_ban_entry(_: State<Arc<AppState>>, Path(ip): Path<String>) -> impl IntoResponse {
-    tracing::info!("Manual unban: {}", ip);
-    (StatusCode::OK, Json(json!({ "success": true, "data": { "ip": ip } }))).into_response()
+/// `DELETE /api/ddos/ban-table/{ip}` — manually unban an IP (B1c).
+///
+/// Idempotent: removing an absent/expired IP still returns `200`. The mutation
+/// is audited (`action="ddos.unban"`).
+pub async fn delete_ban_entry(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(ip_str): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let ip: IpAddr = ip_str
+        .parse()
+        .map_err(|_| ApiError::BadRequest(format!("invalid IP address: {ip_str}")))?;
+
+    let removed = state.engine.ddos_ban_table().remove(ip);
+    if removed {
+        // Keep `bans_active` honest on the manual-unban exit path too.
+        state.engine.ddos_metrics().dec_bans_active(1);
+    }
+
+    let admin_username = bearer_username(&headers, &state.jwt_secret);
+    tracing::info!(action = "ddos.unban", ip = %ip, removed, admin = ?admin_username, "manual DDoS unban");
+    if let Err(e) = state
+        .db
+        .create_audit_log(
+            admin_username.as_deref(),
+            "ddos.unban",
+            Some("ddos_ban"),
+            Some(&ip.to_string()),
+            Some(json!({ "removed": removed })),
+            Some(&peer.ip().to_string()),
+        )
+        .await
+    {
+        tracing::warn!("failed to write audit log for ddos unban: {e}");
+    }
+
+    Ok(Json(json!({ "success": true, "data": { "ip": ip.to_string() } })))
 }

@@ -13,6 +13,7 @@ change + existing behavior).
 | ID | Title | Plan | Lane | Status | Req IDs |
 | --- | --- | --- | --- | --- | --- |
 | US-1801 | Response Filtering — preview endpoint + per-host API | A2 | high-risk | implemented | FR-033, FR-034, FR-035 |
+| US-1802 | DDoS Protection — live metrics, ban table, working unban | B1 | normal | implemented | FR-005, FR-004 |
 
 ## Notes
 

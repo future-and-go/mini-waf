@@ -141,6 +141,7 @@ mod tests {
         let verdict = DetectorVerdict::HardBurst {
             reason: "burst",
             detector: "per_ip",
+            rps: 100,
         };
         let result = action.execute(ip, &verdict, 1000);
         assert_eq!(result.risk_delta, 100);

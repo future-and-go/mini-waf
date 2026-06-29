@@ -1584,6 +1584,29 @@ async fn init_async(
         engine.start_rate_limit_watcher(std::path::Path::new(rl_path));
     }
 
+    // FR-005 DDoS subsystem: load `configs/ddos.yaml` and start the hot-reload
+    // watcher. Without this the engine's ddos_cfg stays at its empty default
+    // and DDoS detection never fires. The path mirrors `ddos_api::resolve_path`
+    // (the admin API writes the same file), so PUT /api/ddos/config hot-reloads.
+    let ddos_path = std::path::Path::new(config_file_path)
+        .parent()
+        .and_then(std::path::Path::parent)
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("configs/ddos.yaml");
+    engine.start_ddos_watcher(&ddos_path);
+
+    // FR-012 transaction-velocity subsystem: load `configs/tx-velocity.yaml`
+    // and start the hot-reload watcher. Same rationale as DDoS above — without
+    // this the engine's tx_velocity_cfg stays at its disabled default and the
+    // velocity/sequence classifiers never fire. A missing/bad file leaves the
+    // subsystem inert (the watcher logs a warning and keeps the default).
+    let tx_velocity_path = std::path::Path::new(config_file_path)
+        .parent()
+        .and_then(std::path::Path::parent)
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("configs/tx-velocity.yaml");
+    engine.start_tx_velocity_watcher(&tx_velocity_path);
+
     // ── Audit log file sink (interop §6/§8/§10) ──────────────────────────────
     // The JSONL audit file is the sole audit sink. Created lazily on the first
     // processed request; append-only; off the request hot path.

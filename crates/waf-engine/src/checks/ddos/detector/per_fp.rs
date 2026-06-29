@@ -93,6 +93,7 @@ impl PerFpDetector {
             Ok(n) if n > u64::from(cfg.per_fp_threshold) => DetectorVerdict::HardBurst {
                 reason: "fp_burst",
                 detector: "per_fp",
+                rps: u32::try_from(n).unwrap_or(u32::MAX),
             },
             Ok(_) => DetectorVerdict::Allow,
             Err(e) => {
@@ -308,13 +309,14 @@ mod tests {
 
         // 11th request exceeds threshold
         let verdict = detector.evaluate_with_fp(Some("ja4-abc123"), &ctx, &cfg, 1000);
-        assert_eq!(
+        assert!(matches!(
             verdict,
             DetectorVerdict::HardBurst {
                 reason: "fp_burst",
                 detector: "per_fp",
+                ..
             }
-        );
+        ));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -339,13 +341,14 @@ mod tests {
 
         // fp1's 6th request should burst
         let verdict = detector.evaluate_with_fp(Some("fp1"), &ctx, &cfg, 1000);
-        assert_eq!(
+        assert!(matches!(
             verdict,
             DetectorVerdict::HardBurst {
                 reason: "fp_burst",
                 detector: "per_fp",
+                ..
             }
-        );
+        ));
     }
 
     #[test]
@@ -368,13 +371,14 @@ mod tests {
 
         // Critical tier's 6th request should burst
         let verdict = detector.evaluate_with_fp(Some("shared-fp"), &ctx_critical, &cfg, 1000);
-        assert_eq!(
+        assert!(matches!(
             verdict,
             DetectorVerdict::HardBurst {
                 reason: "fp_burst",
                 detector: "per_fp",
+                ..
             }
-        );
+        ));
     }
 
     // ─────────────────────────────────────────────────────────────────────────

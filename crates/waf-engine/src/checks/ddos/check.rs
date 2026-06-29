@@ -159,6 +159,7 @@ impl Check for DdosCheck {
                 DetectorVerdict::HardBurst {
                     reason,
                     detector: det_name,
+                    ..
                 } => {
                     // Execute action (ban + risk bump)
                     let result = self.action.execute(ctx.client_ip, &verdict, now_ms);

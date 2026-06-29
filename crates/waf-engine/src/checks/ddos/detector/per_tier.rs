@@ -118,6 +118,7 @@ impl PerTierDetector {
             DetectorVerdict::HardBurst {
                 reason: "tier_burst",
                 detector: "per_tier",
+                rps: u32::try_from(count).unwrap_or(u32::MAX),
             }
         } else {
             DetectorVerdict::Allow
@@ -208,13 +209,14 @@ mod tests {
 
         // 101st exceeds floor
         let verdict = detector.evaluate_at(&ctx, &cfg, 1010);
-        assert_eq!(
+        assert!(matches!(
             verdict,
             DetectorVerdict::HardBurst {
                 reason: "tier_burst",
                 detector: "per_tier",
+                ..
             }
-        );
+        ));
     }
 
     #[test]
@@ -385,12 +387,13 @@ mod tests {
 
         // Critical's 6th request bursts
         let verdict = detector.evaluate_at(&ctx_crit, &cfg, 1000);
-        assert_eq!(
+        assert!(matches!(
             verdict,
             DetectorVerdict::HardBurst {
                 reason: "tier_burst",
                 detector: "per_tier",
+                ..
             }
-        );
+        ));
     }
 }
