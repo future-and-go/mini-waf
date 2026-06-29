@@ -5,7 +5,7 @@ Axum-based admin/control-plane HTTP API. Serves the embedded admin UI, exposes m
 ## Features
 - **REST API**: rules, plugins, tunnels, cache, cluster, stats, notifications, CrowdSec.
 - **Auth**: Argon2 password hashing, JWT issuance, middleware-enforced sessions.
-- **Static UI**: embeds Vue admin panel via `rust-embed` (built by `build.rs`).
+- **Static UI**: embeds React admin panel (Refine + AntD) via `rust-embed` (built by `build.rs`).
 - **WebSocket**: realtime stats / log streaming.
 - **Health**: liveness + readiness endpoints.
 - **Email**: outbound notifications via `lettre`.

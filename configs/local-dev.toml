@@ -1,0 +1,258 @@
+[proxy]
+listen_addr = "127.0.0.1:18080"
+listen_addr_tls = "127.0.0.1:18443"
+# tls_cert_pem / tls_key_pem omitted on purpose: the binary auto-generates a
+# self-signed cert for the proxy HTTPS listener when both are absent.
+
+[api]
+listen_addr = "127.0.0.1:9527"
+
+# ── Admin API TLS ─────────────────────────────────────────────────────────────
+# By default the admin API auto-generates a self-signed Ed25519 certificate on
+# first startup and persists it under `data_dir`.  The browser will show a
+# "Not secure" warning until you import the CA certificate into your trust store
+# (see docs/deployment-guide.md §"Admin TLS — Import self-signed CA").
+#
+# To disable HTTPS (not recommended for production):
+#   [api.tls]
+#   enabled = false
+#
+# To use a certificate issued by your internal PKI:
+#   [api.tls]
+#   mode = "provided"
+#   cert_pem = "/etc/prx-waf/admin-tls/cert.pem"
+#   key_pem  = "/etc/prx-waf/admin-tls/key.pem"
+#
+[api.tls]
+enabled     = true
+mode        = "auto"
+data_dir    = "data/admin-tls"
+# Extra SANs added to the auto-generated certificate.
+# "localhost" and the listen IP are always included automatically.
+extra_sans  = ["waf-admin.local", "localhost", "127.0.0.1", "::1"]
+validity_days    = 365
+renew_before_days = 30
+# Minimum TLS version: "1.2" or "1.3".  Default "1.2" for compatibility.
+min_tls_version  = "1.2"
+# Redirect plain HTTP on `http_redirect_port` → HTTPS.
+http_redirect    = false
+# http_redirect_port = 9526   # defaults to https_port - 1
+
+[storage]
+database_url = "postgresql://prx_waf:prx_waf@127.0.0.1:15432/prx_waf"
+max_connections = 20
+
+# ── FR-009: Response Caching ──────────────────────────────────────────────────
+#
+# backend choices:
+#   "memory"     — in-process Moka LRU (no extra process; default for local dev)
+#   "embedded"   — spawn valkey-server as a child process via UNIX socket
+#   "standalone" — connect to an external Valkey/Redis instance
+#   "cluster"    — connect to a Valkey cluster (topology auto-discovered)
+#
+# For "embedded" / "standalone" / "cluster" the binary must be built with
+# the `valkey` feature flag:  cargo build --features gateway/valkey
+#
+# The `CACHE_BACKEND` env var overrides this field at startup (see docker-compose.yml
+# and docs/valkey-cache-guide.md §3.1) so a single shared config file works for
+# both bare-metal local runs and Compose deployments.
+#
+[cache]
+enabled = true
+max_size_mb = 256
+default_ttl_secs = 60
+max_ttl_secs = 3600
+# FR-009 Phase 3: per-route TTL rules. Hot-reloaded on file change.
+# Missing file is non-fatal at boot (logs warn, runs with no per-route rules).
+rules_path = "rules/cache.yaml"
+# Default to in-process moka so a fresh `cargo run` works without an external
+# Valkey/Redis. docker-compose.yml sets CACHE_BACKEND=standalone to switch the
+# stack to the bundled `valkey` service automatically.
+backend = "memory"
+
+# ── Embedded Valkey (backend = "embedded") ────────────────────────────────────
+# Spawns a valkey-server child process using a UNIX socket.
+# No separate container or service is needed.
+#
+# [cache.embedded]
+# binary_path = ""              # auto-detect from $PATH or /usr/local/bin/valkey-server
+# data_dir    = "/tmp/prx-valkey"
+# extra_args  = []              # additional valkey-server flags
+
+# ── Standalone Valkey (backend = "standalone") ────────────────────────────────
+# Hostname `valkey` matches the docker-compose.yml service name.
+#
+[cache.valkey]
+seeds                    = ["valkey:6379"]
+password                 = ""
+db                       = 0
+tls                      = false
+pool_size                = 4
+connect_timeout_ms       = 2000
+command_timeout_ms       = 500
+circuit_breaker_threshold  = 5
+circuit_breaker_reset_secs = 30
+fallback_to_memory       = true
+
+# ── Valkey Cluster (backend = "cluster") ─────────────────────────────────────
+#
+# [cache.valkey]
+# seeds                    = ["10.0.1.1:6379", "10.0.1.2:6379", "10.0.1.3:6379"]
+# password                 = ""
+# tls                      = true
+# tls_ca_cert              = "/etc/prx-waf/tls/valkey-ca.pem"
+# pool_size                = 4
+# connect_timeout_ms       = 2000
+# command_timeout_ms       = 500
+# circuit_breaker_threshold  = 5
+# circuit_breaker_reset_secs = 30
+# fallback_to_memory       = true
+
+# ── Phase 5: HTTP/3 (QUIC) ────────────────────────────────────────────────────
+[http3]
+enabled = false
+listen_addr = "0.0.0.0:443"
+# cert_pem = "/etc/prx-waf/tls/cert.pem"
+# key_pem  = "/etc/prx-waf/tls/key.pem"
+
+# ── Phase 5: Security Hardening ───────────────────────────────────────────────
+[security]
+# List of IPs/CIDRs allowed to access the admin API.  Empty = allow all.
+admin_ip_allowlist = []
+# Maximum request body size (bytes).  Default 10 MB.
+max_request_body_bytes = 10485760
+# Per-IP rate limit for the admin API (req/s).  0 = disabled.
+api_rate_limit_rps = 0
+# CORS origins for admin API.  Empty = allow all.
+cors_origins = []
+
+# ── Admin panel runtime TOML (shadow mode, risk bands, honeypots, …) ─────────
+[panel]
+config_path = "waf-panel.toml"
+
+# ── FR-004 rate-limit subsystem (YAML, hot-reload) ───────────────────────────
+# Omit `config_path` to leave the subsystem inert.
+[rate_limit]
+config_path = "configs/rate-limit.yaml"
+
+# ── Example host configuration ────────────────────────────────────────────────
+# [[hosts]]
+# host = "example.com"
+# port = 80
+# remote_host = "127.0.0.1"
+# remote_port = 8080
+# guard_status = true
+
+# ── Cluster Configuration (disabled by default — opt-in) ──────────────────────
+# Remove the leading '#' characters from the [cluster] section to enable.
+#
+# [cluster]
+# # Enable clustering. Default: false — zero behavior change for standalone deployments.
+# enabled = false
+#
+# # Unique node identifier. Auto-generated from hostname+uuid suffix if empty.
+# node_id = ""
+#
+# # Role assignment. "auto" participates in leader election.
+# # Values: "auto" | "main" | "worker"
+# role = "auto"
+#
+# # QUIC listen address for inter-node communication.
+# listen_addr = "0.0.0.0:16851"
+#
+# # Static seed nodes. At least one reachable seed required to join a cluster.
+# # seeds = ["10.0.0.1:16851", "10.0.0.2:16851"]
+# seeds = []
+#
+# [cluster.crypto]
+# ca_cert   = "/app/certs/cluster-ca.pem"
+# node_cert = "/app/certs/node.pem"
+# node_key  = "/app/certs/node.key"
+# # Auto-generate CA and node certs on first startup (required for initial main).
+# auto_generate       = true
+# ca_validity_days    = 3650   # 10 years
+# node_validity_days  = 365    # 1 year
+# renewal_before_days = 7      # auto-renew 7 days before expiry
+#
+# [cluster.sync]
+# rules_interval_secs        = 10    # periodic rule version check
+# config_interval_secs       = 30
+# events_batch_size          = 100   # flush event batch at this count
+# events_flush_interval_secs = 5     # flush even if batch not full
+# stats_interval_secs        = 10
+# events_queue_size          = 10000 # drop oldest if worker falls behind
+#
+# [cluster.election]
+# timeout_min_ms        = 150    # random election timeout range (ms)
+# timeout_max_ms        = 300
+# heartbeat_interval_ms = 50     # main → workers heartbeat interval
+# phi_suspect           = 8.0
+# phi_dead              = 12.0
+#
+# [cluster.health]
+# check_interval_secs   = 5
+# max_missed_heartbeats = 3
+
+# ── Audit log ────────────────────────────────────────────────────────────────
+# WAF access decisions (block / allow / challenge / rate-limit) are appended as
+# one JSON object per line to an append-only JSONL file — the sole audit sink.
+# The file is created on the first processed request, off the request hot path.
+#
+# Set `enabled = false` to disable audit logging entirely (no file is created).
+[audit]
+enabled = true
+log_path = "./waf_audit.log"
+
+# ── Community Integration ─────────────────────────────────────────────────────
+# Share threat intelligence with the OpenPRX community network.
+# Enable to report detected attacks and receive the community blocklist.
+# Run `prx-waf community enroll` first to obtain machine_id and api_key.
+#
+# [community]
+# enabled = false
+# server_url = "https://community.openprx.dev"
+# api_key = ""           # Obtained from: prx-waf community enroll
+# machine_id = ""        # Obtained from: prx-waf community enroll
+# public_key = ""        # Ed25519 hex (64 chars). If set but invalid, init is refused.
+# batch_size = 50        # Number of signals to buffer before flushing
+# flush_interval_secs = 30   # Flush buffer even when batch_size not reached
+# sync_interval_secs = 300   # Blocklist sync interval (default: 5 minutes)
+
+# ── FR-035: Outbound Header Leak Prevention ──────────────────────────────────
+# Strip leaky response headers (server fingerprint, debug, internal, error
+# detail) before they reach the client. Detection categories are hard-coded
+# in waf-engine; this section only decides which categories are active.
+# Disabled by default — opt in by setting enabled = true.
+#
+# Standards: OWASP ASVS V14.4, CWE-200 / CWE-209, RFC 9110 §7.6.
+#
+# [outbound]
+# enabled = false
+#
+# [outbound.headers]
+# strip_server_info             = true   # Server, X-Powered-By, X-Runtime, X-Generator, X-OWA-Version, MS-Author-Via, MicrosoftSharePointTeamServices, Liferay-Portal, X-Mod-Pagespeed
+# strip_debug_headers           = true   # X-Debug-*, X-Internal-*, X-Backend-*, X-Real-IP, X-Forwarded-Server
+# strip_error_detail            = true   # X-Error-*, X-Exception-*, X-Stack-*, X-Trace-*, X-Application-Trace-*, X-DotNet-Version-*, X-Exception-Class
+# strip_php_fingerprint         = true   # X-PHP-Version, X-PHP-Response-Code (ref CVE-2024-4577 PHP-CGI banner-driven scans)
+# strip_aspnet_fingerprint      = true   # X-AspNet-Version, X-AspNetMvc-Version, X-SourceFiles (ref CVE-2017-7269)
+# strip_framework_fingerprint   = true   # X-Drupal-*, X-Magento-*, X-Pingback, X-Application-Context, X-Rack-Cache (ref Drupalgeddon, Spring4Shell)
+# strip_cdn_internal            = true   # X-Varnish, X-Amz-Cf-Id, X-Amz-Cf-Pop, X-Akamai-*, X-Fastly-Request-Id (on by default — this WAF is the public edge; flip false if you intentionally proxy CDN debug data)
+# detect_pii_in_values          = false  # Regex-scan VALUES for email / credit card / SSN / phone / RFC-1918 IP / JWT / AWS key / Google API key / Slack token / GitHub PAT (off — adds per-header regex cost; capped at 8 KiB)
+# strip_session_headers_on_pii_match = false  # When ON together with detect_pii_in_values, also strip Set-Cookie / ETag / Authorization on PII match (off — avoids killing session on regex false-positive)
+# strip_headers                 = []     # Extra exact header names (case-insensitive)
+# strip_prefixes                = []     # Extra header-name prefixes (case-insensitive)
+#
+# ── Allowlist (preserves built-ins from being stripped) ──
+# Headers preserved even when matched by an active family toggle or by the
+# `strip_headers` extras list. Use to keep built-ins your app legitimately
+# needs to expose. Beats every strip rule EXCEPT the unconditional CRLF strip
+# (RFC 9110 §5.5) and the hop-by-hop guard (RFC 9110 §7.6.1).
+# preserve_headers              = []     # e.g. ["server"] — keep `Server` even with strip_server_info=true
+# preserve_prefixes             = []     # e.g. ["x-debug-trace-"] — keep this prefix family
+#
+# ── PII tuning (only relevant when detect_pii_in_values = true) ──
+# [outbound.headers.pii]
+# disable_builtin   = []        # Names: email | credit_card | ssn | phone | ipv4_private |
+#                               # jwt | aws_key | google_api_key | slack_token | github_pat
+# extra_patterns    = []        # Custom regexes, compiled at startup. Invalid → startup error.
+# max_scan_bytes    = 8192      # Hard cap on per-value scan length (DoS guard). 0 = no cap.
