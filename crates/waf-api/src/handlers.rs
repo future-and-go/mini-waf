@@ -35,6 +35,55 @@ impl<T: Serialize> ApiResponse<T> {
 
 // ─── Hosts ────────────────────────────────────────────────────────────────────
 
+/// Extract the per-host response-filter override from a host's `defense_json`
+/// (`defense_json.response_filter`), if present. See decision 0011 / US-1801.
+pub(crate) fn response_filter_from_defense_json(
+    defense_json: Option<&Value>,
+) -> Option<waf_common::HostResponseFilter> {
+    defense_json?
+        .get("response_filter")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+}
+
+/// Build the in-memory `HostConfig` for a DB host row, mirroring the router
+/// registration performed on host create/update.
+///
+/// Besides the long-standing field mapping (ports, TLS, defense config, ALPN),
+/// this applies the five per-host response-filter fields persisted under
+/// `defense_json.response_filter` (FR-033/035 + AC-15/16/17, US-1801) so the
+/// proxy honors per-host overrides. When the sub-object is absent the
+/// `HostConfig` defaults are kept unchanged (no behavior change).
+pub(crate) fn host_config_from_row(host: &waf_storage::models::Host) -> Arc<HostConfig> {
+    let defense_config: waf_common::DefenseConfig = host
+        .defense_json
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let upstream_alpn = UpstreamAlpn::from_db_str(&host.upstream_alpn);
+    let mut config = HostConfig {
+        code: host.code.clone(),
+        host: host.host.clone(),
+        port: u16::try_from(host.port).unwrap_or(80),
+        ssl: host.ssl,
+        guard_status: host.guard_status,
+        remote_host: host.remote_host.clone(),
+        remote_port: u16::try_from(host.remote_port).unwrap_or(80),
+        remote_ip: host.remote_ip.clone(),
+        cert_file: host.cert_file.clone(),
+        key_file: host.key_file.clone(),
+        start_status: host.start_status,
+        defense_config,
+        upstream_alpn,
+        upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
+        http_redirect: host.http_redirect,
+        ..HostConfig::default()
+    };
+    if let Some(rf) = response_filter_from_defense_json(host.defense_json.as_ref()) {
+        config.apply_response_filter(&rf);
+    }
+    Arc::new(config)
+}
+
 pub async fn list_hosts(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
     let hosts = state.db.list_hosts().await?;
     Ok(Json(json!({ "success": true, "data": hosts })))
@@ -60,33 +109,8 @@ pub async fn create_host(State(state): State<Arc<AppState>>, Json(req): Json<Cre
 
     let host = state.db.create_host(req).await?;
 
-    // Deserialize per-host defense overrides; fall back to defaults if NULL/invalid.
-    let defense_config: waf_common::DefenseConfig = host
-        .defense_json
-        .as_ref()
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-
-    // Register with router
-    let upstream_alpn = UpstreamAlpn::from_db_str(&host.upstream_alpn);
-    let config = Arc::new(HostConfig {
-        code: host.code.clone(),
-        host: host.host.clone(),
-        port: u16::try_from(host.port).unwrap_or(80),
-        ssl: host.ssl,
-        guard_status: host.guard_status,
-        remote_host: host.remote_host.clone(),
-        remote_port: u16::try_from(host.remote_port).unwrap_or(80),
-        remote_ip: host.remote_ip.clone(),
-        cert_file: host.cert_file.clone(),
-        key_file: host.key_file.clone(),
-        start_status: host.start_status,
-        defense_config,
-        upstream_alpn,
-        upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
-        http_redirect: host.http_redirect,
-        ..HostConfig::default()
-    });
+    // Register with router (maps defense config + per-host response filter).
+    let config = host_config_from_row(&host);
     state.router.register(&config);
 
     Ok(Json(json!({ "success": true, "data": host })))
@@ -121,35 +145,11 @@ pub async fn update_host(
         .update_host(id, req)
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("Host {id} not found")))?;
-    // Unregister old route, register updated config
+    // Unregister old route, register updated config (maps defense config +
+    // per-host response filter).
     let old_port = u16::try_from(old_host.port).unwrap_or(80);
     state.router.unregister(&old_host.host, old_port);
-    let defense_config: waf_common::DefenseConfig = host
-        .defense_json
-        .as_ref()
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-    let port_u16 = u16::try_from(host.port).unwrap_or(80);
-    let remote_port_u16 = u16::try_from(host.remote_port).unwrap_or(80);
-    let upstream_alpn = UpstreamAlpn::from_db_str(&host.upstream_alpn);
-    let config = Arc::new(HostConfig {
-        code: host.code.clone(),
-        host: host.host.clone(),
-        port: port_u16,
-        ssl: host.ssl,
-        guard_status: host.guard_status,
-        remote_host: host.remote_host.clone(),
-        remote_port: remote_port_u16,
-        remote_ip: host.remote_ip.clone(),
-        cert_file: host.cert_file.clone(),
-        key_file: host.key_file.clone(),
-        start_status: host.start_status,
-        defense_config,
-        upstream_alpn,
-        upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
-        http_redirect: host.http_redirect,
-        ..HostConfig::default()
-    });
+    let config = host_config_from_row(&host);
     state.router.register(&config);
     Ok(Json(json!({ "success": true, "data": host })))
 }
@@ -746,6 +746,75 @@ pub async fn set_log_level(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use chrono::Utc;
+    use waf_storage::models::Host;
+
+    fn sample_host(defense_json: Option<Value>) -> Host {
+        Host {
+            id: Uuid::nil(),
+            code: "h1".into(),
+            host: "example.com".into(),
+            port: 443,
+            ssl: true,
+            guard_status: true,
+            remote_host: "127.0.0.1".into(),
+            remote_port: 8080,
+            remote_ip: None,
+            cert_file: None,
+            key_file: None,
+            remarks: None,
+            start_status: true,
+            exclude_url_log: None,
+            is_enable_load_balance: false,
+            load_balance_stage: 0,
+            defense_json,
+            log_only_mode: false,
+            upstream_alpn: "h2h1".into(),
+            upstream_skip_ssl_verify: false,
+            http_redirect: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn host_config_keeps_defaults_without_response_filter() {
+        let cfg = host_config_from_row(&sample_host(None));
+        let defaults = waf_common::HostConfig::default();
+        assert_eq!(cfg.body_scan_enabled, defaults.body_scan_enabled);
+        assert_eq!(cfg.header_blocklist, defaults.header_blocklist);
+        assert_eq!(cfg.strip_server_header, defaults.strip_server_header);
+        assert_eq!(cfg.internal_patterns, defaults.internal_patterns);
+    }
+
+    #[test]
+    fn host_config_applies_response_filter_from_defense_json() {
+        let dj = json!({
+            "response_filter": {
+                "body_scan_enabled": true,
+                "body_scan_max_body_bytes": 4096,
+                "internal_patterns": ["10\\.0\\.0\\.\\d+"],
+                "header_blocklist": ["X-Internal"],
+                "strip_server_header": true
+            }
+        });
+        let cfg = host_config_from_row(&sample_host(Some(dj)));
+        assert!(cfg.body_scan_enabled);
+        assert_eq!(cfg.body_scan_max_body_bytes, 4096);
+        assert_eq!(cfg.internal_patterns, vec!["10\\.0\\.0\\.\\d+".to_string()]);
+        assert_eq!(cfg.header_blocklist, vec!["X-Internal".to_string()]);
+        assert!(cfg.strip_server_header);
+    }
+
+    #[test]
+    fn host_config_ignores_unrelated_defense_json() {
+        // A defense_json without a response_filter key keeps defaults.
+        let dj = json!({ "owasp_set": true });
+        let cfg = host_config_from_row(&sample_host(Some(dj)));
+        assert_eq!(cfg.header_blocklist, waf_common::HostConfig::default().header_blocklist);
+    }
+
     /// Replicates the port validation logic used in `create_host` / `update_host`.
     fn is_valid_port(port: i32) -> bool {
         (1..=65535).contains(&port)

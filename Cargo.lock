@@ -6390,6 +6390,7 @@ dependencies = [
  "parking_lot",
  "rand 0.8.5",
  "rcgen",
+ "regex",
  "reqwest",
  "rust-embed",
  "rustls",

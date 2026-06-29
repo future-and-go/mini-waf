@@ -54,6 +54,7 @@ use crate::notifications::{
 use crate::panel_api::{get_panel_config, put_panel_config};
 use crate::plugins::{delete_plugin, disable_plugin, enable_plugin, list_plugins, upload_plugin};
 use crate::relay_api::{get_relay_config, get_relay_intel_status, put_relay_config, refresh_relay_intel, test_relay};
+use crate::response_filter_api::{get_host_response_filter, preview_response_filter, put_host_response_filter};
 use crate::risk_api::{
     clear_risk_actor, credit_risk_actor, get_risk_config, get_risk_metrics, list_risk_actors, put_risk_config,
 };
@@ -128,6 +129,13 @@ pub fn build_router(state: Arc<AppState>, tls_enabled: bool) -> Router {
             "/api/hosts/{id}",
             get(get_host).put(update_host).delete(delete_host),
         )
+        // A2: per-host response filtering (FR-033/034/035)
+        .route(
+            "/api/hosts/{id}/response-filter",
+            get(get_host_response_filter).put(put_host_response_filter),
+        )
+        // A2: global response-filtering preview
+        .route("/api/response-filtering/preview", post(preview_response_filter))
         // Allow IPs
         .route("/api/allow-ips", get(list_allow_ips).post(create_allow_ip))
         .route("/api/allow-ips/{id}", delete(delete_allow_ip))

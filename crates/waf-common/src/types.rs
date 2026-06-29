@@ -784,6 +784,59 @@ impl HostConfig {
         }
         Ok(())
     }
+
+    /// Apply a per-host response-filter override onto this config, in place.
+    ///
+    /// Copies the five admin-editable response-filter fields (FR-033/035 +
+    /// AC-15/16/17) from a [`HostResponseFilter`] that was persisted under
+    /// `Host.defense_json.response_filter`. Callers map the JSONB sub-object
+    /// into the typed DTO first (see decision 0011); this keeps the DB→config
+    /// wiring identical between the boot loader and the API CRUD path.
+    pub fn apply_response_filter(&mut self, rf: &HostResponseFilter) {
+        self.body_scan_enabled = rf.body_scan_enabled;
+        self.body_scan_max_body_bytes = rf.body_scan_max_body_bytes;
+        self.internal_patterns.clone_from(&rf.internal_patterns);
+        self.header_blocklist.clone_from(&rf.header_blocklist);
+        self.strip_server_header = rf.strip_server_header;
+    }
+}
+
+/// Per-host response-filter settings.
+///
+/// As edited by the admin panel and persisted under
+/// `Host.defense_json.response_filter` (decision 0011). Mirrors the FE
+/// `HostResponseFilter` contract exactly. Defaults match
+/// [`HostConfig::default`] so a `GET` for an un-configured host returns the
+/// real effective defaults.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostResponseFilter {
+    /// FR-033: enable the response-body content scanner.
+    #[serde(default)]
+    pub body_scan_enabled: bool,
+    /// FR-033: max plaintext body bytes scanned per response.
+    #[serde(default = "default_body_scan_max_body_bytes")]
+    pub body_scan_max_body_bytes: u64,
+    /// AC-17: operator regexes masked in identity-encoded response bodies.
+    #[serde(default)]
+    pub internal_patterns: Vec<String>,
+    /// AC-15 / FR-035: response header names to strip (case-insensitive).
+    #[serde(default = "default_header_blocklist")]
+    pub header_blocklist: Vec<String>,
+    /// AC-16 / FR-035: scrub the `Server` response header.
+    #[serde(default)]
+    pub strip_server_header: bool,
+}
+
+impl Default for HostResponseFilter {
+    fn default() -> Self {
+        Self {
+            body_scan_enabled: false,
+            body_scan_max_body_bytes: default_body_scan_max_body_bytes(),
+            internal_patterns: Vec::new(),
+            header_blocklist: default_header_blocklist(),
+            strip_server_header: false,
+        }
+    }
 }
 
 impl Default for HostConfig {
@@ -1338,12 +1391,30 @@ mod tests {
     #[test]
     fn waf_action_contract_strings_cover_all_six_classes() {
         assert_eq!(WafAction::Allow.as_contract_str(), "allow");
-        assert_eq!(WafAction::Block { status: 403, body: None }.as_contract_str(), "block");
+        assert_eq!(
+            WafAction::Block {
+                status: 403,
+                body: None
+            }
+            .as_contract_str(),
+            "block"
+        );
         assert_eq!(WafAction::Challenge.as_contract_str(), "challenge");
-        assert_eq!(WafAction::RateLimit { status: 429, body: None }.as_contract_str(), "rate_limit");
+        assert_eq!(
+            WafAction::RateLimit {
+                status: 429,
+                body: None
+            }
+            .as_contract_str(),
+            "rate_limit"
+        );
         assert_eq!(WafAction::Timeout { status: 504 }.as_contract_str(), "timeout");
         assert_eq!(
-            WafAction::CircuitBreaker { status: 503, body: None }.as_contract_str(),
+            WafAction::CircuitBreaker {
+                status: 503,
+                body: None
+            }
+            .as_contract_str(),
             "circuit_breaker",
         );
         // Internal-only variant: not a wire class, reported as allow.
@@ -1368,25 +1439,37 @@ mod tests {
         let cases: &[(&str, WafAction, &[&str], &[&str])] = &[
             (
                 "high-confidence injection (SQLi/XSS/cmd/SSRF)",
-                WafAction::Block { status: 403, body: None },
+                WafAction::Block {
+                    status: 403,
+                    body: None,
+                },
                 &["block", "challenge"],
                 &["rate_limit", "timeout", "allow"],
             ),
             (
                 "low-confidence injection (heuristic)",
-                WafAction::Block { status: 403, body: None },
+                WafAction::Block {
+                    status: 403,
+                    body: None,
+                },
                 &["block", "challenge", "log_only"],
                 &[],
             ),
             (
                 "auth abuse (cred stuffing, brute force)",
-                WafAction::Block { status: 403, body: None },
+                WafAction::Block {
+                    status: 403,
+                    body: None,
+                },
                 &["rate_limit", "challenge", "block"],
                 &["timeout", "circuit_breaker"],
             ),
             (
                 "volumetric abuse, single source",
-                WafAction::RateLimit { status: 429, body: None },
+                WafAction::RateLimit {
+                    status: 429,
+                    body: None,
+                },
                 &["rate_limit", "block"],
                 &["circuit_breaker"],
             ),
@@ -1398,19 +1481,28 @@ mod tests {
             ),
             (
                 "upstream degradation (WAF-detected)",
-                WafAction::CircuitBreaker { status: 503, body: None },
+                WafAction::CircuitBreaker {
+                    status: 503,
+                    body: None,
+                },
                 &["circuit_breaker"],
                 &["block", "rate_limit"],
             ),
             (
                 "recon / scanning",
-                WafAction::Block { status: 403, body: None },
+                WafAction::Block {
+                    status: 403,
+                    body: None,
+                },
                 &["block", "rate_limit", "challenge"],
                 &[],
             ),
             (
                 "known malicious IP (blacklist)",
-                WafAction::Block { status: 403, body: None },
+                WafAction::Block {
+                    status: 403,
+                    body: None,
+                },
                 &["block"],
                 &[],
             ),

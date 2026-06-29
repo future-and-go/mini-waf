@@ -1,8 +1,8 @@
 //! Coverage for `waf_common::types` decisions, defaults, Display, serde.
 
 use waf_common::types::{
-    DefenseConfig, DetectionResult, GeoIpInfo, HostConfig, InteropMode, LoadBalanceStrategy, Phase, RequestCtx,
-    WafAction, WafDecision, parse_cookie_header,
+    DefenseConfig, DetectionResult, GeoIpInfo, HostConfig, HostResponseFilter, InteropMode, LoadBalanceStrategy, Phase,
+    RequestCtx, WafAction, WafDecision, parse_cookie_header,
 };
 
 #[test]
@@ -192,6 +192,66 @@ fn default_tier_policy_is_shared_arc() {
     let a = RequestCtx::default_tier_policy();
     let b = RequestCtx::default_tier_policy();
     assert!(std::sync::Arc::ptr_eq(&a, &b));
+}
+
+// ── HostResponseFilter (US-1801 / decision 0011) ─────────────────────────────
+
+#[test]
+fn host_response_filter_default_mirrors_host_config() {
+    let rf = HostResponseFilter::default();
+    let hc = HostConfig::default();
+    assert_eq!(rf.body_scan_enabled, hc.body_scan_enabled);
+    assert_eq!(rf.body_scan_max_body_bytes, hc.body_scan_max_body_bytes);
+    assert_eq!(rf.internal_patterns, hc.internal_patterns);
+    assert_eq!(rf.header_blocklist, hc.header_blocklist);
+    assert_eq!(rf.strip_server_header, hc.strip_server_header);
+}
+
+#[test]
+fn host_response_filter_serde_round_trip() {
+    let rf = HostResponseFilter {
+        body_scan_enabled: true,
+        body_scan_max_body_bytes: 65536,
+        internal_patterns: vec![r"192\.168\..*".to_string()],
+        header_blocklist: vec!["X-Powered-By".to_string()],
+        strip_server_header: true,
+    };
+    let json = serde_json::to_string(&rf).unwrap();
+    let back: HostResponseFilter = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, rf);
+}
+
+#[test]
+fn host_response_filter_partial_json_uses_defaults() {
+    // Only one field provided; the rest fall back to documented defaults.
+    let rf: HostResponseFilter = serde_json::from_str(r#"{"body_scan_enabled":true}"#).unwrap();
+    assert!(rf.body_scan_enabled);
+    assert_eq!(
+        rf.body_scan_max_body_bytes,
+        HostConfig::default().body_scan_max_body_bytes
+    );
+    assert_eq!(rf.header_blocklist, HostConfig::default().header_blocklist);
+    assert!(!rf.strip_server_header);
+}
+
+#[test]
+fn apply_response_filter_copies_five_fields() {
+    let mut hc = HostConfig::default();
+    let rf = HostResponseFilter {
+        body_scan_enabled: true,
+        body_scan_max_body_bytes: 4096,
+        internal_patterns: vec!["secret".to_string()],
+        header_blocklist: vec!["X-Internal".to_string()],
+        strip_server_header: true,
+    };
+    hc.apply_response_filter(&rf);
+    assert!(hc.body_scan_enabled);
+    assert_eq!(hc.body_scan_max_body_bytes, 4096);
+    assert_eq!(hc.internal_patterns, vec!["secret".to_string()]);
+    assert_eq!(hc.header_blocklist, vec!["X-Internal".to_string()]);
+    assert!(hc.strip_server_header);
+    // Unrelated fields stay default.
+    assert_eq!(hc.mask_token, "[redacted]");
 }
 
 // ── Phase 2: new WafAction variant tests ─────────────────────────────────────

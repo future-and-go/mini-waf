@@ -1545,7 +1545,6 @@ async fn init_async(
     panel_config_path: Option<std::path::PathBuf>,
     log_level_setter: Option<LogLevelSetter>,
 ) -> anyhow::Result<(Arc<WafEngine>, Arc<HostRouter>, Arc<AppState>, ShutdownGuards)> {
-
     info!("Connecting to database...");
     let db = Arc::new(Database::connect(&config.storage.database_url, config.storage.max_connections).await?);
 
@@ -1641,7 +1640,7 @@ async fn init_async(
             .unwrap_or_default();
         let upstream_alpn = UpstreamAlpn::from_db_str(&host.upstream_alpn);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let cfg = Arc::new(HostConfig {
+        let mut host_config = HostConfig {
             code: host.code.clone(),
             host: host.host.clone(),
             port: host.port as u16,
@@ -1658,7 +1657,18 @@ async fn init_async(
             upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
             http_redirect: host.http_redirect,
             ..HostConfig::default()
-        });
+        };
+        // A2 (US-1801): apply per-host response-filter overrides persisted under
+        // `defense_json.response_filter` so the proxy honors them from boot.
+        if let Some(rf) = host
+            .defense_json
+            .as_ref()
+            .and_then(|v| v.get("response_filter"))
+            .and_then(|v| serde_json::from_value::<waf_common::HostResponseFilter>(v.clone()).ok())
+        {
+            host_config.apply_response_filter(&rf);
+        }
+        let cfg = Arc::new(host_config);
         router.register(&cfg);
     }
 

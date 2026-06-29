@@ -292,7 +292,10 @@ mod tests {
 
     #[test]
     fn differing_same_length_inputs_do_not_match() {
-        assert!(!constant_time_eq(b"waf-hackathon-2026-ctrl", b"waf-hackathon-2026-xxxx"));
+        assert!(!constant_time_eq(
+            b"waf-hackathon-2026-ctrl",
+            b"waf-hackathon-2026-xxxx"
+        ));
         assert!(!constant_time_eq(b"abc", b"abd"));
     }
 

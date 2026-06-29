@@ -254,7 +254,7 @@ fn default_upstream_alpn() -> String {
 }
 
 /// Update host request
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateHost {
     pub host: Option<String>,
     pub port: Option<i32>,
