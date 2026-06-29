@@ -252,6 +252,21 @@ pub async fn threat_intel_status(State(_state): State<Arc<AppState>>) -> ApiResu
     })))
 }
 
+/// GET /api/threat-intel/feeds (D3, FR-042/FR-008)
+///
+/// Returns per-feed metadata (`name`/`source`/`entry_count`/`last_refresh_ms`/
+/// `enabled`) loaded from `configs/relay.yaml` at startup. Metadata only —
+/// never the raw IP/ASN lists. Empty/zero rows when feeds are unconfigured.
+pub async fn threat_intel_feeds(State(state): State<Arc<AppState>>) -> ApiResult<Json<serde_json::Value>> {
+    let feeds = state.engine.relay_feeds();
+    let total = feeds.len();
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "data": &*feeds,
+        "total": total,
+    })))
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------

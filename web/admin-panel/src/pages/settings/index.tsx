@@ -76,22 +76,17 @@ interface PanelConfigEnvelope {
   main_config_file?: string;
 }
 
-interface RegistryOverview {
-  enabled?: number;
-  disabled?: number;
-  rules?: Array<{ id?: string; source?: string; category?: string; enabled?: boolean; name?: string }>;
-}
-
 interface ReputationStatus {
   tor_count?: number;
   asn_count?: number;
 }
 
 interface FeedRow {
-  key: string;
   name: string;
-  count: number;
-  enabled: number;
+  source: string;
+  entry_count: number;
+  last_refresh_ms: number;
+  enabled: boolean;
 }
 
 // ─── Reusable section card ────────────────────────────────────────────────────
@@ -177,10 +172,12 @@ export const SettingsPage: React.FC = () => {
   const { mutate: reload, mutation: reloadMutation } = useCustomMutation();
   const { mutate: feedReload, mutation: feedReloadMutation } = useCustomMutation();
 
-  const registryQuery = useCustom<RegistryOverview>({
-    url: "/api/rules/registry",
+  // D3 (FR-042/FR-008): real per-feed metadata from the threat-intel feeds API,
+  // replacing the previous synthesis from /api/rules/registry.
+  const feedsQuery = useCustom<FeedRow[]>({
+    url: "/api/threat-intel/feeds",
     method: "get",
-    queryOptions: { staleTime: 5 * 60_000, retry: false },
+    queryOptions: { staleTime: 60_000, retry: false },
     errorNotification: false,
   });
 
@@ -198,35 +195,45 @@ export const SettingsPage: React.FC = () => {
   const reputationStatus =
     (reputationQuery.result?.data as unknown as { data: ReputationStatus })?.data ??
     (reputationQuery.result?.data as unknown as ReputationStatus);
-  const registryData = registryQuery.result?.data;
-
   const feedRows = useMemo<FeedRow[]>(() => {
-    if (!registryData?.rules) return [];
-    const sourceMap = new Map<string, { count: number; enabled: number }>();
-    for (const rule of registryData.rules) {
-      const src = rule.source ?? "builtin";
-      const prev = sourceMap.get(src) ?? { count: 0, enabled: 0 };
-      prev.count++;
-      if (rule.enabled) prev.enabled++;
-      sourceMap.set(src, prev);
-    }
-    return Array.from(sourceMap.entries()).map(([name, data]) => ({
-      key: name,
-      name,
-      count: data.count,
-      enabled: data.enabled,
-    }));
-  }, [registryData]);
+    const d = feedsQuery.result?.data;
+    return Array.isArray(d) ? (d as FeedRow[]) : [];
+  }, [feedsQuery.result]);
 
   const feedColumns: ColumnsType<FeedRow> = [
-    { title: t("common.name"), dataIndex: "name", ellipsis: true },
+    { title: t("common.name"), dataIndex: "name", width: 130 },
+    {
+      title: t("settings.feedSource", { defaultValue: "Source" }),
+      dataIndex: "source",
+      ellipsis: true,
+      render: (v: string) => (
+        <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{v}</span>
+      ),
+    },
+    {
+      title: t("settings.feedEntries", { defaultValue: "Entries" }),
+      dataIndex: "entry_count",
+      width: 90,
+      render: (v: number) => v.toLocaleString(),
+    },
+    {
+      title: t("settings.feedLastRefresh", { defaultValue: "Last refresh" }),
+      dataIndex: "last_refresh_ms",
+      width: 170,
+      render: (v: number) =>
+        v > 0 ? (
+          <span style={{ fontSize: 12 }}>{new Date(v).toLocaleString()}</span>
+        ) : (
+          <Typography.Text type="secondary">—</Typography.Text>
+        ),
+    },
     {
       title: t("settings.feedStatus"),
       dataIndex: "enabled",
-      width: 130,
-      render: (v: number, r: FeedRow) => (
-        <Tag color={v > 0 ? "green" : "default"}>
-          {v}/{r.count} {t("settings.feedEnabled")}
+      width: 110,
+      render: (v: boolean) => (
+        <Tag color={v ? "green" : "default"}>
+          {v ? t("common.enabled") : t("common.disabled", { defaultValue: "disabled" })}
         </Tag>
       ),
     },
@@ -847,13 +854,20 @@ export const SettingsPage: React.FC = () => {
           <Typography.Text strong style={{ display: "block", marginBottom: 8 }}>
             {t("settings.feedStatus")}
           </Typography.Text>
-          {registryQuery.query.isLoading ? (
+          {feedsQuery.query.isLoading ? (
             <div style={{ padding: "16px 0" }}>
               <Spin size="small" />
             </div>
+          ) : feedsQuery.query.isError ? (
+            <Alert
+              type="warning"
+              showIcon
+              message={t("settings.feedsError", { defaultValue: "Failed to load threat-intel feeds." })}
+              style={{ marginBottom: 16 }}
+            />
           ) : feedRows.length > 0 ? (
             <Table<FeedRow>
-              rowKey="key"
+              rowKey="name"
               size="small"
               dataSource={feedRows}
               columns={feedColumns}
@@ -864,7 +878,9 @@ export const SettingsPage: React.FC = () => {
             <Alert
               type="info"
               showIcon
-              message="Reputation feeds are configured at startup. No live API available. Check startup logs for feed status."
+              message={t("settings.feedsEmpty", {
+                defaultValue: "No threat-intel feeds configured (see configs/relay.yaml).",
+              })}
               style={{ marginBottom: 16 }}
             />
           )}

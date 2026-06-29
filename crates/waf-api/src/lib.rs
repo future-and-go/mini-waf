@@ -30,6 +30,7 @@ pub mod stats;
 pub mod tier_policies_api;
 pub mod tls;
 pub mod tunnels;
+pub mod tx_velocity_api;
 pub mod websocket;
 
 pub use server::start_api_server;

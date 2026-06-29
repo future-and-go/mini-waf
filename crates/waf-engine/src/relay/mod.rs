@@ -26,6 +26,128 @@ pub use intel::{AsnDb, AsnRecord, DatacenterSet, EmptyAsnDb, IntelProvider, Refr
 pub use registry::ProviderRegistry;
 pub use signal::{AsnClass, ClientIdentity, RelayCtx, Signal, SignalProvider};
 
+/// Per-feed metadata for the admin Threat-Intel panel (FR-042 / FR-008, D3).
+///
+/// Reflects the on-disk intel feeds configured in `relay.yaml`. Metadata-only:
+/// never carries the raw IP / ASN lists (those would leak detection coverage).
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct FeedMeta {
+    /// Stable feed key: `tor_exit` | `asn` | `datacenter`.
+    pub name: String,
+    /// Configured source path (or `(not configured)`).
+    pub source: String,
+    /// Loaded entry count (0 when the feed is unconfigured or count is not
+    /// cheaply available, e.g. an ASN mmdb).
+    pub entry_count: u64,
+    /// Last load/refresh time (source-file mtime, epoch ms; 0 when unknown).
+    pub last_refresh_ms: i64,
+    /// Whether the corresponding provider is in `signals.enabled`.
+    pub enabled: bool,
+}
+
+fn file_mtime_ms(path: &std::path::Path) -> i64 {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|d| i64::try_from(d.as_millis()).ok())
+        .unwrap_or(0)
+}
+
+/// Build the threat-intel feed metadata list from a validated [`RelayConfig`].
+///
+/// Loads each configured feed file to count entries; an unconfigured or
+/// failing feed yields a zero-count row rather than an error (fail-soft).
+#[must_use]
+pub fn load_feed_metadata(cfg: &RelayConfig) -> Vec<FeedMeta> {
+    use crate::relay::providers::TorSet;
+
+    let enabled_has = |name: &str| cfg.signals.enabled.iter().any(|s| s == name);
+    let mut feeds = Vec::with_capacity(3);
+
+    // Tor exit list.
+    let tor = cfg.tor.list_path.as_ref().map_or_else(
+        || FeedMeta {
+            name: "tor_exit".to_string(),
+            source: "(not configured)".to_string(),
+            entry_count: 0,
+            last_refresh_ms: 0,
+            enabled: enabled_has("tor_exit"),
+        },
+        |p| {
+            let count = TorSet::load(p).map_or(0, |s| u64::try_from(s.len()).unwrap_or(u64::MAX));
+            FeedMeta {
+                name: "tor_exit".to_string(),
+                source: p.display().to_string(),
+                entry_count: count,
+                last_refresh_ms: file_mtime_ms(p),
+                enabled: enabled_has("tor_exit"),
+            }
+        },
+    );
+    feeds.push(tor);
+
+    // ASN database (mmdb / TSV). Entry count is not cheaply available from an
+    // mmdb reader, so report the configured source + mtime with a 0 count.
+    let asn_enabled = enabled_has("asn_classifier");
+    let asn = cfg.asn.mmdb_path.as_ref().map_or_else(
+        || FeedMeta {
+            name: "asn".to_string(),
+            source: "(not configured)".to_string(),
+            entry_count: 0,
+            last_refresh_ms: 0,
+            enabled: asn_enabled,
+        },
+        |p| FeedMeta {
+            name: "asn".to_string(),
+            source: p.display().to_string(),
+            entry_count: 0,
+            last_refresh_ms: file_mtime_ms(p),
+            enabled: asn_enabled,
+        },
+    );
+    feeds.push(asn);
+
+    // Datacenter override lists (one or more files merged).
+    let datacenter = if cfg.asn.datacenter_lists.is_empty() {
+        FeedMeta {
+            name: "datacenter".to_string(),
+            source: "(not configured)".to_string(),
+            entry_count: 0,
+            last_refresh_ms: 0,
+            enabled: asn_enabled,
+        }
+    } else {
+        let count = DatacenterSet::load(&cfg.asn.datacenter_lists).map_or(0, |s| {
+            u64::try_from(s.asn_ids.len() + s.operator_allow.len() + s.operator_deny.len()).unwrap_or(u64::MAX)
+        });
+        let refreshed = cfg
+            .asn
+            .datacenter_lists
+            .iter()
+            .map(|p| file_mtime_ms(p))
+            .max()
+            .unwrap_or(0);
+        let source = cfg
+            .asn
+            .datacenter_lists
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        FeedMeta {
+            name: "datacenter".to_string(),
+            source,
+            entry_count: count,
+            last_refresh_ms: refreshed,
+            enabled: asn_enabled,
+        }
+    };
+    feeds.push(datacenter);
+
+    feeds
+}
+
 /// Top-level facade. Owns the active config snapshot + provider registry.
 /// Hot-swap of `cfg` is via `ArcSwap` (phase-05); registry is rebuilt on
 /// reload, not mutated in place.
@@ -117,6 +239,37 @@ async fn intel_refresh_loop(provider: Arc<dyn IntelProvider>, interval: Duration
 mod tests {
     use super::*;
     use std::net::Ipv4Addr;
+
+    #[test]
+    fn load_feed_metadata_empty_config_lists_three_disabled_feeds() {
+        let cfg = RelayConfig::default();
+        let feeds = super::load_feed_metadata(&cfg);
+        assert_eq!(feeds.len(), 3, "tor_exit + asn + datacenter");
+        let names: Vec<&str> = feeds.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.contains(&"tor_exit"));
+        assert!(names.contains(&"asn"));
+        assert!(names.contains(&"datacenter"));
+        for f in &feeds {
+            assert!(!f.enabled, "default config enables nothing");
+            assert_eq!(f.entry_count, 0);
+            assert_eq!(f.source, "(not configured)");
+        }
+    }
+
+    #[test]
+    fn load_feed_metadata_marks_enabled_from_signals() {
+        let yaml = r#"
+relay_detection:
+  signals:
+    enabled: ["tor_exit", "asn_classifier"]
+"#;
+        let cfg = RelayConfig::from_yaml_str(yaml).expect("parse");
+        let feeds = super::load_feed_metadata(&cfg);
+        let tor = feeds.iter().find(|f| f.name == "tor_exit").expect("tor feed");
+        let asn = feeds.iter().find(|f| f.name == "asn").expect("asn feed");
+        assert!(tor.enabled, "tor_exit in signals.enabled");
+        assert!(asn.enabled, "asn_classifier in signals.enabled");
+    }
 
     #[test]
     fn empty_detector_yields_unknown_identity() {

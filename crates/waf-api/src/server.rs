@@ -69,11 +69,13 @@ use crate::security::{
 use crate::state::AppState;
 use crate::static_files::static_handler;
 use crate::stats::{
-    stats_endpoints, stats_geo, stats_overview, stats_timeseries, stats_timeseries_by_category, threat_intel_status,
+    stats_endpoints, stats_geo, stats_overview, stats_timeseries, stats_timeseries_by_category, threat_intel_feeds,
+    threat_intel_status,
 };
 use crate::tier_policies_api::{dry_run_tier, get_tier_policies, put_tier_policies};
 use crate::tls::{AdminTlsManager, spawn_http_redirect};
 use crate::tunnels::{create_tunnel, delete_tunnel, list_tunnels, ws_tunnel};
+use crate::tx_velocity_api::{get_tx_velocity_config, put_tx_velocity_config};
 use crate::websocket::{ws_events, ws_logs};
 
 /// Build the Axum router with all API routes.
@@ -212,6 +214,8 @@ pub fn build_router(state: Arc<AppState>, tls_enabled: bool) -> Router {
         .route("/api/stats/endpoints", get(stats_endpoints))
         // PATCH 4: reputation/threat-intel status (graceful degraded response)
         .route("/api/threat-intel/status", get(threat_intel_status))
+        // D3: threat-intel feeds metadata (FR-042/FR-008)
+        .route("/api/threat-intel/feeds", get(threat_intel_feeds))
         // Phase 4: Notifications
         .route(
             "/api/notifications",
@@ -281,6 +285,11 @@ pub fn build_router(state: Arc<AppState>, tls_enabled: bool) -> Router {
         // FR-002 Tier Policies
         .route("/api/tier-policies", get(get_tier_policies).put(put_tier_policies))
         .route("/api/tier-policies/dry-run", post(dry_run_tier))
+        // FR-012 TX Velocity config (C2)
+        .route(
+            "/api/tx-velocity/config",
+            get(get_tx_velocity_config).put(put_tx_velocity_config),
+        )
         // FR-008 Access Lists
         .route("/api/access-lists", get(get_access_lists).put(put_access_lists))
         .route("/api/access-lists/test", get(test_access_lists))

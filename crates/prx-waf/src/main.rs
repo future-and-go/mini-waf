@@ -1607,6 +1607,16 @@ async fn init_async(
         .join("configs/tx-velocity.yaml");
     engine.start_tx_velocity_watcher(&tx_velocity_path);
 
+    // FR-007/FR-042 (D3): load threat-intel feed metadata from configs/relay.yaml
+    // so GET /api/threat-intel/feeds reports real per-feed name/source/count/
+    // last-refresh. Fail-soft: missing/disabled feeds yield an empty/zero list.
+    let relay_path = std::path::Path::new(config_file_path)
+        .parent()
+        .and_then(std::path::Path::parent)
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("configs/relay.yaml");
+    engine.load_relay_feeds(&relay_path);
+
     // ── Audit log file sink (interop §6/§8/§10) ──────────────────────────────
     // The JSONL audit file is the sole audit sink. Created lazily on the first
     // processed request; append-only; off the request hot path.

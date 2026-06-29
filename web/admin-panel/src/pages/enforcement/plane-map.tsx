@@ -1,10 +1,11 @@
-import { Card, Table, Typography, Button, Space } from "antd";
+import { Card, Table, Typography, Button, Space, Tag } from "antd";
 import { CheckCircleOutlined, LinkOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useGo } from "@refinedev/core";
 import { useTranslation } from "react-i18next";
 
 import { GOVERNANCE_MAP, type GovernanceEntry } from "../../utils/governance-map";
+import { useEnforcementCapabilities } from "../../hooks/use-enforcement-capabilities";
 
 const yes = <CheckCircleOutlined style={{ color: "#52c41a" }} />;
 const dash = <Typography.Text type="secondary">—</Typography.Text>;
@@ -14,6 +15,23 @@ const dash = <Typography.Text type="secondary">—</Typography.Text>;
 export const PlaneMap: React.FC = () => {
   const { t } = useTranslation();
   const go = useGo();
+  const { result } = useEnforcementCapabilities();
+  const caps = result?.data;
+
+  // Control plane is driven by the live capabilities snapshot, not a static
+  // assumption. effective mode = per-feature override, else the default.
+  const controlPlaneCell = (feature: string) => {
+    if (!caps) {
+      return <Tag>{t("enforcement.controlUnknown", { defaultValue: "unknown" })}</Tag>;
+    }
+    const cap = caps.features[feature];
+    if (!cap) {
+      return <Tag>{t("enforcement.controlReference", { defaultValue: "reference" })}</Tag>;
+    }
+    const mode = caps.active.overrides[feature] ?? caps.active.default_mode;
+    if (cap.supported && mode === "enforce") return yes;
+    return <Tag>{t("enforcement.controlOff", { defaultValue: "off" })}</Tag>;
+  };
 
   const columns: ColumnsType<GovernanceEntry> = [
     {
@@ -52,7 +70,7 @@ export const PlaneMap: React.FC = () => {
       title: t("enforcement.colControlPlane"),
       width: 140,
       align: "center",
-      render: () => yes,
+      render: (_, row) => controlPlaneCell(row.feature),
     },
   ];
 
