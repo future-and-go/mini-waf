@@ -48,6 +48,23 @@ pub struct AppConfig {
     /// Audit log file sink (interop §6/§8/§10). Sole audit sink.
     #[serde(default)]
     pub audit: AuditFileConfig,
+    /// FR-002/FR-037 tiered-protection classifier reference. Points to a TOML
+    /// file with a `[tiered_protection]` table. Omit ⇒ every request stays
+    /// `CatchAll` (classifier not wired).
+    #[serde(default)]
+    pub tiered_protection: TierFileRef,
+}
+
+/// Path reference for the tiered-protection config TOML (e.g.
+/// `configs/tier-protection.toml`, containing a `[tiered_protection]` table).
+///
+/// Lives in waf-common so `main` can read the path without pulling the gateway
+/// crate; the actual `[tiered_protection]` schema is parsed gateway-side.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TierFileRef {
+    /// Path to the TOML file. None ⇒ tier classifier stays unwired (CatchAll).
+    #[serde(default)]
+    pub config_path: Option<String>,
 }
 
 /// Audit log file sink configuration (interop contract v2.3 §6/§8/§10).
@@ -1482,5 +1499,17 @@ impl Default for ClusterConfig {
             election: ClusterElectionConfig::default(),
             health: ClusterHealthConfig::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod _tier_parse_probe {
+    use super::AppConfig;
+    #[test]
+    fn probe_tier_section_parses() {
+        let content = std::fs::read_to_string("../../configs/full-features.toml").expect("read");
+        let c: AppConfig = toml::from_str(&content).expect("parse");
+        eprintln!("PROBE config_path = {:?}", c.tiered_protection.config_path);
+        assert_eq!(c.tiered_protection.config_path.as_deref(), Some("configs/tier-protection.toml"));
     }
 }
