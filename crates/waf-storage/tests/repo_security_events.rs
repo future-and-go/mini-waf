@@ -42,6 +42,7 @@ async fn insert(fx: &common::PgFixture, host_code: &str, ip: &str, action: &str,
             detail: None,
             geo_info: country.map(|c| json!({"country": c, "iso_code": c.get(0..2).unwrap_or("XX")})),
             waf_mode: "enforce".into(),
+            tier: None,
         })
         .await
         .unwrap();

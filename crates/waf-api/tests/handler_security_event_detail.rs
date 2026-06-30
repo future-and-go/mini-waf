@@ -59,6 +59,7 @@ async fn get_security_event_200_for_existing_event() {
         detail: Some("seed".into()),
         geo_info: None,
         waf_mode: "log_only".into(),
+        tier: None,
     })
     .await
     .expect("seed event");

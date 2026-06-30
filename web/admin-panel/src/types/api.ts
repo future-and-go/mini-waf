@@ -172,6 +172,9 @@ export interface SecurityEvent {
   action: string;
   // Persisted enforcement mode (Phase 2). Optional for pre-Phase-2 / mixed rows.
   waf_mode?: InteropMode;
+  // Protection tier (Critical | High | Medium | CatchAll). Null for rows written
+  // before the tier column was added; excluded when a tier filter is active.
+  tier?: string | null;
   detail: string | null;
   geo_info: {
     country?: string;

@@ -115,6 +115,9 @@ pub struct SecurityEvent {
     pub detail: Option<String>,
     pub geo_info: Option<serde_json::Value>,
     pub waf_mode: String,
+    /// Protection tier (Debug-formatted: `Critical` | `High` | `Medium` | `CatchAll`).
+    /// NULL for rows written before the tier column was added.
+    pub tier: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -316,6 +319,10 @@ pub struct CreateSecurityEvent {
     pub detail: Option<String>,
     pub geo_info: Option<serde_json::Value>,
     pub waf_mode: String,
+    /// Protection tier, Debug-formatted to match the JSONL audit value exactly
+    /// (`Critical` | `High` | `Medium` | `CatchAll`). See decision record: do not
+    /// switch to serde serialization without updating the FE strings + pinning test.
+    pub tier: Option<String>,
 }
 
 /// Security event query parameters
@@ -331,6 +338,12 @@ pub struct SecurityEventQuery {
     pub action: Option<String>,
     pub country: Option<String>,
     pub iso_code: Option<String>,
+    /// Inclusive lower bound on `created_at` (RFC3339, e.g. `2026-06-30T00:00:00Z`).
+    pub created_at_from: Option<DateTime<Utc>>,
+    /// Inclusive upper bound on `created_at` (RFC3339).
+    pub created_at_to: Option<DateTime<Utc>>,
+    /// Comma-joined tier filter, e.g. `Critical,High`. Empty string treated as no filter.
+    pub tier: Option<String>,
     pub page: Option<i64>,
     pub page_size: Option<i64>,
 }

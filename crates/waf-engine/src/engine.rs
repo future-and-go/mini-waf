@@ -1005,6 +1005,7 @@ impl WafEngine {
                 })
             }),
             waf_mode: decision.mode.as_contract_str().to_string(),
+            tier: Some(format!("{:?}", ctx.tier)),
         };
 
         if let Some(writer) = self.db_batch_writer.get() {

@@ -39,6 +39,7 @@ const toLogRow = (e: SecurityEvent): LogRow => ({
   detail: e.detail ?? undefined,
   req_id: e.id,
   waf_mode: e.waf_mode,
+  tier: e.tier ?? undefined,
   country: e.geo_info?.country ?? e.country,
 });
 
@@ -52,6 +53,14 @@ export const LogsPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<number>(1);
 
   const filterArray = useMemo(() => filtersToCrud(filters), [filters]);
+
+  // Any filter change (tier/range/action selects apply immediately; text inputs
+  // bubble on Apply) must return to page 1 — otherwise a smaller filtered set can
+  // leave the pager on an out-of-range page showing an empty table.
+  const handleFiltersChange = (next: LogsFilterState) => {
+    setFilters(next);
+    setCurrentPage(1);
+  };
 
   const { result, query } = useList<SecurityEvent>({
     resource: "security-events",
@@ -162,7 +171,7 @@ export const LogsPage: React.FC = () => {
         <Col span={6}>
           <LogsFilters
             value={filters}
-            onChange={setFilters}
+            onChange={handleFiltersChange}
             onApply={handleRun}
             loading={query.isFetching}
           />
