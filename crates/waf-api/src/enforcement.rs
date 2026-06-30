@@ -24,7 +24,11 @@ use crate::state::AppState;
 /// Response when interop is disabled. Mirrors the secret plane's 404 so the
 /// frontend's "control plane disabled" Result branch is exercised identically.
 fn disabled_response() -> Response {
-    (StatusCode::NOT_FOUND, Json(json!({"ok": false, "error": "interop disabled"}))).into_response()
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({"ok": false, "error": "interop disabled"})),
+    )
+        .into_response()
 }
 
 pub(crate) async fn enforcement_capabilities(State(state): State<Arc<AppState>>) -> Response {
@@ -34,7 +38,10 @@ pub(crate) async fn enforcement_capabilities(State(state): State<Arc<AppState>>)
     Json(capabilities_value(&state)).into_response()
 }
 
-pub(crate) async fn enforcement_set_profile(State(state): State<Arc<AppState>>, Json(req): Json<SetProfileRequest>) -> Response {
+pub(crate) async fn enforcement_set_profile(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SetProfileRequest>,
+) -> Response {
     if !state.interop_config.enabled {
         return disabled_response();
     }

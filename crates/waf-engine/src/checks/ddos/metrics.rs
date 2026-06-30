@@ -74,6 +74,13 @@ impl DdosMetrics {
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v.saturating_sub(count)));
     }
 
+    /// Zero the active-ban gauge. Called when the ban table is cleared wholesale
+    /// (e.g. the interop runtime-state reset) so the gauge tracks the now-empty
+    /// table rather than retaining a stale count.
+    pub fn reset_bans_active(&self) {
+        self.bans_active.store(0, Ordering::Relaxed);
+    }
+
     /// Increment store error counter.
     pub fn inc_store_error(&self) {
         self.store_errors.fetch_add(1, Ordering::Relaxed);
@@ -191,6 +198,19 @@ mod tests {
         // Saturating sub prevents underflow
         m.dec_bans_active(10);
         assert_eq!(m.bans_active(), 0);
+    }
+
+    #[test]
+    fn metrics_reset_bans_active() {
+        let m = DdosMetrics::new();
+        m.inc_ban();
+        m.inc_ban();
+        assert_eq!(m.bans_active(), 2);
+
+        // Wholesale reset zeroes the active gauge but leaves the lifetime total.
+        m.reset_bans_active();
+        assert_eq!(m.bans_active(), 0);
+        assert_eq!(m.bans_total(), 2);
     }
 
     #[test]

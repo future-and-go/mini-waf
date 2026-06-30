@@ -9,14 +9,17 @@ import {
   Tag,
   Switch,
   Statistic,
-  Descriptions,
+  Form,
+  Input,
+  InputNumber,
+  App,
 } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
-import { useTable, useList } from "@refinedev/core";
+import { ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import { useTable, useList, useCustom, useCustomMutation } from "@refinedev/core";
 import { Column } from "@ant-design/plots";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SecurityEvent } from "../../types/api";
 import { fmtDateTime } from "../../utils/format";
 
@@ -41,6 +44,199 @@ const PREFIX_COLOR: Record<string, string> = {
   "TX-WITHDRAW": "orange",
   "TX-LIMIT": "purple",
   "TX-OTHER": "default",
+};
+
+// ── TX-velocity config (editable, C2 / FR-012) ──────────────────────────────────
+
+interface TxVelocityConfig {
+  schema_version?: number;
+  enabled: boolean;
+  session_cookie: string;
+  signal_cooldown_ms: number;
+  session_ttl_secs: number;
+  janitor_period_secs: number;
+  dedupe_window_ms: number;
+  endpoint_roles?: Array<{ role: string; path: string }>;
+  classifiers?: {
+    sequence?: { min_human_ms: number } | null;
+    withdrawal_velocity?: { max_count: number; window_ms: number } | null;
+    limit_change_velocity?: { max_count: number; window_ms: number } | null;
+  };
+}
+
+const TxVelocityConfigCard: React.FC = () => {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+  const [form] = Form.useForm();
+  const [loaded, setLoaded] = useState<TxVelocityConfig | null>(null);
+
+  const cfgQuery = useCustom<TxVelocityConfig>({
+    url: "/api/tx-velocity/config",
+    method: "get",
+    queryOptions: { staleTime: 10_000, retry: false },
+    errorNotification: false,
+  });
+
+  useEffect(() => {
+    const raw = cfgQuery.result?.data as TxVelocityConfig | undefined;
+    if (!raw) return;
+    setLoaded(raw);
+    form.setFieldsValue({
+      enabled: raw.enabled,
+      session_cookie: raw.session_cookie,
+      signal_cooldown_ms: raw.signal_cooldown_ms,
+      session_ttl_secs: raw.session_ttl_secs,
+      janitor_period_secs: raw.janitor_period_secs,
+      dedupe_window_ms: raw.dedupe_window_ms,
+      seq_min_human_ms: raw.classifiers?.sequence?.min_human_ms,
+      withdraw_max_count: raw.classifiers?.withdrawal_velocity?.max_count,
+      withdraw_window_ms: raw.classifiers?.withdrawal_velocity?.window_ms,
+      limit_max_count: raw.classifiers?.limit_change_velocity?.max_count,
+      limit_window_ms: raw.classifiers?.limit_change_velocity?.window_ms,
+    });
+  }, [cfgQuery.result]);
+
+  const { mutate: save, mutation } = useCustomMutation();
+
+  const onSave = async () => {
+    const v = await form.validateFields();
+    const classifiers: NonNullable<TxVelocityConfig["classifiers"]> = {};
+    if (v.seq_min_human_ms != null) classifiers.sequence = { min_human_ms: v.seq_min_human_ms };
+    if (v.withdraw_max_count != null && v.withdraw_window_ms != null)
+      classifiers.withdrawal_velocity = { max_count: v.withdraw_max_count, window_ms: v.withdraw_window_ms };
+    if (v.limit_max_count != null && v.limit_window_ms != null)
+      classifiers.limit_change_velocity = { max_count: v.limit_max_count, window_ms: v.limit_window_ms };
+
+    const payload: TxVelocityConfig = {
+      ...(loaded?.schema_version ? { schema_version: loaded.schema_version } : {}),
+      enabled: v.enabled ?? false,
+      session_cookie: v.session_cookie,
+      signal_cooldown_ms: v.signal_cooldown_ms,
+      session_ttl_secs: v.session_ttl_secs,
+      janitor_period_secs: v.janitor_period_secs,
+      dedupe_window_ms: v.dedupe_window_ms,
+      endpoint_roles: loaded?.endpoint_roles ?? [],
+      classifiers,
+    };
+
+    save(
+      { url: "/api/tx-velocity/config", method: "put", values: payload },
+      {
+        onSuccess: () => {
+          message.success(t("txVelocity.configSaved", { defaultValue: "Configuration saved" }));
+          cfgQuery.query.refetch();
+        },
+        onError: (e) => message.error(e.message),
+      },
+    );
+  };
+
+  return (
+    <Card
+      title={t("txVelocity.configInfo")}
+      extra={<Tag color="cyan">configs/tx-velocity.yaml</Tag>}
+      loading={cfgQuery.query.isLoading}
+    >
+      {cfgQuery.query.isError ? (
+        <Typography.Text type="danger">
+          {t("txVelocity.configLoadError", { defaultValue: "Failed to load configuration" })}
+        </Typography.Text>
+      ) : (
+        <Form form={form} layout="vertical" size="small">
+          <Form.Item
+            name="enabled"
+            label={t("txVelocity.cfgEnabled", { defaultValue: "Detection enabled" })}
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item
+                name="seq_min_human_ms"
+                label={t("txVelocity.cfgSeqMinHumanMs", { defaultValue: "Sequence min human (ms)" })}
+              >
+                <InputNumber min={0} style={{ width: "100%" }} addonAfter="ms" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="session_cookie"
+                label={t("txVelocity.cfgSessionCookie", { defaultValue: "Session cookie" })}
+              >
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item
+                name="withdraw_max_count"
+                label={t("txVelocity.cfgWithdrawMax", { defaultValue: "Withdrawal max count" })}
+              >
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="withdraw_window_ms"
+                label={t("txVelocity.cfgWithdrawWindowMs", { defaultValue: "Withdrawal window (ms)" })}
+              >
+                <InputNumber min={0} style={{ width: "100%" }} addonAfter="ms" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item
+                name="limit_max_count"
+                label={t("txVelocity.cfgLimitMax", { defaultValue: "Limit-change max count" })}
+              >
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="limit_window_ms"
+                label={t("txVelocity.cfgLimitWindowMs", { defaultValue: "Limit-change window (ms)" })}
+              >
+                <InputNumber min={0} style={{ width: "100%" }} addonAfter="ms" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item
+                name="signal_cooldown_ms"
+                label={t("txVelocity.cfgCooldownMs", { defaultValue: "Signal cooldown (ms)" })}
+              >
+                <InputNumber min={0} style={{ width: "100%" }} addonAfter="ms" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="session_ttl_secs"
+                label={t("txVelocity.cfgSessionTtl", { defaultValue: "Session TTL (s)" })}
+              >
+                <InputNumber min={1} style={{ width: "100%" }} addonAfter="s" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="janitor_period_secs"
+                label={t("txVelocity.cfgJanitor", { defaultValue: "Janitor period (s)" })}
+              >
+                <InputNumber min={1} style={{ width: "100%" }} addonAfter="s" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Button type="primary" icon={<SaveOutlined />} loading={mutation.isPending} onClick={onSave}>
+            {t("common.save")}
+          </Button>
+        </Form>
+      )}
+    </Card>
+  );
 };
 
 // ── Page ───────────────────────────────────────────────────────────────────────
@@ -265,30 +461,9 @@ export const TxVelocityPage: React.FC = () => {
           </Card>
         </Col>
 
-        {/* Config thresholds (read-only, no REST API for FR-012 config) */}
+        {/* Config thresholds — editable (C2 / FR-012 + FR-031 hot-reload) */}
         <Col xs={24} lg={12}>
-          <Card
-            title={t("txVelocity.configInfo")}
-            extra={<Tag color="cyan">configs/tx-velocity.yaml</Tag>}
-          >
-            <Descriptions column={1} size="small" bordered>
-              <Descriptions.Item label={<Tag color="blue">TX-SEQ-*</Tag>}>
-                {t("txVelocity.seqThreshold")}
-              </Descriptions.Item>
-              <Descriptions.Item label={<Tag color="orange">TX-WITHDRAW-*</Tag>}>
-                {t("txVelocity.withdrawThreshold")}
-              </Descriptions.Item>
-              <Descriptions.Item label={<Tag color="purple">TX-LIMIT-*</Tag>}>
-                {t("txVelocity.limitThreshold")}
-              </Descriptions.Item>
-            </Descriptions>
-            <Typography.Text
-              type="secondary"
-              style={{ fontSize: 12, marginTop: 12, display: "block" }}
-            >
-              {t("txVelocity.configEditHint")}
-            </Typography.Text>
-          </Card>
+          <TxVelocityConfigCard />
         </Col>
       </Row>
 

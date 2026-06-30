@@ -47,26 +47,26 @@ import type { RecentEvent, StatsOverview, TopEntry, TrafficPoint, EndpointHeatma
 import { fmtNum, fmtPct, fmtTime } from "../../utils/format";
 
 const ENGINES = [
-  { name: "libinjection", description: "SQLi & XSS fingerprint", enabled: true },
-  { name: "OWASP CRS", description: "Core Rule Set (YAML)", enabled: true },
-  { name: "Rhai Scripts", description: "Custom rule engine", enabled: true },
-  { name: "Bot Detection", description: "UA + behaviour heuristics", enabled: true },
-  { name: "Scanner", description: "Nikto / Acunetix / ZAP", enabled: true },
-  { name: "CC / DDoS", description: "Token-bucket per IP", enabled: true },
-  { name: "SSRF Guard", description: "URL + DNS rebinding pin", enabled: true },
-  { name: "Path Traversal", description: "LFI / RFI detection", enabled: true },
-  { name: "Command Inject", description: "Shell / exec patterns", enabled: true },
-  { name: "Sensitive Data", description: "Aho-Corasick PII leak", enabled: true },
-  { name: "Anti-Hotlink", description: "Referer validation", enabled: true },
-  { name: "GeoIP", description: "Country allow/deny list", enabled: true },
-  { name: "WASM Plugins", description: "wasmtime sandbox", enabled: true },
-  { name: "ModSecurity", description: "SecRule directives", enabled: true },
+  { name: "libinjection", description: "SQLi & XSS fingerprint" },
+  { name: "OWASP CRS", description: "Core Rule Set (YAML)" },
+  { name: "Rhai Scripts", description: "Custom rule engine" },
+  { name: "Bot Detection", description: "UA + behaviour heuristics" },
+  { name: "Scanner", description: "Nikto / Acunetix / ZAP" },
+  { name: "CC / DDoS", description: "Token-bucket per IP" },
+  { name: "SSRF Guard", description: "URL + DNS rebinding pin" },
+  { name: "Path Traversal", description: "LFI / RFI detection" },
+  { name: "Command Inject", description: "Shell / exec patterns" },
+  { name: "Sensitive Data", description: "Aho-Corasick PII leak" },
+  { name: "Anti-Hotlink", description: "Referer validation" },
+  { name: "GeoIP", description: "Country allow/deny list" },
+  { name: "WASM Plugins", description: "wasmtime sandbox" },
+  { name: "ModSecurity", description: "SecRule directives" },
 ];
 
 interface RuleRegistry {
   enabled?: number;
   disabled?: number;
-  rules?: { category?: string }[];
+  rules?: { category?: string; source?: string; enabled?: boolean }[];
 }
 
 interface PanelConfigData {
@@ -74,7 +74,46 @@ interface PanelConfigData {
     risk_allow?: number;
     risk_challenge?: number;
     risk_block?: number;
+    response_filtering?: { block_stack_traces?: boolean };
   };
+}
+
+// Map each detection engine to a *live* signal derived from data the dashboard
+// already fetches: rule-registry `source` substrings (case-insensitive) or an
+// explicit panel-config toggle. Engines with no reliable signal are absent here
+// and resolve to `null` so the UI shows a neutral "static" tag rather than
+// fabricating an enabled (green) state.
+type EngineSignal =
+  | { source: string[] }
+  | { panel: (cfg: PanelConfigData["config"]) => boolean | undefined };
+
+const ENGINE_SIGNALS: Record<string, EngineSignal> = {
+  "OWASP CRS": { source: ["owasp", "crs"] },
+  "Bot Detection": { source: ["bot"] },
+  Scanner: { source: ["scanner"] },
+  GeoIP: { source: ["geoip"] },
+  "Sensitive Data": { panel: (c) => c?.response_filtering?.block_stack_traces },
+};
+
+function engineEnabled(
+  name: string,
+  registry: RuleRegistry | undefined,
+  panelConfig: PanelConfigData["config"] | undefined,
+): boolean | null {
+  const signal = ENGINE_SIGNALS[name];
+  if (!signal) return null;
+  if ("panel" in signal) {
+    if (!panelConfig) return null;
+    const v = signal.panel(panelConfig);
+    return typeof v === "boolean" ? v : null;
+  }
+  const rules = registry?.rules;
+  if (!rules || rules.length === 0) return null;
+  const matched = rules.filter((r) =>
+    signal.source.some((s) => (r.source ?? "").toLowerCase().includes(s)),
+  );
+  if (matched.length === 0) return null;
+  return matched.some((r) => r.enabled !== false);
 }
 
 // ISO 3166-1 alpha-2 code → emoji flag
@@ -555,11 +594,37 @@ export const DashboardPage: React.FC = () => {
 
       <Card size="small" title={t("dashboard.detectionEngines")}>
         <Row gutter={[8, 8]}>
-          {ENGINES.map((eng) => (
-            <Col key={eng.name} xs={12} sm={8} lg={6} xl={4}>
-              <EngineBadge name={eng.name} description={eng.description} enabled={eng.enabled} />
-            </Col>
-          ))}
+          {ENGINES.map((eng) => {
+            const live = engineEnabled(eng.name, reg, panelCfg);
+            return (
+              <Col key={eng.name} xs={12} sm={8} lg={6} xl={4}>
+                {live === null ? (
+                  <Card
+                    size="small"
+                    style={{ borderColor: "#d9d9d9", background: "#fafafa" }}
+                    styles={{ body: { padding: "8px 12px" } }}
+                  >
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>{eng.name}</div>
+                        <div
+                          style={{ fontSize: 11, color: "#8c8c8c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                          title={eng.description}
+                        >
+                          {eng.description}
+                        </div>
+                      </div>
+                      <Tag style={{ marginInlineEnd: 0 }}>
+                        {t("dashboard.engineStatic", { defaultValue: "static" })}
+                      </Tag>
+                    </div>
+                  </Card>
+                ) : (
+                  <EngineBadge name={eng.name} description={eng.description} enabled={live} />
+                )}
+              </Col>
+            );
+          })}
         </Row>
       </Card>
 

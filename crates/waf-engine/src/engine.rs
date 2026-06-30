@@ -156,6 +156,11 @@ pub struct WafEngine {
     /// so engine construction stays infrastructure-free. Provides the
     /// `decision.risk_score` value attached to every WAF decision.
     scorer: Arc<Scorer<MemoryRiskStore>>,
+    // ── FR-007/FR-042 relay-intel feed metadata (D3) ─────────────────────────
+    /// Threat-intel feed metadata (Tor / ASN / datacenter), loaded from
+    /// `configs/relay.yaml` at startup via [`Self::load_relay_feeds`]. Empty
+    /// until loaded. Surfaced read-only by `GET /api/threat-intel/feeds`.
+    relay_feeds: ArcSwap<Vec<crate::relay::FeedMeta>>,
 }
 
 impl WafEngine {
@@ -270,6 +275,7 @@ impl WafEngine {
             mode_registry: OnceLock::new(),
             risk_cfg,
             scorer,
+            relay_feeds: ArcSwap::from_pointee(Vec::new()),
         }
     }
 
@@ -377,6 +383,30 @@ impl WafEngine {
                 error = %e,
                 "ddos: hot-reload watcher failed to start; running without hot-reload"
             ),
+        }
+    }
+
+    /// Threat-intel feed metadata snapshot (D3). Empty until
+    /// [`Self::load_relay_feeds`] runs at startup.
+    #[must_use]
+    pub fn relay_feeds(&self) -> Arc<Vec<crate::relay::FeedMeta>> {
+        self.relay_feeds.load_full()
+    }
+
+    /// Load `configs/relay.yaml` and populate the threat-intel feed metadata.
+    ///
+    /// Fail-soft: a missing/invalid file leaves the feed list empty and logs a
+    /// warning — the gateway never refuses to start over an intel-config issue.
+    pub fn load_relay_feeds(&self, path: &Path) {
+        match crate::relay::RelayConfig::from_yaml_path(path) {
+            Ok(cfg) => {
+                let feeds = crate::relay::load_feed_metadata(&cfg);
+                self.relay_feeds.store(Arc::new(feeds));
+                tracing::info!(file = %path.display(), "relay-intel: feed metadata loaded");
+            }
+            Err(e) => {
+                tracing::warn!(file = %path.display(), error = %e, "relay-intel: feed metadata load failed; empty list");
+            }
         }
     }
 
@@ -539,6 +569,9 @@ impl WafEngine {
             checker.reset_state();
         }
         self.ddos_ban_table().clear();
+        // Keep the active-ban gauge in sync with the now-empty table; clearing
+        // the table alone would leave `bans_active` drifting upward.
+        self.ddos_metrics().reset_bans_active();
         self.tx_velocity_store.clear_all();
     }
 

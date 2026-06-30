@@ -72,10 +72,14 @@ impl Detector for PerIpDetector {
             Ok(Decision::BurstExceeded) => DetectorVerdict::HardBurst {
                 reason: "burst",
                 detector: "per_ip",
+                // The rate-limit store returns only a Decision, not the
+                // observed count — report the configured threshold breached.
+                rps: cfg.per_fp_threshold,
             },
             Ok(Decision::SustainedExceeded) => DetectorVerdict::HardBurst {
                 reason: "sustained",
                 detector: "per_ip",
+                rps: cfg.per_fp_threshold,
             },
             Err(e) => {
                 // Degrade decision owned by phase 6 — here we just warn and allow
@@ -208,13 +212,14 @@ mod tests {
         let cfg = test_cfg();
 
         let verdict = detector.evaluate(&ctx, &cfg, 1000);
-        assert_eq!(
+        assert!(matches!(
             verdict,
             DetectorVerdict::HardBurst {
                 reason: "burst",
                 detector: "per_ip",
+                ..
             }
-        );
+        ));
     }
 
     #[test]
@@ -225,13 +230,14 @@ mod tests {
         let cfg = test_cfg();
 
         let verdict = detector.evaluate(&ctx, &cfg, 1000);
-        assert_eq!(
+        assert!(matches!(
             verdict,
             DetectorVerdict::HardBurst {
                 reason: "sustained",
                 detector: "per_ip",
+                ..
             }
-        );
+        ));
     }
 
     #[test]

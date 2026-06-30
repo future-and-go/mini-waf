@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail};
 use arc_swap::ArcSwap;
 use notify::{Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use super::EndpointRole;
@@ -46,7 +46,7 @@ fn default_session_cookie() -> String {
 // ─── DTO (operator-facing YAML) ──────────────────────────────────────────────
 
 /// Top-level YAML wrapper: `tx_velocity:` is the single root key.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TxVelocityDocument {
     #[serde(default)]
@@ -55,7 +55,7 @@ pub struct TxVelocityDocument {
 
 /// Operator YAML schema. Empty file ⇒ inert (`enabled = false`,
 /// no roles).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TxVelocityFileConfig {
     #[serde(default = "default_schema_version")]
@@ -99,7 +99,7 @@ impl Default for TxVelocityFileConfig {
 }
 
 /// One role rule: `path` is a regex matched against `RequestCtx::path`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoleRule {
     pub role: EndpointRole,
@@ -109,7 +109,7 @@ pub struct RoleRule {
 /// Classifier parameter blocks. Phase 1 keeps them present so YAML
 /// authored against the final schema still parses; values are unused
 /// until Phase 2 wires real classifiers.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClassifierConfigs {
     #[serde(default)]
@@ -120,14 +120,14 @@ pub struct ClassifierConfigs {
     pub limit_change_velocity: Option<VelocityCfg>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SequenceCfg {
     /// Login → OTP → Deposit completed faster than this ⇒ suspicious.
     pub min_human_ms: u64,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VelocityCfg {
     pub max_count: u32,

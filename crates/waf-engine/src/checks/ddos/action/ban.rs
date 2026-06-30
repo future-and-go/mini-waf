@@ -20,13 +20,41 @@ use crate::checks::ddos::store::CounterStore;
 
 use super::{ActionExecutor, ActionResult};
 
+/// Per-entry state stored in the [`DynamicBanTable`].
+///
+/// Carries the metadata the admin ban table renders (`ban_level`, `last_rps`,
+/// `reason`) alongside the expiry. Computed at ban time in
+/// [`BanAction::execute`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BanState {
+    /// Expiry timestamp (epoch ms).
+    pub expires_ms: i64,
+    /// Offense step that produced this ban (1-indexed; 0 = unknown/manual).
+    pub ban_level: u32,
+    /// Rate (req/window) associated with the triggering burst (see
+    /// [`DetectorVerdict::HardBurst::rps`](super::super::detector::DetectorVerdict)).
+    pub last_rps: u32,
+    /// Detector reason that fired the ban (e.g. `burst`, `fp_burst`).
+    pub reason: String,
+}
+
+/// Point-in-time snapshot row of a single live ban, for the admin API.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BanSnapshot {
+    pub ip: IpAddr,
+    pub expires_ms: i64,
+    pub ban_level: u32,
+    pub last_rps: u32,
+    pub reason: String,
+}
+
 /// TTL-aware IP ban table for dynamic `DDoS` bans.
 ///
 /// Separate from `access::IpCidrTable` which is immutable after config load.
 /// This table supports per-entry TTL with automatic expiry checks.
 pub struct DynamicBanTable {
-    /// IP → expiry timestamp (epoch ms)
-    entries: DashMap<IpAddr, i64>,
+    /// IP → ban state (expiry + metadata).
+    entries: DashMap<IpAddr, BanState>,
 }
 
 impl DynamicBanTable {
@@ -37,24 +65,68 @@ impl DynamicBanTable {
         }
     }
 
-    /// Insert or update a ban with expiry timestamp.
+    /// Insert or extend a ban with expiry only (metadata defaulted).
+    ///
+    /// Convenience for callers that only know the expiry (manual/test paths).
+    /// Production bans go through [`Self::insert_ban`] with full metadata.
     pub fn insert(&self, ip: IpAddr, expires_ms: i64) {
+        self.insert_ban(
+            ip,
+            BanState {
+                expires_ms,
+                ban_level: 0,
+                last_rps: 0,
+                reason: "dynamic".to_string(),
+            },
+        );
+    }
+
+    /// Insert or extend a ban with full metadata.
+    ///
+    /// On an existing entry the longer expiry wins and the latest (escalated)
+    /// metadata is adopted.
+    pub fn insert_ban(&self, ip: IpAddr, state: BanState) {
         self.entries
             .entry(ip)
-            .and_modify(|exp| *exp = (*exp).max(expires_ms))
-            .or_insert(expires_ms);
+            .and_modify(|cur| {
+                if state.expires_ms >= cur.expires_ms {
+                    *cur = state.clone();
+                }
+            })
+            .or_insert(state);
     }
 
     /// Check if IP is currently banned.
     #[must_use]
     pub fn contains(&self, ip: IpAddr, now_ms: i64) -> bool {
-        self.entries.get(&ip).is_some_and(|exp| *exp > now_ms)
+        self.entries.get(&ip).is_some_and(|s| s.expires_ms > now_ms)
+    }
+
+    /// Remove a single ban. Returns `true` if an entry was present.
+    pub fn remove(&self, ip: IpAddr) -> bool {
+        self.entries.remove(&ip).is_some()
+    }
+
+    /// Snapshot all non-expired bans as of `now_ms`.
+    #[must_use]
+    pub fn snapshot(&self, now_ms: i64) -> Vec<BanSnapshot> {
+        self.entries
+            .iter()
+            .filter(|e| e.value().expires_ms > now_ms)
+            .map(|e| BanSnapshot {
+                ip: *e.key(),
+                expires_ms: e.value().expires_ms,
+                ban_level: e.value().ban_level,
+                last_rps: e.value().last_rps,
+                reason: e.value().reason.clone(),
+            })
+            .collect()
     }
 
     /// Remove expired entries. Returns count purged.
     pub fn purge_expired(&self, now_ms: i64) -> usize {
         let before = self.entries.len();
-        self.entries.retain(|_, exp| *exp > now_ms);
+        self.entries.retain(|_, s| s.expires_ms > now_ms);
         before.saturating_sub(self.entries.len())
     }
 
@@ -220,8 +292,8 @@ impl ActionExecutor for BanAction {
 
     fn execute(&self, ip: IpAddr, verdict: &DetectorVerdict, now_ms: i64) -> ActionResult {
         // Only act on HardBurst verdicts
-        let (reason, detector) = match verdict {
-            DetectorVerdict::HardBurst { reason, detector } => (*reason, *detector),
+        let (reason, detector, rps) = match verdict {
+            DetectorVerdict::HardBurst { reason, detector, rps } => (*reason, *detector, *rps),
             _ => return ActionResult::noop(),
         };
 
@@ -252,8 +324,16 @@ impl ActionExecutor for BanAction {
         let step = self.schedule.step_for(offense_n);
         let expires_ms = now_ms.saturating_add(i64::from(step.ttl_s) * 1000);
 
-        // Insert ban
-        self.ban_table.insert(ip, expires_ms);
+        // Insert ban with full metadata for the admin ban table.
+        self.ban_table.insert_ban(
+            ip,
+            BanState {
+                expires_ms,
+                ban_level: u32::try_from(offense_n).unwrap_or(u32::MAX),
+                last_rps: rps,
+                reason: reason.to_string(),
+            },
+        );
 
         // Structured logging per brainstorm §9
         warn!(
@@ -299,6 +379,7 @@ mod tests {
         DetectorVerdict::HardBurst {
             reason: "burst",
             detector: "per_ip",
+            rps: 123,
         }
     }
 
@@ -335,6 +416,43 @@ mod tests {
         let purged = table.purge_expired(2000);
         assert_eq!(purged, 1);
         assert_eq!(table.len(), 1);
+    }
+
+    #[test]
+    fn dynamic_ban_table_remove() {
+        let table = DynamicBanTable::new();
+        let ip: IpAddr = "9.9.9.9".parse().unwrap();
+        table.insert(ip, 5000);
+        assert!(table.remove(ip), "present entry removed");
+        assert!(!table.remove(ip), "absent entry returns false (idempotent)");
+        assert!(!table.contains(ip, 1000));
+    }
+
+    #[test]
+    fn dynamic_ban_table_snapshot_excludes_expired() {
+        let table = DynamicBanTable::new();
+        table.insert("1.1.1.1".parse().unwrap(), 5000);
+        table.insert("2.2.2.2".parse().unwrap(), 1500);
+        // now=2000 → only 1.1.1.1 (expires 5000) is live.
+        let rows = table.snapshot(2000);
+        assert_eq!(rows.len(), 1);
+        let row = rows.first().unwrap();
+        assert_eq!(row.ip, "1.1.1.1".parse::<IpAddr>().unwrap());
+        assert_eq!(row.expires_ms, 5000);
+    }
+
+    #[test]
+    fn ban_action_records_level_rps_reason() {
+        let (table, action) = make_ban_action();
+        let ip: IpAddr = "203.0.113.7".parse().unwrap();
+        let r = action.execute(ip, &hard_burst(), 1000);
+        assert!(r.banned);
+        let rows = table.snapshot(1000);
+        assert_eq!(rows.len(), 1);
+        let row = rows.first().unwrap();
+        assert_eq!(row.ban_level, 1, "first offense → level 1");
+        assert_eq!(row.last_rps, 123, "rps carried from verdict");
+        assert_eq!(row.reason, "burst");
     }
 
     #[test]
