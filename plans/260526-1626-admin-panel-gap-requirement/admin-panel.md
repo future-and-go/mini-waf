@@ -37,7 +37,7 @@ Ký hiệu: ✅ đã có UI đầy đủ · 🟡 có UI một phần / chỉ rea
 | FR-029 | Live request feed | `/ws/events`, `/ws/logs` + `/api/security-events` | `pages/dashboard` (live tail 50) + `pages/security-events` | ✅ |
 | FR-030 | Attack visualization | `/api/stats/*` | `pages/rule-analytics` + dashboard | ✅ |
 | FR-031 | Hot config no restart | `/api/panel-config` PUT + `/api/reload` | `pages/settings` | ✅ |
-| FR-032 | Structured JSON audit log | `/api/v1/logs/query` (VictoriaLogs) + `/api/audit-log` | `pages/logs` (admin-only) | ✅ |
+| FR-032 | Structured JSON audit log | ~~`/api/v1/logs/query` (VictoriaLogs)~~ decommissioned + `/api/audit-log` (admin-action only) | `pages/logs` (admin-only) — **broken**: FE still calls `/api/v1/logs/*` (404) | ❌ → superseded by [`A1-logs-audit-log-rewire`](../../docs/review/admin-panel/plans/A1-logs-audit-log-rewire.md) |
 | **FR-033** | **Response filtering (stack trace, internal IP, API key)** | `panel_config.response_filtering.block_stack_traces` + scanner trong gateway | `pages/settings` chỉ có toggle `block_stack_traces` — không UI cho categories / per-host body_scan_* | 🟡 |
 | **FR-034** | **Sensitive field redaction (JSON)** | `panel_config.response_filtering.json_redact_fields` + per-host `internal_patterns` | `pages/settings` chips danh sách field; nhưng per-host `internal_patterns`/mask editor không có | 🟡 |
 | **FR-035** | **Header leak prevention (X-Debug, X-Internal-*)** | Per-host `header_blocklist`, `strip_server_header` | Không có UI dedicated (chỉ Hosts edit có vài trường) | 🟡 |
@@ -105,7 +105,7 @@ Ký hiệu: ✅ đã có UI đầy đủ · 🟡 có UI một phần / chỉ rea
 /api/cluster/*                      → pages/cluster/*
 /api/crowdsec/*                     → pages/crowdsec-*
 /api/audit-log                      → pages/logs (admin-only)
-/api/v1/logs/*                      → pages/logs (VictoriaLogs proxy)
+/api/v1/logs/*                      → DECOMMISSIONED (VictoriaLogs gone; see A1 rewire)
 /api/plugins                        → KHÔNG có page (chưa wire UI)
 /api/tunnels                        → KHÔNG có page (chưa wire UI)
 /api/sensitive-patterns             → KHÔNG có page độc lập (chỉ qua custom-rules)
@@ -407,7 +407,7 @@ Wiring:
 ````
 **Task**: Extend the existing read-only `pages/tx-velocity` to support editing thresholds (FR-012).
 
-**Backend prerequisite**:
+**Backend prerequisite** _(not yet implemented — superseded/tracked by [`C2-tx-velocity-config-api`](../../docs/review/admin-panel/plans/C2-tx-velocity-config-api.md))_:
 1. `GET  /api/tx-velocity/config` → returns parsed `configs/tx-velocity.yaml`.
 2. `PUT  /api/tx-velocity/config` → validate + atomic write + hot-reload (`ArcSwap<TxVelocityConfig>` watcher).
 
@@ -485,7 +485,7 @@ Wiring:
 ````
 **Task**: Create `pages/response-filtering` consolidating FR-033/FR-034/FR-035.
 
-**Backend prerequisite**:
+**Backend prerequisite** _(not yet implemented — superseded/tracked by [`A2-response-filtering-api`](../../docs/review/admin-panel/plans/A2-response-filtering-api.md))_:
 1. Extend existing `/api/panel-config` PUT body to accept new sub-fields under `response_filtering`:
    - `categories: { stack_trace, verbose_error, secrets, internal_ip }` (each `{ enabled: bool, redact: bool, block_on_match: bool }`).
    - `max_body_bytes` (currently per-host; expose global default).
@@ -700,7 +700,7 @@ Wiring:
 ````
 **Task**: Extend `pages/settings` "Threat intel" section into a full FR-042 editor.
 
-**Backend prerequisite**:
+**Backend prerequisite** _(items 2–3 not yet implemented — superseded/tracked by [`D3-threat-intel-feeds-api`](../../docs/review/admin-panel/plans/D3-threat-intel-feeds-api.md))_:
 1. Already exists: `GET /api/threat-intel/status`.
 2. Add: `POST /api/threat-intel/refresh` → forces refresh of all feed sources defined in `risk.yaml::seed`. Returns counts and durations per feed.
 3. Add: `PUT /api/threat-intel/feeds` → updates the feed file paths in `risk.yaml::seed.tor_exits_path` / `asn_classes_path` / `whitelist_path`.
@@ -810,7 +810,7 @@ Out-of-scope:            2
 
 ## 8. Notes triển khai
 
-1. **Auth & RBAC**: tất cả new endpoints phải dưới `protected_routes` (JWT). Nếu là destructive (PUT/DELETE/POST), nên gate qua `admin-only` middleware như `/api/v1/logs/*` đã làm.
+1. **Auth & RBAC**: tất cả new endpoints phải dưới `protected_routes` (JWT). Nếu là destructive (PUT/DELETE/POST), nên gate qua `admin-only` middleware (ví dụ như `/api/audit-log`).
 2. **Hot reload contract**: mọi PUT phải atomic write file (write tmp + rename), không để gateway đọc nửa chừng.
 3. **Pagination**: server-side cho tất cả tables > 100 rows (actor list, ban table, sensitive patterns). Mirror contract `page` / `page_size` / `{data, total}`.
 4. **WebSocket**: nếu thêm `/ws/risk` hoặc `/ws/ddos`, đảm bảo qua `admin_ip_check_middleware` + `rate_limit_middleware` như WS hiện tại.
@@ -820,3 +820,26 @@ Out-of-scope:            2
 ---
 
 **Cập nhật**: tài liệu này dựa trên snapshot codebase đến `crates/waf-api/src/server.rs` và `web/admin-panel/src/App.tsx` mới nhất trong project knowledge. Khi BE thay đổi (đặc biệt nếu thêm endpoint mới ngoài bảng §2.1), cần re-cross-check trước khi prompt Cursor.
+
+---
+
+## Validation Log — 2026-06-27
+
+Verification pass: plan claims grepped against live source (`crates/waf-api/src/server.rs`, `handlers.rs`, `crates/waf-storage/src/models.rs`, `web/admin-panel/src`).
+
+**Verified accurate ✅**
+- All 35 FE pages exist and are registered (`App.tsx:66–109`).
+- ~90 backend routes confirmed; endpoint estimate (§ "70+") holds.
+- `admin-panel-gap.md` bug fixes all implemented: PATCH `/api/sensitive-patterns/{id}` (`handlers.rs:534–586`, route `server.rs:180`); `/api/plugins` envelope (`plugins.rs:43`); `/api/tunnels` protocol field (`tunnels.rs:49`).
+
+**Corrected in this pass**
+- **FR-032 row** — was `✅` claiming `/api/v1/logs/*` (VictoriaLogs). Those routes are decommissioned (no match in `server.rs`); FE still calls them and 404s (`victoria-logs-data-provider.ts:11`). Downgraded to `❌`, marked superseded by `A1-logs-audit-log-rewire`.
+- **Prompt: tx-velocity edit** — `GET/PUT /api/tx-velocity/config` not registered. Prerequisite annotated as superseded/tracked by `C2-tx-velocity-config-api`.
+- **Prompt: response-filtering** — `/api/hosts/{id}/response-filter` + `/api/response-filtering/preview` not registered. Annotated superseded/tracked by `A2-response-filtering-api`.
+- **Prompt: threat-intel** — `POST /api/threat-intel/refresh` + `PUT /api/threat-intel/feeds` not registered (only `GET .../status` at `server.rs:206`). Annotated superseded/tracked by `D3-threat-intel-feeds-api`.
+
+**Decisions (user-confirmed)**
+- FR-032: mark superseded-by A1. ✓ applied.
+- Missing BE APIs (#2–#4): confirmed tracked by newer review docs C2/A2/D3, not lost work. ✓ annotated.
+
+**Caveat**: this doc reads as prescriptive ("add endpoint X") but the backend is largely already built; treat its prompt prerequisites as a gap snapshot, re-cross-check against `server.rs` before acting.

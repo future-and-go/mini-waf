@@ -35,6 +35,7 @@ rule_name   text
 action      text         (block | log | allow | challenge | log_only | redirect)
 detail      text | null
 geo_info    jsonb | null  (keys: country, province, city, isp, iso_code)
+waf_mode    text         (enforce | log_only — added by migration 0018)
 created_at  timestamptz
 ```
 
@@ -296,6 +297,7 @@ export interface SecurityEvent {
     isp?: string;
     iso_code?: string;
   } | null;
+  waf_mode: string; // "enforce" | "log_only" — present on the API response (models.rs:117)
   created_at: string;
 }
 ```
@@ -408,3 +410,24 @@ Trả về theo thứ tự:
 3. Checklist 10 acceptance criteria với cách verify từng cái.
 
 Không tóm tắt lan man. Đi thẳng code.
+
+---
+
+## Validation Log — 2026-06-27
+
+Verification pass: plan claims grepped against live source.
+
+**Verified accurate ✅**
+- Both endpoints already implemented: `GET /api/security-events/{id}` (`handlers.rs:340`, route `server.rs:153`) and `GET /api/stats/timeseries-by-category` (`stats.rs:180`, route `server.rs:202`).
+- Response envelopes `{success,data}` match; pagination `page`/`page_size` are `Option<i64>` (`models.rs:323–336`).
+- Category SQL CASE present (`repo.rs:1463–1495`); `hours` clamp `1..=720` (`stats.rs:184`).
+- `request_headers`/`query`/`phase` correctly stated as NOT on `security_events` (they're on `attack_logs`).
+
+**Corrected in this pass**
+- **SecurityEvent schema** — plan omitted `waf_mode`. Source has `waf_mode: String` (`models.rs:117`, added by migration `0018`). Added to the DB-schema block and the TS `SecurityEvent` interface so FE types match the real API response. ✓ (user-confirmed)
+
+**Checked against live FE — already resolved (no work needed)**
+- `deriveCategory` in the live code already matches both `/^SSRF-/` and `/^ADV-SSRF/` (`web/admin-panel/src/types/api.ts:194–195`). The plan-doc snippet was stale; the implementation is correct.
+- `waf_mode` is already in the live FE `SecurityEvent` type (`types/api.ts:174,340`) and rendered on the detail page (`pages/security-events/detail.tsx:305`). The doc-schema fix above is for doc accuracy only.
+
+**Caveat**: backend AND frontend are already built (`pages/rule-analytics`, `pages/security-events/{index,detail}`). This doc is post-hoc despite its prescriptive ("Thêm method MỚI") phrasing — nothing here remains to implement.
