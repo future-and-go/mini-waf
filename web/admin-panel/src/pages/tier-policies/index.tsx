@@ -339,7 +339,13 @@ export const TierPoliciesPage: React.FC = () => {
         isDirty.current = false;
       }
     }
-  }, [loadResult]);
+    // Depend on the stable fetch timestamp, not the `loadResult` object whose
+    // identity changes every render. Because this effect rebuilds a NEW config
+    // object on each run, depending on `loadResult` caused setConfig → re-render
+    // → effect → setConfig … an infinite loop ("Maximum update depth exceeded")
+    // that froze the router and blocked navigation away from this page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadQuery.dataUpdatedAt]);
 
   useEffect(() => {
     if (loadQuery.isError) {
