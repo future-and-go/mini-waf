@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Layout, Menu, Typography, Button, Select, Space, Dropdown, Avatar, theme, Badge } from "antd";
 import type { MenuProps } from "antd";
 import {
@@ -84,6 +84,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       .filter((item) => location.pathname === item.path || location.pathname.startsWith(item.path + "/"))
       .sort((a, b) => b.path.length - a.path.length);
     return matches[0]?.key ?? "dashboard";
+  }, [location.pathname]);
+
+  // The whole document scrolls (the tall sidebar makes the page taller than the
+  // viewport, so reaching bottom nav items scrolls the window down). On route
+  // change, reset scroll to top — otherwise a shorter destination page renders
+  // above the retained scroll offset and the viewport shows a blank area.
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0 });
   }, [location.pathname]);
 
   const getNavLabel = (itemKey: string, base: string): React.ReactNode => {

@@ -365,6 +365,9 @@ export const TierPoliciesPage: React.FC = () => {
         onSuccess: () => {
           message.success(t("tierPolicies.saved"));
           isDirty.current = false;
+          // Re-fetch from the server so the form reflects exactly what was
+          // persisted (the load effect re-applies it on the new dataUpdatedAt).
+          void loadQuery.refetch();
         },
         onError: (err) => message.error(err.message),
       },
