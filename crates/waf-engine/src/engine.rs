@@ -569,6 +569,9 @@ impl WafEngine {
             checker.reset_state();
         }
         self.ddos_ban_table().clear();
+        // Keep the active-ban gauge in sync with the now-empty table; clearing
+        // the table alone would leave `bans_active` drifting upward.
+        self.ddos_metrics().reset_bans_active();
         self.tx_velocity_store.clear_all();
     }
 
