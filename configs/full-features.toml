@@ -122,6 +122,10 @@ config_path = "full-features-panel.toml"
 [rate_limit]
 config_path = "configs/rate-limit.yaml"
 
+# ── FR-002/FR-037 tiered-protection classifier (TOML, hot-reload) ────────────
+[tiered_protection]
+config_path = "configs/tier-protection.toml"
+
 # ── FR-035 outbound response-header leak prevention — ON ─────────────────────
 [outbound]
 enabled = true
