@@ -867,5 +867,27 @@
     "disabledMessage": "Mặt phẳng điều khiển bị tắt trong cấu hình (interop.enabled = false).",
     "open": "Mở",
     "applied": "Đã áp dụng chế độ thực thi"
+  },
+  "geo": {
+    "country": "Quốc gia",
+    "added": "Đã thêm quy tắc",
+    "deleted": "Đã xóa quy tắc",
+    "tabs": {
+      "dashboard": "Bảng điều khiển",
+      "rules": "Quy tắc quốc gia"
+    },
+    "dashboard": {
+      "activeRules": "Quy tắc địa lý đang bật",
+      "blockedCountries": "Quốc gia bị chặn",
+      "geoEvents": "Sự kiện theo địa lý",
+      "topSource": "Quốc gia nguồn hàng đầu",
+      "distribution": "Phân bố tấn công theo quốc gia",
+      "topSources": "Quốc gia nguồn tấn công hàng đầu",
+      "sourceMap": "Bản đồ nguồn sự kiện bảo mật ứng dụng",
+      "topCities": "Thành phố nguồn hàng đầu",
+      "topIsps": "Mạng nguồn hàng đầu (ISP)",
+      "others": "Khác",
+      "mapHint": "Bản đồ choropleth cần GeoIP DB + lớp bản đồ (tùy chọn)"
+    }
   }
 }
