@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Card,
   Col,
@@ -6,71 +6,42 @@ import {
   Space,
   Switch,
   Typography,
-  Alert,
   Button,
   Statistic,
   message,
 } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
-import { useList } from "@refinedev/core";
+import { useList, useCustom } from "@refinedev/core";
 
 import {
   LogsFilters,
   defaultLogsFilters,
   filtersToCrud,
-  filtersToLogsQL,
   type LogsFilterState,
 } from "./LogsFilters";
-import { LogsQueryBar } from "./LogsQueryBar";
 import { LogsTable, type LogRow } from "./LogsTable";
-import { httpClient } from "../../utils/axios";
+import type { SecurityEvent, StatsOverview } from "../../types/api";
 
-// ─── Stats hook ──────────────────────────────────────────────────────────────
-
-interface LogsStats {
-  count_24h_raw?: string;
-  metrics?: string;
-}
-
-/** Pull a few quick numbers from the proxy `/api/v1/logs/stats`. */
-const useLogsStats = (refreshKey: number): LogsStats => {
-  const [stats, setStats] = useState<LogsStats>({});
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const resp = await httpClient.get<LogsStats>("/api/v1/logs/stats");
-        if (!cancelled) setStats(resp.data ?? {});
-      } catch {
-        if (!cancelled) setStats({});
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshKey]);
-  return stats;
-};
-
-/** Heuristic count extraction — VictoriaLogs returns a raw text body. */
-const parseTotalFromStats = (raw: string | undefined): number | null => {
-  if (!raw) return null;
-  // The body looks like `{"total":1234}` or NDJSON with a `total` key.
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const obj = JSON.parse(trimmed) as Record<string, unknown>;
-      if (typeof obj.total === "number") return obj.total;
-      if (typeof obj.total === "string" && /^\d+$/.test(obj.total)) {
-        return Number.parseInt(obj.total, 10);
-      }
-    } catch {
-      // skip
-    }
-  }
-  return null;
-};
+// ─── Boundary mapper ─────────────────────────────────────────────────────────
+// Parse-first: the one typed place that adapts a `/api/security-events` row to
+// the free-form `LogRow` the table renders. `event_type` is derived from the
+// enforcement `action` (no dedicated column exists); `host_code`→`host`. Extra
+// fields (`waf_mode`, `country`) ride along as discoverable columns.
+const toLogRow = (e: SecurityEvent): LogRow => ({
+  _time: e.created_at,
+  event_type: e.action,
+  rule_name: e.rule_name,
+  rule_id: e.rule_id ?? null,
+  client_ip: e.client_ip,
+  host: e.host_code,
+  method: e.method,
+  path: e.path,
+  detail: e.detail ?? undefined,
+  req_id: e.id,
+  waf_mode: e.waf_mode,
+  tier: e.tier ?? undefined,
+  country: e.geo_info?.country ?? e.country,
+});
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
@@ -79,72 +50,65 @@ export const LogsPage: React.FC = () => {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState<number>(0);
   const [pageSize, setPageSize] = useState<number>(100);
-  const [rawMode, setRawMode] = useState(false);
-  const [rawValue, setRawValue] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
-  const computedLogsQL = useMemo(() => filtersToLogsQL(filters), [filters]);
+  const filterArray = useMemo(() => filtersToCrud(filters), [filters]);
 
-  // Refine `useList` calls our VictoriaLogs data provider via the resource's
-  // `dataProviderName: "vlogs"` configured in App.tsx. The advanced/raw
-  // mode swaps the structured filter array for a single `raw` filter so the
-  // user's hand-written LogsQL goes through unchanged.
-  const filterArray = useMemo(() => {
-    if (rawMode && rawValue.trim()) {
-      return [{ field: "raw", operator: "eq" as const, value: rawValue.trim() }];
-    }
-    return filtersToCrud(filters);
-  }, [filters, rawMode, rawValue]);
+  // Any filter change (tier/range/action selects apply immediately; text inputs
+  // bubble on Apply) must return to page 1 — otherwise a smaller filtered set can
+  // leave the pager on an out-of-range page showing an empty table.
+  const handleFiltersChange = (next: LogsFilterState) => {
+    setFilters(next);
+    setCurrentPage(1);
+  };
 
-  const {
-    result,
-    query,
-  } = useList<LogRow>({
-    resource: "logs",
-    dataProviderName: "vlogs",
+  const { result, query } = useList<SecurityEvent>({
+    resource: "security-events",
     filters: filterArray,
-    pagination: { pageSize, mode: "off" },
-    meta: { timeRange: filters.range },
+    pagination: { currentPage, pageSize, mode: "server" },
     queryOptions: {
       staleTime: 0,
       refetchInterval: autoRefresh && refreshInterval > 0 ? refreshInterval : false,
     },
   });
 
-  const stats = useLogsStats(refreshKey);
-  const total24h = parseTotalFromStats(stats.count_24h_raw);
+  // "Entries (24h)" — real count from the same overview the dashboard KPI uses.
+  const overview = useCustom<StatsOverview>({
+    url: "/api/stats/overview",
+    method: "get",
+    config: { query: { hours: 24 } },
+  });
+  const total24h = overview.query.data?.data?.total_requests ?? null;
+
+  const total = result?.total ?? 0;
 
   // Decorate rows with stable keys (timestamp + req_id) so AntD doesn't fall
   // back to row-index keys (which break expansion across re-renders).
   const rows = useMemo(() => {
-    const list = Array.isArray(result?.data) ? (result.data as LogRow[]) : [];
-    return list.map((r, idx) => ({
-      ...r,
-      __rowKey: `${r._time ?? ""}-${r.req_id ?? ""}-${idx}`,
-    }));
+    const list = Array.isArray(result?.data) ? result.data : [];
+    return list.map((e, idx) => {
+      const row = toLogRow(e);
+      return { ...row, __rowKey: `${row._time ?? ""}-${row.req_id ?? ""}-${idx}` };
+    });
   }, [result?.data]);
 
   const handleRun = () => {
-    setRefreshKey((k) => k + 1);
+    setCurrentPage(1);
     void query.refetch();
+    void overview.query.refetch();
   };
 
   const handleFilterClientIp = (ip: string) => {
     setFilters((s) => ({ ...s, clientIp: ip }));
+    setCurrentPage(1);
     void message.info(`Filter set: client_ip = ${ip}`);
   };
 
   const handleFilterRuleName = (rule: string) => {
     setFilters((s) => ({ ...s, ruleName: rule }));
+    setCurrentPage(1);
     void message.info(`Filter set: rule_name = ${rule}`);
   };
-
-  // ── Empty state when the proxy reports VictoriaLogs disabled ─────────────
-  const errorBody = query.error as { statusCode?: number; message?: string } | undefined;
-  const showDisabledState =
-    errorBody?.statusCode === 400 &&
-    typeof errorBody.message === "string" &&
-    errorBody.message.toLowerCase().includes("disabled");
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -190,20 +154,6 @@ export const LogsPage: React.FC = () => {
         </Space>
       </Space>
 
-      {showDisabledState && (
-        <Alert
-          type="info"
-          showIcon
-          message="VictoriaLogs is disabled"
-          description={
-            <span>
-              Set <code>[victoria_logs] enabled = true</code> in <code>configs/default.toml</code>{" "}
-              and restart the WAF to enable the security log archive.
-            </span>
-          }
-        />
-      )}
-
       <Row gutter={12}>
         <Col span={6}>
           <Card size="small">
@@ -211,22 +161,9 @@ export const LogsPage: React.FC = () => {
               title="Entries (24h)"
               value={total24h ?? "—"}
               valueStyle={{ fontSize: 18 }}
+              loading={overview.query.isLoading}
             />
           </Card>
-        </Col>
-        <Col span={18}>
-          <LogsQueryBar
-            computed={computedLogsQL}
-            rawMode={rawMode}
-            rawValue={rawValue}
-            onRawChange={setRawValue}
-            onModeChange={(raw) => {
-              setRawMode(raw);
-              if (raw && !rawValue) setRawValue(computedLogsQL);
-            }}
-            onRun={handleRun}
-            loading={query.isFetching}
-          />
         </Col>
       </Row>
 
@@ -234,7 +171,7 @@ export const LogsPage: React.FC = () => {
         <Col span={6}>
           <LogsFilters
             value={filters}
-            onChange={setFilters}
+            onChange={handleFiltersChange}
             onApply={handleRun}
             loading={query.isFetching}
           />
@@ -246,6 +183,9 @@ export const LogsPage: React.FC = () => {
               loading={query.isFetching}
               pageSize={pageSize}
               setPageSize={setPageSize}
+              total={total}
+              currentPage={currentPage}
+              onPageChange={setCurrentPage}
               onFilterClientIp={handleFilterClientIp}
               onFilterRuleName={handleFilterRuleName}
             />

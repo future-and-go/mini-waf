@@ -425,8 +425,8 @@ impl Database {
     pub async fn create_security_event(&self, req: CreateSecurityEvent) -> Result<(), StorageError> {
         sqlx::query(
             r"INSERT INTO security_events
-               (host_code, client_ip, method, path, rule_id, rule_name, action, detail, geo_info, waf_mode)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+               (host_code, client_ip, method, path, rule_id, rule_name, action, detail, geo_info, waf_mode, tier)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(&req.host_code)
         .bind(&req.client_ip)
@@ -438,6 +438,7 @@ impl Database {
         .bind(&req.detail)
         .bind(&req.geo_info)
         .bind(&req.waf_mode)
+        .bind(&req.tier)
         .execute(&self.pool)
         .await?;
 
@@ -490,7 +491,7 @@ impl Database {
         for chunk in events.chunks(1000) {
             let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
                 "INSERT INTO security_events (host_code, client_ip, method, path, \
-                 rule_id, rule_name, action, detail, geo_info, waf_mode) ",
+                 rule_id, rule_name, action, detail, geo_info, waf_mode, tier) ",
             );
             qb.push_values(chunk, |mut b, ev| {
                 b.push_bind(&ev.host_code)
@@ -502,7 +503,8 @@ impl Database {
                     .push_bind(&ev.action)
                     .push_bind(&ev.detail)
                     .push_bind(&ev.geo_info)
-                    .push_bind(&ev.waf_mode);
+                    .push_bind(&ev.waf_mode)
+                    .push_bind(&ev.tier);
             });
             qb.push(" ON CONFLICT DO NOTHING");
             qb.build().execute(&self.pool).await?;
@@ -1861,6 +1863,13 @@ impl Database {
         // PATCH 1: pre-format prefix pattern so the SQL check remains a simple equality
         let rule_id_prefix_pattern: Option<String> = query.rule_id_prefix.as_ref().map(|p| format!("{p}%"));
 
+        // A cleared multiselect arrives as Some("") — treat empty as no filter, else
+        // `tier = ANY(string_to_array('', ','))` would silently return zero rows.
+        let tier_filter: Option<&str> = query.tier.as_deref().filter(|s| !s.is_empty());
+
+        // created_at_from/to ($10/$11) and tier ($12) extend the shared WHERE in both
+        // queries. The SELECT renumbers LIMIT/OFFSET to $13/$14 and binds the three
+        // filters before page_size/offset so they line up with the new positions.
         let total: i64 = sqlx::query_scalar(
             r"SELECT COUNT(*) FROM security_events
                WHERE ($1::text IS NULL OR host_code = $1)
@@ -1871,7 +1880,10 @@ impl Database {
                  AND ($6::text IS NULL OR geo_info->>'country' ILIKE '%' || $6 || '%')
                  AND ($7::text IS NULL OR rule_id = $7)
                  AND ($8::text IS NULL OR path ILIKE '%' || $8 || '%')
-                 AND ($9::text IS NULL OR rule_id ILIKE $9)",
+                 AND ($9::text IS NULL OR rule_id ILIKE $9)
+                 AND ($10::timestamptz IS NULL OR created_at >= $10)
+                 AND ($11::timestamptz IS NULL OR created_at <= $11)
+                 AND ($12::text IS NULL OR tier = ANY(string_to_array($12, ',')))",
         )
         .bind(&query.host_code)
         .bind(&query.client_ip)
@@ -1882,6 +1894,9 @@ impl Database {
         .bind(&query.rule_id)
         .bind(&query.path)
         .bind(&rule_id_prefix_pattern)
+        .bind(query.created_at_from)
+        .bind(query.created_at_to)
+        .bind(tier_filter)
         .fetch_one(&self.pool)
         .await?;
 
@@ -1896,8 +1911,11 @@ impl Database {
                  AND ($7::text IS NULL OR rule_id = $7)
                  AND ($8::text IS NULL OR path ILIKE '%' || $8 || '%')
                  AND ($9::text IS NULL OR rule_id ILIKE $9)
+                 AND ($10::timestamptz IS NULL OR created_at >= $10)
+                 AND ($11::timestamptz IS NULL OR created_at <= $11)
+                 AND ($12::text IS NULL OR tier = ANY(string_to_array($12, ',')))
                ORDER BY created_at DESC
-               LIMIT $10 OFFSET $11",
+               LIMIT $13 OFFSET $14",
         )
         .bind(&query.host_code)
         .bind(&query.client_ip)
@@ -1908,6 +1926,9 @@ impl Database {
         .bind(&query.rule_id)
         .bind(&query.path)
         .bind(&rule_id_prefix_pattern)
+        .bind(query.created_at_from)
+        .bind(query.created_at_to)
+        .bind(tier_filter)
         .bind(page_size)
         .bind(offset)
         .fetch_all(&self.pool)

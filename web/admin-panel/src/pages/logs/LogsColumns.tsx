@@ -39,6 +39,21 @@ const eventTypeColor = (eventType: string | undefined): string => {
   }
 };
 
+const tierColor = (tier: string | undefined): string => {
+  switch (tier) {
+    case "Critical":
+      return "red";
+    case "High":
+      return "volcano";
+    case "Medium":
+      return "gold";
+    case "CatchAll":
+      return "default";
+    default:
+      return "default";
+  }
+};
+
 /**
  * Build the canonical built-in column list. The render closures capture
  * the upstream filter callbacks, so this is a function (not a static
@@ -133,8 +148,9 @@ export const buildBuiltinColumns = (
     def: {
       title: "Tier",
       dataIndex: "tier",
-      width: 100,
-      render: (v: unknown) => (typeof v === "string" && v ? <Tag>{v}</Tag> : "—"),
+      width: 110,
+      render: (v: unknown) =>
+        typeof v === "string" && v ? <Tag color={tierColor(v)}>{v}</Tag> : <Tag>—</Tag>,
     },
   },
   {

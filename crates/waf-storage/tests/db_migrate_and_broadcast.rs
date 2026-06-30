@@ -59,6 +59,7 @@ async fn create_security_event_broadcasts_to_subscribers() {
             detail: Some("d".into()),
             geo_info: None,
             waf_mode: "enforce".into(),
+            tier: None,
         })
         .await
         .unwrap();

@@ -168,3 +168,22 @@ impl TierConfig {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Tier;
+
+    /// Pins the Debug format of `Tier` to `PascalCase`. The persisted
+    /// `security_events.tier` column and the JSONL audit sink both write
+    /// `format!("{:?}", tier)`, and the admin-panel tier filter sends these
+    /// exact `PascalCase` strings. Switching to serde serialization would emit
+    /// `snake_case` (`catch_all`) per the `rename_all` attribute, silently
+    /// breaking the filter equality — this test fails the build instead.
+    #[test]
+    fn tier_debug_format_is_pascal_case() {
+        assert_eq!(format!("{:?}", Tier::Critical), "Critical");
+        assert_eq!(format!("{:?}", Tier::High), "High");
+        assert_eq!(format!("{:?}", Tier::Medium), "Medium");
+        assert_eq!(format!("{:?}", Tier::CatchAll), "CatchAll");
+    }
+}

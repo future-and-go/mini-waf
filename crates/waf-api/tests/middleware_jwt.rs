@@ -27,6 +27,19 @@ async fn protected_route_no_token_401() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn security_events_route_no_token_401() {
+    // Guards the auth boundary on the logs feed: a future refactor that moves
+    // /api/security-events off the require_auth layer must fail this test.
+    let s = start_test_server().await;
+    let resp = client()
+        .get(url_for(s.addr, "/api/security-events"))
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp.status(), 401);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn protected_route_invalid_token_401() {
     let s = start_test_server().await;
     let resp = client()

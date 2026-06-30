@@ -1434,6 +1434,36 @@ fn run_server(
         }
     }
 
+    // FR-002/FR-037 — activate the tiered-protection classifier when a config
+    // path is set. Without this the request-context builder leaves every request
+    // at Tier::CatchAll (its documented fallback). The watcher binding is held
+    // for the process lifetime so hot-reload keeps running.
+    let _tier_watcher = config.tiered_protection.config_path.as_deref().and_then(|p| {
+        let path = std::path::PathBuf::from(p);
+        match gateway::tiered::try_reload(&path) {
+            Ok(snap) => {
+                let registry = Arc::new(gateway::tiered::TierPolicyRegistry::new(snap));
+                proxy.with_tier_registry(Arc::clone(&registry));
+                tracing::info!(path = %path.display(), "tiered-protection classifier enabled");
+                match gateway::tiered::TierConfigWatcher::spawn(
+                    path,
+                    registry,
+                    gateway::tiered::DEFAULT_DEBOUNCE_MS,
+                ) {
+                    Ok(w) => Some(w),
+                    Err(e) => {
+                        tracing::warn!("tier config hot-reload disabled: {e}");
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(path = %path.display(), "tiered-protection config invalid: {e}; staying CatchAll");
+                None
+            }
+        }
+    });
+
     let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
     proxy_service.add_tcp(&config.proxy.listen_addr);
 
