@@ -9,6 +9,9 @@ web/admin-panel/dist/
 # ip2region xdb binary data files — download with `prx-waf geoip download`
 data/*.xdb
 
+# Local dev TLS material (CA + leaf certs/keys for proxied hosts) — never commit
+/certs/
+
 # Python cache
 __pycache__/
 *.pyc

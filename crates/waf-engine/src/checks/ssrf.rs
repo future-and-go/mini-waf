@@ -20,6 +20,20 @@ use super::Check;
 use super::ssrf_patterns::{METADATA_HOST_DESCS, METADATA_HOST_SET};
 use super::ssrf_scanners::{extract_urls, is_private_ip, parse_obfuscated_ip};
 
+/// Header locations (as labelled by `extract_urls`) that structurally carry
+/// the client-facing site host rather than a server-side fetch target.
+const SELF_REFERENTIAL_LOCATIONS: &[&str] = &[
+    "header.referer",
+    "header.x-forwarded-host",
+    "header.x-forwarded-server",
+];
+
+/// Strip a trailing `:port` so a `Host`-style value compares against the
+/// bare hostname `url::Host` yields (which never includes a port).
+fn host_without_port(h: &str) -> &str {
+    h.split(':').next().unwrap_or(h)
+}
+
 pub struct SsrfCheck;
 
 impl SsrfCheck {
@@ -63,6 +77,19 @@ impl Check for SsrfCheck {
             };
 
             if allowlist.iter().any(|allowed| allowed.eq_ignore_ascii_case(&host_text)) {
+                continue;
+            }
+
+            // Self-referential headers (Referer / X-Forwarded-Host / …) echo the
+            // client-facing site host the browser used, not a server-side fetch
+            // target. A URL there whose host equals THIS site's configured host
+            // is never SSRF (e.g. `Referer: https://localhost:16843/` when the
+            // host record is `localhost`). Scoped to self-referential locations
+            // and to the site's own host, so self-references to real internal
+            // IPs — and any URL in body/query/cookie — are still flagged.
+            if SELF_REFERENTIAL_LOCATIONS.contains(&location.as_str())
+                && host_text.eq_ignore_ascii_case(host_without_port(&ctx.host_config.host))
+            {
                 continue;
             }
 
@@ -366,6 +393,42 @@ mod tests {
     fn allows_public_ip_addresses() {
         let mut ctx = make_ctx("", r#"{"u":"http://8.8.8.8/dns"}"#);
         assert!(SsrfCheck::new().check(&mut ctx).is_none());
+    }
+
+    fn make_ctx_host(host_cfg: &str, referer: &str) -> RequestCtx {
+        let mut h = HashMap::new();
+        h.insert("referer".to_string(), referer.to_string());
+        let mut ctx = make_ctx_with("", "", h, DefenseConfig::default());
+        ctx.host_config = Arc::new(HostConfig {
+            host: host_cfg.to_string(),
+            ..HostConfig::default()
+        });
+        ctx
+    }
+
+    #[test]
+    fn referer_to_own_site_host_is_skipped() {
+        // FR-016 FP fix: `Referer` echoing the site's own client-facing host
+        // (here `localhost`) must not trip the loopback SSRF rule.
+        let mut ctx = make_ctx_host("localhost", "https://localhost:16843/robots.txt");
+        assert!(SsrfCheck::new().check(&mut ctx).is_none());
+    }
+
+    #[test]
+    fn referer_to_internal_ip_still_detected() {
+        // The exemption is scoped to the site's own host only — a Referer that
+        // points at a real internal/metadata target is still blocked.
+        let mut ctx = make_ctx_host("localhost", "http://169.254.169.254/latest/meta-data/");
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
+    }
+
+    #[test]
+    fn body_url_to_localhost_still_detected_on_localhost_host() {
+        // Exemption applies only to self-referential headers; a URL smuggled in
+        // the body is still a fetch target and stays flagged.
+        let mut ctx = make_ctx_host("localhost", "");
+        ctx.body_preview = Bytes::from(r#"{"u":"http://localhost/admin"}"#.to_string());
+        assert!(SsrfCheck::new().check(&mut ctx).is_some());
     }
 
     #[test]

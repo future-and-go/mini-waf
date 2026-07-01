@@ -1719,6 +1719,7 @@ async fn init_async(
             upstream_alpn,
             upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
             http_redirect: host.http_redirect,
+            preserve_host: host.preserve_host,
             ..HostConfig::default()
         };
         // A2 (US-1801): apply per-host response-filter overrides persisted under

@@ -76,6 +76,7 @@ pub(crate) fn host_config_from_row(host: &waf_storage::models::Host) -> Arc<Host
         upstream_alpn,
         upstream_skip_ssl_verify: host.upstream_skip_ssl_verify,
         http_redirect: host.http_redirect,
+        preserve_host: host.preserve_host,
         ..HostConfig::default()
     };
     if let Some(rf) = response_filter_from_defense_json(host.defense_json.as_ref()) {
@@ -773,6 +774,7 @@ mod tests {
             upstream_alpn: "h2h1".into(),
             upstream_skip_ssl_verify: false,
             http_redirect: false,
+            preserve_host: true,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

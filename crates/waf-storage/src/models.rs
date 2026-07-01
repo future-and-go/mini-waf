@@ -31,6 +31,13 @@ pub struct Host {
     /// (e.g. binary deployed before migration 0016 has run).
     #[sqlx(default)]
     pub http_redirect: bool,
+    /// When `true` (default), forward the client's `Host` header to the
+    /// upstream unchanged. When `false`, rewrite `Host` to `remote_host`
+    /// (required for name-based virtual-host origins, e.g. CDN-fronted sites).
+    /// Graceful degradation: `#[sqlx(default)]` yields `false` when the column
+    /// is absent, but migration 0020 backfills existing rows to `TRUE`.
+    #[sqlx(default)]
+    pub preserve_host: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -245,6 +252,10 @@ pub struct CreateHost {
     /// Redirect plain-HTTP requests to HTTPS. Default `false`.
     #[serde(default)]
     pub http_redirect: bool,
+    /// Preserve the client `Host` header upstream. Default `true` (transparent);
+    /// set `false` to rewrite `Host` to `remote_host` for name-based vhost origins.
+    #[serde(default = "default_preserve_host")]
+    pub preserve_host: bool,
     /// Per-host defense overrides (JSONB blob). When `None`, system defaults apply.
     /// Shape mirrors a partial `waf_common::DefenseConfig`; unknown keys ignored,
     /// missing keys fall back to defaults at engine load.
@@ -254,6 +265,10 @@ pub struct CreateHost {
 
 fn default_upstream_alpn() -> String {
     "h2h1".to_string()
+}
+
+const fn default_preserve_host() -> bool {
+    true
 }
 
 /// Update host request
@@ -274,6 +289,7 @@ pub struct UpdateHost {
     pub upstream_alpn: Option<String>,
     pub upstream_skip_ssl_verify: Option<bool>,
     pub http_redirect: Option<bool>,
+    pub preserve_host: Option<bool>,
     pub defense_json: Option<serde_json::Value>,
 }
 

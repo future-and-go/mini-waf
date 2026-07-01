@@ -151,6 +151,8 @@
     "httpRedirectTooltip": "将 HTTP 请求重定向到 HTTPS（301）。必须在该主机名的 80 端口记录上启用，而非 443 端口。要求 HTTPS 监听在标准 443 端口。",
     "skipSslVerify": "跳过 SSL 验证",
     "skipSslVerifyTooltip": "⚠️ 危险：完全禁用上游 TLS 证书验证，连接将易受中间人攻击。仅在受控的非生产环境中用于自签名证书。切勿在生产环境中启用。",
+    "preserveHost": "保留 Host 头",
+    "preserveHostTooltip": "开启（默认）：转发时保留客户端的 Host 头不变。关闭：将 Host 重写为上游主机名。对于基于域名的虚拟主机源站（CDN 前置站点、共享主机），当 Host 头不匹配时会返回 404，此时应关闭——例如代理到 dantri.com.vn。",
     "defenseSection": "防御配置",
     "defenseToggles": "检测引擎",
     "defenseScan": "扫描器检测",
