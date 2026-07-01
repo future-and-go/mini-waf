@@ -1078,7 +1078,27 @@
     "addRule": "Add Rule",
     "deleteRule": "Delete",
     "confirmDelete": "Delete this geo rule?",
-    "statsTitle": "Top Blocked Countries (24h)"
+    "statsTitle": "Top Blocked Countries (24h)",
+    "country": "Country",
+    "added": "Rule added",
+    "deleted": "Rule deleted",
+    "tabs": {
+      "dashboard": "Dashboard",
+      "rules": "Country Rules"
+    },
+    "dashboard": {
+      "activeRules": "Active geo rules",
+      "blockedCountries": "Blocked countries",
+      "geoEvents": "Geo-attributed events",
+      "topSource": "Top source country",
+      "distribution": "Country Attack Distribution",
+      "topSources": "Top Attack Source Countries",
+      "sourceMap": "Application Security Events Source Map",
+      "topCities": "Top Source Cities",
+      "topIsps": "Top Source Networks (ISP)",
+      "others": "Others",
+      "mapHint": "Choropleth requires GeoIP DB + map layer (optional)"
+    }
   },
   "responseFilter": {
     "title": "Response Filtering (FR-033/034/035)",

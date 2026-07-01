@@ -620,5 +620,27 @@
     "disabledMessage": "控制平面在配置中被禁用（interop.enabled = false）。",
     "open": "打开",
     "applied": "执行模式已应用"
+  },
+  "geo": {
+    "country": "国家",
+    "added": "规则已添加",
+    "deleted": "规则已删除",
+    "tabs": {
+      "dashboard": "仪表盘",
+      "rules": "国家规则"
+    },
+    "dashboard": {
+      "activeRules": "启用的地理规则",
+      "blockedCountries": "已封锁国家",
+      "geoEvents": "地理归因事件",
+      "topSource": "主要来源国家",
+      "distribution": "国家攻击分布",
+      "topSources": "主要攻击来源国家",
+      "sourceMap": "应用安全事件来源地图",
+      "topCities": "主要来源城市",
+      "topIsps": "主要来源网络 (ISP)",
+      "others": "其他",
+      "mapHint": "等值区域地图需要 GeoIP 数据库 + 地图图层（可选）"
+    }
   }
 }
