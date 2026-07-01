@@ -53,6 +53,7 @@ async fn reload_all_loads_seeded_data() {
             upstream_skip_ssl_verify: false,
             defense_json: None,
             http_redirect: false,
+            preserve_host: true,
         })
         .await
         .expect("create host");
@@ -110,6 +111,7 @@ async fn concurrent_reload_keeps_reader_consistent() {
             upstream_skip_ssl_verify: false,
             defense_json: None,
             http_redirect: false,
+            preserve_host: true,
         })
         .await
         .expect("host");

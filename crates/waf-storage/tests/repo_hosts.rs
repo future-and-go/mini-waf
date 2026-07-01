@@ -46,6 +46,7 @@ fn sample_host() -> CreateHost {
         upstream_skip_ssl_verify: false,
         defense_json: None,
         http_redirect: false,
+        preserve_host: true,
     }
 }
 
@@ -102,6 +103,7 @@ async fn update_partial_fields_persists() {
         upstream_skip_ssl_verify: None,
         defense_json: None,
         http_redirect: None,
+        preserve_host: None,
     };
     let updated = fx.db.update_host(host.id, upd).await.unwrap().unwrap();
     assert_eq!(updated.host, "changed.example.com");
@@ -132,6 +134,7 @@ async fn update_missing_returns_none() {
         upstream_skip_ssl_verify: None,
         defense_json: None,
         http_redirect: None,
+        preserve_host: None,
     };
     let res = fx.db.update_host(uuid::Uuid::new_v4(), upd).await.unwrap();
     assert!(res.is_none());

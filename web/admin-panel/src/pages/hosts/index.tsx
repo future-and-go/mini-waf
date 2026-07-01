@@ -36,6 +36,7 @@ interface HostFormShape {
   upstream_alpn: UpstreamAlpn;
   upstream_skip_ssl_verify: boolean;
   http_redirect: boolean;
+  preserve_host: boolean;
   remarks?: string;
   defense_json: DefenseJson;
 }
@@ -69,6 +70,7 @@ const DEFAULT_FORM: HostFormShape = {
   upstream_alpn: "h2h1",
   upstream_skip_ssl_verify: false,
   http_redirect: false,
+  preserve_host: true,
   remarks: "",
   defense_json: DEFAULT_DEFENSE,
 };
@@ -128,6 +130,7 @@ export const HostsPage: React.FC = () => {
       upstream_alpn: host.upstream_alpn ?? "h2h1",
       upstream_skip_ssl_verify: host.upstream_skip_ssl_verify ?? false,
       http_redirect: host.http_redirect ?? false,
+      preserve_host: host.preserve_host ?? true,
       remarks: host.remarks ?? "",
       defense_json: { ...DEFAULT_DEFENSE, ...(host.defense_json ?? {}) },
     });
@@ -304,6 +307,21 @@ export const HostsPage: React.FC = () => {
           <span>
             {t("hosts.httpRedirect")}&nbsp;
             <Tooltip title={t("hosts.httpRedirectTooltip")}>
+              <InfoCircleOutlined style={{ color: "#8c8c8c" }} />
+            </Tooltip>
+          </span>
+        }
+      >
+        <Switch />
+      </Form.Item>
+
+      <Form.Item
+        name="preserve_host"
+        valuePropName="checked"
+        label={
+          <span>
+            {t("hosts.preserveHost")}&nbsp;
+            <Tooltip title={t("hosts.preserveHostTooltip")}>
               <InfoCircleOutlined style={{ color: "#8c8c8c" }} />
             </Tooltip>
           </span>

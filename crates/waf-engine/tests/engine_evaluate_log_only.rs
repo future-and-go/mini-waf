@@ -56,6 +56,7 @@ async fn seed_host(db: &waf_storage::Database, log_only: bool) -> String {
         upstream_skip_ssl_verify: false,
         defense_json: None,
         http_redirect: false,
+        preserve_host: true,
     })
     .await
     .expect("create host")

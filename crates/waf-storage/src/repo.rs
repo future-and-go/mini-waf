@@ -51,16 +51,16 @@ impl Database {
                 id, code, host, port, ssl, guard_status,
                 remote_host, remote_port, remote_ip, cert_file, key_file,
                 remarks, start_status, log_only_mode, upstream_alpn, upstream_skip_ssl_verify,
-                http_redirect, defense_json,
+                http_redirect, preserve_host, defense_json,
                 is_enable_load_balance, load_balance_stage,
                 created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6,
                 $7, $8, $9, $10, $11,
                 $12, $13, $14, $15, $16,
-                $17, $18,
+                $17, $18, $19,
                 false, 0,
-                $19, $19
+                $20, $20
             ) RETURNING *",
         )
         .bind(id)
@@ -79,9 +79,10 @@ impl Database {
         .bind(req.log_only_mode)
         .bind(&req.upstream_alpn)
         .bind(req.upstream_skip_ssl_verify)
-        .bind(req.http_redirect)  // $17
-        .bind(&req.defense_json)  // $18
-        .bind(now)                // $19
+        .bind(req.http_redirect)     // $17
+        .bind(req.preserve_host)     // $18
+        .bind(&req.defense_json)     // $19
+        .bind(now)                   // $20
         .fetch_one(&self.pool)
         .await?;
 
@@ -109,8 +110,9 @@ impl Database {
                 upstream_alpn = COALESCE($14, upstream_alpn),
                 upstream_skip_ssl_verify = COALESCE($15, upstream_skip_ssl_verify),
                 http_redirect = COALESCE($16, http_redirect),
-                defense_json = COALESCE($17, defense_json),
-                updated_at = $18
+                preserve_host = COALESCE($17, preserve_host),
+                defense_json = COALESCE($18, defense_json),
+                updated_at = $19
             WHERE id = $1
             RETURNING *",
         )
@@ -130,8 +132,9 @@ impl Database {
         .bind(req.upstream_alpn)
         .bind(req.upstream_skip_ssl_verify)
         .bind(req.http_redirect) // $16
-        .bind(req.defense_json)  // $17
-        .bind(now)               // $18
+        .bind(req.preserve_host) // $17
+        .bind(req.defense_json)  // $18
+        .bind(now)               // $19
         .fetch_optional(&self.pool)
         .await?;
 
