@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, main-harness]
   pull_request:
-    branches: [main]
+    branches: [main, main-harness]
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -103,11 +103,11 @@ jobs:
 #          name: cache-coverage
 #          path: cov-cache.txt
 
-  # FR-001 phase-06: enforce 95% line coverage on the gateway files
-  # delivered by phases 01-05. Files outside that scope (cache, lb, ssl,
-  # tunnel, http3, plus proxy/router glue that needs the deferred
-  # integration harness) are excluded so we measure only the code under
-  # this phase's contract.
+# FR-001 phase-06: enforce 95% line coverage on the gateway files
+# delivered by phases 01-05. Files outside that scope (cache, lb, ssl,
+# tunnel, http3, plus proxy/router glue that needs the deferred
+# integration harness) are excluded so we measure only the code under
+# this phase's contract.
 #  coverage:
 #    name: Gateway coverage (>=95%)
 #    needs: lint
@@ -141,9 +141,9 @@ jobs:
 #          name: gateway-lcov
 #          path: lcov.info
 
-  # FR-010 phase-09: line-coverage gate scoped to the device_fp module.
-  # Workspace-aggregate would mask gaps inside device_fp, so we measure
-  # only files under crates/waf-engine/src/device_fp/**.
+# FR-010 phase-09: line-coverage gate scoped to the device_fp module.
+# Workspace-aggregate would mask gaps inside device_fp, so we measure
+# only files under crates/waf-engine/src/device_fp/**.
 #  device-fp-coverage:
 #    name: device_fp coverage (>=90%)
 #    needs: lint

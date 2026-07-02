@@ -2,21 +2,21 @@ name: Sec Audit
 
 on:
   push:
-    branches: [main]
+    branches: [main, main-harness]
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
       - "**/Cargo.toml"
       - "deny.toml"
-      - '.cargo/audit.toml'
+      - ".cargo/audit.toml"
   pull_request:
-    branches: [main]
+    branches: [main, main-harness]
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
       - "**/Cargo.toml"
       - "deny.toml"
-      - '.cargo/audit.toml'
+      - ".cargo/audit.toml"
   schedule:
     - cron: "0 6 * * 1"
 

@@ -2,9 +2,9 @@ name: Coverage
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, main-harness]
   pull_request:
-    branches: [main]
+    branches: [main, main-harness]
 
 concurrency:
   group: coverage-${{ github.event.pull_request.number || github.ref }}
@@ -38,13 +38,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { crate: waf-common,  floor: 88 }
+          - { crate: waf-common, floor: 88 }
           - { crate: waf-storage, floor: 84 }
           - { crate: waf-cluster, floor: 82 }
-          - { crate: waf-api,     floor: 60 }
-          - { crate: gateway,     floor: 85 }
-          - { crate: waf-engine,  floor: 80 }
-          - { crate: prx-waf,     floor: 5 }
+          - { crate: waf-api, floor: 60 }
+          - { crate: gateway, floor: 85 }
+          - { crate: waf-engine, floor: 80 }
+          - { crate: prx-waf, floor: 5 }
 
     steps:
       - uses: actions/checkout@v4
