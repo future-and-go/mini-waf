@@ -62,7 +62,7 @@ pub struct AppConfig {
 /// crate; the actual `[tiered_protection]` schema is parsed gateway-side.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TierFileRef {
-    /// Path to the TOML file. None ⇒ tier classifier stays unwired (CatchAll).
+    /// Path to the TOML file. None ⇒ tier classifier stays unwired (`CatchAll`).
     #[serde(default)]
     pub config_path: Option<String>,
 }
@@ -1509,7 +1509,6 @@ mod _tier_parse_probe {
     fn probe_tier_section_parses() {
         let content = std::fs::read_to_string("../../configs/full-features.toml").expect("read");
         let c: AppConfig = toml::from_str(&content).expect("parse");
-        eprintln!("PROBE config_path = {:?}", c.tiered_protection.config_path);
         assert_eq!(
             c.tiered_protection.config_path.as_deref(),
             Some("configs/tier-protection.toml")
