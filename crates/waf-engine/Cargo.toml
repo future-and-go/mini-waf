@@ -18,7 +18,6 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 bytes = { workspace = true }
 dashmap = { workspace = true }
 regex = { workspace = true }
@@ -75,7 +74,6 @@ reqwest = { workspace = true, features = ["stream", "gzip"] }
 testcontainers = "0.27"
 testcontainers-modules = { version = "0.15", features = ["postgres"] }
 wat = "1"
-tracing-subscriber = { workspace = true }
 
 [target.'cfg(loom)'.dev-dependencies]
 loom = "0.7"

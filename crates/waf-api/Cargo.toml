@@ -37,7 +37,6 @@ regex = { workspace = true }
 parking_lot = { workspace = true }
 serde_yaml = { workspace = true }
 sqlx = { workspace = true }
-url = { workspace = true }
 rcgen = { workspace = true }
 time = { workspace = true }
 rustls = { workspace = true }
