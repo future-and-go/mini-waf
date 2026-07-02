@@ -1510,6 +1510,9 @@ mod _tier_parse_probe {
         let content = std::fs::read_to_string("../../configs/full-features.toml").expect("read");
         let c: AppConfig = toml::from_str(&content).expect("parse");
         eprintln!("PROBE config_path = {:?}", c.tiered_protection.config_path);
-        assert_eq!(c.tiered_protection.config_path.as_deref(), Some("configs/tier-protection.toml"));
+        assert_eq!(
+            c.tiered_protection.config_path.as_deref(),
+            Some("configs/tier-protection.toml")
+        );
     }
 }

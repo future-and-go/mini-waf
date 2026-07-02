@@ -13,11 +13,11 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use gateway::context::BodyMaskState;
 use gateway::filters::{
     CompiledMask, ResponseHeaderBlocklistFilter, ResponseServerPolicyFilter, apply_body_mask_chunk,
 };
 use gateway::pipeline::{FilterCtx, ResponseFilter};
-use gateway::context::BodyMaskState;
 use pingora_http::ResponseHeader;
 use waf_common::{HostConfig, HostResponseFilter, RequestCtx};
 
@@ -77,7 +77,10 @@ fn per_host_override_strips_headers() {
     ResponseHeaderBlocklistFilter.apply(&mut resp, &fctx).unwrap();
     ResponseServerPolicyFilter.apply(&mut resp, &fctx).unwrap();
 
-    assert!(resp.headers.get("x-powered-by").is_none(), "blocklisted header stripped");
+    assert!(
+        resp.headers.get("x-powered-by").is_none(),
+        "blocklisted header stripped"
+    );
     assert!(resp.headers.get("server").is_none(), "Server header scrubbed");
     assert!(resp.headers.get("content-type").is_some(), "unrelated header kept");
 }

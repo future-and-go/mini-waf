@@ -22,11 +22,7 @@ use super::ssrf_scanners::{extract_urls, is_private_ip, parse_obfuscated_ip};
 
 /// Header locations (as labelled by `extract_urls`) that structurally carry
 /// the client-facing site host rather than a server-side fetch target.
-const SELF_REFERENTIAL_LOCATIONS: &[&str] = &[
-    "header.referer",
-    "header.x-forwarded-host",
-    "header.x-forwarded-server",
-];
+const SELF_REFERENTIAL_LOCATIONS: &[&str] = &["header.referer", "header.x-forwarded-host", "header.x-forwarded-server"];
 
 /// Strip a trailing `:port` so a `Host`-style value compares against the
 /// bare hostname `url::Host` yields (which never includes a port).

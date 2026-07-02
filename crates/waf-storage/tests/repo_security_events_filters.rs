@@ -132,7 +132,10 @@ async fn tier_filter_selects_and_excludes_null() {
         .unwrap();
     assert_eq!(total, 2);
     assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|r| matches!(r.tier.as_deref(), Some("Critical" | "High"))));
+    assert!(
+        rows.iter()
+            .all(|r| matches!(r.tier.as_deref(), Some("Critical" | "High")))
+    );
 
     // Single tier excludes the NULL-tier row.
     let (_, total) = fx

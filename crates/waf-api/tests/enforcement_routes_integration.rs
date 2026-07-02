@@ -166,7 +166,11 @@ async fn enforcement_requires_jwt_and_rejects_secret() {
             client().post(enf_url(&s, path)).json(&json!({}))
         };
         let resp = req.send().await.expect("no-auth send");
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{method} {path} must reject without JWT");
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "{method} {path} must reject without JWT"
+        );
 
         // X-Benchmark-Secret without a Bearer JWT must NOT be accepted.
         let req = if method == "GET" {
@@ -174,7 +178,11 @@ async fn enforcement_requires_jwt_and_rejects_secret() {
         } else {
             client().post(enf_url(&s, path)).json(&json!({}))
         };
-        let resp = req.header(SECRET_HEADER, VALID_SECRET).send().await.expect("secret-only send");
+        let resp = req
+            .header(SECRET_HEADER, VALID_SECRET)
+            .send()
+            .await
+            .expect("secret-only send");
         assert_eq!(
             resp.status(),
             StatusCode::UNAUTHORIZED,

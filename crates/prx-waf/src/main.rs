@@ -1445,11 +1445,7 @@ fn run_server(
                 let registry = Arc::new(gateway::tiered::TierPolicyRegistry::new(snap));
                 proxy.with_tier_registry(Arc::clone(&registry));
                 tracing::info!(path = %path.display(), "tiered-protection classifier enabled");
-                match gateway::tiered::TierConfigWatcher::spawn(
-                    path,
-                    registry,
-                    gateway::tiered::DEFAULT_DEBOUNCE_MS,
-                ) {
+                match gateway::tiered::TierConfigWatcher::spawn(path, registry, gateway::tiered::DEFAULT_DEBOUNCE_MS) {
                     Ok(w) => Some(w),
                     Err(e) => {
                         tracing::warn!("tier config hot-reload disabled: {e}");

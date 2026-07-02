@@ -624,10 +624,7 @@ impl ProxyHttp for WafProxy {
         // Challenge solve endpoint: intercept before the WAF engine so the POST
         // is not itself blocked. Only active when the challenge subsystem is
         // configured; otherwise the path proxies upstream like any other.
-        if self.challenge_ctx.is_some()
-            && request_ctx.method == "POST"
-            && request_ctx.path == "/challenge/verify"
-        {
+        if self.challenge_ctx.is_some() && request_ctx.method == "POST" && request_ctx.path == "/challenge/verify" {
             return handle_challenge_verify(session, ctx).await;
         }
 
@@ -1025,8 +1022,7 @@ impl ProxyHttp for WafProxy {
         // §5.3 / §9: a recorded MISS whose response we refuse to store is
         // non-cacheable in practice and must advertise BYPASS, not a MISS that
         // can never become a HIT.
-        ctx.cache_status =
-            crate::response_cache_integration::finalize_cache_status(ctx.cache_status, capture_kept);
+        ctx.cache_status = crate::response_cache_integration::finalize_cache_status(ctx.cache_status, capture_kept);
 
         // §5 phase-5 ordering invariant: inject the six contract observability
         // headers as the FINAL step — after (a) response_chain.apply_all,
