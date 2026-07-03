@@ -121,6 +121,12 @@ impl<S: RiskStore> Scorer<S> {
         self.cfg.load_full()
     }
 
+    /// Test-only access to the underlying risk store.
+    #[cfg(test)]
+    pub(crate) const fn store(&self) -> &Arc<S> {
+        &self.store
+    }
+
     /// Score a request and return the result.
     ///
     /// # Arguments

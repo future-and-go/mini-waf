@@ -17,6 +17,7 @@
 //! the Redis store cannot support "apply without decay" as a separate operation.
 
 use std::net::IpAddr;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
@@ -27,7 +28,7 @@ use redis::{Script, aio::ConnectionManager};
 use tokio::time::timeout;
 use tracing::{debug, warn};
 
-use super::redis_lua::{APPLY_SCRIPT, FORCE_MAX_SCRIPT, MINT_OR_GET_OWNER_SCRIPT};
+use super::redis_lua::{APPLY_SCRIPT, FORCE_MAX_SCRIPT};
 use crate::risk::decay::{DECAY_RATE, MAX_DECAY, MIN_CLEAN_STREAK};
 use crate::risk::key::RiskKey;
 use crate::risk::state::{Contributor, RiskState};
@@ -70,53 +71,14 @@ struct CacheEntry {
     owner_id: String,
 }
 
-/// Simple LRU cache for fail-open fallback.
-struct LruCache {
-    entries: std::collections::HashMap<String, CacheEntry>,
-    order: std::collections::VecDeque<String>,
-    capacity: usize,
-}
-
-impl LruCache {
-    fn new(capacity: usize) -> Self {
-        Self {
-            entries: std::collections::HashMap::with_capacity(capacity),
-            order: std::collections::VecDeque::with_capacity(capacity),
-            capacity,
-        }
-    }
-
-    fn get(&mut self, key: &str) -> Option<&CacheEntry> {
-        if self.entries.contains_key(key) {
-            self.order.retain(|k| k != key);
-            self.order.push_back(key.to_string());
-            self.entries.get(key)
-        } else {
-            None
-        }
-    }
-
-    fn insert(&mut self, key: String, entry: CacheEntry) {
-        if self.entries.len() >= self.capacity
-            && let Some(oldest) = self.order.pop_front()
-        {
-            self.entries.remove(&oldest);
-        }
-        self.order.retain(|k| k != &key);
-        self.order.push_back(key.clone());
-        self.entries.insert(key, entry);
-    }
-}
-
 /// Redis-backed risk store with circuit breaker and LRU fallback cache.
 pub struct RedisRiskStore {
     conn: ConnectionManager,
     cfg: RedisRiskConfig,
     consecutive_fails: AtomicU32,
-    cache: Mutex<LruCache>,
+    cache: Mutex<lru::LruCache<String, CacheEntry>>,
     apply_script: Script,
     force_max_script: Script,
-    mint_owner_script: Script,
 }
 
 impl std::fmt::Debug for RedisRiskStore {
@@ -144,13 +106,13 @@ impl RedisRiskStore {
             .await
             .context("risk redis: ping")?;
 
+        let cache_capacity = NonZeroUsize::new(cfg.cache_capacity).unwrap_or(NonZeroUsize::MIN);
         Ok(Self {
             conn,
-            cache: Mutex::new(LruCache::new(cfg.cache_capacity)),
+            cache: Mutex::new(lru::LruCache::new(cache_capacity)),
             consecutive_fails: AtomicU32::new(0),
             apply_script: Script::new(APPLY_SCRIPT),
             force_max_script: Script::new(FORCE_MAX_SCRIPT),
-            mint_owner_script: Script::new(MINT_OR_GET_OWNER_SCRIPT),
             cfg,
         })
     }
@@ -235,7 +197,7 @@ impl RedisRiskStore {
     /// Update LRU cache with new state.
     fn cache_update(&self, key: &RiskKey, owner_id: &str, state: &RiskState) {
         let cache_key = Self::cache_key(key);
-        self.cache.lock().insert(
+        self.cache.lock().push(
             cache_key,
             CacheEntry {
                 state: state.clone(),
@@ -245,54 +207,6 @@ impl RedisRiskStore {
     }
 
     // ── Redis operations ──────────────────────────────────────────────────────
-
-    /// Resolve `owner_id` from index keys via pipelined GET, mint if not found.
-    async fn resolve_or_mint_owner(&self, key: &RiskKey) -> anyhow::Result<(String, bool)> {
-        let idx_keys = self.index_keys(key);
-        if idx_keys.is_empty() {
-            return Ok((Self::mint_owner_id(), true));
-        }
-
-        let new_owner_id = Self::mint_owner_id();
-        let mut conn = self.conn.clone();
-
-        let mut invocation = self.mint_owner_script.prepare_invoke();
-        for k in &idx_keys {
-            invocation.key(k);
-        }
-        invocation.arg(&new_owner_id).arg(self.cfg.ttl_secs);
-
-        let res = timeout(self.cfg.op_timeout, invocation.invoke_async::<String>(&mut conn)).await;
-
-        match res {
-            Ok(Ok(json)) => {
-                self.record_ok();
-                let parsed: serde_json::Value =
-                    serde_json::from_str(&json).context("risk redis: parse mint response")?;
-                let owner_id = parsed
-                    .get("owner_id")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow!("missing owner_id"))?
-                    .to_string();
-                let is_new = parsed
-                    .get("is_new")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                Ok((owner_id, is_new))
-            }
-            Ok(Err(e)) => {
-                self.record_fail();
-                Err(anyhow!(e).context("risk redis: mint_or_get_owner"))
-            }
-            Err(_) => {
-                self.record_fail();
-                Err(anyhow!(
-                    "risk redis: mint_or_get_owner timeout {:?}",
-                    self.cfg.op_timeout
-                ))
-            }
-        }
-    }
 
     /// Lookup `owner_id` from multiple indices, returning all found owners.
     async fn lookup_owners(&self, key: &RiskKey) -> anyhow::Result<Vec<String>> {
@@ -364,6 +278,7 @@ impl RedisRiskStore {
 struct ApplyResponse {
     state: RiskState,
     is_new: bool,
+    owner_id: String,
 }
 
 #[async_trait]
@@ -410,29 +325,18 @@ impl RiskStore for RedisRiskStore {
             });
         }
 
-        // Resolve or mint owner
-        let (owner_id, _) = match self.resolve_or_mint_owner(key).await {
-            Ok(r) => r,
-            Err(e) => {
-                warn!(error = %e, "risk redis: resolve_or_mint failed, using cache fallback");
-                if let Some(state) = self.cache_lookup(key) {
-                    return Ok(ApplyResult { state, is_new: false });
-                }
-                return Ok(ApplyResult {
-                    state: RiskState::new(now_ms),
-                    is_new: true,
-                });
-            }
-        };
-
-        // Run apply script
-        let state_key = self.state_key(&owner_id);
+        // Single-RTT: owner resolution/convergence + decay/fold run in one script.
+        let new_owner_id = Self::mint_owner_id();
         let deltas_json = serde_json::to_string(deltas).context("serialize deltas")?;
         let mut conn = self.conn.clone();
 
         let mut invocation = self.apply_script.prepare_invoke();
+        for k in self.index_keys(key) {
+            invocation.key(k);
+        }
         invocation
-            .key(&state_key)
+            .arg(&new_owner_id)
+            .arg(&self.cfg.key_prefix)
             .arg(now_ms)
             .arg(&deltas_json)
             .arg(self.cfg.ttl_secs)
@@ -447,7 +351,7 @@ impl RiskStore for RedisRiskStore {
                 self.record_ok();
                 let response: ApplyResponse =
                     serde_json::from_str(&json).context("risk redis: parse apply response")?;
-                self.cache_update(key, &owner_id, &response.state);
+                self.cache_update(key, &response.owner_id, &response.state);
                 Ok(ApplyResult {
                     state: response.state,
                     is_new: response.is_new,
@@ -483,14 +387,17 @@ impl RiskStore for RedisRiskStore {
             return Ok(());
         }
 
-        // Resolve or mint owner
-        let (owner_id, _) = self.resolve_or_mint_owner(key).await?;
-        let state_key = self.state_key(&owner_id);
+        // Single-RTT: owner resolution/convergence + force-max run in one script.
+        let new_owner_id = Self::mint_owner_id();
         let mut conn = self.conn.clone();
 
         let mut invocation = self.force_max_script.prepare_invoke();
+        for k in self.index_keys(key) {
+            invocation.key(k);
+        }
         invocation
-            .key(&state_key)
+            .arg(&new_owner_id)
+            .arg(&self.cfg.key_prefix)
             .arg(until_ms)
             .arg(now_ms)
             .arg(self.cfg.ttl_secs);
@@ -498,7 +405,7 @@ impl RiskStore for RedisRiskStore {
         let res = timeout(self.cfg.op_timeout, invocation.invoke_async::<String>(&mut conn)).await;
 
         match res {
-            Ok(Ok(_)) => {
+            Ok(Ok(owner_id)) => {
                 self.record_ok();
                 // Update cache with max state
                 let max_state = RiskState {
@@ -566,11 +473,7 @@ impl RiskStore for RedisRiskStore {
         match timeout(Duration::from_secs(30), scan_fut).await {
             Ok(Ok(n)) => {
                 self.record_ok();
-                {
-                    let mut cache = self.cache.lock();
-                    cache.entries.clear();
-                    cache.order.clear();
-                }
+                self.cache.lock().clear();
                 debug!(deleted = n, "risk redis: reset_all completed");
                 Ok(())
             }
@@ -634,6 +537,37 @@ impl RiskStore for RedisRiskStore {
 mod tests {
     use super::*;
 
+    fn cache_entry(owner_id: &str) -> CacheEntry {
+        CacheEntry {
+            state: RiskState::new(0),
+            owner_id: owner_id.to_string(),
+        }
+    }
+
+    /// Fallback-cache behavior: eviction at capacity, `get` promotes recency,
+    /// `push` replaces an existing entry.
+    #[test]
+    fn lru_cache_eviction_recency_and_replace() {
+        let mut cache = lru::LruCache::new(NonZeroUsize::new(2).unwrap());
+
+        cache.push("a".to_string(), cache_entry("owner-a"));
+        cache.push("b".to_string(), cache_entry("owner-b"));
+
+        // Touch "a" so "b" becomes least-recently-used.
+        assert!(cache.get(&"a".to_string()).is_some());
+
+        // Inserting a third entry evicts "b", not the recently-used "a".
+        cache.push("c".to_string(), cache_entry("owner-c"));
+        assert!(cache.get(&"b".to_string()).is_none(), "LRU entry should be evicted");
+        assert!(cache.get(&"a".to_string()).is_some());
+        assert!(cache.get(&"c".to_string()).is_some());
+
+        // Push with an existing key replaces the entry without growing the cache.
+        cache.push("a".to_string(), cache_entry("owner-a2"));
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.get(&"a".to_string()).unwrap().owner_id, "owner-a2");
+    }
+
     fn unique_prefix() -> String {
         format!(
             "waf_risk_test_{}:",
@@ -674,6 +608,34 @@ mod tests {
         let read = store.read(&key).await.unwrap();
         assert!(read.is_some());
         assert_eq!(read.unwrap().clamped_score, 25);
+    }
+
+    /// #199 conformance — apply-time divergent-score collision must converge
+    /// to the max-score owner; cross-axis applies unify indices. Same cases
+    /// run against the memory backend via `conformance::run_all`.
+    /// Runs only when `REDIS_TEST_URL` is set.
+    #[tokio::test]
+    async fn apply_convergence_conformance() {
+        use crate::risk::store::conformance;
+
+        let Ok(url) = std::env::var("REDIS_TEST_URL") else {
+            tracing::info!("skipping: REDIS_TEST_URL unset");
+            return;
+        };
+
+        let store = RedisRiskStore::new(RedisRiskConfig {
+            url,
+            key_prefix: unique_prefix(),
+            ttl_secs: 3600,
+            op_timeout: Duration::from_millis(500),
+            breaker_threshold: 5,
+            cache_capacity: 100,
+        })
+        .await
+        .expect("connect to REDIS_TEST_URL");
+
+        conformance::test_apply_divergent_score_convergence(&store).await;
+        conformance::test_apply_converges_axes(&store).await;
     }
 
     #[tokio::test]
