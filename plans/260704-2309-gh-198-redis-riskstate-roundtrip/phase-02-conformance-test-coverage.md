@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Conformance Test Coverage"
-status: pending
+status: in-progress
 effort: "S"
 priority: P1
 dependencies: [1]
@@ -65,11 +65,14 @@ rather than literals so the test tracks config drift.
 
 ## Success Criteria
 
-- [ ] New conformance case registered in `run_all` and passing on memory backend
-- [ ] Case asserts: post-decay apply parses, score decreased by `DECAY_RATE`,
+- [x] New conformance case registered in `run_all` and passing on memory backend
+- [x] Case asserts: post-decay apply parses, score decreased by `DECAY_RATE`,
       `Decay` contributor present, and subsequent `read` round-trips
-- [ ] On live Redis (CI): case fails on pre-phase-1 script, passes after
-      (regression lock for the `{"Decay":null}` bug)
+- [ ] On live Redis (CI): case passes (proves the Lua decay branch, previously
+      untested on Redis). Correction from code review (empirical): serde_json's
+      lenient unit-variant handling parses `{"Decay":null}` fine, so the kind
+      fix is canonicalization, not a parse-failure fix — the case is decay
+      parity coverage, not a regression lock for a parse bug
 
 ## Risk Assessment
 

@@ -45,12 +45,26 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      # Valkey backs the REDIS_TEST_URL-gated risk-store conformance tests;
+      # without it those tests early-return as silent passes.
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
         run: cargo test --workspace --all-features
+        env:
+          REDIS_TEST_URL: redis://127.0.0.1:6379
 
   build:
     name: Build

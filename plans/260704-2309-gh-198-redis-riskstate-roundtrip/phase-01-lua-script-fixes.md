@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Lua Script Fixes"
-status: pending
+status: in-progress
 effort: "S"
 priority: P1
 dependencies: []
@@ -79,10 +79,10 @@ truthiness — unaffected.
 
 ## Success Criteria
 
-- [ ] `APPLY_SCRIPT` contains no `== nil` comparison against a `redis.call('GET', ...)` result
-- [ ] `is_new` derives from owner mint (`#candidates == 0`), not state-key existence — exact memory-store parity including the expired-state-key edge
-- [ ] Decay contributor encodes as `{"kind":"Decay","delta":...,"ts_ms":...}`
-- [ ] `cargo clippy -p waf-engine --features redis-store --lib` clean
+- [x] `APPLY_SCRIPT` contains no `== nil` comparison against a `redis.call('GET', ...)` result
+- [x] `is_new` derives from owner mint (`#candidates == 0`), not state-key existence — exact memory-store parity including the expired-state-key edge
+- [x] Decay contributor encodes as `{"kind":"Decay","delta":...,"ts_ms":...}`
+- [x] `cargo clippy -p waf-engine --features redis-store --lib` clean
 - [ ] With `REDIS_TEST_URL` set (CI or operator-provided):
       `risk::store::redis::tests::basic_apply_and_read`,
       `risk::tests::conformance_redis::redis_apply_accumulates_score`,

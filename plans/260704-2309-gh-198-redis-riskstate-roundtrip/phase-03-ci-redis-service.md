@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "CI Redis Service"
-status: pending
+status: in-progress
 effort: "S"
 priority: P1
 dependencies: [1, 2]

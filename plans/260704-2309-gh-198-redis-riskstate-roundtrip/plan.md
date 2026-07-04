@@ -1,7 +1,7 @@
 ---
 title: "GH-198 Redis risk store: RiskState round-trip + is_new fixes, CI Redis coverage"
 description: "Fix APPLY_SCRIPT is_new (Redis Lua GET returns false, not nil) and Decay contributor kind serialization; add decay round-trip conformance case; run Redis-gated tests in CI via Valkey service container."
-status: pending
+status: in-progress
 priority: P1
 branch: "main-harness"
 tags: [bug, area:engine, risk-store, redis, gh-198]
@@ -65,9 +65,9 @@ so the fix is proven by the pipeline.
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Lua Script Fixes](./phase-01-lua-script-fixes.md) | Pending |
-| 2 | [Conformance Test Coverage](./phase-02-conformance-test-coverage.md) | Pending |
-| 3 | [CI Redis Service](./phase-03-ci-redis-service.md) | Pending |
+| 1 | [Lua Script Fixes](./phase-01-lua-script-fixes.md) | Implemented — CI proof pending |
+| 2 | [Conformance Test Coverage](./phase-02-conformance-test-coverage.md) | Implemented — CI proof pending |
+| 3 | [CI Redis Service](./phase-03-ci-redis-service.md) | Implemented — CI run pending |
 
 ## Dependencies
 
@@ -81,9 +81,13 @@ so the fix is proven by the pipeline.
 
 - [x] Empty contributors encodes as `[]`; new-actor-zero-deltas round-trips
       (done in PR #209; regression-guarded by existing conformance once CI runs it)
-- [ ] Decay contributor kind round-trips through serde
-- [ ] `is_new` true on first apply (parity with memory store)
-- [ ] Redis conformance tests run in CI (service container)
+- [x] Decay contributor kind round-trips through serde (kind now encodes
+      canonically as `"Decay"`; code review empirically showed the old
+      `{"Decay":null}` form also parsed via serde_json's lenient unit-variant
+      handling — the fix is canonicalization + new decay-path test coverage)
+- [x] `is_new` true on first apply (parity with memory store; CI proof pending)
+- [ ] Redis conformance tests run in CI (service container) — wired; awaiting
+      PR CI run
 
 ## Open Questions
 
