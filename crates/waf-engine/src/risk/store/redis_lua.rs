@@ -51,6 +51,11 @@ for i, key in ipairs(KEYS) do
     end
 end
 
+-- Parity with MemoryRiskStore: is_new means no owner existed on any index
+-- axis before this call (mint path), not 'state key was absent'. An owner
+-- converged from index keys whose state key TTL-expired is NOT new.
+local is_new = (#candidates == 0)
+
 local owner_id
 if #candidates == 0 then
     -- Mint path: claim the first index key (SETNX guards concurrent minting)
@@ -117,7 +122,6 @@ end
 
 -- Decode deltas
 local deltas = cjson.decode(deltas_json)
-local is_new = (state_json == nil)
 
 -- Apply decay if state exists and has clean streak
 if not is_new and state.clean_streak >= min_clean_streak then
@@ -133,8 +137,11 @@ if not is_new and state.clean_streak >= min_clean_streak then
         if available > 0 then
             state.raw_score = state.raw_score - available
             -- Push decay contributor (keep max 8)
+            -- Canonical serde encoding of the ContributorKind::Decay unit
+            -- variant is the bare string 'Decay' (matches what decay.rs
+            -- persists), rather than the map form cjson would produce.
             local decay_contrib = {
-                kind = {Decay = cjson.null},
+                kind = 'Decay',
                 delta = -available,
                 ts_ms = now_ms
             }

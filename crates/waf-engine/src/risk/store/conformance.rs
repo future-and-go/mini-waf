@@ -21,6 +21,7 @@ pub async fn run_all<S: RiskStore>(store: &S) {
     test_triple_index_max(store).await;
     test_apply_divergent_score_convergence(store).await;
     test_apply_converges_axes(store).await;
+    test_decay_contributor_roundtrip(store).await;
     test_reset_all(store).await;
     test_purge_expired(store).await;
 }
@@ -164,6 +165,68 @@ pub async fn test_apply_converges_axes<S: RiskStore>(store: &S) {
     };
     let state = store.read(&fp_only_key).await.unwrap().unwrap();
     assert_eq!(state.clamped_score, 50, "fp axis must see the converged owner state");
+}
+
+/// Force the decay path so the backend-created `Decay` contributor is proven
+/// to round-trip through serde.
+///
+/// Recipe: score above the decay floor, then enough clean (empty-deltas)
+/// applies to reach `MIN_CLEAN_STREAK`, then one more clean apply to fire
+/// decay. Exercises the backend's own decay branch (previously untested on
+/// Redis) and proves the persisted `Decay` contributor parses on `read`.
+pub async fn test_decay_contributor_roundtrip<S: RiskStore>(store: &S) {
+    use crate::risk::decay::{DECAY_RATE, MAX_DECAY, MIN_CLEAN_STREAK};
+
+    store.reset_all().await.unwrap();
+
+    let key = RiskKey::from_ip(IpAddr::V4(Ipv4Addr::new(10, 8, 8, 8)));
+
+    // Score must sit above MAX_DECAY (the decay floor) for decay to apply.
+    let seed = i16::try_from(MAX_DECAY).unwrap() + 40;
+    let decayed = i32::from(seed) - i32::from(DECAY_RATE);
+    store.apply(&key, &[make_contributor(seed, 1000)], 1000).await.unwrap();
+
+    // Clean applies build the streak; decay checks the streak BEFORE folding,
+    // so no decay fires while the streak climbs to MIN_CLEAN_STREAK.
+    let mut now_ms = 1000;
+    for _ in 0..MIN_CLEAN_STREAK {
+        now_ms += 1000;
+        let result = store.apply(&key, &[], now_ms).await.unwrap();
+        assert_eq!(
+            i32::from(result.state.clamped_score),
+            i32::from(seed),
+            "no decay while streak is below MIN_CLEAN_STREAK"
+        );
+    }
+
+    // Streak is now at threshold — the next clean apply fires decay.
+    now_ms += 1000;
+    let result = store.apply(&key, &[], now_ms).await.unwrap();
+    assert_eq!(
+        i32::from(result.state.clamped_score),
+        decayed,
+        "decay should reduce score by DECAY_RATE"
+    );
+    assert!(
+        result
+            .state
+            .contributors
+            .iter()
+            .any(|c| matches!(c.kind, ContributorKind::Decay)),
+        "decay apply must append a Decay contributor"
+    );
+
+    // The persisted state (with the Decay contributor) must round-trip.
+    let read = store.read(&key).await.unwrap();
+    let state = read.expect("state with Decay contributor must parse on read");
+    assert_eq!(i32::from(state.clamped_score), decayed);
+    assert!(
+        state
+            .contributors
+            .iter()
+            .any(|c| matches!(c.kind, ContributorKind::Decay)),
+        "Decay contributor must survive the round-trip"
+    );
 }
 
 async fn test_reset_all<S: RiskStore>(store: &S) {
