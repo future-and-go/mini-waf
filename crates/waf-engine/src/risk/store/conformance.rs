@@ -19,6 +19,8 @@ pub async fn run_all<S: RiskStore>(store: &S) {
     test_apply_accumulates(store).await;
     test_force_max(store).await;
     test_triple_index_max(store).await;
+    test_apply_divergent_score_convergence(store).await;
+    test_apply_converges_axes(store).await;
     test_reset_all(store).await;
     test_purge_expired(store).await;
 }
@@ -93,6 +95,75 @@ async fn test_triple_index_max<S: RiskStore>(store: &S) {
     };
     let state = store.read(&key_both).await.unwrap().unwrap();
     assert_eq!(state.clamped_score, 50, "read should return max across indices");
+}
+
+/// Apply-time convergence must select the max-score owner: an actor with
+/// accumulated risk cannot shed it by colliding with a cleaner identity axis.
+pub async fn test_apply_divergent_score_convergence<S: RiskStore>(store: &S) {
+    store.reset_all().await.unwrap();
+
+    // High-risk actor on the fingerprint axis (score 90)
+    let key_fp = RiskKey {
+        ip: None,
+        fp_hash: Some(444_444),
+        session: None,
+    };
+    store.apply(&key_fp, &[make_contributor(90, 1000)], 1000).await.unwrap();
+
+    // Clean actor on the session axis (score 0)
+    let key_sess = RiskKey {
+        ip: None,
+        fp_hash: None,
+        session: Some(SessionId::new(vec![4, 3, 2, 1])),
+    };
+    store.apply(&key_sess, &[], 1000).await.unwrap();
+
+    // Colliding apply across both axes must keep the max score
+    let key_both = RiskKey {
+        ip: None,
+        fp_hash: Some(444_444),
+        session: Some(SessionId::new(vec![4, 3, 2, 1])),
+    };
+    let result = store.apply(&key_both, &[], 2000).await.unwrap();
+    assert_eq!(
+        result.state.clamped_score, 90,
+        "colliding apply must converge to the max-score owner"
+    );
+
+    // Both axes now resolve to the surviving high-score state
+    let by_sess = store.read(&key_sess).await.unwrap().unwrap();
+    assert_eq!(by_sess.clamped_score, 90, "session axis must see the max-score owner");
+    let by_fp = store.read(&key_fp).await.unwrap().unwrap();
+    assert_eq!(by_fp.clamped_score, 90, "fp axis must see the max-score owner");
+}
+
+/// Cross-axis convergence at apply time: applying with an extra axis unifies
+/// it with the existing owner so either axis alone reads the same state.
+pub async fn test_apply_converges_axes<S: RiskStore>(store: &S) {
+    store.reset_all().await.unwrap();
+
+    let ip = IpAddr::V4(Ipv4Addr::new(10, 7, 7, 7));
+    let key_ip = RiskKey::from_ip(ip);
+    store.apply(&key_ip, &[make_contributor(40, 1000)], 1000).await.unwrap();
+
+    let key_ip_fp = RiskKey {
+        ip: Some(ip),
+        fp_hash: Some(333_333),
+        session: None,
+    };
+    store
+        .apply(&key_ip_fp, &[make_contributor(10, 2000)], 2000)
+        .await
+        .unwrap();
+
+    // The fp axis alone must resolve to the same accumulated state
+    let fp_only_key = RiskKey {
+        ip: None,
+        fp_hash: Some(333_333),
+        session: None,
+    };
+    let state = store.read(&fp_only_key).await.unwrap().unwrap();
+    assert_eq!(state.clamped_score, 50, "fp axis must see the converged owner state");
 }
 
 async fn test_reset_all<S: RiskStore>(store: &S) {

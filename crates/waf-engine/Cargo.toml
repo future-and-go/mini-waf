@@ -60,6 +60,8 @@ base64 = { workspace = true }
 rand = { workspace = true }
 # FR-010 phase-08 — Redis identity store backend; gated by `redis-store` feature.
 redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager", "tls-rustls", "tokio-rustls-comp", "script"], optional = true }
+# FR-025 phase-07 — O(1) fail-open fallback cache for the Redis risk store.
+lru = { version = "0.12", optional = true }
 
 [dev-dependencies]
 rand = { workspace = true }
@@ -121,7 +123,7 @@ harness = false
 [features]
 default = []
 # FR-010 device fingerprinting — Redis-backed identity store (phase-08).
-redis-store = ["dep:redis"]
+redis-store = ["dep:redis", "dep:lru"]
 # FR-004 rate-limiting — exposes the shared store conformance suite to integration
 # tests / external backends. Implicitly enabled under `cfg(test)`.
 test-conformance = []

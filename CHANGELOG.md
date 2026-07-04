@@ -341,6 +341,12 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **FR-041 Geo restriction: lowercase ISO codes now enforced** — Geo rules
+  configured with lowercase ISO country codes (e.g., `iso_codes: ["cn"]`)
+  previously never matched because the engine expected uppercase codes. Both
+  rule iso_codes and request geo lookups are now uppercased at parse/load time,
+  so rules with any case variation now enforce correctly. Operators should audit
+  existing geo rules and verify they match expected behavior. (GH-206)
 - Remote URL rule sources were silently skipped in `load_all()` due to a missing
   async dispatch path — they are now loaded via `load_remote_sources()` after
   startup and on each scheduled refresh.

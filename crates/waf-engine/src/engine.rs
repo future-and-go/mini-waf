@@ -163,6 +163,14 @@ pub struct WafEngine {
     relay_feeds: ArcSwap<Vec<crate::relay::FeedMeta>>,
 }
 
+/// Whether [`WafEngine::inspect_pipeline`] exited on one of the pre-scoring
+/// fast paths (guard disabled, IP/URL whitelist or blacklist). Fast-path
+/// requests skip the risk scorer entirely — no store write, no scoring cost.
+enum FastPath {
+    Hit,
+    Miss,
+}
+
 impl WafEngine {
     pub fn new(db: Arc<Database>, config: WafEngineConfig) -> Self {
         Self::with_sqli_config(db, config, SqliScanConfig::default())
@@ -665,25 +673,30 @@ impl WafEngine {
     pub async fn inspect(&self, ctx: &mut RequestCtx) -> WafDecision {
         let inspect_time = chrono::Utc::now();
         let now_ms = inspect_time.timestamp_millis();
-        let scorer_score = self
-            .scorer
-            .score(ctx, None, &[], None, now_ms)
-            .await
-            .map_or(0, |r| r.score);
 
-        let mut decision = self.inspect_pipeline(ctx).await;
-        decision.risk_score = scorer_score.min(100);
+        let (mut decision, fast_path) = self.inspect_pipeline(ctx).await;
+        // Fast-path exits (guard off, IP/URL allow/block lists) skip risk
+        // scoring entirely: no store write, risk_score stays 0.
+        if matches!(fast_path, FastPath::Miss) {
+            let scorer_score = self
+                .scorer
+                .score(ctx, None, &[], None, now_ms)
+                .await
+                .map_or(0, |r| r.score);
+            decision.risk_score = scorer_score.min(100);
+        }
         self.send_audit_event(ctx, &decision, inspect_time);
         decision
     }
 
     /// Original inspection pipeline. Split out of [`Self::inspect`] so the
     /// outer wrapper can attach the risk score to every decision without
-    /// rewriting each early-return branch.
-    async fn inspect_pipeline(&self, ctx: &mut RequestCtx) -> WafDecision {
+    /// rewriting each early-return branch. The `FastPath` tag tells the
+    /// wrapper whether the decision came from a pre-scoring fast-path exit.
+    async fn inspect_pipeline(&self, ctx: &mut RequestCtx) -> (WafDecision, FastPath) {
         // Skip WAF if guard is disabled for this host
         if !ctx.host_config.guard_status {
-            return WafDecision::allow();
+            return (WafDecision::allow(), FastPath::Hit);
         }
 
         // ── GeoIP enrichment — populate ctx.geo before any checks ────────────
@@ -698,7 +711,7 @@ impl WafEngine {
             && result.phase == waf_common::Phase::IpWhitelist
         {
             debug!("Request allowed by IP whitelist: {}", ctx.client_ip);
-            return ip_whitelist;
+            return (ip_whitelist, FastPath::Hit);
         }
 
         // ── Phase 2: IP Blacklist — block if matched ───────────────────────────
@@ -707,13 +720,13 @@ impl WafEngine {
         if !ip_blacklist.is_enforcement_allowed() {
             self.log_attack(ctx, &ip_blacklist);
             self.report_community_signal(ctx, &ip_blacklist);
-            return ip_blacklist;
+            return (ip_blacklist, FastPath::Hit);
         }
 
         // ── Phase 3: URL Whitelist — allow immediately if matched ──────────────
         if let Some(url_wl) = check_url_whitelist(ctx, &self.store) {
             debug!("Request allowed by URL whitelist: {}", ctx.path);
-            return url_wl;
+            return (url_wl, FastPath::Hit);
         }
 
         // ── Phase 4: URL Blacklist — block if matched ──────────────────────────
@@ -722,7 +735,7 @@ impl WafEngine {
         if !url_bl.is_enforcement_allowed() {
             self.log_attack(ctx, &url_bl);
             self.report_community_signal(ctx, &url_bl);
-            return url_bl;
+            return (url_bl, FastPath::Hit);
         }
 
         // ── Phase 19: DDoS burst detection (FR-005) ───────────────────────────
@@ -736,7 +749,7 @@ impl WafEngine {
             self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            return decision;
+            return (decision, FastPath::Miss);
         }
 
         // ── Phase 16a: CrowdSec Bouncer — fast cache lookup ───────────────────
@@ -750,7 +763,7 @@ impl WafEngine {
             self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            return decision;
+            return (decision, FastPath::Miss);
         }
 
         // ── Phase 18: Community blocklist ─────────────────────────────────────
@@ -763,7 +776,7 @@ impl WafEngine {
             let (feat, pol) = phase_feature_identity(phase);
             self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
-            return decision;
+            return (decision, FastPath::Miss);
         }
 
         // ── Phase 17: GeoIP access control ────────────────────────────────────
@@ -775,7 +788,7 @@ impl WafEngine {
             self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            return decision;
+            return (decision, FastPath::Miss);
         }
 
         // ── Phase 5-11: Attack detection pipeline ─────────────────────────────
@@ -798,7 +811,7 @@ impl WafEngine {
 
                 self.log_security_event(ctx, &decision);
                 self.report_community_signal(ctx, &decision);
-                return decision;
+                return (decision, FastPath::Miss);
             }
         }
 
@@ -811,7 +824,7 @@ impl WafEngine {
             self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            return decision;
+            return (decision, FastPath::Miss);
         }
 
         // ── Phase 16b: CrowdSec AppSec — async per-request check ──────────────
@@ -826,7 +839,7 @@ impl WafEngine {
                     self.apply_mode(ctx, &mut decision, feat, pol);
                     self.log_security_event(ctx, &decision);
                     self.report_community_signal(ctx, &decision);
-                    return decision;
+                    return (decision, FastPath::Miss);
                 }
                 AppSecResult::Allow | AppSecResult::Unavailable => {}
             }
@@ -859,7 +872,7 @@ impl WafEngine {
             // Block/Challenge: return immediately. In log-only mode enforcement is
             // bypassed (mode = LogOnly), so even a Block intent continues the pipeline.
             if !decision.is_enforcement_allowed() {
-                return decision;
+                return (decision, FastPath::Miss);
             }
         }
 
@@ -872,7 +885,7 @@ impl WafEngine {
             self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            return decision;
+            return (decision, FastPath::Miss);
         }
 
         // ── Phase 14: Sensitive data ───────────────────────────────────────────
@@ -884,7 +897,7 @@ impl WafEngine {
             self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            return decision;
+            return (decision, FastPath::Miss);
         }
 
         // ── Phase 15: Anti-hotlinking ──────────────────────────────────────────
@@ -896,10 +909,10 @@ impl WafEngine {
             self.apply_mode(ctx, &mut decision, feat, pol);
             self.log_security_event(ctx, &decision);
             self.report_community_signal(ctx, &decision);
-            return decision;
+            return (decision, FastPath::Miss);
         }
 
-        WafDecision::allow()
+        (WafDecision::allow(), FastPath::Miss)
     }
 
     /// Build a Block decision. Mode resolution (`LogOnly` / `Enforce`) is
@@ -1129,5 +1142,139 @@ impl WafEngine {
         };
 
         reporter.try_push_detection(ctx.client_ip, result, Some(&req_info));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::net::IpAddr;
+
+    use bytes::Bytes;
+    use testcontainers::runners::AsyncRunner;
+    use testcontainers_modules::postgres::Postgres as PostgresImage;
+    use testcontainers_modules::testcontainers::ImageExt;
+    use waf_common::HostConfig;
+    use waf_storage::models::{CreateHost, CreateIpRule};
+
+    use super::*;
+    use crate::risk::store::RiskStore;
+
+    fn make_ctx(host_code: &str, path: &str, ip: &str) -> RequestCtx {
+        let host_config = Arc::new(HostConfig {
+            code: host_code.into(),
+            host: "risk.example.com".into(),
+            ..HostConfig::default()
+        });
+        RequestCtx {
+            req_id: "fx".into(),
+            client_ip: ip.parse::<IpAddr>().expect("ip parse"),
+            peer_ip: ip.parse::<IpAddr>().expect("ip parse"),
+            client_port: 12345,
+            method: "GET".into(),
+            host: "risk.example.com".into(),
+            port: 80,
+            path: path.into(),
+            query: String::new(),
+            headers: HashMap::from([(
+                "user-agent".into(),
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0".into(),
+            )]),
+            body_preview: Bytes::new(),
+            content_length: 0,
+            is_tls: false,
+            host_config,
+            geo: None,
+            tier: waf_common::tier::Tier::CatchAll,
+            tier_policy: RequestCtx::default_tier_policy(),
+            cookies: HashMap::new(),
+            device_fp: None,
+            tx_velocity_token: None,
+        }
+    }
+
+    /// Fast-path exits (here: IP whitelist) must skip risk scoring entirely —
+    /// zero risk-store writes — while a normal allowed request still scores
+    /// and writes state.
+    ///
+    /// Uses a Postgres testcontainer by default; set `PG_TEST_URL` to point at
+    /// an existing scratch database instead (environments without Docker
+    /// socket access).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fast_path_exits_skip_risk_scoring() {
+        let (url, _container) = if let Ok(url) = std::env::var("PG_TEST_URL") {
+            (url, None)
+        } else {
+            let container = PostgresImage::default()
+                .with_tag("16-alpine")
+                .start()
+                .await
+                .expect("start postgres testcontainer");
+            let host = container.get_host().await.expect("container host");
+            let port = container.get_host_port_ipv4(5432).await.expect("container port");
+            (
+                format!("postgres://postgres:postgres@{host}:{port}/postgres"),
+                Some(container),
+            )
+        };
+        let db = Database::connect(&url, 5).await.expect("db connect");
+        db.migrate().await.expect("migrate");
+        let db = Arc::new(db);
+        let engine = WafEngine::new(Arc::clone(&db), WafEngineConfig::default());
+
+        engine.replace_risk_config(RiskConfig {
+            enabled: true,
+            ..RiskConfig::default()
+        });
+
+        let host_row = db
+            .create_host(CreateHost {
+                host: "risk.example.com".into(),
+                port: 80,
+                ssl: false,
+                guard_status: true,
+                remote_host: "127.0.0.1".into(),
+                remote_port: 8080,
+                remote_ip: None,
+                cert_file: None,
+                key_file: None,
+                remarks: None,
+                start_status: true,
+                log_only_mode: false,
+                upstream_alpn: "h2h1".to_string(),
+                upstream_skip_ssl_verify: false,
+                defense_json: None,
+                http_redirect: false,
+                preserve_host: true,
+            })
+            .await
+            .expect("create host");
+        db.create_allow_ip(CreateIpRule {
+            host_code: host_row.code.clone(),
+            ip_cidr: "203.0.113.7/32".into(),
+            remarks: None,
+        })
+        .await
+        .expect("seed allow ip");
+        engine.reload_rules().await.expect("reload");
+
+        // Whitelisted IP: fast-path exit → no scoring, no store write.
+        let mut ctx = make_ctx(&host_row.code, "/", "203.0.113.7");
+        let decision = engine.inspect(&mut ctx).await;
+        assert!(matches!(decision.action, WafAction::Allow), "whitelisted IP must allow");
+        assert_eq!(decision.risk_score, 0, "fast-path decision must carry risk_score 0");
+        assert!(
+            engine.scorer.store().is_empty().await,
+            "fast-path request must not write the risk store"
+        );
+
+        // Normal request: scored → store written.
+        let mut ctx = make_ctx(&host_row.code, "/", "198.51.100.9");
+        let decision = engine.inspect(&mut ctx).await;
+        assert!(matches!(decision.action, WafAction::Allow), "clean request must allow");
+        assert!(
+            !engine.scorer.store().is_empty().await,
+            "scored request must write the risk store"
+        );
     }
 }

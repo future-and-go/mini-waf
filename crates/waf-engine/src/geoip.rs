@@ -104,7 +104,13 @@ impl GeoIpService {
             return GeoIpInfo::default();
         };
 
-        let raw = match searcher.search(ip.to_string().as_str()) {
+        // Dispatch by family so the searcher gets the address value directly
+        // — no per-lookup `ip.to_string()` allocation + re-parse.
+        let result = match ip {
+            IpAddr::V4(v4) => searcher.search(v4),
+            IpAddr::V6(v6) => searcher.search(v6),
+        };
+        let raw = match result {
             Ok(r) => r,
             Err(e) => {
                 warn!("GeoIP lookup failed for {}: {}", ip, e);
@@ -156,7 +162,10 @@ fn parse_region(raw: &str) -> GeoIpInfo {
     let province = normalize(parts.next().unwrap_or(""));
     let city = normalize(parts.next().unwrap_or(""));
     let isp = normalize(parts.next().unwrap_or(""));
-    let iso_code = normalize(parts.next().unwrap_or(""));
+    // Uppercase at parse time so per-request geo checks can compare without
+    // allocating (`geo_matches` uses plain `contains`).
+    let mut iso_code = normalize(parts.next().unwrap_or(""));
+    iso_code.make_ascii_uppercase();
 
     GeoIpInfo {
         country,

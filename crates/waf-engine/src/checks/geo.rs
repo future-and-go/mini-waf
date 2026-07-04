@@ -61,7 +61,20 @@ impl GeoCheck {
     }
 
     /// Replace all geo rules for the given host (or `"*"` for global rules).
-    pub fn load_rules(&self, host_code: &str, rules: Vec<GeoRule>) {
+    ///
+    /// ISO codes are uppercased here, at load time, so the per-request match
+    /// in `geo_matches` can compare without allocating (`GeoIpInfo.iso_code`
+    /// is uppercased at parse time).
+    pub fn load_rules(&self, host_code: &str, mut rules: Vec<GeoRule>) {
+        for rule in &mut rules {
+            rule.iso_codes = std::mem::take(&mut rule.iso_codes)
+                .into_iter()
+                .map(|mut code| {
+                    code.make_ascii_uppercase();
+                    code
+                })
+                .collect();
+        }
         self.rules.insert(host_code.to_string(), HostGeoRules { rules });
     }
 
@@ -129,8 +142,9 @@ impl GeoCheck {
 
     /// Returns `true` if the geo info matches any of the rule's criteria.
     fn geo_matches(geo: &waf_common::GeoIpInfo, rule: &GeoRule) -> bool {
-        // Match ISO code (uppercase compare)
-        if !geo.iso_code.is_empty() && rule.iso_codes.contains(&geo.iso_code.to_uppercase()) {
+        // Match ISO code — both sides are uppercased ahead of time (rules at
+        // load, geo at parse), so this compare is allocation-free.
+        if !geo.iso_code.is_empty() && rule.iso_codes.contains(&geo.iso_code) {
             return true;
         }
         // Match country name (case-insensitive)
@@ -223,6 +237,27 @@ mod tests {
 
         let mut ctx2 = make_ctx("US", "United States");
         assert!(check.check(&mut ctx2).is_none());
+    }
+
+    #[test]
+    fn lowercase_rule_iso_codes_match() {
+        let check = GeoCheck::new();
+        check.load_rules(
+            "*",
+            vec![GeoRule {
+                id: "GEO-003".into(),
+                name: "Block CN".into(),
+                mode: GeoRuleMode::Block,
+                iso_codes: ["cn".to_string()].into(),
+                countries: HashSet::new(),
+            }],
+        );
+
+        let mut ctx = make_ctx("CN", "China");
+        assert!(
+            check.check(&mut ctx).is_some(),
+            "lowercase rule ISO code must match after load-time normalization"
+        );
     }
 
     #[test]

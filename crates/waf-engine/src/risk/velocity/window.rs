@@ -123,7 +123,15 @@ impl VelocityStore {
         #[allow(clippy::cast_sign_loss)]
         let now_sec = (now_ms / 1000) as u64;
 
-        let count = self.windows.entry(key.clone()).or_default().record(now_sec);
+        // Hot path: existing windows record through a read-shard lock without
+        // cloning the key. `SlidingWindow::record` is atomic (&self). Two
+        // threads racing on a brand-new key both fall through to `entry`,
+        // which serializes them on the write lock — at most one window is
+        // created; the benign race costs one extra lookup, not a lost count.
+        let count = self.windows.get(key).map_or_else(
+            || self.windows.entry(key.clone()).or_default().record(now_sec),
+            |window| window.record(now_sec),
+        );
         if count > self.threshold { Some(count) } else { None }
     }
 
