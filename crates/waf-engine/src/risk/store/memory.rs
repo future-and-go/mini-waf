@@ -133,6 +133,7 @@ impl RiskStore for MemoryRiskStore {
             return Ok(ApplyResult {
                 state: RiskState::new(now_ms),
                 is_new: true,
+                degraded: false,
             });
         }
 
@@ -161,7 +162,11 @@ impl RiskStore for MemoryRiskStore {
         }
 
         let state = state_ref.read().clone();
-        Ok(ApplyResult { state, is_new })
+        Ok(ApplyResult {
+            state,
+            is_new,
+            degraded: false,
+        })
     }
 
     #[allow(clippy::option_if_let_else)]

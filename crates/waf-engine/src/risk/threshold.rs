@@ -4,7 +4,7 @@
 //! thresholds. Uses the tier's `RiskThresholds` (allow, challenge, block).
 
 use waf_common::WafAction;
-use waf_common::tier::RiskThresholds;
+use waf_common::tier::{FailMode, RiskThresholds};
 
 /// Decide the action based on the score and thresholds.
 ///
@@ -38,6 +38,26 @@ pub fn decide(score: u8, thresholds: &RiskThresholds, override_block: bool) -> W
     WafAction::Challenge
 }
 
+/// Decide the action when the risk store is degraded (backend unreachable).
+///
+/// The score is a best-known substitute, not authority, so the tier's
+/// declared fail mode picks the policy:
+///
+/// - `FailMode::Open`  → [`decide`] on the best-known score: a cached high
+///   score still defends; an unknown actor (score 0) is allowed.
+/// - `FailMode::Close` → `Block { 503 }` regardless of score — never trust
+///   a stale or absent score on a fail-closed tier.
+#[must_use]
+pub fn degraded_action(fail_mode: FailMode, score: u8, thresholds: &RiskThresholds, override_block: bool) -> WafAction {
+    match fail_mode {
+        FailMode::Open => decide(score, thresholds, override_block),
+        FailMode::Close => WafAction::Block {
+            status: 503,
+            body: None,
+        },
+    }
+}
+
 /// Check if a score would result in Allow.
 #[must_use]
 pub const fn is_allowed(score: u8, thresholds: &RiskThresholds) -> bool {
@@ -67,6 +87,63 @@ mod tests {
             challenge: 70,
             block: 90,
         }
+    }
+
+    #[test]
+    fn degraded_open_trusts_best_known_score_across_bands() {
+        let t = default_thresholds();
+        // Same mapping as `decide` in every band: unknown actor allowed,
+        // cached mid score challenged, cached high score blocked.
+        assert!(matches!(
+            degraded_action(FailMode::Open, 0, &t, false),
+            WafAction::Allow
+        ));
+        assert!(matches!(
+            degraded_action(FailMode::Open, 29, &t, false),
+            WafAction::Allow
+        ));
+        assert!(matches!(
+            degraded_action(FailMode::Open, 30, &t, false),
+            WafAction::Challenge
+        ));
+        assert!(matches!(
+            degraded_action(FailMode::Open, 89, &t, false),
+            WafAction::Challenge
+        ));
+        assert!(matches!(
+            degraded_action(FailMode::Open, 90, &t, false),
+            WafAction::Block { status: 403, .. }
+        ));
+        assert!(matches!(
+            degraded_action(FailMode::Open, 100, &t, false),
+            WafAction::Block { status: 403, .. }
+        ));
+        // Pinned actor blocks even at a low cached score.
+        assert!(matches!(
+            degraded_action(FailMode::Open, 0, &t, true),
+            WafAction::Block { status: 403, .. }
+        ));
+    }
+
+    #[test]
+    fn degraded_close_blocks_503_regardless_of_score() {
+        let t = default_thresholds();
+        for score in [0u8, 29, 30, 89, 90, 100] {
+            assert!(
+                matches!(
+                    degraded_action(FailMode::Close, score, &t, false),
+                    WafAction::Block {
+                        status: 503,
+                        body: None
+                    }
+                ),
+                "fail-closed tier must block at score {score}"
+            );
+        }
+        assert!(matches!(
+            degraded_action(FailMode::Close, 0, &t, true),
+            WafAction::Block { status: 503, .. }
+        ));
     }
 
     #[test]

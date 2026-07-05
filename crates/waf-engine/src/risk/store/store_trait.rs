@@ -16,6 +16,11 @@ pub struct ApplyResult {
     pub state: RiskState,
     /// True if this was a new entry (not an update to existing).
     pub is_new: bool,
+    /// True when the backend could not reach its authority and `state` is a
+    /// best-known substitute (last cached value or a fresh zero state). Set
+    /// only by backends that can transiently fail; callers must apply their
+    /// fail-mode policy instead of trusting the score as authoritative.
+    pub degraded: bool,
 }
 
 /// Async trait for risk state storage.
@@ -157,6 +162,7 @@ mod tests {
             Ok(ApplyResult {
                 state: RiskState::new(now_ms),
                 is_new: true,
+                degraded: false,
             })
         }
 
@@ -231,6 +237,7 @@ mod tests {
         let r = ApplyResult {
             state: RiskState::new(42),
             is_new: true,
+            degraded: false,
         };
         let r2 = r.clone();
         assert_eq!(r2.state.created_ms, 42);
