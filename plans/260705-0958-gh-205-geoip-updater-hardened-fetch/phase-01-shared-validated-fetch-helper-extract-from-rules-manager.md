@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Shared validated-fetch helper (extract from rules manager)"
-status: pending
+status: completed
 effort: "1.5h"
 ---
 

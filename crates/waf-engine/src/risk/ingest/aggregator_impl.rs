@@ -1,10 +1,10 @@
-//! FR-025 Phase 4 — `ScoringAggregator` implementation.
+//! `ScoringAggregator` implementation.
 //!
 //! Implements `RiskAggregator` by forwarding signals to a bounded MPSC channel.
 //! Fire-and-forget semantics: `submit` never blocks, drops with warning on overflow.
 
+use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -17,17 +17,19 @@ use crate::risk::ingest::metrics::IngestMetrics;
 use crate::risk::ingest::signal_to_contributor::SignalWeights;
 use crate::risk::ingest::worker::{Job, spawn_worker};
 use crate::risk::store::RiskStore;
+use crate::time::{Clock, SystemClock};
 
-/// Default channel capacity (65536 per plan).
+/// Default channel capacity.
 pub const DEFAULT_CHANNEL_CAPACITY: usize = 65536;
 
 /// Async risk aggregator that forwards signals to the ingest worker.
 ///
 /// Bounded channel prevents unbounded memory growth under load. Overflow
-/// triggers drop-with-warn (best-effort semantics per §3.3 of the plan).
+/// triggers drop-with-warn (best-effort semantics).
 pub struct ScoringAggregator {
     tx: mpsc::Sender<Job>,
     metrics: Arc<IngestMetrics>,
+    clock: Arc<dyn Clock>,
 }
 
 impl ScoringAggregator {
@@ -47,11 +49,23 @@ impl ScoringAggregator {
         weights: SignalWeights,
         capacity: usize,
     ) -> (Self, tokio::task::JoinHandle<()>) {
+        Self::start_with_clock(store, weights, capacity, Arc::new(SystemClock))
+    }
+
+    /// Start with an injected clock — submit timestamps and worker lag
+    /// measurements both read it, so tests can drive time deterministically.
+    #[must_use]
+    pub fn start_with_clock(
+        store: Arc<dyn RiskStore>,
+        weights: SignalWeights,
+        capacity: usize,
+        clock: Arc<dyn Clock>,
+    ) -> (Self, tokio::task::JoinHandle<()>) {
         let (tx, rx) = mpsc::channel(capacity);
         let metrics = Arc::new(IngestMetrics::new());
-        let handle = spawn_worker(rx, store, weights, Arc::clone(&metrics));
+        let handle = spawn_worker(rx, store, weights, Arc::clone(&metrics), Arc::clone(&clock));
 
-        (Self { tx, metrics }, handle)
+        (Self { tx, metrics, clock }, handle)
     }
 
     /// Get a reference to the metrics for external monitoring.
@@ -59,19 +73,12 @@ impl ScoringAggregator {
     pub const fn metrics(&self) -> &Arc<IngestMetrics> {
         &self.metrics
     }
-}
 
-#[async_trait]
-impl RiskAggregator for ScoringAggregator {
-    async fn submit(&self, key: &FpKey, signals: &[Signal]) {
-        if signals.is_empty() {
-            return;
-        }
+    /// Enqueue a job without blocking — `try_send` only, drop-with-warn on
+    /// overflow. Sync so both submit seams share one code path.
+    fn enqueue(&self, job: Job) {
+        let signal_count = job.signals.len();
 
-        let now_ms = unix_now_ms();
-        let job = Job::new(key.clone(), signals.to_vec(), now_ms);
-
-        // try_send is non-blocking — contract says submit MUST NOT block
         match self.tx.try_send(job) {
             Ok(()) => {
                 self.metrics.inc_queue_depth();
@@ -80,7 +87,7 @@ impl RiskAggregator for ScoringAggregator {
                 self.metrics.inc_dropped_channel_full();
                 warn!(
                     target: "risk::ingest",
-                    signals = signals.len(),
+                    signals = signal_count,
                     "queue full, dropping risk signals"
                 );
             }
@@ -95,17 +102,23 @@ impl RiskAggregator for ScoringAggregator {
     }
 }
 
-#[allow(clippy::cast_possible_truncation)]
-fn unix_now_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| {
-        // as_millis returns u128; we saturate to i64::MAX (292M years — safe)
-        let ms = d.as_millis();
-        if ms > i64::MAX as u128 {
-            i64::MAX
-        } else {
-            ms as i64 // safe: guarded by if
+#[async_trait]
+impl RiskAggregator for ScoringAggregator {
+    async fn submit(&self, key: &FpKey, signals: &[Signal]) {
+        if signals.is_empty() {
+            return;
         }
-    })
+
+        self.enqueue(Job::for_fp(key.clone(), signals.to_vec(), self.clock.now_ms()));
+    }
+
+    fn submit_ip(&self, ip: IpAddr, signals: &[Signal]) {
+        if signals.is_empty() {
+            return;
+        }
+
+        self.enqueue(Job::for_ip(ip, signals.to_vec(), self.clock.now_ms()));
+    }
 }
 
 #[cfg(test)]
@@ -178,6 +191,29 @@ mod tests {
 
         // Some should have been dropped
         assert!(agg.metrics().dropped_channel_full() > 0);
+
+        drop(agg);
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn submit_ip_enqueues_without_blocking() {
+        use std::net::Ipv4Addr;
+
+        use crate::risk::key::RiskKey;
+
+        let store: Arc<dyn RiskStore> = Arc::new(MemoryRiskStore::new());
+        let (agg, handle) = ScoringAggregator::start(Arc::clone(&store), SignalWeights::default());
+
+        let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 42));
+        // Sync call — no .await, must work from non-async contexts.
+        agg.submit_ip(ip, &[Signal::FpConflict { distinct_uas: 3 }]);
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        assert_eq!(agg.metrics().processed_total(), 1);
+        let state = store.read(&RiskKey::from_ip(ip)).await.unwrap();
+        assert!(state.is_some(), "IP-keyed submission must land on the IP axis");
 
         drop(agg);
         handle.await.unwrap();

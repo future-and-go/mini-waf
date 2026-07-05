@@ -1,7 +1,7 @@
 ---
 title: "GH-202: RiskBumpAction actor-keyed non-blocking risk submit"
 description: "Fix three latent defects in RiskBumpAction: block_in_place panic on current_thread runtime, phantom-actor FpKey smuggling, severity flattened through BurstInterval weights"
-status: pending
+status: completed
 priority: P2
 branch: "main-harness"
 tags: [bug, ddos, risk-scoring, waf-engine]

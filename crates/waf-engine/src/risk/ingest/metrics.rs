@@ -1,4 +1,4 @@
-//! FR-025 Phase 4 — Async ingest pipeline metrics.
+//! Async ingest pipeline metrics.
 //!
 //! Atomic counters for ingest queue health and processing. Uses `AtomicU64`
 //! for lock-free updates. Counters exposed via accessor methods for external

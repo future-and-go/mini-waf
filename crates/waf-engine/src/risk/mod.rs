@@ -1,8 +1,8 @@
-//! FR-025 cumulative risk scoring subsystem.
+//! Cumulative risk scoring subsystem.
 //!
 //! Tracks per-actor (IP, fingerprint, session) risk state and applies a
 //! threshold gate to emit Allow / Challenge / Block decisions. Mirrors the
-//! FR-010 device-fingerprinting architecture: `ArcSwap<RiskConfig>` snapshot,
+//! device-fingerprinting architecture: `ArcSwap<RiskConfig>` snapshot,
 //! hot-reload via `notify`, and a store trait with in-memory + Redis backends.
 //!
 //! Module structure:

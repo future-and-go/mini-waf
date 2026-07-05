@@ -1,4 +1,4 @@
-//! FR-028 Canary Honeypot integration tests.
+//! Canary Honeypot integration tests.
 //!
 //! Tests verify:
 //! - Canary path triggers score=100 and Block decision

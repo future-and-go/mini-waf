@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 use waf_engine::checks::ddos::config::{DdosDocument, DdosFileConfig};
 
 use crate::auth::validate_access_token;
+use crate::config_files::{resolve_path, write_yaml_str};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -32,20 +33,6 @@ fn now_epoch_ms() -> i64 {
 fn bearer_username(headers: &HeaderMap, secret: &str) -> Option<String> {
     let token = headers.get(AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ")?;
     validate_access_token(token, secret).ok().map(|c| c.sub)
-}
-
-fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
-    state.main_config_file.as_ref().map_or_else(
-        || std::path::PathBuf::from(relative),
-        |main| {
-            let p = std::path::Path::new(main.as_str());
-            let root = p
-                .parent()
-                .and_then(|c| c.parent())
-                .unwrap_or_else(|| std::path::Path::new("."));
-            root.join(relative)
-        },
-    )
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -71,18 +58,7 @@ pub async fn put_ddos_config(State(state): State<Arc<AppState>>, Json(body): Jso
     let path = resolve_path(&state, "configs/ddos.yaml");
     let yaml_str =
         serde_yaml::to_string(&doc).map_err(|e| ApiError::Internal(anyhow::anyhow!("serialize yaml: {e}")))?;
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("mkdir: {e}")))?;
-    }
-    let tmp = path.with_extension("yaml.tmp");
-    tokio::fs::write(&tmp, yaml_str.as_bytes())
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("write: {e}")))?;
-    tokio::fs::rename(&tmp, &path)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("rename: {e}")))?;
+    write_yaml_str(&path, &yaml_str).await?;
     let data =
         serde_json::to_value(&doc.ddos).map_err(|e| ApiError::Internal(anyhow::anyhow!("serialize response: {e}")))?;
     Ok(Json(json!({ "success": true, "data": data })))

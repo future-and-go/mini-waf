@@ -145,7 +145,7 @@ async fn header_name_and_emit_header_accessors() {
 }
 
 #[tokio::test]
-async fn with_seed_constructor_and_set_seed() {
+async fn set_seed_then_score_allows() {
     let cfg = RiskConfig {
         enabled: true,
         ..Default::default()
@@ -153,27 +153,12 @@ async fn with_seed_constructor_and_set_seed() {
     let store = Arc::new(MemoryRiskStore::new());
     let swap = Arc::new(ArcSwap::from(Arc::new(cfg)));
     let seed = Arc::new(SeedLayer::empty());
-    let mut scorer = Scorer::with_seed(Arc::clone(&store), swap, Arc::clone(&seed));
+    let mut scorer = Scorer::new(Arc::clone(&store), swap);
     scorer.set_seed(seed);
     // Sanity: can score without panic
     let ctx = ctx_with(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), HashMap::new());
     let r = scorer.score(&ctx, None, &[], None, 1000).await.unwrap();
     assert!(matches!(r.action, WafAction::Allow));
-}
-
-#[tokio::test]
-async fn with_velocity_threshold_constructor() {
-    let cfg = RiskConfig {
-        enabled: true,
-        ..Default::default()
-    };
-    let store = Arc::new(MemoryRiskStore::new());
-    let swap = Arc::new(ArcSwap::from(Arc::new(cfg)));
-    let scorer = Scorer::with_velocity_threshold(store, swap, 1);
-    let ctx = ctx_with(IpAddr::V4(Ipv4Addr::new(7, 7, 7, 7)), HashMap::new());
-    // Run a few requests; expect velocity breach contribution to bump score eventually
-    let r = scorer.score(&ctx, None, &[], None, 1000).await.unwrap();
-    let _ = r;
 }
 
 #[tokio::test]

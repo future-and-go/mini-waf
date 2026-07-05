@@ -1,7 +1,7 @@
 ---
 title: "GH-207 waf-api/risk dedupe: shared config-file helpers, RiskConfig serde mapping, unified Clock"
 description: "Collapse resolve_path + atomic tmp-write-rename copied across 9 waf-api modules into one config_files.rs, unify the risk-pipeline clock on the existing Clock trait, and verify RiskConfig serde mapping lands via GH-196. Behavior-preserving."
-status: pending
+status: completed
 priority: P3
 issue: https://github.com/future-and-go/mini-waf/issues/207
 branch: "main-harness"
@@ -57,9 +57,9 @@ is low-risk. `resolve_path`/writer migration is internal (private module fns).
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Shared config_files module and migrate 9 waf-api modules](./phase-01-shared-config-files-module-and-migrate-9-waf-api-modules.md) | Pending |
-| 2 | [Unified Clock injected into risk ingest and purge loop](./phase-02-unified-clock-injected-into-risk-ingest-and-purge-loop.md) | Pending |
-| 3 | [RiskConfig serde verify and acceptance quality gates](./phase-03-riskconfig-serde-verify-and-acceptance-quality-gates.md) | Pending |
+| 1 | [Shared config_files module and migrate 9 waf-api modules](./phase-01-shared-config-files-module-and-migrate-9-waf-api-modules.md) | Completed |
+| 2 | [Unified Clock injected into risk ingest and purge loop](./phase-02-unified-clock-injected-into-risk-ingest-and-purge-loop.md) | Completed |
+| 3 | [RiskConfig serde verify and acceptance quality gates](./phase-03-riskconfig-serde-verify-and-acceptance-quality-gates.md) | Completed |
 
 ## Key Decisions
 

@@ -13,53 +13,21 @@ use axum::{
 };
 use serde_json::{Value, json};
 
+use crate::config_files::{read_yaml_opt, resolve_path, write_yaml};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
-
-// ─── Path helpers ──────────────────────────────────────────────────────────────
-
-fn rules_path(state: &AppState) -> std::path::PathBuf {
-    state.main_config_file.as_ref().map_or_else(
-        || std::path::PathBuf::from("configs/geo-rules.yaml"),
-        |main| {
-            let p = std::path::Path::new(main.as_str());
-            let root = p
-                .parent()
-                .and_then(|c| c.parent())
-                .unwrap_or_else(|| std::path::Path::new("."));
-            root.join("configs/geo-rules.yaml")
-        },
-    )
-}
 
 // ─── YAML helpers ─────────────────────────────────────────────────────────────
 
 async fn read_rules(path: &std::path::Path) -> Vec<Value> {
-    let Ok(raw) = tokio::fs::read_to_string(path).await else {
-        return vec![];
-    };
-    let Ok(doc) = serde_yaml::from_str::<Value>(&raw) else {
-        return vec![];
-    };
-    doc.get("rules").and_then(|v| v.as_array()).cloned().unwrap_or_default()
+    read_yaml_opt(path)
+        .await
+        .and_then(|doc| doc.get("rules").and_then(|v| v.as_array()).cloned())
+        .unwrap_or_default()
 }
 
 async fn write_rules(path: &std::path::Path, rules: &[Value]) -> Result<(), ApiError> {
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("mkdir: {e}")))?;
-    }
-    let doc = json!({ "rules": rules });
-    let s = serde_yaml::to_string(&doc).map_err(|e| ApiError::Internal(anyhow::anyhow!("yaml serialize: {e}")))?;
-    let tmp = path.with_extension("yaml.tmp");
-    tokio::fs::write(&tmp, s.as_bytes())
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("write: {e}")))?;
-    tokio::fs::rename(&tmp, path)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("rename: {e}")))?;
-    Ok(())
+    write_yaml(path, &json!({ "rules": rules })).await
 }
 
 fn next_id(rules: &[Value]) -> i64 {
@@ -74,14 +42,14 @@ fn next_id(rules: &[Value]) -> i64 {
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
 pub async fn list_geo_rules(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
-    let path = rules_path(&state);
+    let path = resolve_path(&state, "configs/geo-rules.yaml");
     let rules = read_rules(&path).await;
     let total = rules.len();
     Ok(Json(json!({ "success": true, "data": rules, "total": total })))
 }
 
 pub async fn create_geo_rule(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult<Json<Value>> {
-    let path = rules_path(&state);
+    let path = resolve_path(&state, "configs/geo-rules.yaml");
     let mut rules = read_rules(&path).await;
 
     let iso = body
@@ -97,6 +65,7 @@ pub async fn create_geo_rule(State(state): State<Arc<AppState>>, Json(body): Jso
         "action":       body.get("action").and_then(|v| v.as_str()).unwrap_or("block"),
         "scope":        body.get("scope").and_then(|v| v.as_str()).unwrap_or("global"),
         "enabled":      true,
+        "fail_closed":  body.get("fail_closed").and_then(Value::as_bool).unwrap_or(false),
         "created_at":   chrono::Utc::now().to_rfc3339(),
     });
 
@@ -110,7 +79,7 @@ pub async fn patch_geo_rule(
     Path(id): Path<i64>,
     Json(body): Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    let path = rules_path(&state);
+    let path = resolve_path(&state, "configs/geo-rules.yaml");
     let mut rules = read_rules(&path).await;
 
     let idx = rules
@@ -119,7 +88,7 @@ pub async fn patch_geo_rule(
         .ok_or_else(|| ApiError::NotFound(format!("geo rule {id} not found")))?;
 
     if let Some(obj) = rules.get_mut(idx).and_then(Value::as_object_mut) {
-        for field in &["enabled", "action", "scope"] {
+        for field in &["enabled", "action", "scope", "fail_closed"] {
             if let Some(v) = body.get(*field) {
                 obj.insert((*field).to_owned(), v.clone());
             }
@@ -132,7 +101,7 @@ pub async fn patch_geo_rule(
 }
 
 pub async fn delete_geo_rule(State(state): State<Arc<AppState>>, Path(id): Path<i64>) -> ApiResult<Json<Value>> {
-    let path = rules_path(&state);
+    let path = resolve_path(&state, "configs/geo-rules.yaml");
     let mut rules = read_rules(&path).await;
     let before = rules.len();
     rules.retain(|r| r.get("id").and_then(Value::as_i64) != Some(id));

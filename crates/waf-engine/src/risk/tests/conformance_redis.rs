@@ -1,4 +1,4 @@
-//! FR-025 Phase 7: Redis store conformance tests.
+//! Redis store conformance tests.
 //!
 //! Runs the shared conformance suite against `RedisRiskStore`. Only executes
 //! when `REDIS_TEST_URL` is set (e.g. `redis://127.0.0.1:6379`).

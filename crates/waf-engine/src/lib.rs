@@ -16,6 +16,8 @@ pub mod plugins;
 pub mod relay;
 pub mod risk;
 pub mod rules;
+pub mod time;
+pub mod validated_fetch;
 
 pub use checker::RuleStore;
 pub use checks::{AntiHotlinkCheck, GeoCheck, GeoRule, GeoRuleMode, OWASPCheck, SensitiveCheck};

@@ -1,4 +1,4 @@
-//! FR-025 Phase 7: Redis-backed `RiskStore` for cluster-wide risk state.
+//! Redis-backed `RiskStore` for cluster-wide risk state.
 //!
 //! Key layout:
 //! - `waf:risk:state:{owner_id}` → JSON-encoded `RiskState` (TTL: `ttl_secs`)

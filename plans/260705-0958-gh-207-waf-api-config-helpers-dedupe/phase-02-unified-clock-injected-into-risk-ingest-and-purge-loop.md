@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Unified Clock injected into risk ingest and purge loop"
-status: pending
+status: completed
 effort: "2h"
 ---
 

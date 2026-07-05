@@ -449,44 +449,21 @@ const MAX_RULES_RESPONSE_SIZE: u64 = 10 * 1024 * 1024;
 /// Fetch the text content of a remote URL with SSRF protection.
 ///
 /// Safety measures applied:
-/// - URL is validated against private/reserved IP ranges before fetching.
-/// - The HTTP client is pinned to the IPs resolved at validation time via
-///   `resolve_to_addrs`, closing the DNS-rebinding TOCTOU window.
-/// - HTTP redirects are disabled to prevent redirect-based SSRF.
-/// - A 30-second total timeout and 10-second connect timeout cap slow connections.
+/// - The client comes from [`crate::validated_fetch::build_validated_client`]:
+///   URL validated against private/reserved IP ranges, client pinned to the
+///   IPs resolved at validation time (DNS-rebinding TOCTOU), redirects
+///   disabled, 30-second total and 10-second connect timeouts.
 /// - Response body is capped at [`MAX_RULES_RESPONSE_SIZE`] to prevent OOM.
 ///
 /// Returns the response body as a UTF-8 string.
 async fn fetch_remote_content(url: &str) -> Result<String> {
-    // Validate the URL against SSRF targets (private IPs, loopback, IMDS, etc.)
-    // before opening any network connection.  The returned `validated_url` and
-    // `resolved_addrs` are used below to pin the client and close the
-    // DNS-rebinding TOCTOU gap.
-    let (validated_url, resolved_addrs) = waf_common::url_validator::validate_public_url_with_ips(url)
-        .with_context(|| format!("Remote rule URL failed SSRF validation: {url}"))?;
-
-    let mut builder = reqwest::Client::builder()
-        // Disable all redirects — a redirect could point to an internal endpoint.
-        .redirect(reqwest::redirect::Policy::none())
-        // Total request timeout (connect + read).
-        .timeout(std::time::Duration::from_secs(30))
-        // Connection establishment timeout only.
-        .connect_timeout(std::time::Duration::from_secs(10));
-
-    // Pin the client to the IPs validated above.  Only applies when the URL
-    // contains a DNS hostname; IP-literal URLs return an empty `resolved_addrs`.
-    // Re-use the already-parsed `validated_url` to extract the host, avoiding
-    // a redundant parse and removing the need to import `url` directly in this
-    // crate.
-    if !resolved_addrs.is_empty()
-        && let Some(host) = validated_url.host_str()
-    {
-        builder = builder.resolve_to_addrs(host, &resolved_addrs);
-    }
-
-    let client = builder
-        .build()
-        .with_context(|| "Failed to build SSRF-safe HTTP client")?;
+    let client = crate::validated_fetch::build_validated_client(
+        url,
+        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(30),
+        crate::validated_fetch::USER_AGENT,
+    )
+    .with_context(|| format!("Remote rule URL failed SSRF validation: {url}"))?;
 
     let response = client
         .get(url)

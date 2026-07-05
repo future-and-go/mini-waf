@@ -99,3 +99,52 @@ async fn allow_rows_union_into_single_allow_only_rule() {
         "country outside the allow list must be blocked"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn allow_only_fail_mode_honored_when_geo_unavailable() {
+    let fx = start_engine().await;
+    let dir = tempfile::tempdir().expect("tmpdir");
+    let path = dir.path().join("geo-rules.yaml");
+
+    // fail_closed on an allow row: a request with no determinable country is
+    // blocked instead of silently passing the allowlist.
+    write_file(
+        &path,
+        r#"rules:
+  - { id: 1, iso_code: "US", action: "allow", scope: "global", enabled: true, fail_closed: true }
+"#,
+    );
+    fx.engine.load_geo_rules(&path);
+
+    let mut empty_geo = geo_ctx("", "");
+    assert!(
+        fx.engine.geo_check().check(&mut empty_geo).is_some(),
+        "fail-closed allowlist must block a request with empty geo info"
+    );
+    let mut no_geo = geo_ctx("", "");
+    no_geo.geo = None;
+    assert!(
+        fx.engine.geo_check().check(&mut no_geo).is_some(),
+        "fail-closed allowlist must block a request with no geo info"
+    );
+    let mut us = geo_ctx("US", "United States");
+    assert!(
+        fx.engine.geo_check().check(&mut us).is_none(),
+        "listed country still passes under fail-closed"
+    );
+
+    // Same rule without fail_closed: default fail-open behavior is unchanged.
+    write_file(
+        &path,
+        r#"rules:
+  - { id: 1, iso_code: "US", action: "allow", scope: "global", enabled: true }
+"#,
+    );
+    fx.engine.load_geo_rules(&path);
+
+    let mut empty_geo = geo_ctx("", "");
+    assert!(
+        fx.engine.geo_check().check(&mut empty_geo).is_none(),
+        "fail-open allowlist must pass a request with empty geo info"
+    );
+}
