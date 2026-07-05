@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Acceptance tests and quality gates"
-status: pending
+status: completed
 effort: "1.5h"
 ---
 

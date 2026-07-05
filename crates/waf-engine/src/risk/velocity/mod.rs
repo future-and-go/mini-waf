@@ -1,4 +1,4 @@
-//! FR-025 Phase 5: Velocity detection layer (L2).
+//! Velocity detection layer (L2).
 //!
 //! Tracks request velocity and transaction sequences per actor.
 //!

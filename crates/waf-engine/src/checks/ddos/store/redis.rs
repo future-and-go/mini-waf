@@ -17,7 +17,7 @@
 //!
 //! Tracks consecutive failures via `AtomicU32`. Once `breaker_threshold` is reached,
 //! `breaker_open()` returns true. A single success resets the counter.
-//! The wrapping layer (phase 6) can route to memory fallback when breaker is open.
+//! The wrapping degrade layer can route to memory fallback when breaker is open.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -107,7 +107,7 @@ impl RedisCounterStore {
 
     /// True once `breaker_threshold` consecutive failures have occurred.
     ///
-    /// The wrapping layer (phase 6) can read this to route to memory fallback.
+    /// The wrapping degrade layer can read this to route to memory fallback.
     #[must_use]
     pub fn breaker_open(&self) -> bool {
         self.consecutive_fails.load(Ordering::Relaxed) >= self.cfg.breaker_threshold

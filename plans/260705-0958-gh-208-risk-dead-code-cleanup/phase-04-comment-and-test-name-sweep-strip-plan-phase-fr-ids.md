@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Comment + test-name sweep (strip plan/phase/FR IDs)"
-status: pending
+status: completed
 effort: "45m"
 ---
 

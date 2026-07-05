@@ -64,7 +64,10 @@ fn tmp_path_for(target: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-async fn stream_to_tmp(tmp: &Path, response: Response, bounds: &SizeBounds) -> Result<()> {
+/// Stream `response` body to `tmp` with a running byte cap (`bounds` end) and
+/// a minimum-size check (`bounds` start). Shared with the `GeoIP` xdb updater,
+/// which needs the capped stream but validates and renames the tmp file itself.
+pub(crate) async fn stream_to_tmp(tmp: &Path, response: Response, bounds: &SizeBounds) -> Result<()> {
     let mut file = fs::File::create(tmp)
         .await
         .with_context(|| format!("creating {}", tmp.display()))?;

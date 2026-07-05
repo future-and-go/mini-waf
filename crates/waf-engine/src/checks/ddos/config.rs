@@ -1,4 +1,4 @@
-//! FR-005 phase-01 — YAML schema + parser for `configs/ddos.yaml`.
+//! YAML schema + parser for `configs/ddos.yaml`.
 //!
 //! Pure data + validation, returns an `Arc<DdosConfig>` runtime snapshot.
 //! `deny_unknown_fields` everywhere — typos in operator YAML are loud, not
@@ -49,7 +49,7 @@ pub struct DdosFileConfig {
     #[serde(default = "default_max_keys")]
     pub max_keys: usize,
     /// Optional Redis backend. Absence ⇒ memory-only standalone mode.
-    /// Parsed but unused until phase 4.
+    /// Parsed and validated but not yet wired to a runtime store.
     #[serde(default)]
     pub redis: Option<RedisCfg>,
 }
@@ -109,7 +109,7 @@ pub struct TierThresholdCfg {
     pub per_tier_window_s: u32,
 }
 
-/// Optional Redis backend block (parsed but unused until phase 4).
+/// Optional Redis backend block (parsed and validated but not yet wired).
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RedisCfg {

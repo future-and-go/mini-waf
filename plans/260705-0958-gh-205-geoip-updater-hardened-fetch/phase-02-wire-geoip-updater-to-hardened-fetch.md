@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Wire geoip updater to hardened fetch"
-status: pending
+status: completed
 effort: "1.5h"
 ---
 
