@@ -1,7 +1,7 @@
 ---
 title: "GH-201 redis risk store: propagate errors, honor TierPolicy fail_mode on outage"
 description: "Redis store stops silently faking score-0 on outage; apply signals an explicit degraded flag, the Scorer maps store failure to the tier's FailMode (Open → allow with degraded telemetry, Close → block/challenge)."
-status: pending
+status: completed
 priority: P2
 branch: "main-harness"
 tags: [bug, area:engine, risk, redis, security, gh-201]
@@ -57,9 +57,9 @@ Established repo pattern to follow: a small pure `resolve`-style mapping
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Store faithful failure signaling (degraded ApplyResult + faithful Err)](./phase-01-store-faithful-failure-signaling-degraded-applyresult-faithf.md) | Pending |
-| 2 | [Scorer honors TierPolicy fail_mode on store failure](./phase-02-scorer-honors-tierpolicy-fail-mode-on-store-failure.md) | Pending |
-| 3 | [Acceptance tests + quality gates](./phase-03-acceptance-tests-quality-gates.md) | Pending |
+| 1 | [Store faithful failure signaling (degraded ApplyResult + faithful Err)](./phase-01-store-faithful-failure-signaling-degraded-applyresult-faithf.md) | Completed |
+| 2 | [Scorer honors TierPolicy fail_mode on store failure](./phase-02-scorer-honors-tierpolicy-fail-mode-on-store-failure.md) | Completed |
+| 3 | [Acceptance tests + quality gates](./phase-03-acceptance-tests-quality-gates.md) | Completed |
 
 ## Key Decisions
 
@@ -124,11 +124,11 @@ Established repo pattern to follow: a small pure `resolve`-style mapping
 
 ## Acceptance Criteria (from issue)
 
-- [ ] Store errors surface as an explicit degraded indicator (`apply`) or faithful
+- [x] Store errors surface as an explicit degraded indicator (`apply`) or faithful
       `Err` (`read`) — no silent score-0 substitution [Phase 1].
-- [ ] Scorer applies `TierPolicy.fail_mode` on store failure; `FailMode::Close`
+- [x] Scorer applies `TierPolicy.fail_mode` on store failure; `FailMode::Close`
       blocks/challenges, `FailMode::Open` allows on best-known score [Phase 2].
-- [ ] Test: simulated Redis outage → fail-open tier allows (degraded telemetry),
+- [x] Test: simulated Redis outage → fail-open tier allows (degraded telemetry),
       fail-closed tier does not [Phase 3].
 
 ## Validation
