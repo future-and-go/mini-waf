@@ -20,10 +20,11 @@ use crate::risk::canary::CanaryLayer;
 use crate::risk::challenge_credit::{ChallengeVerifier, VerifyOutcome};
 use crate::risk::config::RiskConfig;
 use crate::risk::key::{RiskKey, SessionId};
+use crate::risk::score::clamp_per_request_deltas;
 use crate::risk::seed::{SeedLayer, SeedVerdict};
 use crate::risk::state::{Contributor, ContributorKind, CreditOutcome};
 use crate::risk::store::RiskStore;
-use crate::risk::threshold::decide;
+use crate::risk::threshold::{decide, degraded_action};
 use crate::risk::velocity::{TxEndpoint, VelocityLayer};
 
 /// Result of scoring a request.
@@ -43,7 +44,7 @@ pub struct ScorerResult {
 /// Phase 5 adds L2 detectors: anomaly layer and velocity layer.
 /// Phase 6 adds canary honeypot layer (FR-028).
 /// Phase 8 adds challenge credit verifier (FR-006).
-pub struct Scorer<S: RiskStore> {
+pub struct Scorer<S: RiskStore + ?Sized> {
     store: Arc<S>,
     cfg: Arc<ArcSwap<RiskConfig>>,
     seed: Option<Arc<SeedLayer>>,
@@ -57,7 +58,7 @@ pub struct Scorer<S: RiskStore> {
     velocity: VelocityLayer,
 }
 
-impl<S: RiskStore> Scorer<S> {
+impl<S: RiskStore + ?Sized> Scorer<S> {
     /// Create a new scorer with the given store and config.
     #[must_use]
     pub fn new(store: Arc<S>, cfg: Arc<ArcSwap<RiskConfig>>) -> Self {
@@ -121,8 +122,7 @@ impl<S: RiskStore> Scorer<S> {
         self.cfg.load_full()
     }
 
-    /// Test-only access to the underlying risk store.
-    #[cfg(test)]
+    /// Access to the underlying risk store (admin actor clear/credit).
     pub(crate) const fn store(&self) -> &Arc<S> {
         &self.store
     }
@@ -153,32 +153,24 @@ impl<S: RiskStore> Scorer<S> {
             });
         }
 
-        // L0 seed layer evaluation FIRST — whitelist short-circuits everything
-        if let Some(ref seed) = self.seed
-            && cfg.seed.enabled
-        {
-            match seed.evaluate(ctx.client_ip) {
-                SeedVerdict::Whitelisted => {
-                    return Ok(ScorerResult {
-                        action: WafAction::Allow,
-                        score: 0,
-                        is_new: false,
-                    });
-                }
-                SeedVerdict::Score { delta, kind } => {
-                    let seed_contrib = Contributor::new(ContributorKind::Seed(kind), i16::from(delta), now_ms);
-                    let mut all_deltas = vec![seed_contrib];
-                    all_deltas.extend_from_slice(sync_deltas);
-                    return self
-                        .score_with_l2(ctx, fp_key, &all_deltas, tx_endpoint, now_ms, &cfg)
-                        .await;
-                }
-                SeedVerdict::None => {}
-            }
+        // L0 seed layer — evaluate once; whitelist short-circuits everything,
+        // including the canary check below.
+        let seed_verdict = match (&self.seed, cfg.seed.enabled) {
+            (Some(seed), true) => seed.evaluate(ctx.client_ip),
+            _ => SeedVerdict::None,
+        };
+
+        if matches!(seed_verdict, SeedVerdict::Whitelisted) {
+            return Ok(ScorerResult {
+                action: WafAction::Allow,
+                score: 0,
+                is_new: false,
+            });
         }
 
-        // FR-028 Canary honeypot check — AFTER whitelist, BEFORE other layers
-        // On canary hit: force_max + return Block immediately
+        // Canary honeypot check — after whitelist, before seed scoring and all
+        // other layers, so a seed-scored scanner (Tor exit, datacenter ASN)
+        // still trips the trap. On canary hit: force_max + return Block.
         if let Some(ref canary) = self.canary
             && cfg.canary.enabled
             && canary.check_and_ban(&ctx.path, ctx.client_ip, now_ms)
@@ -205,8 +197,20 @@ impl<S: RiskStore> Scorer<S> {
             });
         }
 
-        self.score_with_l2(ctx, fp_key, sync_deltas, tx_endpoint, now_ms, &cfg)
-            .await
+        match seed_verdict {
+            SeedVerdict::Score { delta, kind } => {
+                let seed_contrib = Contributor::new(ContributorKind::Seed(kind), i16::from(delta), now_ms);
+                let mut all_deltas = vec![seed_contrib];
+                all_deltas.extend_from_slice(sync_deltas);
+                self.score_with_l2(ctx, fp_key, &all_deltas, tx_endpoint, now_ms, &cfg)
+                    .await
+            }
+            // Whitelisted returned above; None carries only the caller deltas.
+            _ => {
+                self.score_with_l2(ctx, fp_key, sync_deltas, tx_endpoint, now_ms, &cfg)
+                    .await
+            }
+        }
     }
 
     /// Internal scoring with L2 layer evaluation.
@@ -251,13 +255,35 @@ impl<S: RiskStore> Scorer<S> {
             all_deltas.push(credit_delta);
         }
 
+        // Cap this request's positive delta sum to MAX_PER_REQUEST_DELTA
+        // before the store fold (which only clamps the total score).
+        let (all_deltas, _raw_sum) = clamp_per_request_deltas(&all_deltas);
+
         // Apply to store (decay happens inside store.apply before fold)
         let result = self.store.apply(&key, &all_deltas, now_ms).await?;
         let state = &result.state;
 
         let override_block = state.is_pinned(now_ms);
         let thresholds = &ctx.tier_policy.risk_thresholds;
-        let action = decide(state.clamped_score, thresholds, override_block);
+        let action = if result.degraded {
+            // Store lost its authority (backend outage); the tier's declared
+            // fail mode decides instead of the unauthoritative score alone.
+            tracing::warn!(
+                target: "risk::degrade",
+                client_ip = %ctx.client_ip,
+                fail_mode = ?ctx.tier_policy.fail_mode,
+                score = state.clamped_score,
+                "risk store degraded; applying tier fail_mode"
+            );
+            degraded_action(
+                ctx.tier_policy.fail_mode,
+                state.clamped_score,
+                thresholds,
+                override_block,
+            )
+        } else {
+            decide(state.clamped_score, thresholds, override_block)
+        };
 
         Ok(ScorerResult {
             action,
@@ -455,6 +481,131 @@ mod tests {
         Scorer::new(store, swap)
     }
 
+    /// Store stub whose `apply` always reports a degraded backend with a
+    /// preset best-known score — deterministic outage without a Redis server.
+    struct DegradedStore {
+        score: u8,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::risk::store::RiskStore for DegradedStore {
+        async fn read(&self, _key: &RiskKey) -> anyhow::Result<Option<crate::risk::state::RiskState>> {
+            anyhow::bail!("backend unreachable")
+        }
+
+        async fn apply(
+            &self,
+            _key: &RiskKey,
+            _deltas: &[Contributor],
+            now_ms: i64,
+        ) -> anyhow::Result<crate::risk::store::store_trait::ApplyResult> {
+            let mut state = crate::risk::state::RiskState::new(now_ms);
+            state.clamped_score = self.score;
+            Ok(crate::risk::store::store_trait::ApplyResult {
+                state,
+                is_new: self.score == 0,
+                degraded: true,
+            })
+        }
+
+        async fn force_max(&self, _key: &RiskKey, _until_ms: i64, _now_ms: i64) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn clear(&self, _key: &RiskKey) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+
+        async fn purge_expired(&self, _ttl_ms: i64, _now_ms: i64) -> anyhow::Result<usize> {
+            Ok(0)
+        }
+
+        async fn reset_all(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn len(&self) -> usize {
+            0
+        }
+    }
+
+    fn make_degraded_scorer(score: u8) -> Scorer<DegradedStore> {
+        let cfg = RiskConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let swap = Arc::new(ArcSwap::from(Arc::new(cfg)));
+        Scorer::new(Arc::new(DegradedStore { score }), swap)
+    }
+
+    fn ctx_with_fail_mode(fail_mode: FailMode) -> RequestCtx {
+        let mut ctx = make_ctx();
+        ctx.tier_policy = Arc::new(TierPolicy {
+            fail_mode,
+            ddos_threshold_rps: 1000,
+            cache_policy: CachePolicy::NoCache,
+            risk_thresholds: RiskThresholds {
+                allow: 30,
+                challenge: 70,
+                block: 90,
+            },
+        });
+        ctx
+    }
+
+    #[tokio::test]
+    async fn degraded_fail_open_unknown_actor_allowed() {
+        let scorer = make_degraded_scorer(0);
+        let ctx = ctx_with_fail_mode(FailMode::Open);
+
+        let result = scorer.score(&ctx, None, &[], None, 1000).await.unwrap();
+        assert_eq!(result.score, 0);
+        assert!(matches!(result.action, WafAction::Allow));
+    }
+
+    #[tokio::test]
+    async fn degraded_fail_open_cached_high_score_still_blocks() {
+        let scorer = make_degraded_scorer(95);
+        let ctx = ctx_with_fail_mode(FailMode::Open);
+
+        let result = scorer.score(&ctx, None, &[], None, 1000).await.unwrap();
+        assert_eq!(result.score, 95, "cached score must not be reset by the outage");
+        assert!(matches!(result.action, WafAction::Block { status: 403, .. }));
+    }
+
+    #[tokio::test]
+    async fn degraded_fail_close_blocks_503_even_at_score_zero() {
+        let scorer = make_degraded_scorer(0);
+        let ctx = ctx_with_fail_mode(FailMode::Close);
+
+        let result = scorer.score(&ctx, None, &[], None, 1000).await.unwrap();
+        assert!(matches!(
+            result.action,
+            WafAction::Block {
+                status: 503,
+                body: None
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn healthy_store_ignores_fail_close() {
+        let store = Arc::new(MemoryRiskStore::new());
+        let cfg = RiskConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let swap = Arc::new(ArcSwap::from(Arc::new(cfg)));
+        let scorer = Scorer::new(store, swap);
+        let ctx = ctx_with_fail_mode(FailMode::Close);
+
+        let result = scorer.score(&ctx, None, &[], None, 1000).await.unwrap();
+        assert!(
+            matches!(result.action, WafAction::Allow),
+            "fail_mode must only apply during store degradation"
+        );
+    }
+
     #[tokio::test]
     async fn score_returns_allow_for_zero_score() {
         let scorer = make_scorer();
@@ -504,6 +655,30 @@ mod tests {
 
         assert_eq!(result.score, 95);
         assert!(matches!(result.action, WafAction::Block { .. }));
+    }
+
+    #[tokio::test]
+    async fn oversized_positive_batch_capped_and_credit_preserved() {
+        use crate::risk::state::{ContributorKind, SeedKind};
+
+        let scorer = make_scorer();
+        let ctx = make_ctx();
+
+        // Positive deltas sum to 160 (> the per-request cap). The oldest
+        // positive is truncated so the newest 100 points land, and the
+        // negative credit survives the cap.
+        let deltas = vec![
+            Contributor::new(ContributorKind::Seed(SeedKind::Generic), 60, 1000),
+            Contributor::new(ContributorKind::AdminCredit, -20, 1000),
+            Contributor::new(ContributorKind::Seed(SeedKind::Generic), 60, 1000),
+            Contributor::new(ContributorKind::Seed(SeedKind::Generic), 40, 1000),
+        ];
+        let result = scorer.score(&ctx, None, &deltas, None, 1000).await.unwrap();
+
+        assert_eq!(
+            result.score, 80,
+            "cap keeps the newest 100 positive points; the credit still applies"
+        );
     }
 
     #[tokio::test]

@@ -24,6 +24,7 @@ use crate::checks::ddos::store::MemoryCounterStore as DdosMemoryStore;
 use crate::checks::ddos::{
     DdosCheck, DdosConfig, DdosFileConfig, DdosMetrics, DdosReloader, DynamicBanTable, OverloadGuard,
 };
+use crate::checks::geo_reload::DEFAULT_DEBOUNCE_MS as GEO_DEBOUNCE_MS;
 use crate::checks::rate_limit::reload::{DEFAULT_DEBOUNCE_MS as RL_DEBOUNCE_MS, RateLimitReloader};
 use crate::checks::rate_limit::store::MemoryStore as RlMemoryStore;
 use crate::checks::rate_limit::{RateLimitFileConfig, store::RateLimitStore};
@@ -44,8 +45,9 @@ use crate::rules::engine::{CustomRulesEngine, from_db_rule};
 
 use crate::risk::canary::{CanaryLayer, DEFAULT_CANARY_BAN_TTL_SECS};
 use crate::risk::config::RiskConfig;
+use crate::risk::reload::{DEFAULT_DEBOUNCE_MS as RISK_DEBOUNCE_MS, RiskReloader};
 use crate::risk::scorer::{Scorer, ScorerResult};
-use crate::risk::store::MemoryRiskStore;
+use crate::risk::store::{MemoryRiskStore, RiskStore};
 
 /// WAF engine configuration
 #[derive(Debug, Clone, Default)]
@@ -138,6 +140,9 @@ pub struct WafEngine {
     /// File watcher for `configs/ddos.yaml`. Lazy via
     /// `start_ddos_watcher`; held to keep the OS watch alive.
     ddos_reloader: OnceLock<DdosReloader>,
+    /// File watcher for `configs/geo-rules.yaml`. Lazy via
+    /// `start_geo_watcher`; held to keep the OS watch alive.
+    geo_reloader: OnceLock<crate::checks::GeoReloader>,
     // ── Audit file sink sender ────────────────────────────────────────────────
     /// Structured audit-event sink. `None` until [`set_audit_sender`] is
     /// called by the binary boot path.  When set, every non-Allow decision
@@ -153,12 +158,16 @@ pub struct WafEngine {
     /// `enabled = false`, so `Scorer.score()` returns score=0 / Allow until
     /// a real config is loaded via [`Self::replace_risk_config`].
     risk_cfg: Arc<ArcSwap<RiskConfig>>,
-    /// Risk scorer threaded into `inspect()`. Backed by the in-memory store
-    /// so engine construction stays infrastructure-free. Provides the
+    /// Risk scorer threaded into `inspect()`. Construction installs a
+    /// memory-backed scorer so the engine stays infrastructure-free;
+    /// [`Self::start_risk_watcher`] swaps in a store built from
+    /// `RiskConfig.store` (memory with purge loop, or redis). Provides the
     /// `decision.risk_score` attached to every WAF decision and drives
     /// FR-025 enforcement: a scorer Block/Challenge escalates a plain-Allow
     /// pipeline decision (see [`Self::inspect`]).
-    scorer: Arc<Scorer<MemoryRiskStore>>,
+    scorer: ArcSwap<Scorer<dyn RiskStore>>,
+    /// Hot-reload watcher handle for `configs/risk.yaml` (guards double-start).
+    risk_reloader: OnceLock<RiskReloader>,
     /// FR-028 canary honeypot layer installed on the scorer. Bound to the
     /// `DDoS` [`DynamicBanTable`] so canary hits IP-ban at the `DDoS` phase on
     /// subsequent requests. Paths and ban TTL follow `RiskConfig.canary`
@@ -257,7 +266,7 @@ impl WafEngine {
         // Risk scorer with in-memory store and default (disabled) config.
         // Operators that want real scoring call `replace_risk_config`.
         let risk_cfg = Arc::new(ArcSwap::from(Arc::new(RiskConfig::default())));
-        let risk_store = Arc::new(MemoryRiskStore::new());
+        let risk_store: Arc<dyn RiskStore> = Arc::new(MemoryRiskStore::new());
         // FR-028 canary layer bound to the DDoS ban table: a canary hit bans
         // the IP so follow-up requests block at the DDoS phase. Paths stay
         // empty (inert) until `replace_risk_config` loads them.
@@ -268,7 +277,7 @@ impl WafEngine {
         ));
         let mut scorer = Scorer::new(risk_store, Arc::clone(&risk_cfg));
         scorer.set_canary(Arc::clone(&risk_canary));
-        let scorer = Arc::new(scorer);
+        let scorer = ArcSwap::from_pointee(scorer);
 
         Self {
             store,
@@ -296,11 +305,13 @@ impl WafEngine {
             ddos_cfg,
             ddos_check,
             ddos_reloader: OnceLock::new(),
+            geo_reloader: OnceLock::new(),
             audit_sender: OnceLock::new(),
             db_batch_writer: OnceLock::new(),
             mode_registry: OnceLock::new(),
             risk_cfg,
             scorer,
+            risk_reloader: OnceLock::new(),
             risk_canary,
             relay_feeds: ArcSwap::from_pointee(Vec::new()),
         }
@@ -319,6 +330,132 @@ impl WafEngine {
         self.risk_canary.reload(cfg.canary.paths.clone());
         self.risk_canary.set_ban_ttl_secs(cfg.canary.ban_ttl_secs);
         self.risk_cfg.store(Arc::new(cfg));
+    }
+
+    /// Build a risk store from `RiskConfig.store`. Fail-soft: any redis
+    /// failure (feature absent, connect/ping error) falls back to the
+    /// in-memory store so the gateway never refuses to start.
+    #[cfg_attr(not(feature = "redis-store"), allow(clippy::unused_async))]
+    async fn build_risk_store(cfg: &RiskConfig) -> Arc<dyn RiskStore> {
+        if cfg.store.backend == "redis" {
+            #[cfg(feature = "redis-store")]
+            {
+                let runtime_cfg = cfg.store.redis.to_runtime_config(cfg.ttl_secs, cfg.decay.clone());
+                // Bound the initial connect: ConnectionManager retries with
+                // backoff internally, which can stall startup for minutes
+                // when the host silently drops packets. Fail-soft needs a
+                // fast answer.
+                let connect = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    crate::risk::store::RedisRiskStore::new(runtime_cfg),
+                );
+                match connect.await {
+                    Ok(Ok(store)) => {
+                        info!("risk: redis store connected");
+                        return Arc::new(store);
+                    }
+                    Ok(Err(e)) => {
+                        warn!(error = %e, "risk: redis store connect failed; falling back to memory store");
+                    }
+                    Err(_) => {
+                        warn!("risk: redis store connect timed out; falling back to memory store");
+                    }
+                }
+            }
+            #[cfg(not(feature = "redis-store"))]
+            warn!("risk: store.backend=redis requires the redis-store build feature; using memory store");
+        }
+        let store = Arc::new(MemoryRiskStore::with_decay(cfg.decay.clone()));
+        // The purge loop needs the concrete `Arc<MemoryRiskStore>`; start it
+        // before the Arc is unsized to `Arc<dyn RiskStore>`.
+        let ttl_ms = i64::try_from(cfg.ttl_secs.saturating_mul(1000)).unwrap_or(i64::MAX);
+        store.start_purge_loop(ttl_ms, cfg.gc_interval_secs);
+        store
+    }
+
+    /// Build a scorer over `store` sharing the engine's config snapshot and
+    /// canary layer (the canary must be re-attached on every scorer rebuild
+    /// or honeypot hits stop pinning scores).
+    fn build_scorer(&self, store: Arc<dyn RiskStore>) -> Scorer<dyn RiskStore> {
+        let mut scorer = Scorer::new(store, Arc::clone(&self.risk_cfg));
+        scorer.set_canary(Arc::clone(&self.risk_canary));
+        scorer
+    }
+
+    /// Load `configs/risk.yaml` once, build the configured store, and start
+    /// the hot-reload watcher.
+    ///
+    /// Bad YAML or a missing file logs a warning and leaves risk scoring at
+    /// defaults (disabled, memory store) — the gateway never refuses to start
+    /// because of a risk config issue. The store backend is start-time only:
+    /// reloads swap the config snapshot (and resync the canary layer) but a
+    /// `store.backend` change logs a warning and keeps the active store.
+    pub async fn start_risk_watcher(&self, path: &Path) {
+        if self.risk_reloader.get().is_some() {
+            return;
+        }
+        let mut active_backend = "memory".to_string();
+        match RiskConfig::from_path(path) {
+            Ok(cfg) => {
+                let store = Self::build_risk_store(&cfg).await;
+                self.scorer.store(Arc::new(self.build_scorer(store)));
+                active_backend.clone_from(&cfg.store.backend);
+                self.replace_risk_config((*cfg).clone());
+                info!(file = %path.display(), backend = %active_backend, "risk: initial config loaded");
+            }
+            Err(e) => {
+                warn!(file = %path.display(), error = %e, "risk: initial load failed; risk scoring stays disabled");
+            }
+        }
+        let canary = Arc::clone(&self.risk_canary);
+        let risk_cfg = Arc::clone(&self.risk_cfg);
+        let result = RiskReloader::start(path.to_path_buf(), RISK_DEBOUNCE_MS, move |cfg| {
+            if cfg.store.backend != active_backend {
+                warn!(
+                    active = %active_backend,
+                    requested = %cfg.store.backend,
+                    "risk: store backend change requires restart; keeping active store"
+                );
+            }
+            // Same semantics as `replace_risk_config`: canary paths + ban TTL
+            // resync before the snapshot swap.
+            canary.reload(cfg.canary.paths.clone());
+            canary.set_ban_ttl_secs(cfg.canary.ban_ttl_secs);
+            risk_cfg.store(cfg);
+        });
+        match result {
+            Ok(r) => {
+                let _ = self.risk_reloader.set(r);
+            }
+            Err(e) => warn!(
+                file = %path.display(),
+                error = %e,
+                "risk: hot-reload watcher failed to start; running without hot-reload"
+            ),
+        }
+    }
+
+    /// Admin API: remove an actor's risk state (all axes reachable from the
+    /// IP). Returns `true` if state existed and was removed.
+    pub async fn risk_clear_actor(&self, ip: std::net::IpAddr) -> anyhow::Result<bool> {
+        let scorer = self.scorer.load_full();
+        let key = crate::risk::key::RiskKey::from_ip(ip);
+        scorer.store().clear(&key).await
+    }
+
+    /// Admin API: credit (reduce) an actor's risk score by `amount` points.
+    /// Returns the post-credit clamped score.
+    pub async fn risk_credit_actor(&self, ip: std::net::IpAddr, amount: i16) -> anyhow::Result<u8> {
+        use crate::risk::state::{Contributor, ContributorKind};
+
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let credit = Contributor::new(ContributorKind::AdminCredit, -amount.abs(), now_ms);
+        let scorer = self.scorer.load_full();
+        let result = scorer
+            .store()
+            .apply(&crate::risk::key::RiskKey::from_ip(ip), &[credit], now_ms)
+            .await?;
+        Ok(result.state.clamped_score)
     }
 
     /// Load `configs/rate-limit.yaml` once and start the hot-reload watcher.
@@ -414,6 +551,38 @@ impl WafEngine {
                 file = %path.display(),
                 error = %e,
                 "ddos: hot-reload watcher failed to start; running without hot-reload"
+            ),
+        }
+    }
+
+    /// Load geo rules from the admin API's `configs/geo-rules.yaml` into
+    /// `geo_check`, replacing the full rule set (hosts absent from the file
+    /// are cleared). Fail-soft: a missing/bad file logs a warning and leaves
+    /// the existing rules in place.
+    pub fn load_geo_rules(&self, path: &Path) {
+        if let Err(e) = crate::checks::apply_geo_rules(&self.geo_check, path) {
+            warn!(file = %path.display(), error = %e, "geo rules: load failed; keeping existing rules");
+        }
+    }
+
+    /// Load `configs/geo-rules.yaml` once and start the hot-reload watcher.
+    ///
+    /// The admin API writes the same file, so geo rule CRUD hot-reloads with
+    /// no extra API→engine call. Missing/bad file leaves `geo_check` empty —
+    /// the gateway never refuses to start because of a geo config issue.
+    pub fn start_geo_watcher(&self, path: &Path) {
+        if self.geo_reloader.get().is_some() {
+            return;
+        }
+        self.load_geo_rules(path);
+        match crate::checks::GeoReloader::start(path.to_path_buf(), Arc::clone(&self.geo_check), GEO_DEBOUNCE_MS) {
+            Ok(r) => {
+                let _ = self.geo_reloader.set(r);
+            }
+            Err(e) => warn!(
+                file = %path.display(),
+                error = %e,
+                "geo rules: hot-reload watcher failed to start; running without hot-reload"
             ),
         }
     }
@@ -528,6 +697,13 @@ impl WafEngine {
     /// the checker pipeline runs, enabling `GeoIP`-based rules.
     pub fn set_geoip(&self, service: Arc<GeoIpService>) {
         let _ = self.geoip.set(service);
+    }
+
+    /// Look up `GeoIP` info for `ip`. Returns `None` when the service is
+    /// disabled/unset; returns a (possibly empty) `GeoIpInfo` otherwise.
+    #[must_use]
+    pub fn geoip_lookup(&self, ip: std::net::IpAddr) -> Option<waf_common::GeoIpInfo> {
+        self.geoip.get().map(|svc| svc.lookup(ip))
     }
 
     /// Plug the audit file sink sender into the engine (called once during
@@ -702,7 +878,7 @@ impl WafEngine {
         // Fast-path exits (guard off, IP/URL allow/block lists) skip risk
         // scoring entirely: no store write, risk_score stays 0.
         if matches!(fast_path, FastPath::Miss)
-            && let Ok(scorer_result) = self.scorer.score(ctx, None, &[], None, now_ms).await
+            && let Ok(scorer_result) = self.scorer.load_full().score(ctx, None, &[], None, now_ms).await
         {
             let risk_score = scorer_result.score.min(100);
             decision.risk_score = risk_score;
@@ -1225,7 +1401,6 @@ mod tests {
     use waf_storage::models::{CreateHost, CreateIpRule};
 
     use super::*;
-    use crate::risk::store::RiskStore;
 
     fn make_ctx(host_code: &str, path: &str, ip: &str) -> RequestCtx {
         let host_config = Arc::new(HostConfig {
@@ -1331,7 +1506,7 @@ mod tests {
         assert!(matches!(decision.action, WafAction::Allow), "whitelisted IP must allow");
         assert_eq!(decision.risk_score, 0, "fast-path decision must carry risk_score 0");
         assert!(
-            engine.scorer.store().is_empty().await,
+            engine.scorer.load().store().is_empty().await,
             "fast-path request must not write the risk store"
         );
 
@@ -1340,7 +1515,7 @@ mod tests {
         let decision = engine.inspect(&mut ctx).await;
         assert!(matches!(decision.action, WafAction::Allow), "clean request must allow");
         assert!(
-            !engine.scorer.store().is_empty().await,
+            !engine.scorer.load().store().is_empty().await,
             "scored request must write the risk store"
         );
     }
@@ -1508,6 +1683,7 @@ mod tests {
         let now_ms = chrono::Utc::now().timestamp_millis();
         engine
             .scorer
+            .load()
             .force_max(&ctx, None, now_ms + 60_000, now_ms)
             .await
             .expect("force_max");
@@ -1594,5 +1770,121 @@ mod tests {
             decision.is_enforcement_allowed(),
             "LogOnly'd SQLi decision must let the request proceed"
         );
+    }
+
+    /// Default (memory) backend starts the purge loop: expired state is
+    /// removed without any caller invoking `purge_expired`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn build_risk_store_memory_purges_expired_state() {
+        use crate::risk::key::RiskKey;
+        use crate::risk::state::{Contributor, ContributorKind, SeedKind};
+
+        let cfg = RiskConfig {
+            ttl_secs: 1,
+            gc_interval_secs: 1,
+            ..RiskConfig::default()
+        };
+        let store = WafEngine::build_risk_store(&cfg).await;
+
+        let key = RiskKey::from_ip("198.51.100.77".parse().expect("ip"));
+        let stale_ms = chrono::Utc::now().timestamp_millis() - 10_000;
+        store
+            .apply(
+                &key,
+                &[Contributor::new(ContributorKind::Seed(SeedKind::Generic), 25, stale_ms)],
+                stale_ms,
+            )
+            .await
+            .expect("apply");
+        assert!(!store.is_empty().await, "state must exist before purge");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            if store.is_empty().await {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("purge loop never removed expired state");
+    }
+
+    /// `store.backend: redis` without a reachable server falls back to the
+    /// memory store (fail-soft); builds without the `redis-store` feature take
+    /// the same fallback via the feature-gate warning path.
+    #[tokio::test]
+    async fn build_risk_store_redis_unreachable_falls_back_to_memory() {
+        let mut cfg = RiskConfig::default();
+        cfg.store.backend = "redis".to_string();
+        cfg.store.redis.url = "redis://127.0.0.1:1".to_string();
+
+        let store = WafEngine::build_risk_store(&cfg).await;
+        assert!(store.is_empty().await, "fallback memory store must start empty");
+    }
+
+    /// `store.backend: redis` with a reachable server builds the redis store:
+    /// applied state must be visible through the same store (CI redis job;
+    /// skips when `REDIS_TEST_URL` is unset).
+    #[cfg(feature = "redis-store")]
+    #[tokio::test]
+    async fn build_risk_store_redis_backend_persists_state() {
+        let Ok(url) = std::env::var("REDIS_TEST_URL") else {
+            return;
+        };
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let mut cfg = RiskConfig::default();
+        cfg.store.backend = "redis".to_string();
+        cfg.store.redis.url = url;
+        cfg.store.redis.key_prefix = format!("waf:risk:enginetest:{now_ms}:");
+
+        let store = WafEngine::build_risk_store(&cfg).await;
+        let key = crate::risk::key::RiskKey::from_ip("10.98.98.98".parse().unwrap());
+        let bump = crate::risk::state::Contributor::new(
+            crate::risk::state::ContributorKind::Signal("engine_test".to_string()),
+            30,
+            now_ms,
+        );
+        let result = store.apply(&key, &[bump], now_ms).await.expect("apply via redis store");
+        assert_eq!(result.state.clamped_score, 30);
+        let read = store.read(&key).await.expect("read via redis store");
+        assert!(read.is_some(), "scored actor state must be visible in redis");
+        store.clear(&key).await.expect("cleanup");
+    }
+
+    /// `start_risk_watcher`: initial load applies the file config, a file
+    /// write hot-reloads the snapshot and resyncs the canary layer, and bad
+    /// YAML keeps the previous snapshot (fail-soft).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn risk_watcher_hot_reloads_config_and_canary() {
+        let (engine, _container) = spawn_engine().await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("risk.yaml");
+        std::fs::write(&path, "risk:\n  enabled: false\n").expect("write initial");
+
+        engine.start_risk_watcher(&path).await;
+        assert!(!engine.risk_cfg.load().enabled, "initial config has enabled=false");
+
+        std::fs::write(&path, "risk:\n  enabled: true\n  canary:\n    paths:\n      - /trap\n").expect("write update");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if engine.risk_cfg.load().enabled {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "hot reload never observed enabled=true"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            engine.risk_canary.check("/trap"),
+            "reload must resync canary paths through replace_risk_config semantics"
+        );
+
+        // Malformed YAML: previous snapshot (and canary set) must be retained.
+        std::fs::write(&path, "risk:\n  ttl_secs: not_a_number\n").expect("write bad yaml");
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        assert!(engine.risk_cfg.load().enabled, "bad YAML must keep previous snapshot");
+        assert!(engine.risk_canary.check("/trap"), "bad YAML must keep canary paths");
     }
 }

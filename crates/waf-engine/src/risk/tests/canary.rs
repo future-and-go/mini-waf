@@ -267,6 +267,110 @@ async fn partial_path_match_does_not_trigger() {
 }
 
 #[tokio::test]
+async fn seed_scored_ip_still_hits_canary() {
+    // A seed-scored IP (Tor exit) hitting a canary path must be blocked —
+    // the seed Score classification must not short-circuit past the canary
+    // check the way the whitelist does.
+
+    let store = Arc::new(MemoryRiskStore::new());
+    let ban_table = Arc::new(DynamicBanTable::new());
+
+    let cfg = RiskConfig {
+        enabled: true,
+        canary: CanaryConfig {
+            enabled: true,
+            paths: vec!["/admin-test".to_string()],
+            ban_ttl_secs: 3600,
+        },
+        ..Default::default()
+    };
+    let swap = Arc::new(ArcSwap::from(Arc::new(cfg)));
+
+    // Seed table classifies the client IP as a Tor exit → SeedVerdict::Score.
+    let ctx = make_ctx("/admin-test");
+    let mut builder = SeedTablesBuilder::new();
+    builder.add_tor_exit(ctx.client_ip);
+    let tables = Arc::new(ArcSwapSeed::from(Arc::new(builder.build())));
+    let seed = Arc::new(SeedLayer::new(tables, SeedDeltas::default()));
+
+    let canary = Arc::new(CanaryLayer::with_ban_table(
+        vec!["/admin-test".to_string()],
+        Arc::clone(&ban_table),
+        3600,
+    ));
+
+    let mut scorer = Scorer::new(store, swap);
+    scorer.set_seed(seed);
+    scorer.set_canary(canary);
+
+    let now_ms = 1_000_000;
+    let result = scorer.score(&ctx, None, &[], None, now_ms).await.unwrap();
+
+    // Canary must fire despite the seed Score classification.
+    assert!(
+        matches!(result.action, WafAction::Block { .. }),
+        "Tor-exit IP on a canary path must be blocked"
+    );
+    assert_eq!(result.score, 100);
+    assert!(ban_table.contains(ctx.client_ip, now_ms));
+
+    // force_max pinned the actor: a later normal request still reads 100.
+    let normal_ctx = make_ctx("/normal-path");
+    let result2 = scorer.score(&normal_ctx, None, &[], None, now_ms + 1000).await.unwrap();
+    assert_eq!(result2.score, 100, "canary pin must persist in the store");
+}
+
+#[tokio::test]
+async fn seed_scored_ip_on_normal_path_accrues_seed_delta() {
+    // The seed contributor must still reach scoring on the non-canary path —
+    // guards against the canary reorder dropping the seed delta.
+
+    let store = Arc::new(MemoryRiskStore::new());
+    let ban_table = Arc::new(DynamicBanTable::new());
+
+    let cfg = RiskConfig {
+        enabled: true,
+        canary: CanaryConfig {
+            enabled: true,
+            paths: vec!["/admin-test".to_string()],
+            ban_ttl_secs: 3600,
+        },
+        ..Default::default()
+    };
+    let swap = Arc::new(ArcSwap::from(Arc::new(cfg)));
+
+    let ctx = make_ctx("/normal-path");
+    let mut builder = SeedTablesBuilder::new();
+    builder.add_tor_exit(ctx.client_ip);
+    let tables = Arc::new(ArcSwapSeed::from(Arc::new(builder.build())));
+    let seed = Arc::new(SeedLayer::new(tables, SeedDeltas::default()));
+
+    let canary = Arc::new(CanaryLayer::with_ban_table(
+        vec!["/admin-test".to_string()],
+        Arc::clone(&ban_table),
+        3600,
+    ));
+
+    let mut scorer = Scorer::new(store, swap);
+    scorer.set_seed(seed);
+    scorer.set_canary(canary);
+
+    let now_ms = 1_000_000;
+    let result = scorer.score(&ctx, None, &[], None, now_ms).await.unwrap();
+
+    assert!(
+        !matches!(result.action, WafAction::Block { .. }),
+        "non-canary path must not block on the seed delta alone"
+    );
+    assert_eq!(
+        result.score,
+        SeedDeltas::default().tor_exit,
+        "seed delta must accrue on the non-canary path"
+    );
+    assert!(!ban_table.contains(ctx.client_ip, now_ms));
+}
+
+#[tokio::test]
 async fn whitelist_bypasses_canary() {
     // Test that seed whitelist short-circuits BEFORE canary check
     // A whitelisted IP hitting a canary path should be allowed, not blocked

@@ -28,8 +28,8 @@ use redis::{Script, aio::ConnectionManager};
 use tokio::time::timeout;
 use tracing::{debug, warn};
 
-use super::redis_lua::{APPLY_SCRIPT, FORCE_MAX_SCRIPT};
-use crate::risk::decay::{DECAY_RATE, MAX_DECAY, MIN_CLEAN_STREAK};
+use super::redis_lua::{APPLY_SCRIPT, CLEAR_SCRIPT, FORCE_MAX_SCRIPT};
+use crate::risk::config::DecayConfig;
 use crate::risk::key::RiskKey;
 use crate::risk::state::{Contributor, RiskState};
 use crate::risk::store::store_trait::{ApplyResult, RiskStore};
@@ -49,6 +49,8 @@ pub struct RedisRiskConfig {
     pub breaker_threshold: u32,
     /// LRU cache capacity for fail-open fallback (default: 10000).
     pub cache_capacity: usize,
+    /// Decay parameters fed into the Lua apply script.
+    pub decay: DecayConfig,
 }
 
 impl Default for RedisRiskConfig {
@@ -60,6 +62,7 @@ impl Default for RedisRiskConfig {
             op_timeout: Duration::from_millis(100),
             breaker_threshold: 5,
             cache_capacity: 10_000,
+            decay: DecayConfig::default(),
         }
     }
 }
@@ -79,6 +82,7 @@ pub struct RedisRiskStore {
     cache: Mutex<lru::LruCache<String, CacheEntry>>,
     apply_script: Script,
     force_max_script: Script,
+    clear_script: Script,
 }
 
 impl std::fmt::Debug for RedisRiskStore {
@@ -113,6 +117,7 @@ impl RedisRiskStore {
             consecutive_fails: AtomicU32::new(0),
             apply_script: Script::new(APPLY_SCRIPT),
             force_max_script: Script::new(FORCE_MAX_SCRIPT),
+            clear_script: Script::new(CLEAR_SCRIPT),
             cfg,
         })
     }
@@ -194,6 +199,13 @@ impl RedisRiskStore {
         self.cache.lock().get(&cache_key).map(|e| e.state.clone())
     }
 
+    /// Best-known substitute when Redis is unreachable: the last cached state
+    /// for this actor, else a fresh zero state. Always flagged `degraded` so
+    /// the caller applies its fail-mode policy instead of trusting the score.
+    fn degraded_apply_result(&self, key: &RiskKey, now_ms: i64) -> ApplyResult {
+        degraded_substitute(self.cache_lookup(key), now_ms)
+    }
+
     /// Update LRU cache with new state.
     fn cache_update(&self, key: &RiskKey, owner_id: &str, state: &RiskState) {
         let cache_key = Self::cache_key(key);
@@ -273,6 +285,24 @@ impl RedisRiskStore {
     }
 }
 
+/// Build the degraded `ApplyResult` from an optional cached state: the last
+/// known state when present (`is_new: false`), else a fresh zero state.
+/// `degraded` is always `true` — the score is a substitute, not authority.
+fn degraded_substitute(cached: Option<RiskState>, now_ms: i64) -> ApplyResult {
+    cached.map_or_else(
+        || ApplyResult {
+            state: RiskState::new(now_ms),
+            is_new: true,
+            degraded: true,
+        },
+        |state| ApplyResult {
+            state,
+            is_new: false,
+            degraded: true,
+        },
+    )
+}
+
 /// Response from apply Lua script.
 #[derive(serde::Deserialize)]
 struct ApplyResponse {
@@ -310,10 +340,9 @@ impl RiskStore for RedisRiskStore {
                 }
                 Ok(max_state.map(|(_, state)| state))
             }
-            Err(e) => {
-                warn!(error = %e, "risk redis: read failed, checking cache");
-                Ok(self.cache_lookup(key))
-            }
+            // Faithful error: read is advisory (not on the enforcement gate),
+            // so callers must see the outage instead of a stale cache value.
+            Err(e) => Err(e.context("risk redis: read")),
         }
     }
 
@@ -322,6 +351,7 @@ impl RiskStore for RedisRiskStore {
             return Ok(ApplyResult {
                 state: RiskState::new(now_ms),
                 is_new: true,
+                degraded: false,
             });
         }
 
@@ -340,9 +370,9 @@ impl RiskStore for RedisRiskStore {
             .arg(now_ms)
             .arg(&deltas_json)
             .arg(self.cfg.ttl_secs)
-            .arg(MIN_CLEAN_STREAK)
-            .arg(DECAY_RATE)
-            .arg(MAX_DECAY);
+            .arg(self.cfg.decay.min_clean_streak)
+            .arg(self.cfg.decay.decay_rate)
+            .arg(self.cfg.decay.max_decay);
 
         let res = timeout(self.cfg.op_timeout, invocation.invoke_async::<String>(&mut conn)).await;
 
@@ -355,29 +385,18 @@ impl RiskStore for RedisRiskStore {
                 Ok(ApplyResult {
                     state: response.state,
                     is_new: response.is_new,
+                    degraded: false,
                 })
             }
             Ok(Err(e)) => {
                 self.record_fail();
-                warn!(error = %e, "risk redis: apply failed, using cache fallback");
-                if let Some(state) = self.cache_lookup(key) {
-                    return Ok(ApplyResult { state, is_new: false });
-                }
-                Ok(ApplyResult {
-                    state: RiskState::new(now_ms),
-                    is_new: true,
-                })
+                warn!(error = %e, "risk redis: apply failed, degraded fallback");
+                Ok(self.degraded_apply_result(key, now_ms))
             }
             Err(_) => {
                 self.record_fail();
-                warn!("risk redis: apply timeout, using cache fallback");
-                if let Some(state) = self.cache_lookup(key) {
-                    return Ok(ApplyResult { state, is_new: false });
-                }
-                Ok(ApplyResult {
-                    state: RiskState::new(now_ms),
-                    is_new: true,
-                })
+                warn!("risk redis: apply timeout, degraded fallback");
+                Ok(self.degraded_apply_result(key, now_ms))
             }
         }
     }
@@ -426,6 +445,40 @@ impl RiskStore for RedisRiskStore {
             Err(_) => {
                 self.record_fail();
                 Err(anyhow!("risk redis: force_max timeout"))
+            }
+        }
+    }
+
+    async fn clear(&self, key: &RiskKey) -> anyhow::Result<bool> {
+        if key.is_empty() {
+            return Ok(false);
+        }
+
+        let mut conn = self.conn.clone();
+        let mut invocation = self.clear_script.prepare_invoke();
+        for k in self.index_keys(key) {
+            invocation.key(k);
+        }
+        invocation.arg(&self.cfg.key_prefix);
+
+        let res = timeout(self.cfg.op_timeout, invocation.invoke_async::<i64>(&mut conn)).await;
+
+        match res {
+            Ok(Ok(deleted)) => {
+                self.record_ok();
+                // Drop the whole fallback cache: entries keyed by other axis
+                // combinations may still hold the cleared score and would
+                // resurrect it on fail-open. Admin clears are rare.
+                self.cache.lock().clear();
+                Ok(deleted > 0)
+            }
+            Ok(Err(e)) => {
+                self.record_fail();
+                Err(anyhow!(e).context("risk redis: clear"))
+            }
+            Err(_) => {
+                self.record_fail();
+                Err(anyhow!("risk redis: clear timeout"))
             }
         }
     }
@@ -568,6 +621,68 @@ mod tests {
         assert_eq!(cache.get(&"a".to_string()).unwrap().owner_id, "owner-a2");
     }
 
+    #[test]
+    fn degraded_substitute_keeps_cached_score() {
+        let mut cached = RiskState::new(0);
+        cached.clamped_score = 87;
+
+        let result = degraded_substitute(Some(cached), 5000);
+        assert!(result.degraded, "cache hit during outage is still degraded");
+        assert!(!result.is_new);
+        assert_eq!(
+            result.state.clamped_score, 87,
+            "last known score must survive the outage"
+        );
+    }
+
+    #[test]
+    fn degraded_substitute_without_cache_is_flagged_not_authoritative() {
+        let result = degraded_substitute(None, 5000);
+        assert!(
+            result.degraded,
+            "fresh zero state during outage must carry the degraded flag"
+        );
+        assert!(result.is_new);
+        assert_eq!(result.state.clamped_score, 0);
+    }
+
+    /// Timeout arm of `apply` + faithful `read` error — runs only when
+    /// `REDIS_TEST_URL` is set. A 1ns op timeout forces every round-trip
+    /// through the failure arms against a real server.
+    #[tokio::test]
+    async fn outage_apply_degrades_and_read_errors() {
+        use crate::risk::key::RiskKey;
+        use std::net::Ipv4Addr;
+
+        let Ok(url) = std::env::var("REDIS_TEST_URL") else {
+            tracing::info!("skipping: REDIS_TEST_URL unset");
+            return;
+        };
+
+        let store = RedisRiskStore::new(RedisRiskConfig {
+            url,
+            key_prefix: unique_prefix(),
+            ttl_secs: 3600,
+            op_timeout: Duration::from_nanos(1),
+            breaker_threshold: 5,
+            cache_capacity: 100,
+            decay: DecayConfig::default(),
+        })
+        .await
+        .expect("connect to REDIS_TEST_URL");
+
+        let key = RiskKey::from_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 101)));
+
+        let result = store.apply(&key, &[], 1000).await.unwrap();
+        assert!(result.degraded, "timed-out apply must be flagged degraded");
+        assert_eq!(result.state.clamped_score, 0);
+
+        assert!(
+            store.read(&key).await.is_err(),
+            "read must surface the outage, not the cache"
+        );
+    }
+
     fn unique_prefix() -> String {
         format!(
             "waf_risk_test_{}:",
@@ -594,6 +709,7 @@ mod tests {
             op_timeout: Duration::from_millis(500),
             breaker_threshold: 5,
             cache_capacity: 100,
+            decay: DecayConfig::default(),
         })
         .await
         .expect("connect to REDIS_TEST_URL");
@@ -630,6 +746,7 @@ mod tests {
             op_timeout: Duration::from_millis(500),
             breaker_threshold: 5,
             cache_capacity: 100,
+            decay: DecayConfig::default(),
         })
         .await
         .expect("connect to REDIS_TEST_URL");

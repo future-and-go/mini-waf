@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Real lookup_ip backed by GeoIpService"
-status: pending
+status: completed
 priority: P1
 dependencies: []
 effort: "1h"

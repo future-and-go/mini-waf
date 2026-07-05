@@ -1,8 +1,9 @@
 //! Geo restriction API — CRUD for country-based allow/block rules.
 //!
-//! Rules are persisted in `rules/geo-rules.yaml` (relative to the main config
-//! directory).  The lookup endpoint returns a stub response because `GeoIP` xdb
-//! files may not be installed in every deployment.
+//! Rules are persisted in `configs/geo-rules.yaml` (relative to the main
+//! config directory); the engine watches the same file, so CRUD hot-reloads
+//! enforcement. The lookup endpoint reads the engine's `GeoIpService` and
+//! falls back to a stub response when the xdb databases are not installed.
 
 use std::sync::Arc;
 
@@ -142,18 +143,33 @@ pub async fn delete_geo_rule(State(state): State<Arc<AppState>>, Path(id): Path<
     Ok(Json(json!({ "success": true })))
 }
 
-/// POST /api/geoip/lookup — IP → country lookup.
-/// Returns a stub response; `GeoIP` xdb database must be installed for real data.
-pub async fn lookup_ip(_state: State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult<Json<Value>> {
+/// POST /api/geoip/lookup — IP → country lookup through the engine's
+/// `GeoIpService`. Falls back to the stub envelope when the service is
+/// disabled or the address has no xdb data (private IP / miss).
+pub async fn lookup_ip(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult<Json<Value>> {
     let ip_str = body.get("ip").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+    let Ok(ip) = ip_str.parse::<std::net::IpAddr>() else {
+        return Err(ApiError::BadRequest(format!("invalid ip: {ip_str}")));
+    };
 
-    Ok(Json(json!({
-        "success": true,
-        "data": {
-            "ip":           ip_str,
-            "iso_code":     "XX",
-            "country_name": "Unknown — GeoIP database not loaded",
-            "isp":          null
-        }
-    })))
+    match state.engine.geoip_lookup(ip) {
+        Some(info) if !info.iso_code.is_empty() || !info.country.is_empty() => Ok(Json(json!({
+            "success": true,
+            "data": {
+                "ip":           ip_str,
+                "iso_code":     info.iso_code,
+                "country_name": info.country,
+                "isp":          if info.isp.is_empty() { Value::Null } else { json!(info.isp) },
+            }
+        }))),
+        _ => Ok(Json(json!({
+            "success": true,
+            "data": {
+                "ip":           ip_str,
+                "iso_code":     "XX",
+                "country_name": "Unknown — GeoIP database not loaded",
+                "isp":          null
+            }
+        }))),
+    }
 }

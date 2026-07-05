@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Risk config PUT/GET serde round-trip"
-status: pending
+status: completed
 priority: P1
 dependencies: []
 ---

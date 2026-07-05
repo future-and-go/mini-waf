@@ -16,6 +16,11 @@ pub struct ApplyResult {
     pub state: RiskState,
     /// True if this was a new entry (not an update to existing).
     pub is_new: bool,
+    /// True when the backend could not reach its authority and `state` is a
+    /// best-known substitute (last cached value or a fresh zero state). Set
+    /// only by backends that can transiently fail; callers must apply their
+    /// fail-mode policy instead of trusting the score as authoritative.
+    pub degraded: bool,
 }
 
 /// Async trait for risk state storage.
@@ -50,6 +55,13 @@ pub trait RiskStore: Send + Sync {
     /// Used for honeypot traps (FR-028). Sets `pinned_until_ms` and floors
     /// the score at 100 regardless of decay.
     async fn force_max(&self, key: &RiskKey, until_ms: i64, now_ms: i64) -> anyhow::Result<()>;
+
+    /// Remove the actor's state reachable from `key` (admin clear).
+    ///
+    /// Deletes the state and every index entry pointing at it, so no axis
+    /// can resurrect the cleared score. Returns `true` if anything was
+    /// removed. An empty key is a no-op returning `false`.
+    async fn clear(&self, key: &RiskKey) -> anyhow::Result<bool>;
 
     /// Purge entries that have been idle longer than `ttl_ms`.
     ///
@@ -150,11 +162,16 @@ mod tests {
             Ok(ApplyResult {
                 state: RiskState::new(now_ms),
                 is_new: true,
+                degraded: false,
             })
         }
 
         async fn force_max(&self, _key: &RiskKey, _until_ms: i64, _now_ms: i64) -> anyhow::Result<()> {
             Ok(())
+        }
+
+        async fn clear(&self, _key: &RiskKey) -> anyhow::Result<bool> {
+            Ok(false)
         }
 
         async fn purge_expired(&self, _ttl_ms: i64, _now_ms: i64) -> anyhow::Result<usize> {
@@ -189,6 +206,7 @@ mod tests {
         let r = s.apply(&key, &[], 100).await.unwrap();
         assert!(r.is_new);
         s.force_max(&key, 1000, 0).await.unwrap();
+        assert!(!s.clear(&key).await.unwrap());
         assert_eq!(s.purge_expired(0, 0).await.unwrap(), 0);
         assert_eq!(s.len().await, 0);
         assert!(s.is_empty().await);
@@ -219,6 +237,7 @@ mod tests {
         let r = ApplyResult {
             state: RiskState::new(42),
             is_new: true,
+            degraded: false,
         };
         let r2 = r.clone();
         assert_eq!(r2.state.created_ms, 42);

@@ -83,6 +83,12 @@ impl GeoCheck {
         self.rules.remove(host_code);
     }
 
+    /// Host codes that currently have rules loaded. Used by the file loader
+    /// to clear hosts that disappear between two loads.
+    pub fn loaded_hosts(&self) -> Vec<String> {
+        self.rules.iter().map(|entry| entry.key().clone()).collect()
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     fn eval_rules(&self, host_code: &str, geo: &waf_common::GeoIpInfo) -> Option<DetectionResult> {

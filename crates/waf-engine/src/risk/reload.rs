@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
-use arc_swap::ArcSwap;
 use notify::{Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use tracing::{info, warn};
 
@@ -23,17 +22,22 @@ pub struct RiskReloader {
 }
 
 impl RiskReloader {
-    /// Spawn a watcher that swaps `swap` whenever `path` changes.
-    pub fn start(path: PathBuf, swap: Arc<ArcSwap<RiskConfig>>, debounce_ms: u64) -> Result<Self> {
-        let watcher = spawn_watch(path, debounce_ms, move |p| reload(p, &swap))?;
+    /// Spawn a watcher that calls `on_change` with the freshly parsed config
+    /// whenever `path` changes. Parse failures log a warning and skip the
+    /// callback, so the caller's previous snapshot is retained (fail-soft).
+    pub fn start<F>(path: PathBuf, debounce_ms: u64, on_change: F) -> Result<Self>
+    where
+        F: Fn(Arc<RiskConfig>) + Send + 'static,
+    {
+        let watcher = spawn_watch(path, debounce_ms, move |p| reload(p, &on_change))?;
         Ok(Self { _watcher: watcher })
     }
 }
 
-fn reload(path: &Path, swap: &Arc<ArcSwap<RiskConfig>>) {
+fn reload<F: Fn(Arc<RiskConfig>)>(path: &Path, on_change: &F) {
     match RiskConfig::from_path(path) {
         Ok(cfg) => {
-            swap.store(cfg);
+            on_change(cfg);
             info!(file = %path.display(), "risk: hot-reload OK");
         }
         Err(e) => {
@@ -108,10 +112,11 @@ mod tests {
         std::fs::write(&path, "risk:\n  enabled: false\n").unwrap();
 
         let cfg = RiskConfig::from_path(&path).unwrap();
-        let swap = Arc::new(ArcSwap::from(cfg));
+        let swap = Arc::new(arc_swap::ArcSwap::from(cfg));
         assert!(!swap.load().enabled);
 
-        let _r = RiskReloader::start(path.clone(), Arc::clone(&swap), 50).expect("start watcher");
+        let cb_swap = Arc::clone(&swap);
+        let _r = RiskReloader::start(path.clone(), 50, move |cfg| cb_swap.store(cfg)).expect("start watcher");
 
         let mut f = std::fs::File::create(&path).unwrap();
         writeln!(f, "risk:\n  enabled: true\n").unwrap();
@@ -135,8 +140,9 @@ mod tests {
         std::fs::write(&path, "risk:\n  enabled: true\n").unwrap();
 
         let cfg = RiskConfig::from_path(&path).unwrap();
-        let swap = Arc::new(ArcSwap::from(cfg));
-        let _r = RiskReloader::start(path.clone(), Arc::clone(&swap), 50).unwrap();
+        let swap = Arc::new(arc_swap::ArcSwap::from(cfg));
+        let cb_swap = Arc::clone(&swap);
+        let _r = RiskReloader::start(path.clone(), 50, move |cfg| cb_swap.store(cfg)).unwrap();
 
         // Write malformed YAML (ttl_secs expects a number, not a string)
         std::fs::write(&path, "risk:\n  ttl_secs: not_a_number\n").unwrap();

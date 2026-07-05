@@ -42,7 +42,7 @@ interface RiskConfig {
   gc_interval_secs: number;
   decay: { min_clean_streak: number; decay_rate: number; max_decay: number };
   canary: { enabled: boolean; paths: string[]; ban_ttl_secs: number };
-  store: { backend: "memory" | "redis"; redis?: { url: string; prefix?: string } };
+  store: { backend: "memory" | "redis"; redis?: { url: string; key_prefix?: string } };
 }
 
 interface RiskActor {
@@ -454,10 +454,10 @@ export const RiskScoringPage: React.FC = () => {
                           </Col>
                           <Col xs={24} sm={8}>
                             <Form.Item
-                              name={["store", "redis", "prefix"]}
+                              name={["store", "redis", "key_prefix"]}
                               label={t("risk.redisPrefix")}
                             >
-                              <Input placeholder="risk:" />
+                              <Input placeholder="waf:risk:" />
                             </Form.Item>
                           </Col>
                         </Row>

@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Add RiskConfig::validate wired into config load"
-status: pending
+status: completed
 effort: 1h
 ---
 

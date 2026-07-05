@@ -1,7 +1,7 @@
 ---
 title: "GH-200 risk: run canary check before seed-layer early return"
 description: "Fix the seed-Score early return in the scorer that skips the canary honeypot check for Tor/datacenter IPs — restore the documented whitelist → canary → other-layers ordering"
-status: pending
+status: completed
 priority: P2
 issue: https://github.com/future-and-go/mini-waf/issues/200
 branch: "main-harness"
@@ -49,8 +49,8 @@ covered by `whitelist_bypasses_canary`, `risk/tests/canary.rs:269-322`).
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Reorder canary check before seed-Score early return](./phase-01-reorder-canary-check-before-seed-score-early-return.md) | Pending |
-| 2 | [Acceptance test + quality gates](./phase-02-acceptance-test-quality-gates.md) | Pending |
+| 1 | [Reorder canary check before seed-Score early return](./phase-01-reorder-canary-check-before-seed-score-early-return.md) | Completed |
+| 2 | [Acceptance test + quality gates](./phase-02-acceptance-test-quality-gates.md) | Completed |
 
 ## Key Decisions
 
@@ -83,8 +83,8 @@ covered by `whitelist_bypasses_canary`, `risk/tests/canary.rs:269-322`).
 
 ## Acceptance Criteria (from issue)
 
-- [ ] Canary check evaluated before (or independently of) the seed early-return. → Phase 1
-- [ ] Test: a seed-classified IP (Tor exit) hitting a canary path gets `force_max`
+- [x] Canary check evaluated before (or independently of) the seed early-return. → Phase 1
+- [x] Test: a seed-classified IP (Tor exit) hitting a canary path gets `force_max`
       + `DynamicBanTable` entry + `Block`. → Phase 2
 
 ## Validation

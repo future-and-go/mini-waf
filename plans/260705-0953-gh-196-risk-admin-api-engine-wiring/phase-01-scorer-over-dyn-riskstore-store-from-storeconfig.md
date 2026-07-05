@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Scorer over dyn RiskStore + store from StoreConfig"
-status: pending
+status: completed
 priority: P1
 dependencies: []
 ---

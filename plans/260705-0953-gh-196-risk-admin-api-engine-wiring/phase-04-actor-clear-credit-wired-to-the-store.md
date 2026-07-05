@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Actor clear/credit wired to the store"
-status: pending
+status: completed
 priority: P1
 dependencies: [1, 2]
 ---

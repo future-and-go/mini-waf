@@ -200,7 +200,7 @@ fn decay_respects_max_decay_floor() {
     // Decay should bring score down but not below MAX_DECAY
     for i in 0..20 {
         let ts = 2000 + i64::from(i) * 100;
-        apply_decay(&mut state, ts);
+        apply_decay(&mut state, ts, &crate::risk::config::DecayConfig::default());
     }
 
     assert!(

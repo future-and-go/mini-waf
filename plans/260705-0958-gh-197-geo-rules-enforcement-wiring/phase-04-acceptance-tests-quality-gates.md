@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Acceptance tests + quality gates"
-status: pending
+status: completed
 priority: P1
 dependencies: [1, 2, 3]
 effort: "2h"
@@ -77,14 +77,14 @@ a request from that country is blocked. Depends on all prior phases.
 
 ## Success Criteria
 
-- [ ] Engine test: block rule loaded via file → `KP` blocked, `US` allowed.
-- [ ] Engine test: removing the rule + reload → `KP` no longer blocked.
-- [ ] Engine test: two allow rows → non-listed country blocked, listed allowed
+- [x] Engine test: block rule loaded via file → `KP` blocked, `US` allowed.
+- [x] Engine test: removing the rule + reload → `KP` no longer blocked.
+- [x] Engine test: two allow rows → non-listed country blocked, listed allowed
       (single unioned AllowOnly rule).
-- [ ] API test: POST rule → file at `rules_path` parses to the expected Block
+- [x] API test: POST rule → file at `rules_path` parses to the expected Block
       rule via `parse_geo_rules` (API↔engine path/contract agreement).
-- [ ] API test: `lookup_ip` returns the stub envelope with no xdb, `success:true`.
-- [ ] `cargo test` (waf-engine, waf-api), `clippy`, `fmt --check` all green.
+- [x] API test: `lookup_ip` returns the stub envelope with no xdb, `success:true`.
+- [x] `cargo test` (waf-engine, waf-api), `clippy`, `fmt --check` all green.
 
 ## Risk Assessment
 

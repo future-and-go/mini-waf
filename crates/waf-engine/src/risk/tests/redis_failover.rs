@@ -7,6 +7,7 @@
 
 use std::time::Duration;
 
+use crate::risk::config::DecayConfig;
 use crate::risk::key::RiskKey;
 use crate::risk::state::{Contributor, ContributorKind, SeedKind};
 use crate::risk::store::RiskStore;
@@ -40,6 +41,7 @@ async fn cache_fallback_on_redis_failure() {
         op_timeout: Duration::from_millis(500),
         breaker_threshold: 5,
         cache_capacity: 1000,
+        decay: DecayConfig::default(),
     })
     .await
     .expect("connect");
@@ -154,6 +156,7 @@ async fn len_counts_state_keys() {
         op_timeout: Duration::from_millis(500),
         breaker_threshold: 5,
         cache_capacity: 1000,
+        decay: DecayConfig::default(),
     })
     .await
     .expect("connect");
@@ -191,6 +194,7 @@ async fn concurrent_applies_are_safe() {
             op_timeout: Duration::from_millis(500),
             breaker_threshold: 5,
             cache_capacity: 1000,
+            decay: DecayConfig::default(),
         })
         .await
         .expect("connect"),

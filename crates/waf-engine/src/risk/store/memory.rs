@@ -14,6 +14,7 @@ use parking_lot::RwLock;
 use tokio::time::interval;
 use tracing::{debug, info};
 
+use crate::risk::config::DecayConfig;
 use crate::risk::decay::apply_decay;
 use crate::risk::key::RiskKey;
 use crate::risk::score::fold;
@@ -28,15 +29,23 @@ pub struct MemoryRiskStore {
     by_ip: DashMap<IpAddr, StateRef>,
     by_fp: DashMap<u64, StateRef>,
     by_session: DashMap<Vec<u8>, StateRef>,
+    decay: DecayConfig,
 }
 
 impl MemoryRiskStore {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_decay(DecayConfig::default())
+    }
+
+    /// Build a store whose decay follows the given config instead of defaults.
+    #[must_use]
+    pub fn with_decay(decay: DecayConfig) -> Self {
         Self {
             by_ip: DashMap::new(),
             by_fp: DashMap::new(),
             by_session: DashMap::new(),
+            decay,
         }
     }
 
@@ -133,6 +142,7 @@ impl RiskStore for MemoryRiskStore {
             return Ok(ApplyResult {
                 state: RiskState::new(now_ms),
                 is_new: true,
+                degraded: false,
             });
         }
 
@@ -150,7 +160,7 @@ impl RiskStore for MemoryRiskStore {
             let mut state = state_ref.write();
             // Decay BEFORE fold (FR-025 §4): read state → decay → fold new deltas
             if !is_new {
-                apply_decay(&mut state, now_ms);
+                apply_decay(&mut state, now_ms, &self.decay);
             }
             fold(&mut state, deltas, now_ms);
         }
@@ -161,7 +171,11 @@ impl RiskStore for MemoryRiskStore {
         }
 
         let state = state_ref.read().clone();
-        Ok(ApplyResult { state, is_new })
+        Ok(ApplyResult {
+            state,
+            is_new,
+            degraded: false,
+        })
     }
 
     #[allow(clippy::option_if_let_else)]
@@ -189,6 +203,40 @@ impl RiskStore for MemoryRiskStore {
 
         self.upsert_indices(key, &state_ref);
         Ok(())
+    }
+
+    async fn clear(&self, key: &RiskKey) -> anyhow::Result<bool> {
+        if key.is_empty() {
+            return Ok(false);
+        }
+
+        let mut candidates: Vec<StateRef> = Vec::with_capacity(3);
+        if let Some(ip) = key.ip
+            && let Some((_, s)) = self.by_ip.remove(&ip)
+        {
+            candidates.push(s);
+        }
+        if let Some(fp) = key.fp_hash
+            && let Some((_, s)) = self.by_fp.remove(&fp)
+        {
+            candidates.push(s);
+        }
+        if let Some(ref sess) = key.session
+            && let Some((_, s)) = self.by_session.remove(sess.as_bytes())
+        {
+            candidates.push(s);
+        }
+        if candidates.is_empty() {
+            return Ok(false);
+        }
+
+        // Remove every index entry that shares an Arc with a removed state,
+        // so axes not present in `key` cannot resurrect the cleared score.
+        let is_candidate = |s: &StateRef| candidates.iter().any(|c| Arc::ptr_eq(c, s));
+        self.by_ip.retain(|_, s| !is_candidate(s));
+        self.by_fp.retain(|_, s| !is_candidate(s));
+        self.by_session.retain(|_, s| !is_candidate(s));
+        Ok(true)
     }
 
     async fn purge_expired(&self, ttl_ms: i64, now_ms: i64) -> anyhow::Result<usize> {

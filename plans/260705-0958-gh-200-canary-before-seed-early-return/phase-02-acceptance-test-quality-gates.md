@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Acceptance test + quality gates"
-status: pending
+status: completed
 priority: P2
 dependencies: [1]
 effort: 30m
@@ -112,12 +112,12 @@ Notes for the implementer:
 
 ## Success Criteria
 
-- [ ] New test fails on unpatched `scorer.rs` (early return) and passes after
+- [x] New test fails on unpatched `scorer.rs` (early return) and passes after
       Phase 1 — confirms it actually guards the bug.
-- [ ] `Block` + `score == 100` + ban-table entry asserted for the Tor-exit +
+- [x] `Block` + `score == 100` + ban-table entry asserted for the Tor-exit +
       canary-path case.
-- [ ] Non-canary seed-Score path asserted to still accrue the seed delta.
-- [ ] `cargo test -p waf-engine risk` and `cargo clippy -p waf-engine --all-targets` green.
+- [x] Non-canary seed-Score path asserted to still accrue the seed delta.
+- [x] `cargo test -p waf-engine risk` and `cargo clippy -p waf-engine --all-targets` green.
 
 ## Risk Assessment
 
