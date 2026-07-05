@@ -5,7 +5,6 @@
 
 use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -18,6 +17,7 @@ use crate::risk::ingest::metrics::IngestMetrics;
 use crate::risk::ingest::signal_to_contributor::SignalWeights;
 use crate::risk::ingest::worker::{Job, spawn_worker};
 use crate::risk::store::RiskStore;
+use crate::time::{Clock, SystemClock};
 
 /// Default channel capacity (65536 per plan).
 pub const DEFAULT_CHANNEL_CAPACITY: usize = 65536;
@@ -29,6 +29,7 @@ pub const DEFAULT_CHANNEL_CAPACITY: usize = 65536;
 pub struct ScoringAggregator {
     tx: mpsc::Sender<Job>,
     metrics: Arc<IngestMetrics>,
+    clock: Arc<dyn Clock>,
 }
 
 impl ScoringAggregator {
@@ -48,11 +49,23 @@ impl ScoringAggregator {
         weights: SignalWeights,
         capacity: usize,
     ) -> (Self, tokio::task::JoinHandle<()>) {
+        Self::start_with_clock(store, weights, capacity, Arc::new(SystemClock))
+    }
+
+    /// Start with an injected clock — submit timestamps and worker lag
+    /// measurements both read it, so tests can drive time deterministically.
+    #[must_use]
+    pub fn start_with_clock(
+        store: Arc<dyn RiskStore>,
+        weights: SignalWeights,
+        capacity: usize,
+        clock: Arc<dyn Clock>,
+    ) -> (Self, tokio::task::JoinHandle<()>) {
         let (tx, rx) = mpsc::channel(capacity);
         let metrics = Arc::new(IngestMetrics::new());
-        let handle = spawn_worker(rx, store, weights, Arc::clone(&metrics));
+        let handle = spawn_worker(rx, store, weights, Arc::clone(&metrics), Arc::clone(&clock));
 
-        (Self { tx, metrics }, handle)
+        (Self { tx, metrics, clock }, handle)
     }
 
     /// Get a reference to the metrics for external monitoring.
@@ -96,7 +109,7 @@ impl RiskAggregator for ScoringAggregator {
             return;
         }
 
-        self.enqueue(Job::for_fp(key.clone(), signals.to_vec(), unix_now_ms()));
+        self.enqueue(Job::for_fp(key.clone(), signals.to_vec(), self.clock.now_ms()));
     }
 
     fn submit_ip(&self, ip: IpAddr, signals: &[Signal]) {
@@ -104,21 +117,8 @@ impl RiskAggregator for ScoringAggregator {
             return;
         }
 
-        self.enqueue(Job::for_ip(ip, signals.to_vec(), unix_now_ms()));
+        self.enqueue(Job::for_ip(ip, signals.to_vec(), self.clock.now_ms()));
     }
-}
-
-#[allow(clippy::cast_possible_truncation)]
-fn unix_now_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| {
-        // as_millis returns u128; we saturate to i64::MAX (292M years — safe)
-        let ms = d.as_millis();
-        if ms > i64::MAX as u128 {
-            i64::MAX
-        } else {
-            ms as i64 // safe: guarded by if
-        }
-    })
 }
 
 #[cfg(test)]

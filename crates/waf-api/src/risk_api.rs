@@ -17,46 +17,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use waf_engine::risk::config::RiskConfig;
 
+use crate::config_files::{read_yaml_opt, resolve_path, write_yaml};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
-
-// ─── Path helper (shared pattern) ────────────────────────────────────────────
-
-fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
-    state.main_config_file.as_ref().map_or_else(
-        || std::path::PathBuf::from(relative),
-        |main| {
-            let p = std::path::Path::new(main.as_str());
-            let root = p
-                .parent()
-                .and_then(|c| c.parent())
-                .unwrap_or_else(|| std::path::Path::new("."));
-            root.join(relative)
-        },
-    )
-}
-
-async fn read_yaml_opt(path: &std::path::Path) -> Option<Value> {
-    let raw = tokio::fs::read_to_string(path).await.ok()?;
-    serde_yaml::from_str::<Value>(&raw).ok()
-}
-
-async fn write_yaml(path: &std::path::Path, value: &Value) -> Result<(), ApiError> {
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("mkdir: {e}")))?;
-    }
-    let s = serde_yaml::to_string(value).map_err(|e| ApiError::Internal(anyhow::anyhow!("{e}")))?;
-    let tmp = path.with_extension("yaml.tmp");
-    tokio::fs::write(&tmp, s.as_bytes())
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("write: {e}")))?;
-    tokio::fs::rename(&tmp, path)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("rename: {e}")))?;
-    Ok(())
-}
 
 // ─── Config helpers ───────────────────────────────────────────────────────────
 

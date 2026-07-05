@@ -20,6 +20,7 @@ use crate::risk::key::RiskKey;
 use crate::risk::score::fold;
 use crate::risk::state::{Contributor, RiskState};
 use crate::risk::store::store_trait::{ApplyResult, RiskStore};
+use crate::time::Clock;
 
 type StateRef = Arc<RwLock<RiskState>>;
 
@@ -50,13 +51,13 @@ impl MemoryRiskStore {
     }
 
     /// Spawn a background task that periodically purges expired entries.
-    pub fn start_purge_loop(self: &Arc<Self>, ttl_ms: i64, interval_secs: u64) {
+    pub fn start_purge_loop(self: &Arc<Self>, ttl_ms: i64, interval_secs: u64, clock: Arc<dyn Clock>) {
         let store = Arc::clone(self);
         tokio::spawn(async move {
             let mut tick = interval(Duration::from_secs(interval_secs));
             loop {
                 tick.tick().await;
-                let now_ms = chrono::Utc::now().timestamp_millis();
+                let now_ms = clock.now_ms();
                 match store.purge_expired(ttl_ms, now_ms).await {
                     Ok(n) if n > 0 => debug!(purged = n, "risk store: purged expired entries"),
                     Ok(_) => {}

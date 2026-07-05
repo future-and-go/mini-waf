@@ -19,22 +19,9 @@ use serde_json::{Value, json};
 use waf_engine::checks::tx_velocity::config::{TxVelocityDocument, TxVelocityFileConfig};
 
 use crate::auth::validate_access_token;
+use crate::config_files::{resolve_path, write_yaml_str};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
-
-fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
-    state.main_config_file.as_ref().map_or_else(
-        || std::path::PathBuf::from(relative),
-        |main| {
-            let p = std::path::Path::new(main.as_str());
-            let root = p
-                .parent()
-                .and_then(|c| c.parent())
-                .unwrap_or_else(|| std::path::Path::new("."));
-            root.join(relative)
-        },
-    )
-}
 
 fn bearer_username(headers: &HeaderMap, secret: &str) -> Option<String> {
     let token = headers.get(AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ")?;
@@ -75,18 +62,7 @@ pub async fn put_tx_velocity_config(
         .map_err(|e| ApiError::BadRequest(format!("tx-velocity config validation: {e}")))?;
 
     let path = resolve_path(&state, "configs/tx-velocity.yaml");
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("mkdir: {e}")))?;
-    }
-    let tmp = path.with_extension("yaml.tmp");
-    tokio::fs::write(&tmp, yaml_str.as_bytes())
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("write: {e}")))?;
-    tokio::fs::rename(&tmp, &path)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("rename: {e}")))?;
+    write_yaml_str(&path, &yaml_str).await?;
 
     // Audit the config mutation.
     let admin_username = bearer_username(&headers, &state.jwt_secret);
