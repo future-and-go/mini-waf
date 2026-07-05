@@ -1,7 +1,7 @@
 ---
 title: "GH-204 risk: enforce per-request delta cap, honor DecayConfig, add RiskConfig::validate"
 description: "Wire the defined-but-unused per-request delta cap into the scorer, thread DecayConfig into both store backends so it stops being dead config, and add RiskConfig::validate at the parse boundary"
-status: pending
+status: completed
 priority: P2
 effort: 5h
 branch: "main-harness"

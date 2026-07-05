@@ -14,6 +14,7 @@ use parking_lot::RwLock;
 use tokio::time::interval;
 use tracing::{debug, info};
 
+use crate::risk::config::DecayConfig;
 use crate::risk::decay::apply_decay;
 use crate::risk::key::RiskKey;
 use crate::risk::score::fold;
@@ -28,15 +29,23 @@ pub struct MemoryRiskStore {
     by_ip: DashMap<IpAddr, StateRef>,
     by_fp: DashMap<u64, StateRef>,
     by_session: DashMap<Vec<u8>, StateRef>,
+    decay: DecayConfig,
 }
 
 impl MemoryRiskStore {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_decay(DecayConfig::default())
+    }
+
+    /// Build a store whose decay follows the given config instead of defaults.
+    #[must_use]
+    pub fn with_decay(decay: DecayConfig) -> Self {
         Self {
             by_ip: DashMap::new(),
             by_fp: DashMap::new(),
             by_session: DashMap::new(),
+            decay,
         }
     }
 
@@ -151,7 +160,7 @@ impl RiskStore for MemoryRiskStore {
             let mut state = state_ref.write();
             // Decay BEFORE fold (FR-025 §4): read state → decay → fold new deltas
             if !is_new {
-                apply_decay(&mut state, now_ms);
+                apply_decay(&mut state, now_ms, &self.decay);
             }
             fold(&mut state, deltas, now_ms);
         }

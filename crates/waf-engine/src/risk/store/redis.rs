@@ -29,7 +29,7 @@ use tokio::time::timeout;
 use tracing::{debug, warn};
 
 use super::redis_lua::{APPLY_SCRIPT, CLEAR_SCRIPT, FORCE_MAX_SCRIPT};
-use crate::risk::decay::{DECAY_RATE, MAX_DECAY, MIN_CLEAN_STREAK};
+use crate::risk::config::DecayConfig;
 use crate::risk::key::RiskKey;
 use crate::risk::state::{Contributor, RiskState};
 use crate::risk::store::store_trait::{ApplyResult, RiskStore};
@@ -49,6 +49,8 @@ pub struct RedisRiskConfig {
     pub breaker_threshold: u32,
     /// LRU cache capacity for fail-open fallback (default: 10000).
     pub cache_capacity: usize,
+    /// Decay parameters fed into the Lua apply script.
+    pub decay: DecayConfig,
 }
 
 impl Default for RedisRiskConfig {
@@ -60,6 +62,7 @@ impl Default for RedisRiskConfig {
             op_timeout: Duration::from_millis(100),
             breaker_threshold: 5,
             cache_capacity: 10_000,
+            decay: DecayConfig::default(),
         }
     }
 }
@@ -367,9 +370,9 @@ impl RiskStore for RedisRiskStore {
             .arg(now_ms)
             .arg(&deltas_json)
             .arg(self.cfg.ttl_secs)
-            .arg(MIN_CLEAN_STREAK)
-            .arg(DECAY_RATE)
-            .arg(MAX_DECAY);
+            .arg(self.cfg.decay.min_clean_streak)
+            .arg(self.cfg.decay.decay_rate)
+            .arg(self.cfg.decay.max_decay);
 
         let res = timeout(self.cfg.op_timeout, invocation.invoke_async::<String>(&mut conn)).await;
 
@@ -663,6 +666,7 @@ mod tests {
             op_timeout: Duration::from_nanos(1),
             breaker_threshold: 5,
             cache_capacity: 100,
+            decay: DecayConfig::default(),
         })
         .await
         .expect("connect to REDIS_TEST_URL");
@@ -705,6 +709,7 @@ mod tests {
             op_timeout: Duration::from_millis(500),
             breaker_threshold: 5,
             cache_capacity: 100,
+            decay: DecayConfig::default(),
         })
         .await
         .expect("connect to REDIS_TEST_URL");
@@ -741,6 +746,7 @@ mod tests {
             op_timeout: Duration::from_millis(500),
             breaker_threshold: 5,
             cache_capacity: 100,
+            decay: DecayConfig::default(),
         })
         .await
         .expect("connect to REDIS_TEST_URL");
