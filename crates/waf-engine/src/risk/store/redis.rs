@@ -647,30 +647,81 @@ mod tests {
         assert_eq!(result.state.clamped_score, 0);
     }
 
-    /// Timeout arm of `apply` + faithful `read` error — runs only when
-    /// `REDIS_TEST_URL` is set. A 1ns op timeout forces every round-trip
-    /// through the failure arms against a real server.
+    /// Minimal RESP stub: answers every command received before (and
+    /// including) the first `INFO` — the connection handshake (`CLIENT
+    /// SETINFO` pipeline, `PING`, `INFO cluster`) — with `+PONG`, then goes
+    /// silent forever. Every later command hangs, so client-side op timeouts
+    /// fire deterministically regardless of host speed.
+    async fn spawn_silent_after_handshake_stub() -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind stub");
+        let addr = listener.local_addr().expect("stub addr");
+        tokio::spawn(async move {
+            loop {
+                let Ok((sock, _)) = listener.accept().await else { return };
+                tokio::spawn(stub_serve_connection(sock));
+            }
+        });
+        addr
+    }
+
+    /// One `+PONG` per RESP command until the `INFO` frame is answered, then
+    /// reads (and ignores) everything so later commands hang.
+    async fn stub_serve_connection(mut sock: tokio::net::TcpStream) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let mut buf = [0_u8; 4096];
+        let mut silent = false;
+        loop {
+            let chunk = match sock.read(&mut buf).await {
+                Ok(0) | Err(_) => return,
+                Ok(n) => buf.get(..n).unwrap_or_default(),
+            };
+            if silent {
+                continue;
+            }
+            // One reply per RESP array header ('*' at the start of a frame);
+            // handshake args carry neither '*' nor CRLF, so this count is
+            // exact.
+            let commands = chunk
+                .iter()
+                .enumerate()
+                .filter(|&(i, &b)| b == b'*' && (i == 0 || chunk.get(..i).is_some_and(|p| p.ends_with(b"\r\n"))))
+                .count();
+            for _ in 0..commands {
+                if sock.write_all(b"+PONG\r\n").await.is_err() {
+                    return;
+                }
+            }
+            // Exact frame match — `SETINFO` also contains the substring
+            // `INFO`.
+            if chunk.windows(8).any(|w| w == b"$4\r\nINFO") {
+                silent = true;
+            }
+        }
+    }
+
+    /// Timeout arm of `apply` + faithful `read` error. The stub server stops
+    /// responding after the connection handshake, so both operations hit the
+    /// timeout arm deterministically. (A tiny timeout against a live server
+    /// is a race — the response can beat the timer, and a client-side
+    /// "timed-out" apply still executes server-side.)
     #[tokio::test]
     async fn outage_apply_degrades_and_read_errors() {
         use crate::risk::key::RiskKey;
         use std::net::Ipv4Addr;
 
-        let Ok(url) = std::env::var("REDIS_TEST_URL") else {
-            tracing::info!("skipping: REDIS_TEST_URL unset");
-            return;
-        };
-
+        let addr = spawn_silent_after_handshake_stub().await;
         let store = RedisRiskStore::new(RedisRiskConfig {
-            url,
+            url: format!("redis://{addr}"),
             key_prefix: unique_prefix(),
             ttl_secs: 3600,
-            op_timeout: Duration::from_nanos(1),
+            op_timeout: Duration::from_millis(50),
             breaker_threshold: 5,
             cache_capacity: 100,
             decay: DecayConfig::default(),
         })
         .await
-        .expect("connect to REDIS_TEST_URL");
+        .expect("connect to silent-after-handshake stub");
 
         let key = RiskKey::from_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 101)));
 

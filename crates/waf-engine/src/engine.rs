@@ -1501,10 +1501,20 @@ mod tests {
             port: 80,
             path: path.into(),
             query: String::new(),
-            headers: HashMap::from([(
-                "user-agent".into(),
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0".into(),
-            )]),
+            // A browser-like UA must come with the headers real browsers
+            // always send, or the header-sanity anomaly detector adds +5 per
+            // missing header and skews every risk-score expectation below.
+            headers: HashMap::from([
+                (
+                    "user-agent".into(),
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0".into(),
+                ),
+                (
+                    "accept".into(),
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8".into(),
+                ),
+                ("accept-language".into(), "en-US,en;q=0.9".into()),
+            ]),
             body_preview: Bytes::new(),
             content_length: 0,
             is_tls: false,
@@ -2043,6 +2053,25 @@ mod tests {
         let mut ctx = make_ctx("risk-test", "/clean", "203.0.113.61");
         let decision = engine.inspect(&mut ctx).await;
         assert_eq!(decision.risk_score, 0);
+        assert!(matches!(decision.action, WafAction::Allow));
+    }
+
+    /// L2 anomaly deltas must flow into the enforcement score: a browser UA
+    /// missing the headers real browsers always send earns the header-sanity
+    /// penalty (+5 per missing header) on the cumulative score.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn header_anomaly_deltas_feed_cumulative_score() {
+        let (engine, _container) = spawn_engine().await;
+        engine.replace_risk_config(enabled_risk_config());
+
+        let mut ctx = make_ctx("risk-test", "/clean", "203.0.113.80");
+        ctx.headers.remove("accept");
+        ctx.headers.remove("accept-language");
+        let decision = engine.inspect(&mut ctx).await;
+        assert_eq!(
+            decision.risk_score, 10,
+            "missing accept and accept-language on a browser UA must each add +5"
+        );
         assert!(matches!(decision.action, WafAction::Allow));
     }
 
