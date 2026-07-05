@@ -176,7 +176,10 @@ mod tests {
     #[test]
     fn credit_amount_gate_matches_ui_contract() {
         for ui_amount in [50, 25, 10, DEFAULT_CREDIT_AMOUNT] {
-            assert!(validate_credit_amount(ui_amount).is_ok(), "UI amount {ui_amount} must pass");
+            assert!(
+                validate_credit_amount(ui_amount).is_ok(),
+                "UI amount {ui_amount} must pass"
+            );
         }
         for bad in [-50, -25, -10, 0, 101] {
             assert!(validate_credit_amount(bad).is_err(), "amount {bad} must be rejected");

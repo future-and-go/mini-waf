@@ -2021,7 +2021,9 @@ mod tests {
     async fn rule_match_risk_deltas_raise_cumulative_score() {
         let (engine, _container) = spawn_engine().await;
         engine.replace_risk_config(enabled_risk_config());
-        engine.custom_rules.add_file_rule(risk_delta_rule("gh226-bump", "/attack", 80));
+        engine
+            .custom_rules
+            .add_file_rule(risk_delta_rule("gh226-bump", "/attack", 80));
 
         let mut ctx = make_ctx("risk-test", "/attack/probe", "203.0.113.60");
         let decision = engine.inspect(&mut ctx).await;
@@ -2051,7 +2053,9 @@ mod tests {
     async fn fp_axis_risk_enforces_across_ips() {
         let (engine, _container) = spawn_engine().await;
         engine.replace_risk_config(enabled_risk_config());
-        engine.custom_rules.add_file_rule(risk_delta_rule("gh226-fp", "/attack", 80));
+        engine
+            .custom_rules
+            .add_file_rule(risk_delta_rule("gh226-fp", "/attack", 80));
 
         // Accrue risk under IP A with fingerprint X.
         let mut ctx = make_ctx("risk-test", "/attack/probe", "203.0.113.70");
