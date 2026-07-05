@@ -54,6 +54,10 @@ pub enum Signal {
     /// FR-012 — burst of limit-change requests within `window_sec`.
     /// Same `count`/`ok_count` semantics as `WithdrawalVelocity`.
     LimitChangeBurst { count: u32, ok_count: u32, window_sec: u32 },
+    /// FR-005 — `DDoS` detector verdict credited to the offending actor.
+    /// `risk_delta` is the detector-decided severity (0-100), applied
+    /// verbatim as the contributor delta — never weight-table mapped.
+    DdosBurst { risk_delta: u8 },
 }
 
 /// Reason an HTTP/2 anomaly was flagged. Closed enum so risk scorer can
@@ -87,6 +91,7 @@ impl Signal {
             Self::TxSequenceTooFast { .. } => "tx_sequence_too_fast",
             Self::WithdrawalVelocity { .. } => "withdrawal_velocity",
             Self::LimitChangeBurst { .. } => "limit_change_burst",
+            Self::DdosBurst { .. } => "ddos_burst",
         }
     }
 }
@@ -112,5 +117,6 @@ mod tests {
         assert_eq!(Signal::Regularity { cv_x1000: 100 }.name(), "regularity");
         assert_eq!(Signal::ZeroDepth { samples: 4 }.name(), "zero_depth");
         assert_eq!(Signal::MissingReferer.name(), "missing_referer");
+        assert_eq!(Signal::DdosBurst { risk_delta: 50 }.name(), "ddos_burst");
     }
 }

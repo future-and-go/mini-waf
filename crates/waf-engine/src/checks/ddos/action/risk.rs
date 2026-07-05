@@ -1,7 +1,9 @@
 //! FR-005 phase-05 — Risk bump action for `DDoS` verdicts.
 //!
 //! Submits risk signals to FR-010's [`RiskAggregator`] when `DDoS` violations
-//! are detected. Fire-and-forget semantics — no blocking on scorer response.
+//! are detected. Fire-and-forget via the sync `submit_ip` seam — the actor is
+//! the client IP on the `RiskKey` IP axis, so the request-path scorer joins
+//! the same state it reads for that IP. No blocking, no runtime required.
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -11,14 +13,13 @@ use tracing::debug;
 use crate::checks::ddos::detector::DetectorVerdict;
 use crate::device_fp::aggregator::RiskAggregator;
 use crate::device_fp::signal::Signal;
-use crate::device_fp::types::FpKey;
 
 use super::{ActionExecutor, ActionResult};
 
 /// Risk bump action that submits `DDoS` signals to the risk aggregator.
 ///
-/// Uses the [`BurstInterval`](Signal::BurstInterval) signal variant to report
-/// `DDoS` burst detections. The aggregator handles scoring asynchronously.
+/// Uses [`Signal::DdosBurst`] to carry the detector-decided severity verbatim
+/// to the scorer. The aggregator handles scoring asynchronously.
 pub struct RiskBumpAction {
     aggregator: Arc<dyn RiskAggregator>,
 }
@@ -27,27 +28,6 @@ impl RiskBumpAction {
     #[must_use]
     pub fn new(aggregator: Arc<dyn RiskAggregator>) -> Self {
         Self { aggregator }
-    }
-
-    /// Build an [`FpKey`] from client IP for signal submission.
-    ///
-    /// `DDoS` detection operates on IPs, not TLS fingerprints. We create a
-    /// minimal [`FpKey`] with the IP encoded in JA3 field for keying purposes.
-    fn ip_to_fp_key(ip: IpAddr) -> FpKey {
-        use crate::device_fp::types::FingerprintValue;
-        FpKey {
-            ja3: Some(FingerprintValue::new(format!("ddos:{ip}"))),
-            ja4: None,
-            h2_akamai: None,
-        }
-    }
-
-    /// Build the signal for a `DDoS` burst detection.
-    fn burst_signal(risk_delta: u8) -> Signal {
-        // BurstInterval count field represents severity (clamped to u16)
-        Signal::BurstInterval {
-            count: u16::from(risk_delta),
-        }
     }
 }
 
@@ -68,16 +48,7 @@ impl ActionExecutor for RiskBumpAction {
             return ActionResult::noop();
         }
 
-        let fp_key = Self::ip_to_fp_key(ip);
-        let signal = Self::burst_signal(risk_delta);
-
-        // Fire-and-forget submission via block_in_place bridge
-        // The aggregator contract says submit MUST NOT block, so this is safe
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                self.aggregator.submit(&fp_key, &[signal]).await;
-            });
-        });
+        self.aggregator.submit_ip(ip, &[Signal::DdosBurst { risk_delta }]);
 
         debug!(
             action = "risk_bump",
@@ -105,8 +76,8 @@ mod tests {
         (agg, action)
     }
 
-    #[tokio::test]
-    async fn ignores_allow_verdict() {
+    #[test]
+    fn ignores_allow_verdict() {
         let (agg, action) = make_risk_action();
         let ip: IpAddr = "192.168.1.1".parse().unwrap();
 
@@ -115,8 +86,8 @@ mod tests {
         assert!(agg.is_empty());
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn submits_soft_anomaly() {
+    #[test]
+    fn submits_soft_anomaly() {
         let (agg, action) = make_risk_action();
         let ip: IpAddr = "10.0.0.1".parse().unwrap();
 
@@ -127,14 +98,15 @@ mod tests {
         let snap = agg.snapshot();
         assert_eq!(snap.len(), 1);
         let first = snap.first().expect("expected one submission");
+        assert_eq!(first.actor_ip, Some(ip));
         assert!(matches!(
             first.signals.as_slice(),
-            [Signal::BurstInterval { count: 50 }]
+            [Signal::DdosBurst { risk_delta: 50 }]
         ));
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn submits_hard_burst_max_risk() {
+    #[test]
+    fn submits_hard_burst_max_risk() {
         let (agg, action) = make_risk_action();
         let ip: IpAddr = "172.16.0.1".parse().unwrap();
 
@@ -149,21 +121,15 @@ mod tests {
         let snap = agg.snapshot();
         assert_eq!(snap.len(), 1);
         let first = snap.first().expect("expected one submission");
+        assert_eq!(first.actor_ip, Some(ip));
         assert!(matches!(
             first.signals.as_slice(),
-            [Signal::BurstInterval { count: 100 }]
+            [Signal::DdosBurst { risk_delta: 100 }]
         ));
     }
 
-    #[tokio::test]
-    async fn fp_key_contains_ip() {
-        let ip: IpAddr = "8.8.8.8".parse().unwrap();
-        let key = RiskBumpAction::ip_to_fp_key(ip);
-        assert!(key.ja3.unwrap().as_str().contains("8.8.8.8"));
-    }
-
-    #[tokio::test]
-    async fn zero_soft_anomaly_is_noop() {
+    #[test]
+    fn zero_soft_anomaly_is_noop() {
         let (agg, action) = make_risk_action();
         let ip: IpAddr = "1.1.1.1".parse().unwrap();
 

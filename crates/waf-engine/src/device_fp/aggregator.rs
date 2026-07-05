@@ -11,7 +11,11 @@
 //! ### Semantics
 //! - `submit` is async but **MUST NOT block** the caller. Implementations
 //!   forward to a bounded channel / queue and drop-with-warn on overflow.
-//! - Caller treats `submit` as fire-and-forget — no error path, no result.
+//! - `submit_ip` is the sync twin for callers on the request path that
+//!   identify the actor by client IP instead of a fingerprint. Same
+//!   contract: queue fan-out, drop-with-warn on overflow, never blocks —
+//!   callable without a runtime.
+//! - Caller treats both as fire-and-forget — no error path, no result.
 //! - `key` is borrowed; clone if the impl needs to retain it.
 //!
 //! ### Skeleton implementation
@@ -29,6 +33,7 @@
 //! }
 //! ```
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -42,6 +47,11 @@ pub trait RiskAggregator: Send + Sync {
     /// Submit a batch of signals tied to one fingerprint key. Implementations
     /// MUST NOT block the caller — fan out to a queue/channel internally.
     async fn submit(&self, key: &FpKey, signals: &[Signal]);
+
+    /// Submit signals credited to an actor identified by client IP.
+    /// Sync and non-blocking by contract (queue fan-out, drop-with-warn on
+    /// overflow) — callable from the request path without a runtime.
+    fn submit_ip(&self, ip: IpAddr, signals: &[Signal]);
 }
 
 /// Default aggregator — discards all submissions. Used when no risk scorer
@@ -63,13 +73,24 @@ impl RiskAggregator for NoopAggregator {
             "noop aggregator: submission dropped"
         );
     }
+
+    fn submit_ip(&self, ip: IpAddr, signals: &[Signal]) {
+        tracing::debug!(
+            target: "device_fp::aggregator",
+            %ip,
+            count = signals.len(),
+            "noop aggregator: submission dropped"
+        );
+    }
 }
 
 /// One recorded submission — `(key, signals)` pair captured by
-/// [`LoggingAggregator`] for assertions in integration tests.
+/// [`LoggingAggregator`] for assertions in integration tests. IP-keyed
+/// submissions carry `actor_ip` and a default (empty) `key`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AggregatorSubmission {
     pub key: FpKey,
+    pub actor_ip: Option<IpAddr>,
     pub signals: Vec<Signal>,
 }
 
@@ -117,15 +138,30 @@ impl Default for LoggingAggregator {
     }
 }
 
-#[async_trait]
-impl RiskAggregator for LoggingAggregator {
-    async fn submit(&self, key: &FpKey, signals: &[Signal]) {
+impl LoggingAggregator {
+    fn record(&self, submission: AggregatorSubmission) {
         let mut q = self.inner.lock();
         if q.len() == self.cap {
             q.pop_front();
         }
-        q.push_back(AggregatorSubmission {
+        q.push_back(submission);
+    }
+}
+
+#[async_trait]
+impl RiskAggregator for LoggingAggregator {
+    async fn submit(&self, key: &FpKey, signals: &[Signal]) {
+        self.record(AggregatorSubmission {
             key: key.clone(),
+            actor_ip: None,
+            signals: signals.to_vec(),
+        });
+    }
+
+    fn submit_ip(&self, ip: IpAddr, signals: &[Signal]) {
+        self.record(AggregatorSubmission {
+            key: FpKey::default(),
+            actor_ip: Some(ip),
             signals: signals.to_vec(),
         });
     }
@@ -175,5 +211,33 @@ mod tests {
             agg.submit(&empty_key(), &[]).await;
         }
         assert_eq!(agg.len(), 2);
+    }
+
+    #[test]
+    fn logging_submit_ip_records_actor_ip() {
+        use std::net::Ipv4Addr;
+
+        let agg = LoggingAggregator::new(8);
+        let ip = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 9));
+        agg.submit_ip(
+            ip,
+            &[Signal::H2Anomaly {
+                reason: H2AnomalyReason::BadSettings,
+            }],
+        );
+
+        let snap = agg.snapshot();
+        assert_eq!(snap.len(), 1);
+        let sub = snap.first().unwrap();
+        assert_eq!(sub.actor_ip, Some(ip));
+        assert!(sub.key.is_empty(), "IP submissions carry an empty fp key");
+        assert_eq!(sub.signals.len(), 1);
+    }
+
+    #[test]
+    fn noop_submit_ip_does_not_panic() {
+        use std::net::Ipv4Addr;
+
+        NoopAggregator.submit_ip(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 10)), &[]);
     }
 }

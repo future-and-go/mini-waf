@@ -4,6 +4,7 @@
 //! and applies them to the risk store. Best-effort: job errors are logged but
 //! don't stop the worker.
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
@@ -16,19 +17,35 @@ use crate::risk::key::RiskKey;
 use crate::risk::score::clamp_per_request_deltas;
 use crate::risk::store::RiskStore;
 
-/// Job submitted to the worker queue.
+/// Job submitted to the worker queue. Carries at least one actor axis:
+/// a fingerprint key (device-fp submissions) or a client IP (request-path
+/// submissions that must join the scorer's IP-keyed actor).
 #[derive(Debug)]
 pub struct Job {
-    pub fp_key: FpKey,
+    pub fp_key: Option<FpKey>,
+    pub actor_ip: Option<IpAddr>,
     pub signals: Vec<crate::device_fp::signal::Signal>,
     pub submitted_ms: i64,
 }
 
 impl Job {
+    /// Job keyed by fingerprint (device-fp pipeline).
     #[must_use]
-    pub const fn new(fp_key: FpKey, signals: Vec<crate::device_fp::signal::Signal>, submitted_ms: i64) -> Self {
+    pub const fn for_fp(fp_key: FpKey, signals: Vec<crate::device_fp::signal::Signal>, submitted_ms: i64) -> Self {
         Self {
-            fp_key,
+            fp_key: Some(fp_key),
+            actor_ip: None,
+            signals,
+            submitted_ms,
+        }
+    }
+
+    /// Job keyed by client IP (sync request-path submissions).
+    #[must_use]
+    pub const fn for_ip(ip: IpAddr, signals: Vec<crate::device_fp::signal::Signal>, submitted_ms: i64) -> Self {
+        Self {
+            fp_key: None,
+            actor_ip: Some(ip),
             signals,
             submitted_ms,
         }
@@ -76,20 +93,21 @@ async fn process_job(
     let now_ms = chrono::Utc::now().timestamp_millis();
     let lag_ms = now_ms.saturating_sub(job.submitted_ms).max(0);
 
-    // Build RiskKey from FpKey — using fp_hash only (IP from sync path)
-    let Some(fp_hash) = RiskKey::hash_fp_key(&job.fp_key) else {
-        // Empty FpKey can't be resolved to a RiskKey
+    // Resolve the actor axes the job carries; a job with neither a hashable
+    // fingerprint nor an IP cannot be credited to anyone.
+    let fp_hash = job.fp_key.as_ref().and_then(RiskKey::hash_fp_key);
+    if job.actor_ip.is_none() && fp_hash.is_none() {
         metrics.inc_dropped_key_unresolved();
         debug!(
             target: "risk::ingest",
-            "dropping job: FpKey is empty, cannot resolve to RiskKey"
+            "dropping job: no actor axis (empty FpKey, no IP), cannot resolve to RiskKey"
         );
         return Ok(());
-    };
+    }
 
     let risk_key = RiskKey {
-        ip: None, // Async path uses fp_hash only; sync path handles IP
-        fp_hash: Some(fp_hash),
+        ip: job.actor_ip,
+        fp_hash,
         session: None,
     };
 
@@ -145,7 +163,7 @@ mod tests {
         let weights = SignalWeights::default();
         let metrics = Arc::new(IngestMetrics::new());
 
-        let job = Job::new(
+        let job = Job::for_fp(
             test_fp_key("test-ja3"),
             vec![Signal::FpConflict { distinct_uas: 3 }],
             chrono::Utc::now().timestamp_millis(),
@@ -154,7 +172,7 @@ mod tests {
         process_job(&job, &store, &weights, &metrics).await.unwrap();
 
         // Verify state was updated
-        let fp_hash = RiskKey::hash_fp_key(&job.fp_key).unwrap();
+        let fp_hash = RiskKey::hash_fp_key(job.fp_key.as_ref().unwrap()).unwrap();
         let key = RiskKey {
             ip: None,
             fp_hash: Some(fp_hash),
@@ -171,8 +189,8 @@ mod tests {
         let weights = SignalWeights::default();
         let metrics = Arc::new(IngestMetrics::new());
 
-        let job = Job::new(
-            FpKey::default(), // Empty key
+        let job = Job::for_fp(
+            FpKey::default(), // Empty key — and no IP axis
             vec![Signal::FpConflict { distinct_uas: 3 }],
             chrono::Utc::now().timestamp_millis(),
         );
@@ -181,6 +199,31 @@ mod tests {
 
         assert_eq!(metrics.dropped_key_unresolved(), 1);
         assert_eq!(metrics.processed_total(), 0);
+    }
+
+    #[tokio::test]
+    async fn ip_keyed_job_applies_to_ip_axis() {
+        use std::net::Ipv4Addr;
+
+        let store: Arc<dyn RiskStore> = Arc::new(MemoryRiskStore::new());
+        let weights = SignalWeights::default();
+        let metrics = Arc::new(IngestMetrics::new());
+
+        let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
+        let job = Job::for_ip(
+            ip,
+            vec![Signal::FpConflict { distinct_uas: 3 }],
+            chrono::Utc::now().timestamp_millis(),
+        );
+
+        process_job(&job, &store, &weights, &metrics).await.unwrap();
+
+        // The delta must land on the same IP axis the request-path scorer
+        // reads via `RiskKey::from_ip`.
+        let state = store.read(&RiskKey::from_ip(ip)).await.unwrap();
+        assert!(state.is_some(), "IP-keyed job must be readable at RiskKey::from_ip");
+        assert!(state.unwrap().clamped_score > 0);
+        assert_eq!(metrics.processed_total(), 1);
     }
 
     #[tokio::test]
@@ -195,7 +238,7 @@ mod tests {
         // Send jobs
         for i in 0..5 {
             metrics.inc_queue_depth();
-            tx.send(Job::new(
+            tx.send(Job::for_fp(
                 test_fp_key(&format!("key-{i}")),
                 vec![Signal::H2Anomaly {
                     reason: H2AnomalyReason::BadSettings,
