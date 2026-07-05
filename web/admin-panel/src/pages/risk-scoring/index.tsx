@@ -120,7 +120,11 @@ export const RiskScoringPage: React.FC = () => {
     errorNotification: false,
   });
   const metrics = metricsQuery.result?.data;
-  const metricsError = metricsQuery.query.isError;
+  // 501 means the backend explicitly does not implement the endpoint yet —
+  // render that distinctly from a transient backend error, and never as data.
+  const metricsNotImplemented =
+    (metricsQuery.query.error as { statusCode?: number } | null)?.statusCode === 501;
+  const metricsError = metricsQuery.query.isError && !metricsNotImplemented;
 
   // ── API: config ───────────────────────────────────────────────────────────
 
@@ -152,6 +156,9 @@ export const RiskScoringPage: React.FC = () => {
       ? (actorsQuery.result.data as unknown as RiskActor[])
       : [];
   const actorsTotal = actorsQuery.result?.data?.total ?? actors.length;
+  const actorsNotImplemented =
+    (actorsQuery.query.error as { statusCode?: number } | null)?.statusCode === 501;
+  const actorsError = actorsQuery.query.isError && !actorsNotImplemented;
 
   const distributionData = useMemo(() => buildDistributionData(actors), [actors]);
 
@@ -303,7 +310,20 @@ export const RiskScoringPage: React.FC = () => {
         </Space>
       </Space>
 
-      {/* Metrics error fallback */}
+      {/* Metrics not-implemented / error fallback */}
+      {metricsNotImplemented && (
+        <Alert
+          type="info"
+          showIcon
+          message={t("risk.metricsNotImplemented", {
+            defaultValue: "Risk metrics are not implemented yet",
+          })}
+          description={t("risk.metricsNotImplementedDesc", {
+            defaultValue:
+              "The gateway does not aggregate risk metrics yet — the KPIs below are unavailable, not zero.",
+          })}
+        />
+      )}
       {metricsError && (
         <Alert
           type="warning"
@@ -575,7 +595,13 @@ export const RiskScoringPage: React.FC = () => {
                   justifyContent: "center",
                 }}
               >
-                <Typography.Text type="secondary">{t("risk.noActors")}</Typography.Text>
+                <Typography.Text type="secondary">
+                  {actorsNotImplemented || actorsError
+                    ? t("risk.distributionUnavailable", {
+                        defaultValue: "No actor data available",
+                      })
+                    : t("risk.noActors")}
+                </Typography.Text>
               </div>
             )}
           </Card>
@@ -583,7 +609,19 @@ export const RiskScoringPage: React.FC = () => {
 
         <Col xs={24} lg={14}>
           <Card size="small" title={t("risk.liveActors")}>
-            {actorsQuery.query.isError ? (
+            {actorsNotImplemented ? (
+              <Alert
+                type="info"
+                showIcon
+                message={t("risk.actorsNotImplemented", {
+                  defaultValue: "Actor listing is not implemented yet",
+                })}
+                description={t("risk.actorsNotImplementedDesc", {
+                  defaultValue:
+                    "The gateway cannot enumerate risk actors yet — this is missing data, not an empty threat list. Credit/clear actions still mutate live per-IP state.",
+                })}
+              />
+            ) : actorsError ? (
               <Alert
                 type="warning"
                 showIcon
