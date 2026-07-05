@@ -111,14 +111,13 @@ pub async fn put_risk_config(State(state): State<Arc<AppState>>, Json(body): Jso
     Ok(Json(resp))
 }
 
+/// Metrics aggregation does not exist yet: `RiskStore` has no query surface
+/// for counts or score percentiles. 501 keeps the UI from rendering zero
+/// KPIs as if the system were healthy and idle.
 pub async fn get_risk_metrics(_: State<Arc<AppState>>) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({
-        "success": true,
-        "data": {
-            "actor_count": 0, "avg_score": 0, "p95_score": 0,
-            "scored_last_hour": 0, "blocked_last_hour": 0, "challenged_last_hour": 0
-        }
-    })))
+    Err(ApiError::NotImplemented(
+        "risk metrics are not implemented; the risk store has no aggregation query yet".into(),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -128,14 +127,13 @@ pub struct ActorsQuery {
     pub page: Option<i64>,
 }
 
-/// **STUB — v1 placeholder.**
-///
-/// Returns an empty actor list; real-time risk-actor tracking is not yet
-/// implemented. Frontend should treat `data: []` as "no data available" rather
-/// than "no risky actors". Will be replaced with a live query against the
-/// risk-score store in a future release.
+/// Actor enumeration does not exist yet: `RiskStore` exposes only keyed
+/// lookups, no listing. 501 keeps the UI from rendering an empty table as
+/// "no risky actors" while credit/clear still mutate live per-IP state.
 pub async fn list_risk_actors(_: State<Arc<AppState>>, Query(_q): Query<ActorsQuery>) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "success": true, "data": [], "total": 0 })))
+    Err(ApiError::NotImplemented(
+        "risk actor listing is not implemented; the risk store cannot enumerate actors yet".into(),
+    ))
 }
 
 /// Actor ids are IP addresses today (the admin panel lists actors by IP).

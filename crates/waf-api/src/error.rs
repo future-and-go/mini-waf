@@ -23,6 +23,9 @@ pub enum ApiError {
     #[error("Payload too large: {0}")]
     PayloadTooLarge(String),
 
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
+
     #[error("Internal server error: {0}")]
     Internal(#[from] anyhow::Error),
 
@@ -38,6 +41,7 @@ impl IntoResponse for ApiError {
             Self::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
             Self::TooManyRequests(msg) => (StatusCode::TOO_MANY_REQUESTS, msg.clone()),
             Self::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg.clone()),
+            Self::NotImplemented(msg) => (StatusCode::NOT_IMPLEMENTED, msg.clone()),
             Self::Internal(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             Self::Storage(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         };
@@ -98,6 +102,14 @@ mod tests {
         let (status, msg) = read_body_message(resp).await;
         assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(msg, "slow down");
+    }
+
+    #[tokio::test]
+    async fn not_implemented_maps_to_501() {
+        let resp = ApiError::NotImplemented("no metrics yet".into()).into_response();
+        let (status, msg) = read_body_message(resp).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(msg, "no metrics yet");
     }
 
     #[tokio::test]
