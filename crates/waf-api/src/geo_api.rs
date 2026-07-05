@@ -187,6 +187,9 @@ mod tests {
             );
         }
         assert!(matches!(validate_geo_action(&json!(5)), Err(ApiError::BadRequest(_))));
-        assert!(matches!(validate_geo_action(&Value::Null), Err(ApiError::BadRequest(_))));
+        assert!(matches!(
+            validate_geo_action(&Value::Null),
+            Err(ApiError::BadRequest(_))
+        ));
     }
 }
