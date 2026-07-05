@@ -1,77 +1,73 @@
 import { Typography, Space } from "antd";
 import type { CSSProperties } from "react";
 
+// Mirrors the engine's threshold gate (`risk/threshold.rs::decide`):
+//   score < allow   → Allow
+//   score >= block  → Block
+//   otherwise       → Challenge
+// Only `allow` and `block` are enforcement boundaries — there is no fourth
+// band and the tier's `challenge` value is not consulted by the gate.
 interface RiskBandPreviewProps {
-  riskAllow: number;
-  riskChallenge: number;
-  riskBlock: number;
+  allow: number;
+  block: number;
+  hideLegend?: boolean;
   style?: CSSProperties;
 }
 
 const BAND_COLORS = {
   allow: "#52c41a",
   challenge: "#faad14",
-  nearBlock: "#fa8c16",
   block: "#f5222d",
 } as const;
 
 export const RiskBandPreview: React.FC<RiskBandPreviewProps> = ({
-  riskAllow,
-  riskChallenge,
-  riskBlock,
+  allow,
+  block,
+  hideLegend,
   style,
 }) => {
-  const a = Math.max(0, Math.min(100, riskAllow));
-  const c = Math.max(0, Math.min(100, riskChallenge));
-  const b = Math.max(0, Math.min(100, riskBlock));
+  const a = Math.max(0, Math.min(100, allow));
+  const b = Math.max(a, Math.min(100, block));
 
   const greenPct = a;
-  const yellowPct = Math.max(0, c - a);
-  const orangePct = Math.max(0, b - c);
-  const redPct = Math.max(0, 100 - b);
+  const yellowPct = b - a;
+  const redPct = 100 - b;
 
   return (
     <Space direction="vertical" size={6} style={{ width: "100%", ...style }}>
       <div style={{ display: "flex", height: 20, borderRadius: 3, overflow: "hidden" }}>
         {greenPct > 0 && (
           <div
-            title={`Allow: 0–${a}`}
+            title={`Allow: score < ${a}`}
             style={{ width: `${greenPct}%`, background: BAND_COLORS.allow }}
           />
         )}
         {yellowPct > 0 && (
           <div
-            title={`Challenge: ${a}–${c}`}
+            title={`Challenge: ${a} ≤ score < ${b}`}
             style={{ width: `${yellowPct}%`, background: BAND_COLORS.challenge }}
-          />
-        )}
-        {orangePct > 0 && (
-          <div
-            title={`Block threshold: ${c}–${b}`}
-            style={{ width: `${orangePct}%`, background: BAND_COLORS.nearBlock }}
           />
         )}
         {redPct > 0 && (
           <div
-            title={`Block: ${b}–100`}
+            title={`Block: score ≥ ${b}`}
             style={{ width: `${redPct}%`, background: BAND_COLORS.block }}
           />
         )}
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 14px" }}>
-        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-          <span style={{ color: BAND_COLORS.allow }}>■</span> Allow 0–{a}
-        </Typography.Text>
-        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-          <span style={{ color: BAND_COLORS.challenge }}>■</span> Challenge {a}–{c}
-        </Typography.Text>
-        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-          <span style={{ color: BAND_COLORS.nearBlock }}>■</span> Block {c}–{b}
-        </Typography.Text>
-        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-          <span style={{ color: BAND_COLORS.block }}>■</span> Hard block {b}–100
-        </Typography.Text>
-      </div>
+      {!hideLegend && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 14px" }}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+            <span style={{ color: BAND_COLORS.allow }}>■</span> Allow &lt; {a}
+          </Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+            <span style={{ color: BAND_COLORS.challenge }}>■</span> Challenge {a}–{b - 1}
+          </Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+            <span style={{ color: BAND_COLORS.block }}>■</span> Block ≥ {b}
+          </Typography.Text>
+        </div>
+      )}
     </Space>
   );
 };

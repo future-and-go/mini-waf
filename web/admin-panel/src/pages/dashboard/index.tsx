@@ -71,12 +71,19 @@ interface RuleRegistry {
 
 interface PanelConfigData {
   config?: {
-    risk_allow?: number;
-    risk_challenge?: number;
-    risk_block?: number;
     response_filtering?: { block_stack_traces?: boolean };
   };
 }
+
+interface TierPoliciesData {
+  policies?: Record<
+    string,
+    { risk_thresholds?: { allow?: number; challenge?: number; block?: number } }
+  >;
+}
+
+// Render order for the per-tier threshold preview (matches the tier ladder).
+const TIER_ORDER = ["critical", "high", "medium", "catch_all"] as const;
 
 // Map each detection engine to a *live* signal derived from data the dashboard
 // already fetches: rule-registry `source` substrings (case-insensitive) or an
@@ -178,6 +185,17 @@ export const DashboardPage: React.FC = () => {
     queryOptions: { staleTime: 60_000, retry: false },
   });
   const panelCfg = panelConfig.result?.data?.config;
+
+  // Enforcement risk thresholds come from tier policies (TierPolicy.
+  // risk_thresholds), not panel config — the preview must show what the
+  // engine actually enforces.
+  const tierPolicies = useCustom<TierPoliciesData>({
+    url: "/api/tier-policies",
+    method: "get",
+    queryOptions: { staleTime: 60_000, retry: false },
+    errorNotification: false,
+  });
+  const tierPolicyMap = tierPolicies.result?.data?.policies;
 
   const heatmap = useCustom<EndpointHeatmapData>({
     url: "/api/stats/endpoints",
@@ -499,20 +517,41 @@ export const DashboardPage: React.FC = () => {
       </Row>
 
       {/* Risk Score Distribution */}
-      {!panelConfig.query.isError && (
+      {!tierPolicies.query.isError && (
         <Card
           size="small"
           title={t("dashboard.riskDistribution")}
-          loading={panelConfig.query.isLoading && !panelCfg}
+          loading={tierPolicies.query.isLoading && !tierPolicyMap}
         >
-          {panelCfg ? (
+          {tierPolicyMap ? (
             <Row gutter={[16, 16]} align="middle">
               <Col xs={24} lg={14}>
-                <RiskBandPreview
-                  riskAllow={panelCfg.risk_allow ?? 50}
-                  riskChallenge={panelCfg.risk_challenge ?? 74}
-                  riskBlock={panelCfg.risk_block ?? 75}
-                />
+                <Typography.Text
+                  type="secondary"
+                  style={{ fontSize: 11, display: "block", marginBottom: 8 }}
+                >
+                  {t("dashboard.riskBandSource", {
+                    defaultValue:
+                      "Enforcement thresholds per tier (from tier policies): score < allow passes, score ≥ block is blocked, in between is challenged.",
+                  })}
+                </Typography.Text>
+                {TIER_ORDER.filter((tier) => tierPolicyMap[tier]?.risk_thresholds).map(
+                  (tier) => (
+                    <Row key={tier} gutter={8} align="middle" style={{ marginBottom: 8 }}>
+                      <Col flex="72px">
+                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                          {tier}
+                        </Typography.Text>
+                      </Col>
+                      <Col flex="auto">
+                        <RiskBandPreview
+                          allow={tierPolicyMap[tier]?.risk_thresholds?.allow ?? 0}
+                          block={tierPolicyMap[tier]?.risk_thresholds?.block ?? 100}
+                        />
+                      </Col>
+                    </Row>
+                  ),
+                )}
               </Col>
               <Col xs={24} lg={10}>
                 <Row gutter={[8, 0]}>

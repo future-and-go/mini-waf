@@ -9,7 +9,6 @@ import {
   InputNumber,
   Row,
   Select,
-  Slider,
   Space,
   Switch,
   Tag,
@@ -35,7 +34,6 @@ import {
   DatabaseOutlined,
 } from "@ant-design/icons";
 import { useCustom, useCustomMutation } from "@refinedev/core";
-import { RiskBandPreview } from "../../components/risk-band-preview";
 import type { HttpError } from "@refinedev/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -44,9 +42,6 @@ import { httpClient } from "../../utils/axios";
 
 interface WafPanelConfig {
   shadow_mode: boolean;
-  risk_allow: number;
-  risk_challenge: number;
-  risk_block: number;
   challenge_type: string;
   honeypot_paths: string[];
   response_filtering: {
@@ -338,14 +333,6 @@ export const SettingsPage: React.FC = () => {
   const onSavePanel = async () => {
     try {
       const values = await form.validateFields();
-      // Client-side risk order guard (before any API call)
-      const ra = values.risk_allow as number;
-      const rc = values.risk_challenge as number;
-      const rb = values.risk_block as number;
-      if (!(ra < rc && rc < rb)) {
-        message.error(t("settings.panel.riskOrderError"));
-        return;
-      }
       setSaving(true);
       const resp = await httpClient.put<{ success: boolean; data: PanelConfigEnvelope }>(
         "/api/panel-config",
@@ -368,21 +355,6 @@ export const SettingsPage: React.FC = () => {
       setSaving(false);
     }
   };
-
-  const riskAllow = Form.useWatch("risk_allow", form) ?? envelope?.config?.risk_allow ?? 51;
-  const riskChallenge = Form.useWatch("risk_challenge", form) ?? envelope?.config?.risk_challenge ?? 74;
-  const riskBlock = Form.useWatch("risk_block", form) ?? envelope?.config?.risk_block ?? 75;
-
-  // Cross-field revalidate when sliders change so the InputNumber/risk_block
-  // shows its error immediately (without waiting for submit).
-  useEffect(() => {
-    if (form.isFieldTouched("risk_block")) {
-      form.validateFields(["risk_block"]).catch(() => {});
-    }
-    if (form.isFieldTouched("risk_challenge")) {
-      form.validateFields(["risk_challenge"]).catch(() => {});
-    }
-  }, [riskAllow, riskChallenge, form]);
 
   const ipsCount = (status?.rules?.allow_ips ?? 0) + (status?.rules?.block_ips ?? 0);
   const urlsCount = (status?.rules?.allow_urls ?? 0) + (status?.rules?.block_urls ?? 0);
@@ -536,87 +508,9 @@ export const SettingsPage: React.FC = () => {
               />
             </SectionCard>
 
-            {/* ── Risk Thresholds ──────────────────────────────────────── */}
-            <SectionCard
-              icon={<SecurityScanOutlined style={{ color: "#1677ff" }} />}
-              title={t("settings.panel.riskThresholds")}
-            >
-              <Form.Item
-                name="risk_allow"
-                label={
-                  <Row style={{ width: "100%" }} justify="space-between">
-                    <span style={{ color: "#52c41a", fontWeight: 600 }}>
-                      {t("settings.panel.allowBandShort")} (0 – {riskAllow})
-                    </span>
-                    <span style={{ fontVariantNumeric: "tabular-nums" }}>{riskAllow}</span>
-                  </Row>
-                }
-                rules={[{ required: true, type: "number", min: 0, max: 98 }]}
-              >
-                <Slider min={0} max={98} tooltip={{ open: false }} styles={{ track: { background: "#52c41a" } }} />
-              </Form.Item>
-
-              <Form.Item
-                name="risk_challenge"
-                label={
-                  <Row style={{ width: "100%" }} justify="space-between">
-                    <span style={{ color: "#fa8c16", fontWeight: 600 }}>
-                      {t("settings.panel.challengeBandShort")} ({riskAllow + 1} – {riskChallenge})
-                    </span>
-                    <span style={{ fontVariantNumeric: "tabular-nums" }}>{riskChallenge}</span>
-                  </Row>
-                }
-                dependencies={["risk_allow"]}
-                rules={[
-                  { required: true, type: "number" },
-                  {
-                    validator: async (_, v) => {
-                      const a = form.getFieldValue("risk_allow") as number;
-                      if (typeof v === "number" && v > a) return;
-                      return Promise.reject(new Error(t("settings.panel.riskOrderError")));
-                    },
-                  },
-                ]}
-              >
-                <Slider min={1} max={99} tooltip={{ open: false }} styles={{ track: { background: "#fa8c16" } }} />
-              </Form.Item>
-
-              <Row align="middle" style={{ marginTop: 4 }}>
-                <Typography.Text type="secondary">
-                  {t("settings.panel.blockThresholdLabel")}:{" "}
-                </Typography.Text>
-                <Tag color="red" style={{ marginLeft: 8, fontWeight: 600 }}>
-                  &gt;= {riskBlock}
-                </Tag>
-                <Form.Item
-                  name="risk_block"
-                  noStyle
-                  dependencies={["risk_challenge"]}
-                  rules={[
-                    { required: true, type: "number" },
-                    {
-                      validator: async (_, v) => {
-                        const c = form.getFieldValue("risk_challenge") as number;
-                        if (typeof v === "number" && v > c) return;
-                        return Promise.reject(new Error(t("settings.panel.riskOrderError")));
-                      },
-                    },
-                  ]}
-                >
-                  <InputNumber min={2} max={100} size="small" style={{ width: 80, marginLeft: 12 }} />
-                </Form.Item>
-              </Row>
-              <div style={{ marginTop: 16 }}>
-                <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
-                  {t("settings.riskBandPreview")}
-                </Typography.Text>
-                <RiskBandPreview
-                  riskAllow={riskAllow}
-                  riskChallenge={riskChallenge}
-                  riskBlock={riskBlock}
-                />
-              </div>
-            </SectionCard>
+            {/* Risk thresholds are enforced per tier (TierPolicy.risk_thresholds,
+                edited on the tier-policies page) — the old panel-config sliders
+                here had no effect on enforcement and were removed. */}
 
             {/* ── Challenge Engine ─────────────────────────────────────── */}
             <SectionCard
