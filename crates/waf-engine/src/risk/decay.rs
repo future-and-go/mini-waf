@@ -5,69 +5,62 @@
 //! Decay has a floor of `MAX_DECAY` (50) — scores never drop below this via
 //! automatic decay (only explicit credits can go lower).
 
+use crate::risk::config::DecayConfig;
 use crate::risk::state::{Contributor, ContributorKind, RiskState};
 
-/// Maximum points that can be decayed away automatically.
+/// Default maximum points that can be decayed away automatically.
+///
 /// Scores above this floor require explicit credits to reduce further.
+/// Runtime decay reads `DecayConfig`; this const is a test/bench reference.
 pub const MAX_DECAY: i32 = 50;
 
-/// Minimum clean streak before decay kicks in.
+/// Default minimum clean streak before decay kicks in.
+/// Runtime decay reads `DecayConfig`; this const is a test/bench reference.
 pub const MIN_CLEAN_STREAK: u32 = 10;
 
-/// Points decayed per clean request after `MIN_CLEAN_STREAK`.
+/// Default points decayed per clean request after the clean streak.
+/// Runtime decay reads `DecayConfig`; this const is a test/bench reference.
 pub const DECAY_RATE: i16 = 1;
 
 /// Apply decay to the state if conditions are met.
 ///
 /// Returns the decay delta applied (0 if no decay). Mutates state in place.
-pub fn apply_decay(state: &mut RiskState, now_ms: i64) -> i16 {
-    if state.clean_streak < MIN_CLEAN_STREAK {
+/// `decay.decay_rate == 0` disables decay through the `available` arithmetic.
+pub fn apply_decay(state: &mut RiskState, now_ms: i64, decay: &DecayConfig) -> i16 {
+    let delta = preview_decay(state, now_ms, decay);
+    if delta == 0 {
         return 0;
     }
 
-    if state.is_pinned(now_ms) {
-        return 0;
-    }
-
-    let floor = MAX_DECAY;
-    if state.raw_score <= floor {
-        return 0;
-    }
-
-    let available = (state.raw_score - floor).min(i32::from(DECAY_RATE));
-    if available <= 0 {
-        return 0;
-    }
-
-    #[allow(clippy::cast_possible_truncation)]
-    let decay_delta = -(available as i16); // safe: available is clamped to DECAY_RATE (1)
-    state.raw_score = state.raw_score.saturating_add(i32::from(decay_delta));
-    state.push_contributor(Contributor::new(ContributorKind::Decay, decay_delta, now_ms));
+    state.raw_score = state.raw_score.saturating_add(i32::from(delta));
+    state.push_contributor(Contributor::new(ContributorKind::Decay, delta, now_ms));
     state.reclamp();
 
-    decay_delta
+    delta
 }
 
 /// Calculate how much decay would apply without mutating state.
 #[must_use]
-pub fn preview_decay(state: &RiskState, now_ms: i64) -> i16 {
-    if state.clean_streak < MIN_CLEAN_STREAK {
+pub fn preview_decay(state: &RiskState, now_ms: i64, decay: &DecayConfig) -> i16 {
+    if state.clean_streak < decay.min_clean_streak {
         return 0;
     }
     if state.is_pinned(now_ms) {
         return 0;
     }
-    let floor = MAX_DECAY;
+    // validate() enforces max_decay <= 100; the fallback keeps an
+    // unvalidated construction from panicking.
+    let floor = i32::try_from(decay.max_decay).unwrap_or(100);
     if state.raw_score <= floor {
         return 0;
     }
-    let available = (state.raw_score - floor).min(i32::from(DECAY_RATE));
+    let available = (state.raw_score - floor).min(i32::from(decay.decay_rate));
     if available <= 0 {
         return 0;
     }
     #[allow(clippy::cast_possible_truncation)]
     {
-        -(available as i16) // safe: available is clamped to DECAY_RATE (1)
+        -(available as i16) // safe: available is clamped to decay_rate (u16)
     }
 }
 
@@ -82,7 +75,7 @@ mod tests {
         state.clamped_score = 80;
         state.clean_streak = 5;
 
-        let decay = apply_decay(&mut state, 2000);
+        let decay = apply_decay(&mut state, 2000, &DecayConfig::default());
         assert_eq!(decay, 0);
         assert_eq!(state.raw_score, 80);
     }
@@ -94,7 +87,7 @@ mod tests {
         state.clamped_score = 80;
         state.clean_streak = 15;
 
-        let decay = apply_decay(&mut state, 2000);
+        let decay = apply_decay(&mut state, 2000, &DecayConfig::default());
         assert_eq!(decay, -1);
         assert_eq!(state.raw_score, 79);
         assert_eq!(state.clamped_score, 79);
@@ -107,11 +100,11 @@ mod tests {
         state.clamped_score = 51;
         state.clean_streak = 15;
 
-        let decay = apply_decay(&mut state, 2000);
+        let decay = apply_decay(&mut state, 2000, &DecayConfig::default());
         assert_eq!(decay, -1);
         assert_eq!(state.raw_score, 50);
 
-        let decay2 = apply_decay(&mut state, 3000);
+        let decay2 = apply_decay(&mut state, 3000, &DecayConfig::default());
         assert_eq!(decay2, 0);
         assert_eq!(state.raw_score, 50);
     }
@@ -124,7 +117,7 @@ mod tests {
         state.clean_streak = 15;
         state.pinned_until_ms = Some(5000);
 
-        let decay = apply_decay(&mut state, 2000);
+        let decay = apply_decay(&mut state, 2000, &DecayConfig::default());
         assert_eq!(decay, 0);
         assert_eq!(state.raw_score, 80);
     }
@@ -136,8 +129,8 @@ mod tests {
         state.clamped_score = 75;
         state.clean_streak = 20;
 
-        let preview = preview_decay(&state, 2000);
-        let actual = apply_decay(&mut state, 2000);
+        let preview = preview_decay(&state, 2000, &DecayConfig::default());
+        let actual = apply_decay(&mut state, 2000, &DecayConfig::default());
         assert_eq!(preview, actual);
     }
 }

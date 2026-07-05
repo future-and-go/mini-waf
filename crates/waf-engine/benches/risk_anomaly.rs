@@ -147,7 +147,13 @@ fn bench_decay(c: &mut Criterion) {
                 state.clean_streak = 15;
                 state
             },
-            |mut state| black_box(apply_decay(&mut state, 2000)),
+            |mut state| {
+                black_box(apply_decay(
+                    &mut state,
+                    2000,
+                    &waf_engine::risk::config::DecayConfig::default(),
+                ))
+            },
             criterion::BatchSize::SmallInput,
         )
     });

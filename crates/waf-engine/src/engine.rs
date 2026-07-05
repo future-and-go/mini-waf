@@ -24,6 +24,7 @@ use crate::checks::ddos::store::MemoryCounterStore as DdosMemoryStore;
 use crate::checks::ddos::{
     DdosCheck, DdosConfig, DdosFileConfig, DdosMetrics, DdosReloader, DynamicBanTable, OverloadGuard,
 };
+use crate::checks::geo_reload::DEFAULT_DEBOUNCE_MS as GEO_DEBOUNCE_MS;
 use crate::checks::rate_limit::reload::{DEFAULT_DEBOUNCE_MS as RL_DEBOUNCE_MS, RateLimitReloader};
 use crate::checks::rate_limit::store::MemoryStore as RlMemoryStore;
 use crate::checks::rate_limit::{RateLimitFileConfig, store::RateLimitStore};
@@ -139,6 +140,9 @@ pub struct WafEngine {
     /// File watcher for `configs/ddos.yaml`. Lazy via
     /// `start_ddos_watcher`; held to keep the OS watch alive.
     ddos_reloader: OnceLock<DdosReloader>,
+    /// File watcher for `configs/geo-rules.yaml`. Lazy via
+    /// `start_geo_watcher`; held to keep the OS watch alive.
+    geo_reloader: OnceLock<crate::checks::GeoReloader>,
     // ── Audit file sink sender ────────────────────────────────────────────────
     /// Structured audit-event sink. `None` until [`set_audit_sender`] is
     /// called by the binary boot path.  When set, every non-Allow decision
@@ -301,6 +305,7 @@ impl WafEngine {
             ddos_cfg,
             ddos_check,
             ddos_reloader: OnceLock::new(),
+            geo_reloader: OnceLock::new(),
             audit_sender: OnceLock::new(),
             db_batch_writer: OnceLock::new(),
             mode_registry: OnceLock::new(),
@@ -335,7 +340,7 @@ impl WafEngine {
         if cfg.store.backend == "redis" {
             #[cfg(feature = "redis-store")]
             {
-                let runtime_cfg = cfg.store.redis.to_runtime_config(cfg.ttl_secs);
+                let runtime_cfg = cfg.store.redis.to_runtime_config(cfg.ttl_secs, cfg.decay.clone());
                 // Bound the initial connect: ConnectionManager retries with
                 // backoff internally, which can stall startup for minutes
                 // when the host silently drops packets. Fail-soft needs a
@@ -360,7 +365,7 @@ impl WafEngine {
             #[cfg(not(feature = "redis-store"))]
             warn!("risk: store.backend=redis requires the redis-store build feature; using memory store");
         }
-        let store = Arc::new(MemoryRiskStore::new());
+        let store = Arc::new(MemoryRiskStore::with_decay(cfg.decay.clone()));
         // The purge loop needs the concrete `Arc<MemoryRiskStore>`; start it
         // before the Arc is unsized to `Arc<dyn RiskStore>`.
         let ttl_ms = i64::try_from(cfg.ttl_secs.saturating_mul(1000)).unwrap_or(i64::MAX);
@@ -550,6 +555,38 @@ impl WafEngine {
         }
     }
 
+    /// Load geo rules from the admin API's `configs/geo-rules.yaml` into
+    /// `geo_check`, replacing the full rule set (hosts absent from the file
+    /// are cleared). Fail-soft: a missing/bad file logs a warning and leaves
+    /// the existing rules in place.
+    pub fn load_geo_rules(&self, path: &Path) {
+        if let Err(e) = crate::checks::apply_geo_rules(&self.geo_check, path) {
+            warn!(file = %path.display(), error = %e, "geo rules: load failed; keeping existing rules");
+        }
+    }
+
+    /// Load `configs/geo-rules.yaml` once and start the hot-reload watcher.
+    ///
+    /// The admin API writes the same file, so geo rule CRUD hot-reloads with
+    /// no extra API→engine call. Missing/bad file leaves `geo_check` empty —
+    /// the gateway never refuses to start because of a geo config issue.
+    pub fn start_geo_watcher(&self, path: &Path) {
+        if self.geo_reloader.get().is_some() {
+            return;
+        }
+        self.load_geo_rules(path);
+        match crate::checks::GeoReloader::start(path.to_path_buf(), Arc::clone(&self.geo_check), GEO_DEBOUNCE_MS) {
+            Ok(r) => {
+                let _ = self.geo_reloader.set(r);
+            }
+            Err(e) => warn!(
+                file = %path.display(),
+                error = %e,
+                "geo rules: hot-reload watcher failed to start; running without hot-reload"
+            ),
+        }
+    }
+
     /// Threat-intel feed metadata snapshot (D3). Empty until
     /// [`Self::load_relay_feeds`] runs at startup.
     #[must_use]
@@ -660,6 +697,13 @@ impl WafEngine {
     /// the checker pipeline runs, enabling `GeoIP`-based rules.
     pub fn set_geoip(&self, service: Arc<GeoIpService>) {
         let _ = self.geoip.set(service);
+    }
+
+    /// Look up `GeoIP` info for `ip`. Returns `None` when the service is
+    /// disabled/unset; returns a (possibly empty) `GeoIpInfo` otherwise.
+    #[must_use]
+    pub fn geoip_lookup(&self, ip: std::net::IpAddr) -> Option<waf_common::GeoIpInfo> {
+        self.geoip.get().map(|svc| svc.lookup(ip))
     }
 
     /// Plug the audit file sink sender into the engine (called once during

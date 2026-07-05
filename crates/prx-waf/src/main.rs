@@ -1633,6 +1633,17 @@ async fn init_async(
         .join("configs/tx-velocity.yaml");
     engine.start_tx_velocity_watcher(&tx_velocity_path);
 
+    // Geo restriction subsystem: load `configs/geo-rules.yaml` and start the
+    // hot-reload watcher. The admin API writes the same file, so POST/PATCH/
+    // DELETE /api/geoip/rules hot-reloads. Missing/bad file leaves geo_check
+    // empty (the watcher logs a warning).
+    let geo_rules_path = std::path::Path::new(config_file_path)
+        .parent()
+        .and_then(std::path::Path::parent)
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("configs/geo-rules.yaml");
+    engine.start_geo_watcher(&geo_rules_path);
+
     // FR-025 risk-scoring subsystem: load `configs/risk.yaml`, build the
     // configured store (memory with purge loop, or redis), and start the
     // hot-reload watcher. The path mirrors `risk_api::resolve_path` (the
