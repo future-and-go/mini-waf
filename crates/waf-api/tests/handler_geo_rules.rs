@@ -131,3 +131,58 @@ async fn lookup_rejects_invalid_ip() {
         .expect("lookup send");
     assert_eq!(resp.status(), 400);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fail_closed_round_trips_through_create_and_patch() {
+    let dir = tempfile::tempdir().expect("tmpdir");
+    let main_cfg = dir.path().join("config/waf.yaml");
+    let s = start_test_server_with_main_config(main_cfg.to_str().unwrap()).await;
+
+    let created: serde_json::Value = client()
+        .post(url_for(s.addr, "/api/geoip/rules"))
+        .bearer_auth(&s.admin_token)
+        .json(&json!({ "iso_code": "US", "action": "allow", "fail_closed": true }))
+        .send()
+        .await
+        .expect("create send")
+        .json()
+        .await
+        .expect("create json");
+    assert_eq!(created["data"]["fail_closed"], true);
+    let id = created["data"]["id"].as_i64().expect("rule id");
+
+    let listed: serde_json::Value = client()
+        .get(url_for(s.addr, "/api/geoip/rules"))
+        .bearer_auth(&s.admin_token)
+        .send()
+        .await
+        .expect("list send")
+        .json()
+        .await
+        .expect("list json");
+    assert_eq!(listed["data"][0]["fail_closed"], true);
+
+    // The persisted file must map to a fail-closed AllowOnly rule.
+    let rules_file = dir.path().join("configs/geo-rules.yaml");
+    let map = parse_geo_rules(&rules_file).expect("engine loader parses API file");
+    let rules = map.get("*").expect("global host rules");
+    assert_eq!(rules[0].mode, GeoRuleMode::AllowOnly);
+    assert!(rules[0].fail_closed);
+
+    // PATCH toggles it back to fail-open.
+    let patched: serde_json::Value = client()
+        .patch(url_for(s.addr, &format!("/api/geoip/rules/{id}")))
+        .bearer_auth(&s.admin_token)
+        .json(&json!({ "fail_closed": false }))
+        .send()
+        .await
+        .expect("patch send")
+        .json()
+        .await
+        .expect("patch json");
+    assert_eq!(patched["data"]["fail_closed"], false);
+
+    let map = parse_geo_rules(&rules_file).expect("engine loader parses patched file");
+    let rules = map.get("*").expect("global host rules");
+    assert!(!rules[0].fail_closed);
+}

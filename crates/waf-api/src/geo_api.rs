@@ -97,6 +97,7 @@ pub async fn create_geo_rule(State(state): State<Arc<AppState>>, Json(body): Jso
         "action":       body.get("action").and_then(|v| v.as_str()).unwrap_or("block"),
         "scope":        body.get("scope").and_then(|v| v.as_str()).unwrap_or("global"),
         "enabled":      true,
+        "fail_closed":  body.get("fail_closed").and_then(Value::as_bool).unwrap_or(false),
         "created_at":   chrono::Utc::now().to_rfc3339(),
     });
 
@@ -119,7 +120,7 @@ pub async fn patch_geo_rule(
         .ok_or_else(|| ApiError::NotFound(format!("geo rule {id} not found")))?;
 
     if let Some(obj) = rules.get_mut(idx).and_then(Value::as_object_mut) {
-        for field in &["enabled", "action", "scope"] {
+        for field in &["enabled", "action", "scope", "fail_closed"] {
             if let Some(v) = body.get(*field) {
                 obj.insert((*field).to_owned(), v.clone());
             }

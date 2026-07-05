@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "API knob + GH-197 loader wiring + acceptance"
-status: pending
+status: completed
 dependencies: [1, 2]
 effort: "1.5h"
 ---

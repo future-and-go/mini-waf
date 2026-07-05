@@ -63,27 +63,47 @@ impl GeoIpService {
 
     /// Hot-reload xdb files from disk without service interruption.
     ///
-    /// Loads fresh `Searcher` instances from the original file paths and
-    /// atomically swaps them in via `ArcSwapOption::store`.  Any concurrent
-    /// in-flight lookups continue using the old searchers until they complete.
+    /// Each address family is decided independently: a freshly loaded
+    /// `Searcher` is atomically swapped in via `ArcSwapOption::store`; if the
+    /// new load fails but a working searcher is currently present, the old
+    /// searcher is **kept** (never replaced with `None`) and the failure is
+    /// surfaced as an `Err`. A family that was `None` and stays `None`
+    /// (first-time / degraded setup) is left untouched without error.
     ///
-    /// Returns `Ok(true)` after a successful reload.  Returns `Ok(false)` if
-    /// neither file exists (degraded / first-time-setup situation).
+    /// Returns `Ok(true)` when at least one family swapped in a new searcher,
+    /// `Ok(false)` when nothing loaded and nothing needed preserving, and
+    /// `Err` naming the families whose working searcher was preserved because
+    /// the new load failed.
     pub fn reload(&self) -> anyhow::Result<bool> {
-        let new_ipv4 = load_searcher(&self.ipv4_path, self.cache_policy, "IPv4");
-        let new_ipv6 = load_searcher(&self.ipv6_path, self.cache_policy, "IPv6");
+        let mut swapped = false;
+        let mut preserved: Vec<&str> = Vec::new();
 
-        let any_loaded = new_ipv4.is_some() || new_ipv6.is_some();
-
-        // Atomic swap — readers see either old or new, never a torn state.
-        self.ipv4.store(new_ipv4);
-        self.ipv6.store(new_ipv6);
-
-        if any_loaded {
-            info!("GeoIP: hot-reloaded xdb files from disk");
+        for (slot, path, label) in [
+            (&self.ipv4, self.ipv4_path.as_str(), "IPv4"),
+            (&self.ipv6, self.ipv6_path.as_str(), "IPv6"),
+        ] {
+            let new = load_searcher(path, self.cache_policy, label);
+            match family_reload(new, slot.load().is_some()) {
+                FamilyReload::Swap(searcher) => {
+                    // Atomic swap — readers see either old or new, never a torn state.
+                    slot.store(Some(searcher));
+                    swapped = true;
+                }
+                FamilyReload::Preserve => preserved.push(label),
+                FamilyReload::LeaveEmpty => {}
+            }
         }
 
-        Ok(any_loaded)
+        if !preserved.is_empty() {
+            anyhow::bail!(
+                "GeoIP reload: new load failed for {}; kept previous searcher(s)",
+                preserved.join(", ")
+            );
+        }
+        if swapped {
+            info!("GeoIP: hot-reloaded xdb files from disk");
+        }
+        Ok(swapped)
     }
 
     /// Look up the `GeoIP` information for `ip`.
@@ -123,6 +143,26 @@ impl GeoIpService {
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+/// Per-family reload decision.
+enum FamilyReload<T> {
+    /// The new load succeeded — swap it in.
+    Swap(T),
+    /// The new load failed but a working searcher is present — keep it.
+    Preserve,
+    /// The new load failed and no searcher was present — stay empty.
+    LeaveEmpty,
+}
+
+/// Decide what a reload does for one address family. A working searcher is
+/// never replaced by a failed load; an empty slot stays empty without error.
+fn family_reload<T>(new: Option<T>, current_present: bool) -> FamilyReload<T> {
+    match new {
+        Some(searcher) => FamilyReload::Swap(searcher),
+        None if current_present => FamilyReload::Preserve,
+        None => FamilyReload::LeaveEmpty,
+    }
+}
 
 /// Attempt to open an xdb file and build a `Searcher`.
 ///
@@ -218,6 +258,47 @@ mod tests {
         let info = parse_region("");
         assert_eq!(info.country, "");
         assert_eq!(info.iso_code, "");
+    }
+
+    #[test]
+    fn family_reload_swaps_on_successful_load() {
+        assert!(matches!(family_reload(Some(1), true), FamilyReload::Swap(1)));
+        assert!(matches!(family_reload(Some(1), false), FamilyReload::Swap(1)));
+    }
+
+    #[test]
+    fn family_reload_preserves_working_searcher_on_failed_load() {
+        assert!(matches!(family_reload::<i32>(None, true), FamilyReload::Preserve));
+    }
+
+    #[test]
+    fn family_reload_leaves_empty_slot_empty() {
+        assert!(matches!(family_reload::<i32>(None, false), FamilyReload::LeaveEmpty));
+    }
+
+    #[test]
+    fn reload_with_no_files_and_no_searchers_is_ok_false() {
+        let svc = GeoIpService::init("/nonexistent/v4.xdb", "/nonexistent/v6.xdb", CachePolicy::NoCache).expect("init");
+        assert!(!svc.is_available());
+        let result = svc.reload().expect("degraded reload must not error");
+        assert!(!result, "nothing loaded and nothing preserved");
+        assert!(!svc.is_available());
+    }
+
+    #[test]
+    fn reload_with_corrupt_file_and_no_searcher_is_ok_false() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = dir.path().join("corrupt.xdb");
+        std::fs::write(&path, b"not a real xdb file").expect("write");
+        let path_str = path.to_str().expect("utf8 path");
+
+        let svc = GeoIpService::init(path_str, "/nonexistent/v6.xdb", CachePolicy::NoCache).expect("init");
+        assert!(!svc.is_available());
+        // The corrupt file fails to load and no working searcher exists, so
+        // this is the degraded first-time case — no error, slot stays empty.
+        let result = svc.reload().expect("no working searcher to preserve");
+        assert!(!result);
+        assert!(!svc.is_available());
     }
 
     #[test]

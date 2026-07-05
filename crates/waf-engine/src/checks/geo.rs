@@ -28,6 +28,10 @@ pub struct GeoRule {
     pub iso_codes: HashSet<String>,
     /// Country names to match (case-insensitive).
     pub countries: HashSet<String>,
+    /// `AllowOnly` only: block when the request has no determinable country
+    /// (missing xdb / lookup failure / private IP). Default `false` =
+    /// fail-open. Ignored for `Block` rules.
+    pub fail_closed: bool,
 }
 
 /// Whether the rule blocks the listed countries or allows only them.
@@ -107,6 +111,41 @@ impl GeoCheck {
         None
     }
 
+    fn eval_fail_closed(&self, host_code: &str) -> Option<DetectionResult> {
+        // Host-specific rules first
+        if let Some(entry) = self.rules.get(host_code)
+            && let Some(r) = Self::match_fail_closed(&entry.rules)
+        {
+            return Some(r);
+        }
+        // Global rules
+        if let Some(entry) = self.rules.get("*")
+            && let Some(r) = Self::match_fail_closed(&entry.rules)
+        {
+            return Some(r);
+        }
+        None
+    }
+
+    /// With no determinable country only a fail-closed `AllowOnly` rule can
+    /// act; `Block` rules cannot match a specific country without data.
+    fn match_fail_closed(rules: &[GeoRule]) -> Option<DetectionResult> {
+        rules
+            .iter()
+            .find(|rule| rule.mode == GeoRuleMode::AllowOnly && rule.fail_closed)
+            .map(|rule| DetectionResult {
+                rule_id: Some(rule.id.clone()),
+                rule_name: rule.name.clone(),
+                phase: Phase::GeoIp,
+                detail: format!(
+                    "Blocked by geo allowlist '{}': geo data unavailable (fail-closed)",
+                    rule.name
+                ),
+                rule_action: None,
+                action_status: None,
+            })
+    }
+
     fn match_rules(geo: &waf_common::GeoIpInfo, rules: &[GeoRule]) -> Option<DetectionResult> {
         for rule in rules {
             let matched = Self::geo_matches(geo, rule);
@@ -169,15 +208,16 @@ impl Default for GeoCheck {
 
 impl Check for GeoCheck {
     fn check(&self, ctx: &mut RequestCtx) -> Option<DetectionResult> {
-        // If geo info was not populated (GeoIP disabled or xdb missing) skip.
-        let Some(geo) = &ctx.geo else {
-            return None;
-        };
-        // No useful info yet (e.g. private IP not in xdb)
-        if geo.country.is_empty() && geo.iso_code.is_empty() {
-            return None;
+        match &ctx.geo {
+            // Data present — unchanged matching path.
+            Some(geo) if !(geo.country.is_empty() && geo.iso_code.is_empty()) => {
+                self.eval_rules(&ctx.host_config.code, geo)
+            }
+            // Geo absent or empty (service disabled, missing xdb, lookup
+            // failure, private IP): fail-open unless a fail-closed AllowOnly
+            // rule applies to this host.
+            _ => self.eval_fail_closed(&ctx.host_config.code),
         }
-        self.eval_rules(&ctx.host_config.code, geo)
     }
 }
 
@@ -235,6 +275,7 @@ mod tests {
                 mode: GeoRuleMode::Block,
                 iso_codes: ["KP".to_string()].into(),
                 countries: HashSet::new(),
+                fail_closed: false,
             }],
         );
 
@@ -256,6 +297,7 @@ mod tests {
                 mode: GeoRuleMode::Block,
                 iso_codes: ["cn".to_string()].into(),
                 countries: HashSet::new(),
+                fail_closed: false,
             }],
         );
 
@@ -264,6 +306,88 @@ mod tests {
             check.check(&mut ctx).is_some(),
             "lowercase rule ISO code must match after load-time normalization"
         );
+    }
+
+    fn allow_only_us_rule(fail_closed: bool) -> GeoRule {
+        GeoRule {
+            id: "GEO-ALLOW".into(),
+            name: "Allow US".into(),
+            mode: GeoRuleMode::AllowOnly,
+            iso_codes: ["US".to_string()].into(),
+            countries: HashSet::new(),
+            fail_closed,
+        }
+    }
+
+    #[test]
+    fn allow_only_fail_closed_blocks_when_geo_is_none() {
+        let check = GeoCheck::new();
+        check.load_rules("*", vec![allow_only_us_rule(true)]);
+
+        let mut ctx = make_ctx("", "");
+        ctx.geo = None;
+        let result = check.check(&mut ctx).expect("fail-closed allowlist must block");
+        assert_eq!(result.phase, Phase::GeoIp);
+        assert_eq!(result.rule_id.as_deref(), Some("GEO-ALLOW"));
+        assert!(result.detail.contains("geo data unavailable"));
+    }
+
+    #[test]
+    fn allow_only_fail_closed_blocks_when_geo_is_empty() {
+        let check = GeoCheck::new();
+        check.load_rules("*", vec![allow_only_us_rule(true)]);
+
+        // Empty GeoIpInfo — private IP / lookup miss.
+        let mut ctx = make_ctx("", "");
+        assert!(check.check(&mut ctx).is_some());
+    }
+
+    #[test]
+    fn allow_only_fail_open_passes_when_geo_unavailable() {
+        let check = GeoCheck::new();
+        check.load_rules("*", vec![allow_only_us_rule(false)]);
+
+        let mut empty = make_ctx("", "");
+        assert!(check.check(&mut empty).is_none(), "fail-open on empty geo is unchanged");
+
+        let mut none = make_ctx("", "");
+        none.geo = None;
+        assert!(check.check(&mut none).is_none(), "fail-open on absent geo is unchanged");
+    }
+
+    #[test]
+    fn allow_only_fail_closed_with_geo_data_matches_as_before() {
+        let check = GeoCheck::new();
+        check.load_rules("*", vec![allow_only_us_rule(true)]);
+
+        let mut allowed = make_ctx("US", "United States");
+        assert!(check.check(&mut allowed).is_none(), "listed country passes");
+
+        let mut blocked = make_ctx("CN", "China");
+        assert!(check.check(&mut blocked).is_some(), "unlisted country still blocked");
+    }
+
+    #[test]
+    fn block_rule_never_fails_closed() {
+        let check = GeoCheck::new();
+        check.load_rules(
+            "*",
+            vec![GeoRule {
+                id: "GEO-BLOCK".into(),
+                name: "Block KP".into(),
+                mode: GeoRuleMode::Block,
+                iso_codes: ["KP".to_string()].into(),
+                countries: HashSet::new(),
+                fail_closed: true,
+            }],
+        );
+
+        let mut empty = make_ctx("", "");
+        assert!(check.check(&mut empty).is_none());
+
+        let mut none = make_ctx("", "");
+        none.geo = None;
+        assert!(check.check(&mut none).is_none());
     }
 
     #[test]
@@ -277,6 +401,7 @@ mod tests {
                 mode: GeoRuleMode::Block,
                 iso_codes: ["XX".to_string()].into(),
                 countries: HashSet::new(),
+                fail_closed: false,
             }],
         );
         let host_config = Arc::new(HostConfig::default());
