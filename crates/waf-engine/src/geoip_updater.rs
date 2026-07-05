@@ -93,7 +93,15 @@ impl XdbUpdater {
 
         // One validated client per cycle — both files share the base host.
         let client = build_validated_client(&self.github_base_url, CONNECT_TIMEOUT, HEAD_TIMEOUT, USER_AGENT)?;
+        self.check_update_with(&client).await
+    }
 
+    /// HEAD + `Content-Length` comparison against already-present local files.
+    ///
+    /// Takes the client as a parameter (like `download_one`) so unit tests can
+    /// drive it at a local server through a production-shaped client — the
+    /// validated client builder rejects loopback base URLs by design.
+    async fn check_update_with(&self, client: &reqwest::Client) -> Result<bool> {
         for filename in &["ip2region_v4.xdb", "ip2region_v6.xdb"] {
             let local_path = self.data_dir.join(filename);
             let local_size = local_path.metadata().map_or(0, |m| m.len());
@@ -444,6 +452,56 @@ mod tests {
             .await
             .expect_err("loopback source must be rejected");
         assert!(err.to_string().contains("SSRF"), "unexpected error: {err:#}");
+    }
+
+    #[tokio::test]
+    async fn check_update_with_returns_false_when_sizes_match() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let tmp = tempfile::tempdir().expect("tmp");
+        std::fs::write(tmp.path().join("ip2region_v4.xdb"), b"hello").expect("write v4");
+        std::fs::write(tmp.path().join("ip2region_v6.xdb"), b"world").expect("write v6");
+
+        for name in ["ip2region_v4.xdb", "ip2region_v6.xdb"] {
+            Mock::given(method("HEAD"))
+                .and(path(format!("/{name}")))
+                .respond_with(ResponseTemplate::new(200).insert_header("content-length", "5"))
+                .mount(&server)
+                .await;
+        }
+
+        let updater = XdbUpdater::new(tmp.path().to_path_buf(), server.uri());
+        let result = updater
+            .check_update_with(&production_shaped_client())
+            .await
+            .expect("check");
+        assert!(!result, "matching sizes must not trigger an update");
+    }
+
+    #[tokio::test]
+    async fn check_update_with_returns_true_on_size_mismatch() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let tmp = tempfile::tempdir().expect("tmp");
+        std::fs::write(tmp.path().join("ip2region_v4.xdb"), b"hello").expect("write v4");
+        std::fs::write(tmp.path().join("ip2region_v6.xdb"), b"world").expect("write v6");
+
+        Mock::given(method("HEAD"))
+            .and(path("/ip2region_v4.xdb"))
+            .respond_with(ResponseTemplate::new(200).insert_header("content-length", "9999"))
+            .mount(&server)
+            .await;
+
+        let updater = XdbUpdater::new(tmp.path().to_path_buf(), server.uri());
+        let result = updater
+            .check_update_with(&production_shaped_client())
+            .await
+            .expect("check");
+        assert!(result, "remote size mismatch must trigger an update");
     }
 
     #[tokio::test]

@@ -2,8 +2,7 @@
 //!
 //! Covers: check_update returns true when files missing, download 404 → error,
 //! download success + atomic rename, corrupted body fails validation and leaves
-//! original untouched, xdb_file_info helpers, parse_duration all units,
-//! build_client success, update no-op when check_update returns false.
+//! original untouched, xdb_file_info helpers, parse_duration all units.
 
 #![allow(
     clippy::unwrap_used,
@@ -212,47 +211,32 @@ fn new_stores_custom_url() {
     let _ = updater;
 }
 
-// ── check_update returns true on size mismatch ───────────────────────────────
+// ── check_update decides on missing files before any network access ──────────
+//
+// A successful HEAD through the public API cannot be exercised here: the
+// SSRF-validated client rejects loopback base URLs by design, so a local mock
+// server is unreachable through `check_update`/`update`. The size-comparison
+// branch is covered by unit tests that inject a production-shaped client
+// (`check_update_with_*` in `src/geoip_updater.rs`), mirroring `download_one`.
 
 #[tokio::test(flavor = "multi_thread")]
-async fn check_update_returns_true_when_remote_size_differs() {
+async fn check_update_missing_file_short_circuits_before_network() {
     let server = MockServer::start().await;
     let tmp = tempfile::tempdir().expect("tmp");
 
-    // v4 local = 5 bytes, remote reports 9999 → size mismatch → update needed
+    // v4 present, v6 missing → update needed, decided before the source URL is
+    // validated or contacted (a loopback URL would fail validation otherwise).
     std::fs::write(tmp.path().join("ip2region_v4.xdb"), b"hello").expect("write v4");
 
     Mock::given(method("HEAD"))
-        .and(path("/ip2region_v4.xdb"))
-        .respond_with(ResponseTemplate::new(200).insert_header("content-length", "9999"))
+        .respond_with(ResponseTemplate::new(200).insert_header("content-length", "5"))
+        .expect(0)
         .mount(&server)
         .await;
 
     let updater = XdbUpdater::new(tmp.path().to_path_buf(), server.uri());
     let result = updater.check_update().await.expect("check");
-    assert!(result, "expected true on size mismatch");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn check_update_returns_false_when_sizes_match_both_files() {
-    let server = MockServer::start().await;
-    let tmp = tempfile::tempdir().expect("tmp");
-
-    // Both files present with size 5
-    std::fs::write(tmp.path().join("ip2region_v4.xdb"), b"hello").expect("write v4");
-    std::fs::write(tmp.path().join("ip2region_v6.xdb"), b"world").expect("write v6");
-
-    for name in ["ip2region_v4.xdb", "ip2region_v6.xdb"] {
-        Mock::given(method("HEAD"))
-            .and(path(format!("/{name}")))
-            .respond_with(ResponseTemplate::new(200).insert_header("content-length", "5"))
-            .mount(&server)
-            .await;
-    }
-
-    let updater = XdbUpdater::new(tmp.path().to_path_buf(), server.uri());
-    let result = updater.check_update().await.expect("check");
-    assert!(!result, "expected false when sizes match");
+    assert!(result, "missing v6 must report an update without any HEAD request");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -303,40 +287,6 @@ async fn update_attempts_download_when_check_update_errors() {
     assert!(result.is_err(), "expected download error when server unreachable");
 }
 
-// ── update no-op when already up to date ─────────────────────────────────────
-
-#[tokio::test(flavor = "multi_thread")]
-async fn update_is_noop_when_check_update_returns_false() {
-    let server = MockServer::start().await;
-
-    let tmp = tempfile::tempdir().expect("tmp");
-
-    // Create both local files with size 5.
-    std::fs::write(tmp.path().join("ip2region_v4.xdb"), b"hello").expect("write v4");
-    std::fs::write(tmp.path().join("ip2region_v6.xdb"), b"world").expect("write v6");
-
-    // HEAD responses match the local sizes (5 bytes each) → no update needed.
-    for name in ["ip2region_v4.xdb", "ip2region_v6.xdb"] {
-        Mock::given(method("HEAD"))
-            .and(path(format!("/{name}")))
-            .respond_with(ResponseTemplate::new(200).insert_header("content-length", "5"))
-            .mount(&server)
-            .await;
-    }
-
-    let updater = XdbUpdater::new(tmp.path().to_path_buf(), server.uri());
-
-    // Build a GeoIpService pointing at missing files (won't be reloaded).
-    let geoip = waf_engine::geoip::GeoIpService::init(
-        tmp.path().join("ip2region_v4.xdb").to_str().expect("str"),
-        tmp.path().join("ip2region_v6.xdb").to_str().expect("str"),
-        ip2region::CachePolicy::NoCache,
-    )
-    .expect("geoip init");
-
-    let result = updater.update(&geoip).await.expect("update");
-    assert!(!result.ipv4_updated);
-    assert!(!result.ipv6_updated);
-    assert_eq!(result.ipv4_size, 0);
-    assert_eq!(result.ipv6_size, 0);
-}
+// The update()-is-a-no-op path (check_update → false → zeroed result) needs a
+// successful loopback HEAD, which the SSRF-validated client forbids — see the
+// note above `check_update_missing_file_short_circuits_before_network`.
