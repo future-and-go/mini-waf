@@ -31,6 +31,7 @@ interface HostFormShape {
   guard_status: boolean;
   remote_host: string;
   remote_port: number;
+  remote_ip: string;
   start_status: boolean;
   log_only_mode: boolean;
   upstream_alpn: UpstreamAlpn;
@@ -65,6 +66,7 @@ const DEFAULT_FORM: HostFormShape = {
   guard_status: true,
   remote_host: "",
   remote_port: 8080,
+  remote_ip: "",
   start_status: true,
   log_only_mode: false,
   upstream_alpn: "h2h1",
@@ -125,6 +127,7 @@ export const HostsPage: React.FC = () => {
       guard_status: host.guard_status,
       remote_host: host.remote_host,
       remote_port: host.remote_port,
+      remote_ip: host.remote_ip ?? "",
       start_status: host.start_status,
       log_only_mode: host.log_only_mode ?? false,
       upstream_alpn: host.upstream_alpn ?? "h2h1",
@@ -255,6 +258,19 @@ export const HostsPage: React.FC = () => {
           <InputNumber min={1} max={65535} style={{ width: "100%" }} />
         </Form.Item>
       </Space.Compact>
+      <Form.Item
+        name="remote_ip"
+        label={
+          <span>
+            {t("hosts.remoteIpPin")}&nbsp;
+            <Tooltip title={t("hosts.remoteIpPinTooltip")}>
+              <InfoCircleOutlined style={{ color: "#8c8c8c" }} />
+            </Tooltip>
+          </span>
+        }
+      >
+        <Input placeholder="203.0.113.10" allowClear />
+      </Form.Item>
       <Form.Item name="remarks" label={t("hosts.remarks")}>
         <Input />
       </Form.Item>

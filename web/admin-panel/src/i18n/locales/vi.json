@@ -184,6 +184,8 @@
     "http": "HTTP",
     "editHost": "Sửa Host",
     "upstreamPort": "Upstream port",
+    "remoteIpPin": "IP upstream (ghim)",
+    "remoteIpPinTooltip": "Ghim upstream vào IP này, bỏ qua phân giải DNS của hostname Upstream. Để trống để định tuyến theo hostname. IP đã ghim sẽ ghi đè trường Upstream.",
     "logOnly": "Chỉ ghi log",
     "upstreamAlpn": "ALPN upstream",
     "upstreamAlpnTooltip": "ALPN chỉ áp dụng khi bật SSL",
