@@ -1,4 +1,4 @@
-//! FR-005 phase-05 — Ban action with TTL escalation.
+//! Ban action with TTL escalation.
 //!
 //! [`BanAction`] tracks offenses per IP and applies escalating bans:
 //! - 1st offense: 60s ban, +30 risk
@@ -335,7 +335,7 @@ impl ActionExecutor for BanAction {
             },
         );
 
-        // Structured logging per brainstorm §9
+        // Structured audit log for ban events
         warn!(
             action = "ban",
             ip = %ip,

@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "RiskConfig serde verify and acceptance quality gates"
-status: pending
+status: completed
 effort: "1h"
 ---
 

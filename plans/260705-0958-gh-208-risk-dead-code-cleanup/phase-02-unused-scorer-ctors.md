@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Remove unused Scorer ctors + migrate tests"
-status: pending
+status: completed
 effort: "20m"
 ---
 

@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Actor-Keyed Sync Submit Seam"
-status: pending
+status: completed
 priority: P2
 dependencies: []
 ---

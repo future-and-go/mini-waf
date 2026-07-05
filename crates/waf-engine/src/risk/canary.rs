@@ -1,9 +1,9 @@
-//! FR-028 Canary Honeypot layer.
+//! Canary Honeypot layer.
 //!
 //! Configured canary paths (e.g., `/admin-test`, `/api-debug`) that no legitimate
 //! user should hit. When triggered:
 //! 1. `store.force_max()` — pins score to 100 with `pinned_until_ms`
-//! 2. Adds IP to dynamic ban table (FR-005 `DynamicBanTable`)
+//! 2. Adds IP to the dynamic ban table (`DynamicBanTable`)
 //! 3. Returns `Block` immediately, bypassing threshold gate
 //!
 //! Hot-reloadable via `ArcSwap<HashSet<String>>` for path list updates.

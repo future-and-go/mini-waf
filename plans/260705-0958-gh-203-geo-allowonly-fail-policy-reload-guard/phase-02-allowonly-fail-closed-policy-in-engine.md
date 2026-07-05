@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "AllowOnly fail-closed policy in engine"
-status: pending
+status: completed
 dependencies: [1]
 effort: "2h"
 ---

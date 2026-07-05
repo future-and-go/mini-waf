@@ -1,4 +1,4 @@
-//! FR-025 Phase 5: Risk lifecycle tests.
+//! Risk lifecycle tests.
 //!
 //! Verifies the rise → decay → floor behavior end-to-end:
 //! - Attack signals raise score

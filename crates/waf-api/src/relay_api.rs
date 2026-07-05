@@ -10,22 +10,9 @@ use axum::{Json, extract::State};
 use serde_json::{Value, json};
 use waf_engine::relay::config::{RelayConfig, RelayDetectionDocument};
 
+use crate::config_files::{resolve_path, write_yaml_str};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
-
-fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
-    state.main_config_file.as_ref().map_or_else(
-        || std::path::PathBuf::from(relative),
-        |main| {
-            let p = std::path::Path::new(main.as_str());
-            let root = p
-                .parent()
-                .and_then(|c| c.parent())
-                .unwrap_or_else(|| std::path::Path::new("."));
-            root.join(relative)
-        },
-    )
-}
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
@@ -50,18 +37,7 @@ pub async fn put_relay_config(State(state): State<Arc<AppState>>, Json(body): Js
     let path = resolve_path(&state, "configs/relay.yaml");
     let yaml_str =
         serde_yaml::to_string(&doc).map_err(|e| ApiError::Internal(anyhow::anyhow!("serialize yaml: {e}")))?;
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("mkdir: {e}")))?;
-    }
-    let tmp = path.with_extension("yaml.tmp");
-    tokio::fs::write(&tmp, yaml_str.as_bytes())
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("write: {e}")))?;
-    tokio::fs::rename(&tmp, &path)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("rename: {e}")))?;
+    write_yaml_str(&path, &yaml_str).await?;
     let data = serde_json::to_value(&doc.relay_detection)
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("serialize response: {e}")))?;
     Ok(Json(json!({ "success": true, "data": data })))

@@ -4,6 +4,7 @@ pub mod bot_api;
 pub mod cache_api;
 pub mod challenge_api;
 pub mod cluster;
+mod config_files;
 pub mod crowdsec;
 pub mod ddos_api;
 pub mod device_fp_api;

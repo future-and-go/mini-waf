@@ -1,4 +1,4 @@
-//! FR-025 Phase 2: L0 Reputation Seed Layer.
+//! L0 Reputation Seed Layer.
 //!
 //! Classifies IPs via whitelist (short-circuit), Tor exit list, and ASN
 //! classification before any expensive detection layers run. Uses `ArcSwap`

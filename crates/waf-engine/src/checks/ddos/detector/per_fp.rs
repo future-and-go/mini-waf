@@ -16,15 +16,14 @@
 //!   which adds memory overhead proportional to (keys × `window_duration` / granularity).
 //!   For 100k fingerprints × 60s window, this is significant.
 //!
-//! For FR-005 v1, the fixed-window approximation is sufficient. Upgrade to
+//! For now, the fixed-window approximation is sufficient. Upgrade to
 //! precise sliding if edge-case exploitation becomes a real attack vector.
 //!
 //! # Current Limitation
 //!
-//! **GAP**: `RequestCtx` does not yet carry a `device_fp` field. Until phase 7
-//! wires device fingerprinting into the request pipeline, this detector will
-//! always return `Allow` for live traffic. The core logic is complete and
-//! tested via `evaluate_with_fp()`.
+//! **GAP**: `Detector::evaluate` does not yet read the device fingerprint
+//! from the request, so this detector always returns `Allow` for live
+//! traffic. The core logic is complete and tested via `evaluate_with_fp()`.
 
 use std::sync::Arc;
 
@@ -48,7 +47,7 @@ impl PerFpDetector {
     /// Create a new per-fingerprint detector backed by the given counter store.
     ///
     /// The store is typically `MemoryCounterStore` for standalone deployments
-    /// or a Redis-backed store for clustered deployments (phase 4).
+    /// or a Redis-backed store for clustered deployments.
     #[must_use]
     pub fn new(store: Arc<dyn CounterStore>) -> Self {
         Self { store }
@@ -64,8 +63,8 @@ impl PerFpDetector {
     /// Core evaluation logic with explicit fingerprint input.
     ///
     /// This method contains the actual detection logic. It's exposed separately
-    /// from `Detector::evaluate` because `RequestCtx` doesn't yet carry device
-    /// fingerprint data (that wiring happens in phase 7).
+    /// from `Detector::evaluate`, which does not yet read device fingerprint
+    /// data from the request.
     ///
     /// # Arguments
     /// - `fp_hash`: Device fingerprint hash. `None` or empty string → `Allow` (no signal).
@@ -80,8 +79,8 @@ impl PerFpDetector {
         now_ms: i64,
     ) -> DetectorVerdict {
         // Skip when fingerprint is absent or empty — no signal available.
-        // This happens when FR-010 device fingerprinting didn't run (e.g.,
-        // plain HTTP/1 without TLS extensions, or FR-010 disabled).
+        // This happens when device fingerprinting didn't run (e.g., plain
+        // HTTP/1 without TLS extensions, or fingerprinting disabled).
         let Some(fp) = fp_hash.filter(|s| !s.is_empty()) else {
             return DetectorVerdict::Allow;
         };
@@ -97,7 +96,7 @@ impl PerFpDetector {
             },
             Ok(_) => DetectorVerdict::Allow,
             Err(e) => {
-                // Degrade decision owned by phase 6 — here we warn and allow.
+                // Degrade decision owned by the degrade module — here we warn and allow.
                 warn!(
                     detector = "per_fp",
                     fp = %fp,
@@ -120,15 +119,14 @@ impl Detector for PerFpDetector {
     ///
     /// # Current Behavior
     ///
-    /// **Always returns `Allow`** because `RequestCtx` doesn't yet carry
-    /// `device_fp`. This is a documented gap — phase 7 wires device
-    /// fingerprinting into the request pipeline.
+    /// **Always returns `Allow`** — the device fingerprint is not yet read
+    /// from the request here; this is a documented gap.
     ///
-    /// Once phase 7 is complete, this will extract `ctx.device_fp.hash` and
+    /// Once the wiring lands, this will extract `ctx.device_fp.hash` and
     /// delegate to `evaluate_with_fp()`.
     fn evaluate(&self, _ctx: &RequestCtx, _cfg: &DdosTierCfg, _now_ms: i64) -> DetectorVerdict {
-        // GAP: RequestCtx.device_fp does not exist yet.
-        // Phase 7 will add it; then this becomes:
+        // GAP: the device fingerprint is not read from the request here yet.
+        // Once wired, this becomes:
         //   let fp = ctx.device_fp.as_ref().and_then(|f| f.hash.as_ref());
         //   self.evaluate_with_fp(fp.map(String::as_str), ctx, cfg, now_ms)
         DetectorVerdict::Allow
@@ -426,8 +424,8 @@ mod tests {
 
     #[test]
     fn detector_evaluate_returns_allow_gap_documented() {
-        // This tests the current behavior where RequestCtx.device_fp doesn't exist.
-        // The Detector::evaluate method always returns Allow until phase 7 wires it up.
+        // This tests the current behavior where the fingerprint is not wired up:
+        // the Detector::evaluate method always returns Allow.
         let store = TestCounterStore::new();
         let detector = PerFpDetector::new(store);
         let ctx = test_ctx(Tier::Medium);

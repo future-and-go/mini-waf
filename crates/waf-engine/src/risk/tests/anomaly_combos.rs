@@ -1,4 +1,4 @@
-//! FR-025 Phase 5: Anomaly detector combination tests.
+//! Anomaly detector combination tests.
 //!
 //! Verifies each detector emits correct deltas and that combinations
 //! accumulate properly without exceeding individual caps.

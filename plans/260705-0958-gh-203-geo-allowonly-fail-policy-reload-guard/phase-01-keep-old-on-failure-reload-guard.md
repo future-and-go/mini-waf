@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Keep-old-on-failure reload guard"
-status: pending
+status: completed
 dependencies: []
 effort: "1.5h"
 ---

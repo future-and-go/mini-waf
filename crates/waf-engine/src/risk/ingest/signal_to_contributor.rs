@@ -12,7 +12,7 @@ use crate::risk::state::{Contributor, ContributorKind};
 
 /// Configurable weights for signal → delta mapping.
 ///
-/// Default values match the plan table. Operators can override via
+/// Operators can override the default values via
 /// `risk.signal_weights` in the config YAML.
 #[derive(Clone, Debug)]
 pub struct SignalWeights {
@@ -148,6 +148,10 @@ pub fn signal_to_contributor(signal: &Signal, weights: &SignalWeights, ts_ms: i6
             ContributorKind::Signal("limit_change_burst".into()),
             weights.get("limit_change_burst"),
         ),
+
+        // Passthrough by design: the DDoS detector already quantifies
+        // severity, so a static weight would flatten it.
+        Signal::DdosBurst { risk_delta } => (ContributorKind::Signal("ddos_burst".into()), i16::from(*risk_delta)),
     };
 
     Contributor::new(kind, delta, ts_ms)
@@ -200,6 +204,7 @@ mod tests {
                 ok_count: 3,
                 window_sec: 60,
             },
+            Signal::DdosBurst { risk_delta: 50 },
         ];
 
         for signal in &signals {
@@ -243,6 +248,15 @@ mod tests {
 
         let contrib = signal_to_contributor(&Signal::FpConflict { distinct_uas: 2 }, &weights, 0);
         assert_eq!(contrib.delta, 50);
+    }
+
+    #[test]
+    fn ddos_burst_delta_is_passthrough() {
+        let weights = SignalWeights::default();
+        let soft = signal_to_contributor(&Signal::DdosBurst { risk_delta: 37 }, &weights, 0);
+        let hard = signal_to_contributor(&Signal::DdosBurst { risk_delta: 100 }, &weights, 0);
+        assert_eq!(soft.delta, 37);
+        assert_eq!(hard.delta, 100);
     }
 
     #[test]

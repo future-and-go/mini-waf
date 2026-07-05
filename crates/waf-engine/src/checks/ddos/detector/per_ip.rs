@@ -1,6 +1,6 @@
 //! Per-IP `DDoS` detector.
 //!
-//! Thin wrapper around `RateLimitStore` — delegates rate limiting math to FR-004,
+//! Thin wrapper around `RateLimitStore` — delegates the rate limiting math to it,
 //! only translates `Decision` → `DetectorVerdict`. No new counters or algorithms.
 
 use std::sync::Arc;
@@ -14,9 +14,9 @@ use super::{DdosTierCfg, Detector, DetectorVerdict, tier_str};
 
 /// Per-IP rate detector using the existing `RateLimitStore`.
 ///
-/// Reuses FR-004's token bucket + sliding window implementation to detect
+/// Reuses the rate limiter's token bucket + sliding window implementation to detect
 /// per-IP burst violations. Key format: `ddos:ip:{tier}:{ip}` to avoid
-/// collision with FR-004's `ip:{host}:{ip}` namespace.
+/// collision with the rate limiter's `ip:{host}:{ip}` namespace.
 pub struct PerIpDetector {
     store: Arc<dyn RateLimitStore>,
 }
@@ -30,7 +30,7 @@ impl PerIpDetector {
 
     /// Build the rate limit key for this IP + tier combination.
     ///
-    /// Format: `ddos:ip:{tier}:{ip}` — distinct from FR-004's `ip:{host}:{ip}`.
+    /// Format: `ddos:ip:{tier}:{ip}` — distinct from the rate limiter's `ip:{host}:{ip}`.
     fn build_key(ctx: &RequestCtx) -> String {
         format!("ddos:ip:{}:{}", tier_str(ctx.tier), ctx.client_ip)
     }
@@ -82,7 +82,7 @@ impl Detector for PerIpDetector {
                 rps: cfg.per_fp_threshold,
             },
             Err(e) => {
-                // Degrade decision owned by phase 6 — here we just warn and allow
+                // Degrade decision owned by the degrade module — here we just warn and allow
                 warn!(
                     detector = "per_ip",
                     ip = %ctx.client_ip,
@@ -247,7 +247,7 @@ mod tests {
         let ctx = test_ctx(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), Tier::CatchAll);
         let cfg = test_cfg();
 
-        // Error should degrade to Allow (fail-open for now, phase 6 owns degrade)
+        // Error should degrade to Allow (fail-open; the degrade module owns degrade)
         let verdict = detector.evaluate(&ctx, &cfg, 1000);
         assert_eq!(verdict, DetectorVerdict::Allow);
     }

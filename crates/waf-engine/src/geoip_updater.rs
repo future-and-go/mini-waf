@@ -13,10 +13,27 @@ use anyhow::{Context, Result};
 use tracing::{debug, info, warn};
 
 use crate::geoip::GeoIpService;
+use crate::relay::intel::atomic_swap::stream_to_tmp;
+use crate::validated_fetch::{USER_AGENT, build_validated_client};
 use waf_common::config::GeoIpAutoUpdateConfig;
 
 /// Default URL base for ip2region raw xdb files on GitHub.
 const DEFAULT_GITHUB_BASE_URL: &str = "https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data";
+
+/// Maximum allowed xdb response body size (64 MiB — comfortable headroom over
+/// the ~20 MB full xdb files). Enforced via `Content-Length` fast-reject and a
+/// running cap while streaming to disk.
+const MAX_XDB_RESPONSE_SIZE: u64 = 64 * 1024 * 1024;
+
+/// Connection establishment timeout for updater requests.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Total request timeout for `HEAD` update checks.
+const HEAD_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Total request timeout for xdb downloads (~20 MB files on slow links).
+#[allow(clippy::duration_suboptimal_units)] // prefer `from_secs` over MSRV-gated `from_mins`
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -65,17 +82,20 @@ impl XdbUpdater {
     /// file is missing locally).  Returns `Ok(false)` when both local files
     /// match the remote sizes.  Network errors are propagated.
     pub async fn check_update(&self) -> Result<bool> {
-        let client = build_client(30)?;
-
+        // Missing file → definitely need to download; decided before any
+        // network access (and before the source URL is validated).
         for filename in &["ip2region_v4.xdb", "ip2region_v6.xdb"] {
-            let local_path = self.data_dir.join(filename);
-
-            // Missing file → definitely need to download.
-            if !local_path.exists() {
+            if !self.data_dir.join(filename).exists() {
                 debug!("GeoIP updater: {} not found locally — update needed", filename);
                 return Ok(true);
             }
+        }
 
+        // One validated client per cycle — both files share the base host.
+        let client = build_validated_client(&self.github_base_url, CONNECT_TIMEOUT, HEAD_TIMEOUT, USER_AGENT)?;
+
+        for filename in &["ip2region_v4.xdb", "ip2region_v6.xdb"] {
+            let local_path = self.data_dir.join(filename);
             let local_size = local_path.metadata().map_or(0, |m| m.len());
             let url = format!("{}/{}", self.github_base_url, filename);
 
@@ -120,7 +140,7 @@ impl XdbUpdater {
         std::fs::create_dir_all(&self.data_dir)
             .with_context(|| format!("Failed to create data dir: {}", self.data_dir.display()))?;
 
-        let client = build_client(120)?;
+        let client = build_validated_client(&self.github_base_url, CONNECT_TIMEOUT, DOWNLOAD_TIMEOUT, USER_AGENT)?;
 
         let (ipv4_updated, ipv4_size) = self.download_one(&client, "ip2region_v4.xdb").await?;
         let (ipv6_updated, ipv6_size) = self.download_one(&client, "ip2region_v6.xdb").await?;
@@ -182,15 +202,23 @@ impl XdbUpdater {
             return Err(anyhow::anyhow!("HTTP {} downloading {}", resp.status(), url));
         }
 
-        let bytes = resp
-            .bytes()
-            .await
-            .with_context(|| format!("Failed to read response body for {filename}"))?;
+        // Fast-reject a response that already advertises an oversized body.
+        if let Some(len) = resp.content_length()
+            && len > MAX_XDB_RESPONSE_SIZE
+        {
+            return Err(anyhow::anyhow!(
+                "GeoIP xdb response too large: {len} bytes (max {MAX_XDB_RESPONSE_SIZE}) for {url}"
+            ));
+        }
 
-        let size = bytes.len() as u64;
+        // Stream to the tmp file with a running byte cap — never buffer the
+        // whole body in memory.
+        if let Err(e) = stream_to_tmp(&tmp_path, resp, &(1..=MAX_XDB_RESPONSE_SIZE)).await {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(e.context(format!("Failed to download {filename}")));
+        }
 
-        // Write to tmp file first.
-        std::fs::write(&tmp_path, &bytes).with_context(|| format!("Failed to write {}", tmp_path.display()))?;
+        let size = tmp_path.metadata().map_or(0, |m| m.len());
 
         // Validate: try to open the tmp file as a Searcher.
         // Use NoCache policy to avoid loading ~20 MB into memory just for validation.
@@ -278,14 +306,6 @@ pub fn parse_duration(s: &str) -> Duration {
     };
 
     Duration::from_secs(secs)
-}
-
-/// Build a [`reqwest::Client`] with a given timeout (seconds).
-fn build_client(timeout_secs: u64) -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout_secs))
-        .build()
-        .context("Failed to build HTTP client for GeoIP updater")
 }
 
 // ── Display helper ────────────────────────────────────────────────────────────
@@ -396,20 +416,152 @@ mod tests {
         assert_eq!(default.github_base_url, DEFAULT_GITHUB_BASE_URL);
     }
 
-    #[test]
-    fn build_client_succeeds_with_reasonable_timeout() {
-        let res = build_client(30);
-        assert!(res.is_ok());
-    }
-
     #[tokio::test]
     async fn check_update_returns_true_when_files_missing() {
         let tmp = tempfile::tempdir().expect("tmp");
         // Use a non-routable URL so HEAD requests never hit the network for
         // the size-comparison branch — but since both files are missing, the
-        // function returns Ok(true) before issuing a request.
+        // function returns Ok(true) before issuing a request (and before the
+        // source URL is validated).
         let updater = XdbUpdater::new(tmp.path().to_path_buf(), "http://127.0.0.1:1".to_string());
         let res = updater.check_update().await.expect("missing files → Ok(true)");
         assert!(res);
+    }
+
+    /// Place dummy local xdb files so `check_update` proceeds to the network phase.
+    fn write_dummy_xdb_files(dir: &Path) {
+        std::fs::write(dir.join("ip2region_v4.xdb"), b"v4").expect("write v4");
+        std::fs::write(dir.join("ip2region_v6.xdb"), b"v6").expect("write v6");
+    }
+
+    #[tokio::test]
+    async fn check_update_rejects_private_host() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        write_dummy_xdb_files(tmp.path());
+        let updater = XdbUpdater::new(tmp.path().to_path_buf(), "http://127.0.0.1:9/data".to_string());
+        let err = updater
+            .check_update()
+            .await
+            .expect_err("loopback source must be rejected");
+        assert!(err.to_string().contains("SSRF"), "unexpected error: {err:#}");
+    }
+
+    #[tokio::test]
+    async fn download_rejects_private_host() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let updater = XdbUpdater::new(tmp.path().to_path_buf(), "http://10.0.0.1/data".to_string());
+        let err = updater
+            .download()
+            .await
+            .expect_err("private-range source must be rejected");
+        assert!(err.to_string().contains("SSRF"), "unexpected error: {err:#}");
+        assert!(!tmp.path().join("ip2region_v4.xdb").exists());
+    }
+
+    #[tokio::test]
+    async fn download_rejects_imds_host() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let updater = XdbUpdater::new(tmp.path().to_path_buf(), "http://169.254.169.254/latest".to_string());
+        let err = updater.download().await.expect_err("IMDS source must be rejected");
+        assert!(err.to_string().contains("SSRF"), "unexpected error: {err:#}");
+    }
+
+    /// A production-shaped client for local-server tests.
+    ///
+    /// `build_validated_client` rejects loopback URLs by design, so the full
+    /// `download()` wiring cannot be pointed at a local test server. These
+    /// tests build the client through the same helper against a public
+    /// IP-literal placeholder (never contacted) — same redirect policy,
+    /// timeouts, and UA — then drive `download_one` at the local server.
+    fn production_shaped_client() -> reqwest::Client {
+        build_validated_client(
+            "http://93.184.216.34/",
+            CONNECT_TIMEOUT,
+            Duration::from_secs(30),
+            USER_AGENT,
+        )
+        .expect("public placeholder URL must validate")
+    }
+
+    #[tokio::test]
+    async fn download_one_rejects_oversized_response() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // Body one byte over the cap; the advertised Content-Length triggers
+        // the fast-reject before any body byte is read.
+        #[allow(clippy::cast_possible_truncation)]
+        let body = vec![0u8; MAX_XDB_RESPONSE_SIZE as usize + 1];
+        Mock::given(method("GET"))
+            .and(path("/ip2region_v4.xdb"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().expect("tmp");
+        let updater = XdbUpdater::new(tmp.path().to_path_buf(), server.uri());
+
+        let err = updater
+            .download_one(&production_shaped_client(), "ip2region_v4.xdb")
+            .await
+            .expect_err("oversized response must be rejected");
+        assert!(err.to_string().contains("too large"), "unexpected error: {err:#}");
+        assert!(!tmp.path().join("ip2region_v4.xdb").exists(), "no final file");
+        assert!(!tmp.path().join("ip2region_v4.xdb.tmp").exists(), "no tmp left behind");
+    }
+
+    #[tokio::test]
+    async fn download_one_does_not_follow_redirect() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/ip2region_v4.xdb"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", "/elsewhere"))
+            .mount(&server)
+            .await;
+        // The redirect target must never be fetched (verified on server drop).
+        Mock::given(method("GET"))
+            .and(path("/elsewhere"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"payload".to_vec()))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().expect("tmp");
+        let updater = XdbUpdater::new(tmp.path().to_path_buf(), server.uri());
+
+        let err = updater
+            .download_one(&production_shaped_client(), "ip2region_v4.xdb")
+            .await
+            .expect_err("redirect must surface as an error");
+        assert!(err.to_string().contains("302"), "unexpected error: {err:#}");
+        assert!(!tmp.path().join("ip2region_v4.xdb").exists());
+    }
+
+    #[tokio::test]
+    async fn download_one_rejects_invalid_xdb_and_cleans_tmp() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/ip2region_v4.xdb"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"not a real xdb file".to_vec()))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().expect("tmp");
+        let updater = XdbUpdater::new(tmp.path().to_path_buf(), server.uri());
+
+        let err = updater
+            .download_one(&production_shaped_client(), "ip2region_v4.xdb")
+            .await
+            .expect_err("invalid xdb must fail Searcher validation");
+        assert!(err.to_string().contains("validation"), "unexpected error: {err:#}");
+        assert!(!tmp.path().join("ip2region_v4.xdb").exists(), "no final file");
+        assert!(!tmp.path().join("ip2region_v4.xdb.tmp").exists(), "tmp cleaned up");
     }
 }

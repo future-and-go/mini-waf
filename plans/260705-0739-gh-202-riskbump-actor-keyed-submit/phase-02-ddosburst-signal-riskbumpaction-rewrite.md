@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "DdosBurst Signal + RiskBumpAction Rewrite"
-status: pending
+status: completed
 priority: P2
 dependencies: [1]
 ---
