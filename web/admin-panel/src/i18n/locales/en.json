@@ -919,7 +919,7 @@
     "configSaved": "Config saved",
     "scoreCleared": "Score cleared",
     "noActors": "No actors tracked yet",
-    "creditHint": "A positive amount decreases the risk score; negative increases it.",
+    "creditHint": "The credit amount is subtracted from the actor's risk score (allowed range 1\u2013100).",
     "creditApplied": "Credit applied",
     "actorDetail": "Actor Detail",
     "addCreditTitle": "Add Score Credit",
