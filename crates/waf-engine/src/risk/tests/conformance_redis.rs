@@ -7,7 +7,8 @@
 
 use std::time::Duration;
 
-use crate::risk::store::conformance::run_all;
+use crate::risk::config::DecayConfig;
+use crate::risk::store::conformance::{run_all, test_decay_disabled_when_rate_zero, test_decay_honors_configured_rate};
 use crate::risk::store::redis::{RedisRiskConfig, RedisRiskStore};
 
 fn unique_prefix() -> String {
@@ -32,11 +33,64 @@ async fn redis_store_passes_conformance() {
         op_timeout: Duration::from_millis(500),
         breaker_threshold: 5,
         cache_capacity: 1000,
+        decay: DecayConfig::default(),
     })
     .await
     .expect("connect to REDIS_TEST_URL");
 
     run_all(&store).await;
+}
+
+/// The Lua apply script must decay by the configured rate, not the default.
+#[tokio::test]
+async fn redis_decay_honors_configured_rate() {
+    let Ok(url) = std::env::var("REDIS_TEST_URL") else {
+        tracing::info!("skipping: REDIS_TEST_URL unset");
+        return;
+    };
+
+    let store = RedisRiskStore::new(RedisRiskConfig {
+        url,
+        key_prefix: unique_prefix(),
+        ttl_secs: 3600,
+        op_timeout: Duration::from_millis(500),
+        breaker_threshold: 5,
+        cache_capacity: 1000,
+        decay: DecayConfig {
+            decay_rate: 3,
+            ..Default::default()
+        },
+    })
+    .await
+    .expect("connect to REDIS_TEST_URL");
+
+    test_decay_honors_configured_rate(&store).await;
+}
+
+/// The Lua apply script must not decay at all when `decay_rate` is 0.
+#[tokio::test]
+async fn redis_decay_disabled_when_rate_zero() {
+    let Ok(url) = std::env::var("REDIS_TEST_URL") else {
+        tracing::info!("skipping: REDIS_TEST_URL unset");
+        return;
+    };
+
+    let store = RedisRiskStore::new(RedisRiskConfig {
+        url,
+        key_prefix: unique_prefix(),
+        ttl_secs: 3600,
+        op_timeout: Duration::from_millis(500),
+        breaker_threshold: 5,
+        cache_capacity: 1000,
+        decay: DecayConfig {
+            decay_rate: 0,
+            ..Default::default()
+        },
+    })
+    .await
+    .expect("connect to REDIS_TEST_URL");
+
+    test_decay_disabled_when_rate_zero(&store).await;
 }
 
 /// Test that multiple applies accumulate correctly.
@@ -58,6 +112,7 @@ async fn redis_apply_accumulates_score() {
         op_timeout: Duration::from_millis(500),
         breaker_threshold: 5,
         cache_capacity: 1000,
+        decay: DecayConfig::default(),
     })
     .await
     .expect("connect");
@@ -101,6 +156,7 @@ async fn redis_triple_key_converges() {
         op_timeout: Duration::from_millis(500),
         breaker_threshold: 5,
         cache_capacity: 1000,
+        decay: DecayConfig::default(),
     })
     .await
     .expect("connect");
@@ -163,6 +219,7 @@ async fn redis_force_max_pins_score() {
         op_timeout: Duration::from_millis(500),
         breaker_threshold: 5,
         cache_capacity: 1000,
+        decay: DecayConfig::default(),
     })
     .await
     .expect("connect");
@@ -203,6 +260,7 @@ async fn redis_reset_all_clears_store() {
         op_timeout: Duration::from_millis(500),
         breaker_threshold: 5,
         cache_capacity: 1000,
+        decay: DecayConfig::default(),
     })
     .await
     .expect("connect");

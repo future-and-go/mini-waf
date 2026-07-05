@@ -13,6 +13,7 @@ use crate::device_fp::types::FpKey;
 use crate::risk::ingest::metrics::IngestMetrics;
 use crate::risk::ingest::signal_to_contributor::{SignalWeights, signals_to_contributors};
 use crate::risk::key::RiskKey;
+use crate::risk::score::clamp_per_request_deltas;
 use crate::risk::store::RiskStore;
 
 /// Job submitted to the worker queue.
@@ -101,6 +102,10 @@ async fn process_job(
         metrics.record_processed(lag_ms as u64);
         return Ok(());
     }
+
+    // One job carries one request's signals — cap its positive delta sum
+    // like the sync path does.
+    let (contributors, _raw_sum) = clamp_per_request_deltas(&contributors);
 
     // Apply to store
     store.apply(&risk_key, &contributors, now_ms).await?;

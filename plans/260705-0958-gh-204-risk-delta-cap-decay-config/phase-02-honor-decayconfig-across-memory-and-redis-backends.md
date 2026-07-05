@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Honor DecayConfig across memory and redis backends"
-status: pending
+status: completed
 effort: 2h
 ---
 

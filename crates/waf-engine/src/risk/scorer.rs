@@ -20,6 +20,7 @@ use crate::risk::canary::CanaryLayer;
 use crate::risk::challenge_credit::{ChallengeVerifier, VerifyOutcome};
 use crate::risk::config::RiskConfig;
 use crate::risk::key::{RiskKey, SessionId};
+use crate::risk::score::clamp_per_request_deltas;
 use crate::risk::seed::{SeedLayer, SeedVerdict};
 use crate::risk::state::{Contributor, ContributorKind, CreditOutcome};
 use crate::risk::store::RiskStore;
@@ -253,6 +254,10 @@ impl<S: RiskStore + ?Sized> Scorer<S> {
         if let Some(credit_delta) = self.evaluate_challenge_credit(ctx, &key, now_ms, cfg).await {
             all_deltas.push(credit_delta);
         }
+
+        // Cap this request's positive delta sum to MAX_PER_REQUEST_DELTA
+        // before the store fold (which only clamps the total score).
+        let (all_deltas, _raw_sum) = clamp_per_request_deltas(&all_deltas);
 
         // Apply to store (decay happens inside store.apply before fold)
         let result = self.store.apply(&key, &all_deltas, now_ms).await?;
@@ -650,6 +655,30 @@ mod tests {
 
         assert_eq!(result.score, 95);
         assert!(matches!(result.action, WafAction::Block { .. }));
+    }
+
+    #[tokio::test]
+    async fn oversized_positive_batch_capped_and_credit_preserved() {
+        use crate::risk::state::{ContributorKind, SeedKind};
+
+        let scorer = make_scorer();
+        let ctx = make_ctx();
+
+        // Positive deltas sum to 160 (> the per-request cap). The oldest
+        // positive is truncated so the newest 100 points land, and the
+        // negative credit survives the cap.
+        let deltas = vec![
+            Contributor::new(ContributorKind::Seed(SeedKind::Generic), 60, 1000),
+            Contributor::new(ContributorKind::AdminCredit, -20, 1000),
+            Contributor::new(ContributorKind::Seed(SeedKind::Generic), 60, 1000),
+            Contributor::new(ContributorKind::Seed(SeedKind::Generic), 40, 1000),
+        ];
+        let result = scorer.score(&ctx, None, &deltas, None, 1000).await.unwrap();
+
+        assert_eq!(
+            result.score, 80,
+            "cap keeps the newest 100 positive points; the credit still applies"
+        );
     }
 
     #[tokio::test]
