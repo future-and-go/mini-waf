@@ -1,4 +1,4 @@
-//! FR-025 Phase 7: Embedded Lua scripts for Redis risk store.
+//! Embedded Lua scripts for the Redis risk store.
 //!
 //! All scripts are atomic single-RTT operations: owner resolution (mint or
 //! max-score convergence across index keys) and state mutation happen inside

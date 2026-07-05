@@ -1,4 +1,4 @@
-//! FR-025 risk scoring configuration.
+//! Risk scoring configuration.
 //!
 //! YAML schema for `configs/risk.yaml`. Hot-reload via `ArcSwap` + `notify`.
 
@@ -58,15 +58,15 @@ pub struct RiskConfig {
     #[serde(default)]
     pub seed: SeedConfig,
 
-    /// Async ingest pipeline configuration (Phase 4).
+    /// Async ingest pipeline configuration.
     #[serde(default)]
     pub ingest: IngestConfig,
 
-    /// FR-028 canary honeypot configuration (Phase 6).
+    /// Canary honeypot configuration.
     #[serde(default)]
     pub canary: CanaryConfig,
 
-    /// FR-006/FR-025 Phase 8 challenge credit configuration.
+    /// Challenge credit configuration.
     #[serde(default)]
     pub challenge: ChallengeConfig,
 }
@@ -92,7 +92,7 @@ impl Default for StoreConfig {
     }
 }
 
-/// Redis store configuration (Phase 7).
+/// Redis store configuration.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RedisStoreConfig {
     /// Redis URL, e.g. `redis://127.0.0.1:6379`.
@@ -242,7 +242,7 @@ impl SeedConfig {
     }
 }
 
-/// Async ingest pipeline configuration (Phase 4).
+/// Async ingest pipeline configuration.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct IngestConfig {
     /// Whether async ingest is enabled.
@@ -259,7 +259,7 @@ pub struct IngestConfig {
     pub signal_weights: HashMap<String, i16>,
 }
 
-/// FR-028 Canary honeypot configuration (Phase 6).
+/// Canary honeypot configuration.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CanaryConfig {
     /// Whether canary detection is enabled.
@@ -276,7 +276,7 @@ pub struct CanaryConfig {
     pub ban_ttl_secs: u32,
 }
 
-/// FR-006/FR-025 Phase 8 Challenge credit configuration.
+/// Challenge credit configuration.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ChallengeConfig {
     /// Whether challenge credit verification is enabled.

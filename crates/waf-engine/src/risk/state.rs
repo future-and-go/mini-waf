@@ -1,4 +1,4 @@
-//! FR-025 risk state types.
+//! Risk state types.
 //!
 //! `RiskState` holds the accumulated risk for a single actor identity.
 //! `Contributor` records individual risk events (rule hits, anomalies, signals)
@@ -20,7 +20,7 @@ pub enum SeedKind {
     BadASN,
 }
 
-/// Outcome of challenge credit verification (FR-006).
+/// Outcome of challenge credit verification.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CreditOutcome {
     /// Valid challenge token — grant credit.
@@ -38,7 +38,7 @@ pub enum CreditOutcome {
 pub enum ContributorKind {
     /// A WAF rule matched (`rule_id` stored).
     Rule(String),
-    /// Behavioral anomaly detected (FR-011).
+    /// Behavioral anomaly detected.
     Anomaly,
     /// L0 seed layer classification (Tor exit, datacenter ASN, bad ASN).
     Seed(SeedKind),
@@ -48,7 +48,7 @@ pub enum ContributorKind {
     Override,
     /// Decay credit applied.
     Decay,
-    /// FR-006 challenge credit verification result.
+    /// Challenge credit verification result.
     ChallengeCredit(CreditOutcome),
     /// Admin API credit — operator-issued score reduction.
     AdminCredit,
@@ -88,7 +88,7 @@ pub struct RiskState {
     pub contributors: SmallVec<[Contributor; 8]>,
     /// Consecutive "clean" requests (no risk events) — used for decay.
     pub clean_streak: u32,
-    /// FR-028 honeypot: floor the score until this timestamp (ms).
+    /// Canary honeypot: floor the score until this timestamp (ms).
     pub pinned_until_ms: Option<i64>,
 }
 

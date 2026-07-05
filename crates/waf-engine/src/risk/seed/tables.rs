@@ -1,4 +1,4 @@
-//! FR-025 Phase 2: Seed data tables for L0 reputation layer.
+//! Seed data tables for the L0 reputation layer.
 //!
 //! Bundles Tor exit set, ASN classification trie, and whitelist CIDR trie
 //! into a single `SeedTables` struct for atomic hot-reload via `ArcSwap`.

@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Remove dead RiskKeyBuilder + its tests"
-status: pending
+status: completed
 effort: "20m"
 ---
 

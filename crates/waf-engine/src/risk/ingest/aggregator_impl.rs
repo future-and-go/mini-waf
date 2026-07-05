@@ -1,4 +1,4 @@
-//! FR-025 Phase 4 — `ScoringAggregator` implementation.
+//! `ScoringAggregator` implementation.
 //!
 //! Implements `RiskAggregator` by forwarding signals to a bounded MPSC channel.
 //! Fire-and-forget semantics: `submit` never blocks, drops with warning on overflow.
@@ -19,13 +19,13 @@ use crate::risk::ingest::worker::{Job, spawn_worker};
 use crate::risk::store::RiskStore;
 use crate::time::{Clock, SystemClock};
 
-/// Default channel capacity (65536 per plan).
+/// Default channel capacity.
 pub const DEFAULT_CHANNEL_CAPACITY: usize = 65536;
 
 /// Async risk aggregator that forwards signals to the ingest worker.
 ///
 /// Bounded channel prevents unbounded memory growth under load. Overflow
-/// triggers drop-with-warn (best-effort semantics per §3.3 of the plan).
+/// triggers drop-with-warn (best-effort semantics).
 pub struct ScoringAggregator {
     tx: mpsc::Sender<Job>,
     metrics: Arc<IngestMetrics>,

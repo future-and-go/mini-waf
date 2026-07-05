@@ -1,4 +1,4 @@
-//! FR-025 Phase 4 — Async ingest worker loop.
+//! Async ingest worker loop.
 //!
 //! Single tokio task that drains the job queue, maps signals to contributors,
 //! and applies them to the risk store. Best-effort: job errors are logged but

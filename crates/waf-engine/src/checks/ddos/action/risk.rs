@@ -1,6 +1,6 @@
-//! FR-005 phase-05 — Risk bump action for `DDoS` verdicts.
+//! Risk bump action for `DDoS` verdicts.
 //!
-//! Submits risk signals to FR-010's [`RiskAggregator`] when `DDoS` violations
+//! Submits risk signals to the [`RiskAggregator`] when `DDoS` violations
 //! are detected. Fire-and-forget via the sync `submit_ip` seam — the actor is
 //! the client IP on the `RiskKey` IP axis, so the request-path scorer joins
 //! the same state it reads for that IP. No blocking, no runtime required.

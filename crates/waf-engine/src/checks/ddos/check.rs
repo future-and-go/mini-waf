@@ -1,7 +1,7 @@
-//! FR-005 Phase 7 — `DdosCheck` pipeline integration.
+//! `DdosCheck` pipeline integration.
 //!
 //! Wires detectors (per-IP, per-FP, per-tier) into the WAF engine pipeline.
-//! Runs after allowlist phases (1-4) and before rate-limit (Phase 11).
+//! Runs after the allowlist checks and before rate-limit (`Phase::RateLimit`).
 //!
 //! ## Pipeline Behavior
 //! - Runs detectors in cheap-first order: `per_ip` → `per_fp` → `per_tier`
@@ -170,7 +170,7 @@ impl Check for DdosCheck {
                         self.metrics.inc_ban();
                     }
 
-                    // Structured audit log per FR-032
+                    // Structured audit log
                     warn!(
                         target: "ddos::audit",
                         request_id = %ctx.req_id,
