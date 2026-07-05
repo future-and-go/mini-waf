@@ -933,11 +933,20 @@ impl WafEngine {
         let inspect_time = chrono::Utc::now();
         let now_ms = inspect_time.timestamp_millis();
 
-        let (mut decision, fast_path) = self.inspect_pipeline(ctx).await;
+        let mut rule_deltas: Vec<crate::risk::state::Contributor> = Vec::new();
+        let (mut decision, fast_path) = self.inspect_pipeline(ctx, &mut rule_deltas).await;
         // Fast-path exits (guard off, IP/URL allow/block lists) skip risk
         // scoring entirely: no store write, risk_score stays 0.
+        //
+        // The scorer receives the request's device fingerprint (so risk
+        // accrued on the fp axis — e.g. by the ingest worker — is read at
+        // enforcement) and the risk deltas from every matched custom rule.
         if matches!(fast_path, FastPath::Miss)
-            && let Ok(scorer_result) = self.scorer.load_full().score(ctx, None, &[], None, now_ms).await
+            && let Ok(scorer_result) = self
+                .scorer
+                .load_full()
+                .score(ctx, ctx.device_fp.as_deref(), &rule_deltas, None, now_ms)
+                .await
         {
             let risk_score = scorer_result.score.min(100);
             decision.risk_score = risk_score;
@@ -995,7 +1004,14 @@ impl WafEngine {
     /// outer wrapper can attach the risk score to every decision without
     /// rewriting each early-return branch. The `FastPath` tag tells the
     /// wrapper whether the decision came from a pre-scoring fast-path exit.
-    async fn inspect_pipeline(&self, ctx: &mut RequestCtx) -> (WafDecision, FastPath) {
+    ///
+    /// `rule_deltas` is an out-parameter: risk deltas from matched custom
+    /// rules accumulate here so the wrapper can feed them to the scorer.
+    async fn inspect_pipeline(
+        &self,
+        ctx: &mut RequestCtx,
+        rule_deltas: &mut Vec<crate::risk::state::Contributor>,
+    ) -> (WafDecision, FastPath) {
         // Skip WAF if guard is disabled for this host
         if !ctx.host_config.guard_status {
             return (WafDecision::allow(), FastPath::Hit);
@@ -1148,7 +1164,15 @@ impl WafEngine {
         }
 
         // ── Phase 12: Custom rules engine ─────────────────────────────────────
-        if let Some(result) = self.custom_rules.check(ctx) {
+        let rule_verdict = self.custom_rules.check_with_verdict(ctx);
+        if !rule_verdict.risk_deltas.is_empty() {
+            let ts_ms = chrono::Utc::now().timestamp_millis();
+            rule_deltas.extend(crate::risk::score::rule_deltas_to_contributors(
+                &rule_verdict.risk_deltas,
+                ts_ms,
+            ));
+        }
+        if let Some(result) = rule_verdict.result {
             let rule_name = result.rule_name.clone();
             // Custom rules carry their own action intent/status overrides, so this
             // branch builds the action directly instead of using make_block_decision.
@@ -1945,5 +1969,121 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         assert!(engine.risk_cfg.load().enabled, "bad YAML must keep previous snapshot");
         assert!(engine.risk_canary.check("/trap"), "bad YAML must keep canary paths");
+    }
+
+    /// A non-blocking custom rule that adds `risk_delta` when `path` contains
+    /// `path_fragment`. Log action so the pipeline decision stays a plain
+    /// Allow and only the risk deltas drive the outcome.
+    fn risk_delta_rule(id: &str, path_fragment: &str, delta: i16) -> crate::rules::engine::CustomRule {
+        use crate::rules::engine::{Condition, ConditionField, ConditionOp, ConditionValue, CustomRule, Operator};
+
+        CustomRule {
+            id: id.into(),
+            host_code: "*".into(),
+            name: id.into(),
+            priority: 1,
+            enabled: true,
+            condition_op: ConditionOp::And,
+            conditions: vec![Condition {
+                field: ConditionField::Path,
+                operator: Operator::Contains,
+                value: ConditionValue::Str(path_fragment.into()),
+            }],
+            action: RuleAction::Log,
+            action_status: 200,
+            action_msg: None,
+            script: None,
+            match_tree: None,
+            risk_delta: Some(delta),
+            risk_action: None,
+            pattern: None,
+            pattern_field: "all".into(),
+            category: None,
+            severity: None,
+            paranoia: None,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            reference: None,
+        }
+    }
+
+    fn device_fp(tag: &str) -> Arc<waf_common::FpKey> {
+        Arc::new(waf_common::FpKey {
+            ja3: Some(waf_common::FingerprintValue::new(tag)),
+            ..waf_common::FpKey::default()
+        })
+    }
+
+    /// Risk deltas from matched custom rules must reach the scorer: a +80
+    /// delta lands the actor in the challenge band (default thresholds
+    /// allow=30 / block=90) on the very request that matched.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rule_match_risk_deltas_raise_cumulative_score() {
+        let (engine, _container) = spawn_engine().await;
+        engine.replace_risk_config(enabled_risk_config());
+        engine.custom_rules.add_file_rule(risk_delta_rule("gh226-bump", "/attack", 80));
+
+        let mut ctx = make_ctx("risk-test", "/attack/probe", "203.0.113.60");
+        let decision = engine.inspect(&mut ctx).await;
+        assert_eq!(
+            decision.risk_score, 80,
+            "rule risk_delta must contribute to the cumulative score"
+        );
+        assert!(
+            matches!(decision.action, WafAction::Challenge),
+            "score 80 must land in the challenge band, got {:?}",
+            decision.action
+        );
+        let result = decision.result.as_ref().expect("risk challenge must carry a result");
+        assert_eq!(result.rule_name, "cumulative_risk");
+
+        // A path the rule does not match stays clean for a fresh actor.
+        let mut ctx = make_ctx("risk-test", "/clean", "203.0.113.61");
+        let decision = engine.inspect(&mut ctx).await;
+        assert_eq!(decision.risk_score, 0);
+        assert!(matches!(decision.action, WafAction::Allow));
+    }
+
+    /// Risk accrued on the fingerprint axis must be read back at enforcement:
+    /// an actor that earned risk under one IP is still challenged from a
+    /// different IP when the request carries the same device fingerprint.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fp_axis_risk_enforces_across_ips() {
+        let (engine, _container) = spawn_engine().await;
+        engine.replace_risk_config(enabled_risk_config());
+        engine.custom_rules.add_file_rule(risk_delta_rule("gh226-fp", "/attack", 80));
+
+        // Accrue risk under IP A with fingerprint X.
+        let mut ctx = make_ctx("risk-test", "/attack/probe", "203.0.113.70");
+        ctx.device_fp = Some(device_fp("gh226-ja3"));
+        let decision = engine.inspect(&mut ctx).await;
+        assert!(
+            matches!(decision.action, WafAction::Challenge),
+            "delta request must challenge, got {:?}",
+            decision.action
+        );
+
+        // Same fingerprint from a different IP on a benign path: the fp-axis
+        // state must surface (fp_key=None would score this as a fresh actor).
+        let mut ctx = make_ctx("risk-test", "/clean", "198.51.100.70");
+        ctx.device_fp = Some(device_fp("gh226-ja3"));
+        let decision = engine.inspect(&mut ctx).await;
+        assert!(
+            decision.risk_score >= 70,
+            "fp-axis risk must be read at enforcement, got score {}",
+            decision.risk_score
+        );
+        assert!(
+            matches!(decision.action, WafAction::Challenge),
+            "same-fp request from a new IP must challenge, got {:?}",
+            decision.action
+        );
+
+        // Control: a different fingerprint from another fresh IP stays clean.
+        let mut ctx = make_ctx("risk-test", "/clean", "198.51.100.71");
+        ctx.device_fp = Some(device_fp("gh226-other"));
+        let decision = engine.inspect(&mut ctx).await;
+        assert_eq!(decision.risk_score, 0, "unrelated fingerprint must not inherit risk");
+        assert!(matches!(decision.action, WafAction::Allow));
     }
 }
