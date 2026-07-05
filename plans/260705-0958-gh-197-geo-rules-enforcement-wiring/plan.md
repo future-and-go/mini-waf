@@ -1,7 +1,7 @@
 ---
 title: "GH-197 geo rules: wire API CRUD to GeoCheck enforcement + real IP lookup"
 description: "Geo rule CRUD writes configs/geo-rules.yaml that nothing loads; wire an engine-owned load + hot-reload watcher into GeoCheck, and back lookup_ip with GeoIpService."
-status: pending
+status: completed
 priority: P1
 branch: "main-harness"
 tags: [bug, area:api, geo, security, gh-197]
@@ -54,10 +54,10 @@ no extra API→engine call (ddos does exactly this — `main.rs:1613-1616`).
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Shared geo rule schema + engine loader/mapping](./phase-01-shared-geo-rule-schema-engine-loader-mapping.md) | Pending |
-| 2 | [Geo rules hot-reload watcher + startup wiring](./phase-02-geo-rules-hot-reload-watcher-startup-wiring.md) | Pending |
-| 3 | [Real lookup_ip backed by GeoIpService](./phase-03-real-lookup-ip-backed-by-geoipservice.md) | Pending |
-| 4 | [Acceptance tests + quality gates](./phase-04-acceptance-tests-quality-gates.md) | Pending |
+| 1 | [Shared geo rule schema + engine loader/mapping](./phase-01-shared-geo-rule-schema-engine-loader-mapping.md) | Completed |
+| 2 | [Geo rules hot-reload watcher + startup wiring](./phase-02-geo-rules-hot-reload-watcher-startup-wiring.md) | Completed |
+| 3 | [Real lookup_ip backed by GeoIpService](./phase-03-real-lookup-ip-backed-by-geoipservice.md) | Completed |
+| 4 | [Acceptance tests + quality gates](./phase-04-acceptance-tests-quality-gates.md) | Completed |
 
 ## Key Decisions
 
@@ -112,12 +112,12 @@ no extra API→engine call (ddos does exactly this — `main.rs:1613-1616`).
 
 ## Acceptance Criteria (from issue)
 
-- [ ] One rule schema shared between API and engine (explicit mapping; file shape
+- [x] One rule schema shared between API and engine (explicit mapping; file shape
   unchanged) — Phase 1.
-- [ ] Save path loads rules into `engine.geo_check()` at startup and on
+- [x] Save path loads rules into `engine.geo_check()` at startup and on
   hot-reload — Phases 1–2.
-- [ ] `lookup_ip` backed by `GeoIpService` — Phase 3.
-- [ ] Integration test: create block rule via API → request from that country is
+- [x] `lookup_ip` backed by `GeoIpService` — Phase 3.
+- [x] Integration test: create block rule via API → request from that country is
   blocked — Phase 4.
 
 ## Validation

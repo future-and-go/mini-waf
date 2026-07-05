@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Shared geo rule schema + engine loader/mapping"
-status: pending
+status: completed
 priority: P1
 dependencies: []
 effort: "2h"

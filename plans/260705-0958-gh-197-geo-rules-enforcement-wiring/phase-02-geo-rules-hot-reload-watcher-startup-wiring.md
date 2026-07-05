@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Geo rules hot-reload watcher + startup wiring"
-status: pending
+status: completed
 priority: P1
 dependencies: [1]
 effort: "2h"

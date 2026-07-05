@@ -202,6 +202,74 @@ pub async fn start_test_server_with_panel() -> (TestServer, std::path::PathBuf) 
     (server, panel_path)
 }
 
+/// Variant that sets `main_config_file` so path-derived config files
+/// (e.g. `configs/geo-rules.yaml`) land under a caller-owned temp root
+/// instead of the crate working directory.
+pub async fn start_test_server_with_main_config(main_config_file: &str) -> TestServer {
+    // SAFETY: test-only; called before any other threads read these env vars.
+    unsafe {
+        std::env::set_var("JWT_SECRET", "integration-test-secret-key-32bytes-min");
+        std::env::set_var("MASTER_KEY", "integration-test-master-key-32bytes-min");
+    }
+
+    let container = PostgresImage::default()
+        .with_tag("16-alpine")
+        .start()
+        .await
+        .expect("start postgres testcontainer");
+    let host = container.get_host().await.expect("container host");
+    let port = container.get_host_port_ipv4(5432).await.expect("container port");
+    let url = format!("postgres://postgres:postgres@{host}:{port}/postgres");
+
+    let db = Database::connect(&url, 5).await.expect("db connect");
+    db.migrate().await.expect("migrate");
+    let db = Arc::new(db);
+
+    let engine = Arc::new(WafEngine::new(Arc::clone(&db), WafEngineConfig::default()));
+    let router = Arc::new(HostRouter::new());
+    let cache = ResponseCache::new(8, 60, 300);
+    let mut state_inner =
+        AppState::new(Arc::clone(&db), Arc::clone(&engine), Arc::clone(&router), cache).expect("AppState::new");
+    state_inner.main_config_file = Some(main_config_file.to_string());
+    let state = Arc::new(state_inner);
+
+    let admin_password = "test-admin-password".to_string();
+    let hash = hash_password(&admin_password).expect("hash password");
+    let admin = db
+        .create_admin_user(
+            CreateAdminUser {
+                username: "admin".into(),
+                email: Some("admin@example.com".into()),
+                password: admin_password.clone(),
+                role: Some("admin".into()),
+            },
+            &hash,
+        )
+        .await
+        .expect("seed admin");
+
+    let admin_token =
+        generate_access_token(admin.id, &admin.username, &admin.role, &state.jwt_secret).expect("issue admin token");
+
+    let app = build_router(Arc::clone(&state), false);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local_addr");
+    let server_task = tokio::spawn(async move {
+        let _ = serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await;
+    });
+
+    TestServer {
+        addr,
+        db,
+        admin_token,
+        admin_password,
+        admin_id: admin.id,
+        state,
+        server_task: Some(server_task),
+        _container: container,
+    }
+}
+
 /// Variant that wires a real `cluster_state` (single-node) so cluster_*
 /// handlers can exercise their populated branches.
 pub async fn start_test_server_with_cluster() -> TestServer {
