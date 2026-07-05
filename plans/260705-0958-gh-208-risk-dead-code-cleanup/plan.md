@@ -1,7 +1,7 @@
 ---
 title: "GH-208 risk pipeline dead-code cleanup"
 description: "Remove verified dead code (RiskKeyBuilder, unused Scorer ctors), unify force_max via reclamp(), and strip plan/phase/FR IDs from risk + ddos comments. Behavior-preserving."
-status: pending
+status: completed
 priority: P3
 issue: https://github.com/future-and-go/mini-waf/issues/208
 branch: "main-harness"

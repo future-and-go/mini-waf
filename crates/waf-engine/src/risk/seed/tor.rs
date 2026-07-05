@@ -1,4 +1,4 @@
-//! FR-025 Phase 2: Tor exit list loader.
+//! Tor exit list loader.
 //!
 //! Loads Tor exit node IPs from a newline-delimited file into a `HashSet`
 //! for O(1) lookup. Malformed lines are logged and skipped.

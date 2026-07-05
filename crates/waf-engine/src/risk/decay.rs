@@ -1,4 +1,4 @@
-//! FR-025 pure decay function.
+//! Pure decay function.
 //!
 //! Applies time-based decay to risk scores. Clean requests (no risk events)
 //! accumulate a streak; after enough clean requests, the score decays.

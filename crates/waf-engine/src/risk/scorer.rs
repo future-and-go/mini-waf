@@ -1,11 +1,11 @@
-//! FR-025 Scorer orchestrator.
+//! Scorer orchestrator.
 //!
 //! Builds `RiskKey` from request context, calls store, applies threshold gate,
 //! sets `X-WAF-Risk-Score` header, returns `WafAction`.
 //!
-//! Phase 5 adds L2 detectors (anomaly + velocity) evaluated inline.
-//! Phase 6 adds canary honeypot layer (FR-028) for scanner detection.
-//! Phase 8 adds challenge credit verification (FR-006 wiring).
+//! L2 detectors (anomaly + velocity) are evaluated inline, along with the
+//! canary honeypot layer (scanner detection) and challenge credit
+//! verification.
 
 use std::sync::Arc;
 
@@ -41,16 +41,15 @@ pub struct ScorerResult {
 /// Scorer orchestrator for the risk scoring pipeline.
 ///
 /// Owns a reference to the store and config snapshot. Thread-safe via `Arc`.
-/// Phase 5 adds L2 detectors: anomaly layer and velocity layer.
-/// Phase 6 adds canary honeypot layer (FR-028).
-/// Phase 8 adds challenge credit verifier (FR-006).
+/// Also owns the L2 detectors (anomaly + velocity layers), the canary
+/// honeypot layer, and the challenge credit verifier.
 pub struct Scorer<S: RiskStore + ?Sized> {
     store: Arc<S>,
     cfg: Arc<ArcSwap<RiskConfig>>,
     seed: Option<Arc<SeedLayer>>,
-    /// FR-028 canary honeypot layer for scanner detection.
+    /// Canary honeypot layer for scanner detection.
     pub canary: Option<Arc<CanaryLayer>>,
-    /// FR-006 challenge credit verifier.
+    /// Challenge credit verifier.
     challenge_verifier: Option<Arc<ChallengeVerifier>>,
     /// L2 anomaly detection layer (JA4↔UA mismatch, XFF, header sanity).
     anomaly: AnomalyLayer,
@@ -70,34 +69,6 @@ impl<S: RiskStore + ?Sized> Scorer<S> {
             challenge_verifier: None,
             anomaly: AnomalyLayer::new(),
             velocity: VelocityLayer::with_defaults(),
-        }
-    }
-
-    /// Create a scorer with seed layer.
-    #[must_use]
-    pub fn with_seed(store: Arc<S>, cfg: Arc<ArcSwap<RiskConfig>>, seed: Arc<SeedLayer>) -> Self {
-        Self {
-            store,
-            cfg,
-            seed: Some(seed),
-            canary: None,
-            challenge_verifier: None,
-            anomaly: AnomalyLayer::new(),
-            velocity: VelocityLayer::with_defaults(),
-        }
-    }
-
-    /// Create a scorer with custom velocity threshold.
-    #[must_use]
-    pub fn with_velocity_threshold(store: Arc<S>, cfg: Arc<ArcSwap<RiskConfig>>, threshold: u32) -> Self {
-        Self {
-            store,
-            cfg,
-            seed: None,
-            canary: None,
-            challenge_verifier: None,
-            anomaly: AnomalyLayer::new(),
-            velocity: VelocityLayer::new(threshold),
         }
     }
 
@@ -250,7 +221,7 @@ impl<S: RiskStore + ?Sized> Scorer<S> {
         let velocity_deltas = self.velocity.evaluate(&key, tx_endpoint, now_ms);
         all_deltas.extend(velocity_deltas);
 
-        // FR-006 Challenge credit verification
+        // Challenge credit verification
         if let Some(credit_delta) = self.evaluate_challenge_credit(ctx, &key, now_ms, cfg).await {
             all_deltas.push(credit_delta);
         }

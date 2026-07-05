@@ -1,7 +1,7 @@
-//! FR-025 risk store backends.
+//! Risk store backends.
 //!
-//! Phase 1 ships the [`RiskStore`] trait + in-memory backend. Phase 7 adds
-//! Redis backend behind `redis-store` feature flag for cluster-wide state.
+//! The [`RiskStore`] trait has an in-memory backend, plus a Redis backend
+//! behind the `redis-store` feature flag for cluster-wide state.
 
 pub mod memory;
 pub mod store_trait;

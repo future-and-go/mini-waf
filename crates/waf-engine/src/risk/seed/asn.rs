@@ -1,4 +1,4 @@
-//! FR-025 Phase 2: ASN classification loader.
+//! ASN classification loader.
 //!
 //! Loads ASN classification data from a CSV file into a radix trie for
 //! longest-prefix matching. Format: `cidr,asn,classification`.

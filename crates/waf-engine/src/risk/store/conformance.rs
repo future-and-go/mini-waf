@@ -1,7 +1,7 @@
-//! FR-025 store conformance suite.
+//! Store conformance suite.
 //!
 //! Shared test cases that any `RiskStore` implementation must pass.
-//! Memory backend tests call this; Redis backend (P7) will reuse.
+//! Memory backend tests call this; the Redis backend reuses it.
 
 use std::net::{IpAddr, Ipv4Addr};
 

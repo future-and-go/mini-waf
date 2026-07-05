@@ -1,4 +1,4 @@
-//! FR-025 Phase 5: Anomaly detection layer (L2).
+//! Anomaly detection layer (L2).
 //!
 //! Inline synchronous anomaly detectors for per-request evaluation.
 //! Each detector emits risk deltas based on request characteristics.

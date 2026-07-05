@@ -1,7 +1,7 @@
 //! HMAC secret bootstrap for challenge credit tokens.
 //!
 //! Loads secret from disk; generates 32 random bytes on first boot if absent.
-//! Never auto-rotates (Iron Rule §11) — secret persists across restarts.
+//! Never auto-rotates — secret persists across restarts.
 
 use std::fs;
 use std::io::Write;

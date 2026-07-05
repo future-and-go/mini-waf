@@ -37,7 +37,7 @@ pub enum DetectorVerdict {
         detector: &'static str,
         /// Rate (requests per detection window) associated with the burst.
         /// For `per_fp`/`per_tier` this is the **observed** count in the
-        /// window; for `per_ip` (backed by the FR-004 rate-limit store, which
+        /// window; for `per_ip` (backed by the shared rate-limit store, which
         /// only returns an allow/deny `Decision`) it is the configured
         /// **threshold** that was exceeded. Surfaced to the admin ban table as
         /// `last_rps`.

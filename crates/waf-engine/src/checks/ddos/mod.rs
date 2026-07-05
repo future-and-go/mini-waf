@@ -1,14 +1,14 @@
-//! FR-005 `DDoS` protection module.
+//! `DDoS` protection module.
 //!
 //! Composed of:
 //! - [`store`]    — async `CounterStore` trait + in-memory backend
 //! - [`config`]   — YAML schema + parsing for `configs/ddos.yaml`
 //! - [`reload`]   — hot-reload watcher with `ArcSwap` snapshot
-//! - [`detector`] — `Detector` trait + per-IP detector (phase 2)
-//! - [`action`]   — action executors for bans and risk bumps (phase 5)
-//! - [`degrade`]  — circuit breaker & fail-mode resolution (phase 6)
-//! - [`check`]    — `DdosCheck` pipeline integration (phase 7)
-//! - [`metrics`]  — atomic counters for observability (phase 7)
+//! - [`detector`] — `Detector` trait + per-IP detector
+//! - [`action`]   — action executors for bans and risk bumps
+//! - [`degrade`]  — circuit breaker & fail-mode resolution
+//! - [`check`]    — `DdosCheck` pipeline integration
+//! - [`metrics`]  — atomic counters for observability
 
 use std::collections::HashMap;
 

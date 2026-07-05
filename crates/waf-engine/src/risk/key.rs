@@ -1,4 +1,4 @@
-//! FR-025 risk identity key types.
+//! Risk identity key types.
 //!
 //! `RiskKey` bundles the three identity axes (IP, fingerprint hash, session)
 //! used to look up / update risk state. Not all axes are always present —

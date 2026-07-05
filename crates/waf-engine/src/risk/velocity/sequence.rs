@@ -5,7 +5,8 @@
 //! - Impossible-fast transitions (e.g., Login→OTP in <1.5s)
 //!
 //! Emits +30 delta on violation. Sync-side only — fires when sequence
-//! completes in a single request chain (FR-012 async handles cross-request).
+//! completes in a single request chain (the async transaction-velocity
+//! signals handle cross-request sequences).
 
 use dashmap::DashMap;
 

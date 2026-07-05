@@ -1,4 +1,4 @@
-//! FR-025 Phase 7: Redis failover and circuit breaker tests.
+//! Redis failover and circuit breaker tests.
 //!
 //! Tests fail-open behavior when Redis is unavailable or times out.
 //! Uses cache fallback to maintain continuity during outages.
