@@ -9,8 +9,15 @@
 pub mod sequence;
 pub mod window;
 
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::time::interval;
+use tracing::debug;
+
 use crate::risk::key::RiskKey;
 use crate::risk::state::Contributor;
+use crate::time::Clock;
 
 pub use sequence::{SEQUENCE_VIOLATION_DELTA, SequenceStore, SequenceViolation, TxEndpoint};
 pub use window::{VELOCITY_THRESHOLD_DELTA, VelocityStore};
@@ -69,6 +76,27 @@ impl VelocityLayer {
         let velocity_purged = self.velocity.purge_idle(now_ms);
         let sequence_purged = self.sequence.purge_idle();
         (velocity_purged, sequence_purged)
+    }
+
+    /// Spawn a background task that periodically purges idle actors from
+    /// both stores. Keys are attacker-controlled (full `RiskKey`: cookie,
+    /// IPv6, fingerprint), so without this loop a key spray grows the maps
+    /// unbounded. Mirrors `MemoryRiskStore::start_purge_loop`.
+    pub fn start_purge_loop(self: &Arc<Self>, interval_secs: u64, clock: Arc<dyn Clock>) {
+        let layer = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut tick = interval(Duration::from_secs(interval_secs));
+            loop {
+                tick.tick().await;
+                let (velocity_purged, sequence_purged) = layer.purge_idle(clock.now_ms());
+                if velocity_purged > 0 || sequence_purged > 0 {
+                    debug!(
+                        velocity_purged,
+                        sequence_purged, "velocity layer: purged idle actors"
+                    );
+                }
+            }
+        });
     }
 
     /// Number of tracked actors in velocity store.
@@ -159,5 +187,45 @@ mod tests {
 
         // Velocity should purge, sequence might not (depends on state)
         assert!(v > 0 || s > 0);
+    }
+
+    /// The scheduled purge loop bounds the maps under a key spray: distinct
+    /// attacker-controlled keys stop accumulating once their windows go idle
+    /// and their sequence state returns to Idle — no caller ever invokes
+    /// `purge_idle` by hand.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn purge_loop_reaps_idle_actors_under_key_spray() {
+        use crate::time::test_utils::MockClock;
+
+        let layer = Arc::new(VelocityLayer::new(100));
+
+        // Spray 512 distinct IP keys at t=0. Otp-without-login is a violation
+        // that leaves the sequence state Idle, so both maps fill and both are
+        // reapable once idle.
+        for a in 0..2u8 {
+            for b in 0..=255u8 {
+                let ip = IpAddr::V4(Ipv4Addr::new(10, 99, a, b));
+                let _ = layer.evaluate(&RiskKey::from_ip(ip), Some(TxEndpoint::Otp), 0);
+            }
+        }
+        assert_eq!(layer.velocity_len(), 512);
+        assert_eq!(layer.sequence_len(), 512);
+
+        // Clock far past the 60s window: every entry is idle on first tick.
+        let clock = Arc::new(MockClock::new(120_000));
+        layer.start_purge_loop(1, clock);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if layer.velocity_len() == 0 && layer.sequence_len() == 0 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!(
+            "purge loop never drained the stores: velocity={}, sequence={}",
+            layer.velocity_len(),
+            layer.sequence_len()
+        );
     }
 }

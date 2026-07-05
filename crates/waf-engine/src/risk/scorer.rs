@@ -53,8 +53,9 @@ pub struct Scorer<S: RiskStore + ?Sized> {
     challenge_verifier: Option<Arc<ChallengeVerifier>>,
     /// L2 anomaly detection layer (JA4↔UA mismatch, XFF, header sanity).
     anomaly: AnomalyLayer,
-    /// L2 velocity detection layer (sliding window, sequence FSM).
-    velocity: VelocityLayer,
+    /// L2 velocity detection layer (sliding window, sequence FSM). Shared
+    /// (`Arc`) so its idle-purge loop can outlive-safely reference it.
+    velocity: Arc<VelocityLayer>,
 }
 
 impl<S: RiskStore + ?Sized> Scorer<S> {
@@ -68,8 +69,15 @@ impl<S: RiskStore + ?Sized> Scorer<S> {
             canary: None,
             challenge_verifier: None,
             anomaly: AnomalyLayer::new(),
-            velocity: VelocityLayer::with_defaults(),
+            velocity: Arc::new(VelocityLayer::with_defaults()),
         }
+    }
+
+    /// Start the velocity/sequence idle-purge loop. Call once per scorer in
+    /// production (the engine does this when the scorer is built); without
+    /// it the velocity maps grow unbounded under attacker-controlled keys.
+    pub fn start_velocity_purge_loop(&self, interval_secs: u64, clock: Arc<dyn crate::time::Clock>) {
+        self.velocity.start_purge_loop(interval_secs, clock);
     }
 
     /// Set the seed layer.
