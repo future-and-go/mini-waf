@@ -22,6 +22,7 @@ pub async fn run_all<S: RiskStore>(store: &S) {
     test_apply_divergent_score_convergence(store).await;
     test_apply_converges_axes(store).await;
     test_decay_contributor_roundtrip(store).await;
+    test_oversized_batch_clamps_to_cap(store).await;
     test_clear_removes_all_axes(store).await;
     test_admin_credit_reduces_score(store).await;
     test_reset_all(store).await;
@@ -231,6 +232,90 @@ pub async fn test_decay_contributor_roundtrip<S: RiskStore>(store: &S) {
     );
 }
 
+/// A single apply whose deltas sum past the score cap must clamp the visible
+/// score to 100 while the negative credit contributor still round-trips.
+async fn test_oversized_batch_clamps_to_cap<S: RiskStore>(store: &S) {
+    store.reset_all().await.unwrap();
+
+    let key = RiskKey::from_ip(IpAddr::V4(Ipv4Addr::new(10, 11, 11, 11)));
+    let deltas = vec![
+        make_contributor(60, 1000),
+        make_contributor(60, 1000),
+        Contributor::new(ContributorKind::AdminCredit, -20, 1000),
+        make_contributor(30, 1000),
+    ];
+    let result = store.apply(&key, &deltas, 1000).await.unwrap();
+    assert_eq!(result.state.clamped_score, 100, "visible score must clamp at 100");
+
+    let state = store.read(&key).await.unwrap().expect("state must persist");
+    assert_eq!(state.clamped_score, 100);
+    assert!(
+        state
+            .contributors
+            .iter()
+            .any(|c| matches!(c.kind, ContributorKind::AdminCredit)),
+        "credit contributor must survive the round-trip"
+    );
+}
+
+/// Decay must honor a non-default configured rate.
+///
+/// Call with a store built with `decay_rate = 3` and otherwise-default decay
+/// settings (memory: `MemoryRiskStore::with_decay`, redis: `RedisRiskConfig.decay`).
+pub async fn test_decay_honors_configured_rate<S: RiskStore>(store: &S) {
+    use crate::risk::decay::{MAX_DECAY, MIN_CLEAN_STREAK};
+
+    store.reset_all().await.unwrap();
+
+    let key = RiskKey::from_ip(IpAddr::V4(Ipv4Addr::new(10, 12, 12, 12)));
+    let seed = i16::try_from(MAX_DECAY).unwrap() + 40;
+    store.apply(&key, &[make_contributor(seed, 1000)], 1000).await.unwrap();
+
+    // Build the clean streak; decay checks the streak BEFORE folding, so no
+    // decay fires while the streak climbs to the threshold.
+    let mut now_ms = 1000;
+    for _ in 0..MIN_CLEAN_STREAK {
+        now_ms += 1000;
+        store.apply(&key, &[], now_ms).await.unwrap();
+    }
+
+    now_ms += 1000;
+    let result = store.apply(&key, &[], now_ms).await.unwrap();
+    assert_eq!(
+        i32::from(result.state.clamped_score),
+        i32::from(seed) - 3,
+        "decay must subtract the configured rate, not the default"
+    );
+}
+
+/// A store built with `decay_rate = 0` must never decay, no matter how long
+/// the clean streak grows.
+pub async fn test_decay_disabled_when_rate_zero<S: RiskStore>(store: &S) {
+    store.reset_all().await.unwrap();
+
+    let key = RiskKey::from_ip(IpAddr::V4(Ipv4Addr::new(10, 13, 13, 13)));
+    store.apply(&key, &[make_contributor(90, 1000)], 1000).await.unwrap();
+
+    let mut now_ms = 1000;
+    for _ in 0..30 {
+        now_ms += 1000;
+        let result = store.apply(&key, &[], now_ms).await.unwrap();
+        assert_eq!(
+            result.state.clamped_score, 90,
+            "decay_rate 0 must leave the score untouched"
+        );
+    }
+
+    let state = store.read(&key).await.unwrap().expect("state must persist");
+    assert!(
+        !state
+            .contributors
+            .iter()
+            .any(|c| matches!(c.kind, ContributorKind::Decay)),
+        "decay_rate 0 must not append Decay contributors"
+    );
+}
+
 /// Admin clear must remove the state so no axis resurrects the old score.
 pub async fn test_clear_removes_all_axes<S: RiskStore>(store: &S) {
     store.reset_all().await.unwrap();
@@ -334,11 +419,30 @@ async fn test_purge_expired<S: RiskStore>(store: &S) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::risk::config::DecayConfig;
     use crate::risk::store::MemoryRiskStore;
 
     #[tokio::test]
     async fn memory_store_passes_conformance() {
         let store = MemoryRiskStore::new();
         run_all(&store).await;
+    }
+
+    #[tokio::test]
+    async fn memory_store_decay_honors_configured_rate() {
+        let store = MemoryRiskStore::with_decay(DecayConfig {
+            decay_rate: 3,
+            ..Default::default()
+        });
+        test_decay_honors_configured_rate(&store).await;
+    }
+
+    #[tokio::test]
+    async fn memory_store_decay_disabled_when_rate_zero() {
+        let store = MemoryRiskStore::with_decay(DecayConfig {
+            decay_rate: 0,
+            ..Default::default()
+        });
+        test_decay_disabled_when_rate_zero(&store).await;
     }
 }

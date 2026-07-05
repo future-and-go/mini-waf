@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Reorder canary check before seed-Score early return"
-status: pending
+status: completed
 priority: P2
 dependencies: []
 effort: 30m
@@ -102,11 +102,11 @@ IPs skip the honeypot trap entirely.
 
 ## Success Criteria
 
-- [ ] `score()` evaluates the canary block for a non-whitelisted seed-Score IP
+- [x] `score()` evaluates the canary block for a non-whitelisted seed-Score IP
       (control-flow verified by reading the reordered function).
-- [ ] Whitelist still returns Allow before canary; `None` path unchanged.
-- [ ] Ordering comment matches the code.
-- [ ] `cargo test -p waf-engine risk` green; no signature changes.
+- [x] Whitelist still returns Allow before canary; `None` path unchanged.
+- [x] Ordering comment matches the code.
+- [x] `cargo test -p waf-engine risk` green; no signature changes.
 
 ## Risk Assessment
 

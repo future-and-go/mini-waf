@@ -72,7 +72,7 @@ pub struct RiskConfig {
 }
 
 /// Store backend selection.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StoreConfig {
     /// Backend type: "memory" or "redis" (redis requires feature flag).
     #[serde(default = "default_backend")]
@@ -81,6 +81,15 @@ pub struct StoreConfig {
     /// Redis configuration (only used when backend = "redis").
     #[serde(default)]
     pub redis: RedisStoreConfig,
+}
+
+impl Default for StoreConfig {
+    fn default() -> Self {
+        Self {
+            backend: default_backend(),
+            redis: RedisStoreConfig::default(),
+        }
+    }
 }
 
 /// Redis store configuration (Phase 7).
@@ -119,7 +128,7 @@ impl RedisStoreConfig {
     /// Convert to runtime `RedisRiskConfig` (requires `redis-store` feature).
     #[cfg(feature = "redis-store")]
     #[must_use]
-    pub fn to_runtime_config(&self, ttl_secs: u64) -> crate::risk::store::redis::RedisRiskConfig {
+    pub fn to_runtime_config(&self, ttl_secs: u64, decay: DecayConfig) -> crate::risk::store::redis::RedisRiskConfig {
         crate::risk::store::redis::RedisRiskConfig {
             url: self.url.clone(),
             key_prefix: self.key_prefix.clone(),
@@ -128,6 +137,7 @@ impl RedisStoreConfig {
             op_timeout: std::time::Duration::from_millis(self.op_timeout_ms),
             breaker_threshold: self.breaker_threshold,
             cache_capacity: self.cache_capacity,
+            decay,
         }
     }
 }
@@ -379,7 +389,45 @@ impl RiskConfig {
         let doc: RiskDocument = serde_yaml::from_str(&content)
             .with_context(|| format!("failed to parse risk config: {}", path.display()))?;
 
+        doc.risk
+            .validate()
+            .with_context(|| format!("invalid risk config: {}", path.display()))?;
+
         Ok(Arc::new(doc.risk))
+    }
+
+    /// Reject values that are verified-harmful at runtime.
+    ///
+    /// Checks: zero TTL (every actor expires instantly), zero GC interval
+    /// (panics `tokio::time::interval`), zero ingest channel capacity (panics
+    /// the bounded mpsc), unknown store backend, and a decay floor above the
+    /// score range. `decay_rate: 0` (decay disabled) and `min_clean_streak: 0`
+    /// (decay eligible immediately) are valid. Risk thresholds
+    /// (allow/challenge/block) live in `TierPolicy.risk_thresholds` and are
+    /// not validated here.
+    pub fn validate(&self) -> Result<()> {
+        if self.ttl_secs == 0 {
+            anyhow::bail!("risk config: ttl_secs must be > 0");
+        }
+        if self.gc_interval_secs == 0 {
+            anyhow::bail!("risk config: gc_interval_secs must be > 0");
+        }
+        if self.ingest.channel_capacity == 0 {
+            anyhow::bail!("risk config: ingest.channel_capacity must be > 0");
+        }
+        if !matches!(self.store.backend.as_str(), "memory" | "redis") {
+            anyhow::bail!(
+                "risk config: store.backend must be \"memory\" or \"redis\", got \"{}\"",
+                self.store.backend
+            );
+        }
+        if self.decay.max_decay > 100 {
+            anyhow::bail!(
+                "risk config: decay.max_decay must be <= 100, got {}",
+                self.decay.max_decay
+            );
+        }
+        Ok(())
     }
 
     /// TTL in milliseconds.
@@ -505,5 +553,67 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(cfg.ttl_ms(), 60_000);
+    }
+
+    #[test]
+    fn validate_accepts_default_config() {
+        assert!(RiskConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_disabled_decay_and_zero_streak() {
+        let mut cfg = RiskConfig::default();
+        cfg.decay.decay_rate = 0;
+        cfg.decay.min_clean_streak = 0;
+        assert!(cfg.validate().is_ok(), "rate 0 and streak 0 are valid decay settings");
+    }
+
+    #[test]
+    fn validate_rejects_zero_ttl() {
+        let cfg = RiskConfig {
+            ttl_secs: 0,
+            ..Default::default()
+        };
+        assert!(cfg.validate().unwrap_err().to_string().contains("ttl_secs"));
+    }
+
+    #[test]
+    fn validate_rejects_zero_gc_interval() {
+        let cfg = RiskConfig {
+            gc_interval_secs: 0,
+            ..Default::default()
+        };
+        assert!(cfg.validate().unwrap_err().to_string().contains("gc_interval_secs"));
+    }
+
+    #[test]
+    fn validate_rejects_zero_channel_capacity() {
+        let mut cfg = RiskConfig::default();
+        cfg.ingest.channel_capacity = 0;
+        assert!(cfg.validate().unwrap_err().to_string().contains("channel_capacity"));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_backend() {
+        let mut cfg = RiskConfig::default();
+        cfg.store.backend = "postgres".to_string();
+        assert!(cfg.validate().unwrap_err().to_string().contains("backend"));
+    }
+
+    #[test]
+    fn validate_rejects_decay_floor_above_score_range() {
+        let mut cfg = RiskConfig::default();
+        cfg.decay.max_decay = 101;
+        assert!(cfg.validate().unwrap_err().to_string().contains("max_decay"));
+    }
+
+    #[test]
+    fn from_path_rejects_zero_gc_interval_without_panic() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("risk.yaml");
+        std::fs::write(&path, "risk:\n  enabled: true\n  gc_interval_secs: 0\n").unwrap();
+
+        let err = RiskConfig::from_path(&path).unwrap_err();
+        assert!(format!("{err:#}").contains("gc_interval_secs"));
     }
 }

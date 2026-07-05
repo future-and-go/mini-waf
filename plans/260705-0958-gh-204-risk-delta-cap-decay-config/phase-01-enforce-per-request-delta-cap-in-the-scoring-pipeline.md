@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Enforce per-request delta cap in the scoring pipeline"
-status: pending
+status: completed
 effort: 1h
 ---
 

@@ -340,7 +340,7 @@ impl WafEngine {
         if cfg.store.backend == "redis" {
             #[cfg(feature = "redis-store")]
             {
-                let runtime_cfg = cfg.store.redis.to_runtime_config(cfg.ttl_secs);
+                let runtime_cfg = cfg.store.redis.to_runtime_config(cfg.ttl_secs, cfg.decay.clone());
                 // Bound the initial connect: ConnectionManager retries with
                 // backoff internally, which can stall startup for minutes
                 // when the host silently drops packets. Fail-soft needs a
@@ -365,7 +365,7 @@ impl WafEngine {
             #[cfg(not(feature = "redis-store"))]
             warn!("risk: store.backend=redis requires the redis-store build feature; using memory store");
         }
-        let store = Arc::new(MemoryRiskStore::new());
+        let store = Arc::new(MemoryRiskStore::with_decay(cfg.decay.clone()));
         // The purge loop needs the concrete `Arc<MemoryRiskStore>`; start it
         // before the Arc is unsized to `Arc<dyn RiskStore>`.
         let ttl_ms = i64::try_from(cfg.ttl_secs.saturating_mul(1000)).unwrap_or(i64::MAX);
