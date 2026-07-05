@@ -11,6 +11,7 @@
 use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use arc_swap::ArcSwap;
 use tracing::warn;
@@ -29,8 +30,9 @@ pub struct CanaryLayer {
     paths: ArcSwap<HashSet<String>>,
     /// Reference to `DDoS` ban table for IP blocking.
     ban_table: Option<Arc<DynamicBanTable>>,
-    /// Ban TTL in seconds for canary hits.
-    ban_ttl_secs: u32,
+    /// Ban TTL in seconds for canary hits. Atomic so config hot-reloads can
+    /// update it through a shared `Arc<CanaryLayer>`.
+    ban_ttl_secs: AtomicU32,
 }
 
 impl CanaryLayer {
@@ -40,7 +42,7 @@ impl CanaryLayer {
         Self {
             paths: ArcSwap::from(Arc::new(HashSet::new())),
             ban_table: None,
-            ban_ttl_secs: DEFAULT_CANARY_BAN_TTL_SECS,
+            ban_ttl_secs: AtomicU32::new(DEFAULT_CANARY_BAN_TTL_SECS),
         }
     }
 
@@ -51,7 +53,7 @@ impl CanaryLayer {
         Self {
             paths: ArcSwap::from(Arc::new(set)),
             ban_table: None,
-            ban_ttl_secs: DEFAULT_CANARY_BAN_TTL_SECS,
+            ban_ttl_secs: AtomicU32::new(DEFAULT_CANARY_BAN_TTL_SECS),
         }
     }
 
@@ -62,7 +64,7 @@ impl CanaryLayer {
         Self {
             paths: ArcSwap::from(Arc::new(set)),
             ban_table: Some(ban_table),
-            ban_ttl_secs,
+            ban_ttl_secs: AtomicU32::new(ban_ttl_secs),
         }
     }
 
@@ -71,9 +73,10 @@ impl CanaryLayer {
         self.ban_table = Some(ban_table);
     }
 
-    /// Set the ban TTL in seconds.
-    pub const fn set_ban_ttl_secs(&mut self, ttl: u32) {
-        self.ban_ttl_secs = ttl;
+    /// Set the ban TTL in seconds. Takes `&self` so config hot-reloads can
+    /// update a layer shared behind `Arc`.
+    pub fn set_ban_ttl_secs(&self, ttl: u32) {
+        self.ban_ttl_secs.store(ttl, Ordering::Relaxed);
     }
 
     /// Check if the given path is a canary path (exact match).
@@ -98,17 +101,19 @@ impl CanaryLayer {
             return false;
         }
 
+        let ban_ttl_secs = self.ban_ttl_secs();
+
         // Log the honeypot hit
         warn!(
             canary_path = path,
             client_ip = %ip,
-            ban_ttl_secs = self.ban_ttl_secs,
+            ban_ttl_secs,
             "canary honeypot triggered — scanner detected"
         );
 
         // Add to dynamic ban table
         if let Some(ref ban_table) = self.ban_table {
-            let expires_ms = now_ms.saturating_add(i64::from(self.ban_ttl_secs) * 1000);
+            let expires_ms = now_ms.saturating_add(i64::from(ban_ttl_secs) * 1000);
             ban_table.insert(ip, expires_ms);
         }
 
@@ -135,14 +140,14 @@ impl CanaryLayer {
 
     /// Get the ban TTL in seconds.
     #[must_use]
-    pub const fn ban_ttl_secs(&self) -> u32 {
-        self.ban_ttl_secs
+    pub fn ban_ttl_secs(&self) -> u32 {
+        self.ban_ttl_secs.load(Ordering::Relaxed)
     }
 
     /// Get the ban TTL in milliseconds.
     #[must_use]
     pub fn ban_ttl_ms(&self) -> i64 {
-        i64::from(self.ban_ttl_secs) * 1000
+        i64::from(self.ban_ttl_secs()) * 1000
     }
 }
 
@@ -247,7 +252,7 @@ mod tests {
 
     #[test]
     fn ban_ttl_configuration() {
-        let mut layer = CanaryLayer::new();
+        let layer = CanaryLayer::new();
         assert_eq!(layer.ban_ttl_secs(), DEFAULT_CANARY_BAN_TTL_SECS);
         assert_eq!(layer.ban_ttl_ms(), i64::from(DEFAULT_CANARY_BAN_TTL_SECS) * 1000);
 
