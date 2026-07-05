@@ -152,32 +152,24 @@ impl<S: RiskStore + ?Sized> Scorer<S> {
             });
         }
 
-        // L0 seed layer evaluation FIRST — whitelist short-circuits everything
-        if let Some(ref seed) = self.seed
-            && cfg.seed.enabled
-        {
-            match seed.evaluate(ctx.client_ip) {
-                SeedVerdict::Whitelisted => {
-                    return Ok(ScorerResult {
-                        action: WafAction::Allow,
-                        score: 0,
-                        is_new: false,
-                    });
-                }
-                SeedVerdict::Score { delta, kind } => {
-                    let seed_contrib = Contributor::new(ContributorKind::Seed(kind), i16::from(delta), now_ms);
-                    let mut all_deltas = vec![seed_contrib];
-                    all_deltas.extend_from_slice(sync_deltas);
-                    return self
-                        .score_with_l2(ctx, fp_key, &all_deltas, tx_endpoint, now_ms, &cfg)
-                        .await;
-                }
-                SeedVerdict::None => {}
-            }
+        // L0 seed layer — evaluate once; whitelist short-circuits everything,
+        // including the canary check below.
+        let seed_verdict = match (&self.seed, cfg.seed.enabled) {
+            (Some(seed), true) => seed.evaluate(ctx.client_ip),
+            _ => SeedVerdict::None,
+        };
+
+        if matches!(seed_verdict, SeedVerdict::Whitelisted) {
+            return Ok(ScorerResult {
+                action: WafAction::Allow,
+                score: 0,
+                is_new: false,
+            });
         }
 
-        // FR-028 Canary honeypot check — AFTER whitelist, BEFORE other layers
-        // On canary hit: force_max + return Block immediately
+        // Canary honeypot check — after whitelist, before seed scoring and all
+        // other layers, so a seed-scored scanner (Tor exit, datacenter ASN)
+        // still trips the trap. On canary hit: force_max + return Block.
         if let Some(ref canary) = self.canary
             && cfg.canary.enabled
             && canary.check_and_ban(&ctx.path, ctx.client_ip, now_ms)
@@ -204,8 +196,20 @@ impl<S: RiskStore + ?Sized> Scorer<S> {
             });
         }
 
-        self.score_with_l2(ctx, fp_key, sync_deltas, tx_endpoint, now_ms, &cfg)
-            .await
+        match seed_verdict {
+            SeedVerdict::Score { delta, kind } => {
+                let seed_contrib = Contributor::new(ContributorKind::Seed(kind), i16::from(delta), now_ms);
+                let mut all_deltas = vec![seed_contrib];
+                all_deltas.extend_from_slice(sync_deltas);
+                self.score_with_l2(ctx, fp_key, &all_deltas, tx_endpoint, now_ms, &cfg)
+                    .await
+            }
+            // Whitelisted returned above; None carries only the caller deltas.
+            _ => {
+                self.score_with_l2(ctx, fp_key, sync_deltas, tx_endpoint, now_ms, &cfg)
+                    .await
+            }
+        }
     }
 
     /// Internal scoring with L2 layer evaluation.
