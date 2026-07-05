@@ -41,6 +41,33 @@ async fn redis_store_passes_conformance() {
     run_all(&store).await;
 }
 
+/// Concurrent applies must not lose delta batches or split-brain the axes
+/// (the Lua apply script is atomic per invocation — this pins that parity
+/// with the memory backend's index-lock behavior).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn redis_concurrent_apply_no_lost_deltas() {
+    use crate::risk::store::conformance::test_concurrent_apply_no_lost_deltas;
+
+    let Ok(url) = std::env::var("REDIS_TEST_URL") else {
+        tracing::info!("skipping: REDIS_TEST_URL unset");
+        return;
+    };
+
+    let store = RedisRiskStore::new(RedisRiskConfig {
+        url,
+        key_prefix: unique_prefix(),
+        ttl_secs: 3600,
+        op_timeout: Duration::from_millis(500),
+        breaker_threshold: 5,
+        cache_capacity: 1000,
+        decay: DecayConfig::default(),
+    })
+    .await
+    .expect("connect to REDIS_TEST_URL");
+
+    test_concurrent_apply_no_lost_deltas(std::sync::Arc::new(store)).await;
+}
+
 /// The Lua apply script must decay by the configured rate, not the default.
 #[tokio::test]
 async fn redis_decay_honors_configured_rate() {

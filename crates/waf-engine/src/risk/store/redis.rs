@@ -28,7 +28,7 @@ use redis::{Script, aio::ConnectionManager};
 use tokio::time::timeout;
 use tracing::{debug, warn};
 
-use super::redis_lua::{APPLY_SCRIPT, CLEAR_SCRIPT, FORCE_MAX_SCRIPT};
+use super::redis_lua::{APPLY_SCRIPT, CLEAR_SCRIPT, FORCE_MAX_SCRIPT, RESET_SCRIPT};
 use crate::risk::config::DecayConfig;
 use crate::risk::key::RiskKey;
 use crate::risk::state::{Contributor, RiskState};
@@ -83,6 +83,7 @@ pub struct RedisRiskStore {
     apply_script: Script,
     force_max_script: Script,
     clear_script: Script,
+    reset_script: Script,
 }
 
 impl std::fmt::Debug for RedisRiskStore {
@@ -110,6 +111,24 @@ impl RedisRiskStore {
             .await
             .context("risk redis: ping")?;
 
+        // The Lua scripts derive state keys from a prefix argument (not KEYS),
+        // which Redis Cluster rejects with CROSSSLOT on every apply — the
+        // store would run permanently degraded. Fail at startup instead.
+        match redis::cmd("INFO").arg("cluster").query_async::<String>(&mut conn).await {
+            Ok(info) if info.contains("cluster_enabled:1") => {
+                return Err(anyhow!(
+                    "risk redis: {} is a Redis Cluster; the risk store requires a single \
+                     non-cluster Redis/Valkey instance (its Lua scripts compute state keys \
+                     outside KEYS, which cluster slot routing rejects with CROSSSLOT)",
+                    cfg.url
+                ));
+            }
+            Ok(_) => {}
+            // Some restricted deployments block INFO; connectivity is already
+            // proven by PING, so proceed without the cluster check.
+            Err(e) => warn!(error = %e, "risk redis: could not verify non-cluster mode (INFO failed)"),
+        }
+
         let cache_capacity = NonZeroUsize::new(cfg.cache_capacity).unwrap_or(NonZeroUsize::MIN);
         Ok(Self {
             conn,
@@ -118,6 +137,7 @@ impl RedisRiskStore {
             apply_script: Script::new(APPLY_SCRIPT),
             force_max_script: Script::new(FORCE_MAX_SCRIPT),
             clear_script: Script::new(CLEAR_SCRIPT),
+            reset_script: Script::new(RESET_SCRIPT),
             cfg,
         })
     }
@@ -489,41 +509,22 @@ impl RiskStore for RedisRiskStore {
     }
 
     async fn reset_all(&self) -> anyhow::Result<()> {
+        // Single Lua execution = atomic swap-with-empty (the trait contract):
+        // concurrent readers see either the full pre-reset store or nothing,
+        // never a half-cleared keyspace. The script blocks the server while it
+        // runs, which is acceptable for a rare emergency/admin operation.
         let pattern = format!("{}*", self.cfg.key_prefix);
         let mut conn = self.conn.clone();
-        let mut deleted = 0_usize;
 
-        // SCAN-based deletion (cooperative, bounded batches)
-        let scan_fut = async {
-            let mut cursor = 0_u64;
-            loop {
-                let (next_cursor, keys): (u64, Vec<String>) = redis::cmd("SCAN")
-                    .arg(cursor)
-                    .arg("MATCH")
-                    .arg(&pattern)
-                    .arg("COUNT")
-                    .arg(100)
-                    .query_async(&mut conn)
-                    .await?;
-
-                if !keys.is_empty() {
-                    let mut pipe = redis::pipe();
-                    for k in &keys {
-                        pipe.del(k);
-                    }
-                    let _: () = pipe.query_async(&mut conn).await?;
-                    deleted += keys.len();
-                }
-
-                cursor = next_cursor;
-                if cursor == 0 {
-                    break;
-                }
-            }
-            Ok::<_, redis::RedisError>(deleted)
+        let invocation_fut = async {
+            self.reset_script
+                .prepare_invoke()
+                .arg(&pattern)
+                .invoke_async::<i64>(&mut conn)
+                .await
         };
 
-        match timeout(Duration::from_secs(30), scan_fut).await {
+        match timeout(Duration::from_secs(30), invocation_fut).await {
             Ok(Ok(n)) => {
                 self.record_ok();
                 self.cache.lock().clear();

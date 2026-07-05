@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use dashmap::DashMap;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use tokio::time::interval;
 use tracing::{debug, info};
 
@@ -31,6 +31,12 @@ pub struct MemoryRiskStore {
     by_fp: DashMap<u64, StateRef>,
     by_session: DashMap<Vec<u8>, StateRef>,
     decay: DecayConfig,
+    /// Serializes index resolution (find + upsert) across the three maps.
+    /// Without it, concurrent first-applies for the same actor can both miss,
+    /// mint separate states, and split-brain the indices — dropping one delta
+    /// batch. Held only for the map operations, never across `.await` or the
+    /// per-state fold.
+    index_lock: Mutex<()>,
 }
 
 impl MemoryRiskStore {
@@ -47,6 +53,7 @@ impl MemoryRiskStore {
             by_fp: DashMap::new(),
             by_session: DashMap::new(),
             decay,
+            index_lock: Mutex::new(()),
         }
     }
 
@@ -147,13 +154,20 @@ impl RiskStore for MemoryRiskStore {
             });
         }
 
-        let (state_ref, is_new) = if let Some(existing) = self.find_existing(key) {
-            (existing, false)
-        } else {
-            let new_state = RiskState::new(now_ms);
-            let new_ref = Arc::new(RwLock::new(new_state));
-            self.upsert_indices(key, &new_ref);
-            (new_ref, true)
+        // Resolve + unify indices under the index lock so concurrent applies
+        // for the same actor always converge on one state (no lost creates,
+        // no split-brained axes).
+        let (state_ref, is_new) = {
+            let _guard = self.index_lock.lock();
+            if let Some(existing) = self.find_existing(key) {
+                // Merge-on-collide: ensure all axes point to the same Arc.
+                self.upsert_indices(key, &existing);
+                (existing, false)
+            } else {
+                let new_ref = Arc::new(RwLock::new(RiskState::new(now_ms)));
+                self.upsert_indices(key, &new_ref);
+                (new_ref, true)
+            }
         };
 
         // Apply decay then fold deltas under write lock (atomic)
@@ -164,11 +178,6 @@ impl RiskStore for MemoryRiskStore {
                 apply_decay(&mut state, now_ms, &self.decay);
             }
             fold(&mut state, deltas, now_ms);
-        }
-
-        // Re-unify indices (merge-on-collide: ensure all axes point to same Arc)
-        if !is_new {
-            self.upsert_indices(key, &state_ref);
         }
 
         let state = state_ref.read().clone();
@@ -185,13 +194,17 @@ impl RiskStore for MemoryRiskStore {
             return Ok(());
         }
 
-        let state_ref = if let Some(existing) = self.find_existing(key) {
-            existing
-        } else {
-            let new_state = RiskState::new(now_ms);
-            let new_ref = Arc::new(RwLock::new(new_state));
-            self.upsert_indices(key, &new_ref);
-            new_ref
+        // Same index-lock discipline as `apply`: resolve + unify atomically.
+        let state_ref = {
+            let _guard = self.index_lock.lock();
+            if let Some(existing) = self.find_existing(key) {
+                self.upsert_indices(key, &existing);
+                existing
+            } else {
+                let new_ref = Arc::new(RwLock::new(RiskState::new(now_ms)));
+                self.upsert_indices(key, &new_ref);
+                new_ref
+            }
         };
 
         {
@@ -202,7 +215,6 @@ impl RiskStore for MemoryRiskStore {
             state.last_updated_ms = now_ms;
         }
 
-        self.upsert_indices(key, &state_ref);
         Ok(())
     }
 
