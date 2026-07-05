@@ -48,6 +48,16 @@ fn deep_merge(base: &mut Value, patch: Value) {
     }
 }
 
+/// The store backend is start-time only: the engine's hot-reload keeps the
+/// active store when `store.backend` changes. True when the saved config asks
+/// for a different backend than the one actually running (including a redis →
+/// memory startup fallback), i.e. the operator needs a gateway restart for the
+/// saved value to take effect. `active = None` (watcher not started, e.g. unit
+/// tests) cannot claim a mismatch.
+fn backend_restart_required(requested: &str, active: Option<&str>) -> bool {
+    active.is_some_and(|a| a != requested)
+}
+
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
 pub async fn get_risk_config(State(state): State<Arc<AppState>>) -> ApiResult<Json<Value>> {
@@ -58,7 +68,14 @@ pub async fn get_risk_config(State(state): State<Arc<AppState>>) -> ApiResult<Js
     let cfg: RiskConfig = serde_json::from_value(node)
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("configs/risk.yaml does not parse as RiskConfig: {e}")))?;
     let data = serde_json::to_value(&cfg).map_err(|e| ApiError::Internal(anyhow::anyhow!("{e}")))?;
-    Ok(Json(json!({ "success": true, "data": data })))
+    // `active_store_backend` is the backend actually running, which can lag
+    // the file (backend edits are start-time only) or differ from it after a
+    // redis connect fallback — the operator's downgrade-detection surface.
+    Ok(Json(json!({
+        "success": true,
+        "data": data,
+        "active_store_backend": state.engine.risk_store_backend(),
+    })))
 }
 
 pub async fn put_risk_config(State(state): State<Arc<AppState>>, Json(body): Json<Value>) -> ApiResult<Json<Value>> {
@@ -72,7 +89,26 @@ pub async fn put_risk_config(State(state): State<Arc<AppState>>, Json(body): Jso
         serde_json::from_value(merged).map_err(|e| ApiError::BadRequest(format!("invalid risk config: {e}")))?;
     let data = serde_json::to_value(&cfg).map_err(|e| ApiError::Internal(anyhow::anyhow!("{e}")))?;
     write_yaml(&path, &json!({ "risk": data })).await?;
-    Ok(Json(json!({ "success": true, "data": data })))
+    let active = state.engine.risk_store_backend();
+    let restart_required = backend_restart_required(&cfg.store.backend, active);
+    let mut resp = json!({
+        "success": true,
+        "data": data,
+        "restart_required": restart_required,
+        "active_store_backend": active,
+    });
+    if restart_required && let Some(obj) = resp.as_object_mut() {
+        obj.insert(
+            "message".into(),
+            json!(format!(
+                "store.backend saved as \"{}\" but the gateway is running the \"{}\" store; \
+                 the change takes effect after a gateway restart",
+                cfg.store.backend,
+                active.unwrap_or("unknown"),
+            )),
+        );
+    }
+    Ok(Json(resp))
 }
 
 pub async fn get_risk_metrics(_: State<Arc<AppState>>) -> ApiResult<Json<Value>> {
@@ -200,6 +236,23 @@ mod tests {
         let mut node = serde_json::to_value(RiskConfig::default()).unwrap();
         deep_merge(&mut node, json!({ "ttl_secs": "not_a_number" }));
         assert!(serde_json::from_value::<RiskConfig>(node).is_err());
+    }
+
+    /// PUT changing `store.backend` away from the running store must be
+    /// flagged, never silently 200-OK'd; matching or unknown (watcher not
+    /// started) backends must not flag.
+    #[test]
+    fn backend_change_flags_restart_required() {
+        // memory → redis via PUT (engine keeps memory until restart); the
+        // same input covers the startup-fallback case where the file already
+        // said redis but the connect failed and memory is active.
+        assert!(backend_restart_required("redis", Some("memory")));
+        assert!(backend_restart_required("memory", Some("redis")));
+        // No change → no flag.
+        assert!(!backend_restart_required("memory", Some("memory")));
+        assert!(!backend_restart_required("redis", Some("redis")));
+        // Watcher never started (no active store to contradict).
+        assert!(!backend_restart_required("redis", None));
     }
 
     #[test]
