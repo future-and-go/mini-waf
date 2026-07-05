@@ -316,6 +316,77 @@ pub async fn test_decay_disabled_when_rate_zero<S: RiskStore>(store: &S) {
     );
 }
 
+/// Concurrent first-applies for one multi-axis actor must converge.
+///
+/// No delta batch may be lost and every axis must resolve to the same score.
+/// Exercises the create/merge race, so it needs real parallelism — call from
+/// a multi-thread runtime.
+pub async fn test_concurrent_apply_no_lost_deltas<S: RiskStore + 'static>(store: std::sync::Arc<S>) {
+    const TASKS: usize = 16;
+    const ROUNDS: usize = 20;
+
+    store.reset_all().await.unwrap();
+
+    for round in 0..ROUNDS {
+        let round_u8 = u8::try_from(round).unwrap();
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 42, 42, round_u8));
+        let fp = 900_000 + round as u64;
+        let session = SessionId::new(vec![9, 9, round_u8, 1]);
+        let key = RiskKey {
+            ip: Some(ip),
+            fp_hash: Some(fp),
+            session: Some(session.clone()),
+        };
+
+        // Barrier releases all appliers at once to maximize collisions on
+        // the first-create path.
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(TASKS));
+        let mut handles = Vec::with_capacity(TASKS);
+        for _ in 0..TASKS {
+            let store = std::sync::Arc::clone(&store);
+            let key = key.clone();
+            let barrier = std::sync::Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                store.apply(&key, &[make_contributor(1, 1000)], 1000).await.unwrap();
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        let expected = u8::try_from(TASKS).unwrap();
+        let axis_keys = [
+            RiskKey {
+                ip: Some(ip),
+                fp_hash: None,
+                session: None,
+            },
+            RiskKey {
+                ip: None,
+                fp_hash: Some(fp),
+                session: None,
+            },
+            RiskKey {
+                ip: None,
+                fp_hash: None,
+                session: Some(session.clone()),
+            },
+        ];
+        for axis_key in axis_keys {
+            let state = store
+                .read(&axis_key)
+                .await
+                .unwrap()
+                .expect("every axis must resolve after concurrent applies");
+            assert_eq!(
+                state.clamped_score, expected,
+                "round {round}: every axis must see all {TASKS} concurrent deltas (no lost batch, no split-brain)"
+            );
+        }
+    }
+}
+
 /// Admin clear must remove the state so no axis resurrects the old score.
 pub async fn test_clear_removes_all_axes<S: RiskStore>(store: &S) {
     store.reset_all().await.unwrap();
@@ -435,6 +506,12 @@ mod tests {
             ..Default::default()
         });
         test_decay_honors_configured_rate(&store).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn memory_store_concurrent_apply_no_lost_deltas() {
+        let store = std::sync::Arc::new(MemoryRiskStore::new());
+        test_concurrent_apply_no_lost_deltas(store).await;
     }
 
     #[tokio::test]

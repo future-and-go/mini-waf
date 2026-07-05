@@ -322,6 +322,27 @@ end
 return deleted
 ";
 
+/// Reset script: atomically delete every key under the store's prefix.
+///
+/// The `RiskStore::reset_all` contract requires swap-with-empty semantics:
+/// concurrent readers must see either the pre-reset or post-reset store,
+/// never a partially cleared one. A single Lua execution is atomic in Redis,
+/// so all keys vanish in one step. `KEYS` is O(N) and blocks the server for
+/// the duration, which is acceptable here: reset is a rare emergency/admin
+/// amnesty operation and the keyspace is bounded by the store prefix.
+/// `UNLINK` defers the actual memory reclaim off the command thread.
+///
+/// ARGV[1]: match pattern (`{key_prefix}*`)
+///
+/// Returns: number of keys removed
+pub const RESET_SCRIPT: &str = r"
+local keys = redis.call('KEYS', ARGV[1])
+for i = 1, #keys do
+    redis.call('UNLINK', keys[i])
+end
+return #keys
+";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,5 +353,6 @@ mod tests {
         assert!(!APPLY_SCRIPT.is_empty());
         assert!(!FORCE_MAX_SCRIPT.is_empty());
         assert!(!CLEAR_SCRIPT.is_empty());
+        assert!(!RESET_SCRIPT.is_empty());
     }
 }
