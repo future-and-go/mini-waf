@@ -115,6 +115,74 @@ async fn update_partial_fields_persists() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn update_remote_ip_empty_string_clears_pin_and_null_preserves_it() {
+    let fx = fresh().await;
+    let mut create = sample_host();
+    create.remote_ip = Some("10.0.0.9".into());
+    let host = fx.db.create_host(create).await.unwrap();
+    assert_eq!(host.remote_ip.as_deref(), Some("10.0.0.9"));
+
+    let clear = UpdateHost {
+        host: None,
+        port: None,
+        ssl: None,
+        guard_status: None,
+        remote_host: None,
+        remote_port: None,
+        remote_ip: Some(String::new()),
+        cert_file: None,
+        key_file: None,
+        remarks: None,
+        start_status: None,
+        log_only_mode: None,
+        upstream_alpn: None,
+        upstream_skip_ssl_verify: None,
+        defense_json: None,
+        http_redirect: None,
+        preserve_host: None,
+    };
+    // COALESCE('', remote_ip) stores the empty string — the proxy filters
+    // empty pins, so this is the effective "clear" the admin panel sends.
+    let cleared = fx.db.update_host(host.id, clear).await.unwrap().unwrap();
+    assert_eq!(cleared.remote_ip.as_deref(), Some(""));
+
+    // Re-pin, then send NULL: COALESCE keeps the existing value. This is why
+    // the frontend must send "" (not omit the field) to clear the pin.
+    let repin = UpdateHost {
+        remote_ip: Some("10.0.0.7".into()),
+        ..clear_update_template()
+    };
+    let repinned = fx.db.update_host(host.id, repin).await.unwrap().unwrap();
+    assert_eq!(repinned.remote_ip.as_deref(), Some("10.0.0.7"));
+
+    let omit = clear_update_template();
+    let unchanged = fx.db.update_host(host.id, omit).await.unwrap().unwrap();
+    assert_eq!(unchanged.remote_ip.as_deref(), Some("10.0.0.7"));
+}
+
+fn clear_update_template() -> UpdateHost {
+    UpdateHost {
+        host: None,
+        port: None,
+        ssl: None,
+        guard_status: None,
+        remote_host: None,
+        remote_port: None,
+        remote_ip: None,
+        cert_file: None,
+        key_file: None,
+        remarks: None,
+        start_status: None,
+        log_only_mode: None,
+        upstream_alpn: None,
+        upstream_skip_ssl_verify: None,
+        defense_json: None,
+        http_redirect: None,
+        preserve_host: None,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn update_missing_returns_none() {
     let fx = fresh().await;
     let upd = UpdateHost {

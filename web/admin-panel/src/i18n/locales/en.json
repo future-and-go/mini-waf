@@ -184,6 +184,8 @@
     "http": "HTTP",
     "editHost": "Edit Host",
     "upstreamPort": "Upstream port",
+    "remoteIpPin": "Upstream IP (pin)",
+    "remoteIpPinTooltip": "Pins the upstream to this IP, bypassing DNS resolution of the Upstream hostname. Leave empty to route to the hostname. A set pin overrides the Upstream field.",
     "logOnly": "Log only",
     "upstreamAlpn": "Upstream ALPN",
     "upstreamAlpnTooltip": "ALPN only applies to TLS upstreams (SSL on)",

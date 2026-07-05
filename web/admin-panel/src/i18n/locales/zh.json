@@ -141,6 +141,8 @@
     "http": "HTTP",
     "editHost": "编辑主机",
     "upstreamPort": "上游端口",
+    "remoteIpPin": "上游 IP（固定）",
+    "remoteIpPinTooltip": "将上游固定到此 IP，绕过上游主机名的 DNS 解析。留空则路由到主机名。已设置的固定 IP 会覆盖上游字段。",
     "logOnly": "仅记录日志",
     "upstreamAlpn": "上游 ALPN",
     "upstreamAlpnTooltip": "ALPN 仅适用于 TLS 上游（SSL 开启时）",

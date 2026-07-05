@@ -50,6 +50,9 @@ export interface Host {
   guard_status: boolean;
   remote_host: string;
   remote_port: number;
+  /** Upstream IP pin. When non-empty, the proxy dials this IP instead of
+   *  resolving remote_host (bypasses container DNS). Empty = use remote_host. */
+  remote_ip?: string;
   start_status: boolean;
   log_only_mode?: boolean;
   remarks?: string;
