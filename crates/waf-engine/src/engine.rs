@@ -475,7 +475,11 @@ impl WafEngine {
                     );
                 }
                 self.init_risk_layers(&cfg);
-                self.scorer.store(Arc::new(self.build_scorer(store)));
+                let scorer = Arc::new(self.build_scorer(store));
+                // Velocity/sequence maps are keyed on attacker-controlled
+                // RiskKeys; the idle-purge loop is what bounds them.
+                scorer.start_velocity_purge_loop(cfg.gc_interval_secs, Arc::new(crate::time::SystemClock));
+                self.scorer.store(scorer);
                 active_backend = built_backend.to_string();
                 self.replace_risk_config((*cfg).clone());
                 info!(file = %path.display(), backend = %active_backend, "risk: initial config loaded");
