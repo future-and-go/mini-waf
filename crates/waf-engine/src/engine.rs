@@ -42,8 +42,9 @@ use crate::logging::{AuditEvent, AuditEventType, AuditSender, DbBatchWriter, DbL
 use crate::rules::custom_file_loader::CustomRuleFileWatcher;
 use crate::rules::engine::{CustomRulesEngine, from_db_rule};
 
+use crate::risk::canary::{CanaryLayer, DEFAULT_CANARY_BAN_TTL_SECS};
 use crate::risk::config::RiskConfig;
-use crate::risk::scorer::Scorer;
+use crate::risk::scorer::{Scorer, ScorerResult};
 use crate::risk::store::MemoryRiskStore;
 
 /// WAF engine configuration
@@ -150,12 +151,19 @@ pub struct WafEngine {
     mode_registry: OnceLock<ModeRegistry>,
     /// Hot-swappable risk-scoring config. Default `RiskConfig` has
     /// `enabled = false`, so `Scorer.score()` returns score=0 / Allow until
-    /// operators wire a real config via [`Self::replace_risk_config`].
+    /// a real config is loaded via [`Self::replace_risk_config`].
     risk_cfg: Arc<ArcSwap<RiskConfig>>,
     /// Risk scorer threaded into `inspect()`. Backed by the in-memory store
     /// so engine construction stays infrastructure-free. Provides the
-    /// `decision.risk_score` value attached to every WAF decision.
+    /// `decision.risk_score` attached to every WAF decision and drives
+    /// FR-025 enforcement: a scorer Block/Challenge escalates a plain-Allow
+    /// pipeline decision (see [`Self::inspect`]).
     scorer: Arc<Scorer<MemoryRiskStore>>,
+    /// FR-028 canary honeypot layer installed on the scorer. Bound to the
+    /// `DDoS` [`DynamicBanTable`] so canary hits IP-ban at the `DDoS` phase on
+    /// subsequent requests. Paths and ban TTL follow `RiskConfig.canary`
+    /// via [`Self::replace_risk_config`].
+    risk_canary: Arc<CanaryLayer>,
     // ── FR-007/FR-042 relay-intel feed metadata (D3) ─────────────────────────
     /// Threat-intel feed metadata (Tor / ASN / datacenter), loaded from
     /// `configs/relay.yaml` at startup via [`Self::load_relay_feeds`]. Empty
@@ -250,7 +258,17 @@ impl WafEngine {
         // Operators that want real scoring call `replace_risk_config`.
         let risk_cfg = Arc::new(ArcSwap::from(Arc::new(RiskConfig::default())));
         let risk_store = Arc::new(MemoryRiskStore::new());
-        let scorer = Arc::new(Scorer::new(risk_store, Arc::clone(&risk_cfg)));
+        // FR-028 canary layer bound to the DDoS ban table: a canary hit bans
+        // the IP so follow-up requests block at the DDoS phase. Paths stay
+        // empty (inert) until `replace_risk_config` loads them.
+        let risk_canary = Arc::new(CanaryLayer::with_ban_table(
+            Vec::new(),
+            Arc::clone(ddos_check.ban_table()),
+            DEFAULT_CANARY_BAN_TTL_SECS,
+        ));
+        let mut scorer = Scorer::new(risk_store, Arc::clone(&risk_cfg));
+        scorer.set_canary(Arc::clone(&risk_canary));
+        let scorer = Arc::new(scorer);
 
         Self {
             store,
@@ -283,6 +301,7 @@ impl WafEngine {
             mode_registry: OnceLock::new(),
             risk_cfg,
             scorer,
+            risk_canary,
             relay_feeds: ArcSwap::from_pointee(Vec::new()),
         }
     }
@@ -294,6 +313,11 @@ impl WafEngine {
     /// scoring via this entry point; tests use it to enable scoring on a
     /// per-test basis.
     pub fn replace_risk_config(&self, cfg: RiskConfig) {
+        // Keep the canary layer in sync with the config: path set and ban TTL
+        // are both hot-reloadable. The TTL governs the DDoS-table ban and the
+        // force_max score pin (`CanaryLayer::ban_ttl_ms`).
+        self.risk_canary.reload(cfg.canary.paths.clone());
+        self.risk_canary.set_ban_ttl_secs(cfg.canary.ban_ttl_secs);
         self.risk_cfg.store(Arc::new(cfg));
     }
 
@@ -677,16 +701,59 @@ impl WafEngine {
         let (mut decision, fast_path) = self.inspect_pipeline(ctx).await;
         // Fast-path exits (guard off, IP/URL allow/block lists) skip risk
         // scoring entirely: no store write, risk_score stays 0.
-        if matches!(fast_path, FastPath::Miss) {
-            let scorer_score = self
-                .scorer
-                .score(ctx, None, &[], None, now_ms)
-                .await
-                .map_or(0, |r| r.score);
-            decision.risk_score = scorer_score.min(100);
+        if matches!(fast_path, FastPath::Miss)
+            && let Ok(scorer_result) = self.scorer.score(ctx, None, &[], None, now_ms).await
+        {
+            let risk_score = scorer_result.score.min(100);
+            decision.risk_score = risk_score;
+            // FR-025 enforcement: escalation-only gate. A scorer Block or
+            // Challenge replaces the pipeline decision only when that decision
+            // is a plain Allow. Any decision carrying a detection — enforced
+            // or downgraded to LogOnly by a monitored feature — is returned
+            // untouched; a scorer Allow never downgrades anything.
+            if matches!(decision.action, WafAction::Allow)
+                && matches!(scorer_result.action, WafAction::Block { .. } | WafAction::Challenge)
+            {
+                let mut risk_decision = Self::make_risk_decision(ctx, &scorer_result);
+                self.apply_mode(ctx, &mut risk_decision, "risk_assessment", Some("cumulative_risk"));
+                self.log_security_event(ctx, &risk_decision);
+                self.report_community_signal(ctx, &risk_decision);
+                risk_decision.risk_score = risk_score;
+                decision = risk_decision;
+            }
         }
         self.send_audit_event(ctx, &decision, inspect_time);
         decision
+    }
+
+    /// Build the Block/Challenge decision for a risk-scorer escalation.
+    ///
+    /// All risk enforcement events carry `Phase::RiskScore` and the single
+    /// rule name `cumulative_risk` (threshold, pinned-actor, and canary hits
+    /// alike — canary hits stay distinguishable via the scorer's info log).
+    /// Mode resolution is handled by `apply_mode()` at the call site.
+    fn make_risk_decision(ctx: &RequestCtx, scorer_result: &ScorerResult) -> WafDecision {
+        let result = DetectionResult {
+            rule_id: None,
+            rule_name: "cumulative_risk".to_string(),
+            phase: waf_common::Phase::RiskScore,
+            detail: format!("risk score {}", scorer_result.score),
+            rule_action: None,
+            action_status: None,
+        };
+        match scorer_result.action {
+            WafAction::Block { status, .. } => {
+                let body = render_block_page(ctx, "cumulative_risk");
+                WafDecision::block(status, Some(body), result)
+            }
+            _ => WafDecision {
+                action: WafAction::Challenge,
+                result: Some(result),
+                risk_score: 0,
+                mode: InteropMode::Enforce,
+                rule_id: None,
+            },
+        }
     }
 
     /// Original inspection pipeline. Split out of [`Self::inspect`] so the
@@ -1275,6 +1342,257 @@ mod tests {
         assert!(
             !engine.scorer.store().is_empty().await,
             "scored request must write the risk store"
+        );
+    }
+
+    /// Spin up an engine on a scratch Postgres. Enforcement tests need no DB
+    /// rules, so no host row is created — `make_ctx` carries the host config.
+    async fn spawn_engine() -> (WafEngine, Option<testcontainers::ContainerAsync<PostgresImage>>) {
+        let (url, container) = if let Ok(url) = std::env::var("PG_TEST_URL") {
+            (url, None)
+        } else {
+            let container = PostgresImage::default()
+                .with_tag("16-alpine")
+                .start()
+                .await
+                .expect("start postgres testcontainer");
+            let host = container.get_host().await.expect("container host");
+            let port = container.get_host_port_ipv4(5432).await.expect("container port");
+            (
+                format!("postgres://postgres:postgres@{host}:{port}/postgres"),
+                Some(container),
+            )
+        };
+        let db = Database::connect(&url, 5).await.expect("db connect");
+        db.migrate().await.expect("migrate");
+        let engine = WafEngine::new(Arc::new(db), WafEngineConfig::default());
+        (engine, container)
+    }
+
+    /// `make_ctx` with custom risk thresholds. `challenge` mirrors `allow` —
+    /// only the allow/block boundaries drive `threshold::decide`.
+    fn make_ctx_with_thresholds(path: &str, ip: &str, allow: u32, block: u32) -> RequestCtx {
+        use waf_common::tier::{CachePolicy, FailMode, RiskThresholds, TierPolicy};
+
+        let mut ctx = make_ctx("risk-test", path, ip);
+        ctx.tier_policy = Arc::new(TierPolicy {
+            fail_mode: FailMode::Open,
+            ddos_threshold_rps: 1000,
+            cache_policy: CachePolicy::NoCache,
+            risk_thresholds: RiskThresholds {
+                allow,
+                challenge: allow,
+                block,
+            },
+        });
+        ctx
+    }
+
+    fn enabled_risk_config() -> RiskConfig {
+        RiskConfig {
+            enabled: true,
+            ..RiskConfig::default()
+        }
+    }
+
+    /// Threshold gate drives the returned decision: score-at-block → 403 with
+    /// a `Phase::RiskScore` result, challenge band → Challenge, disabled
+    /// config → Allow even with block-at-0 thresholds.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn risk_threshold_matrix_enforced() {
+        let (engine, _container) = spawn_engine().await;
+        engine.replace_risk_config(enabled_risk_config());
+
+        // Block: score 0 >= block threshold 0.
+        let mut ctx = make_ctx_with_thresholds("/", "198.51.100.1", 0, 0);
+        let decision = engine.inspect(&mut ctx).await;
+        assert!(
+            matches!(decision.action, WafAction::Block { status: 403, .. }),
+            "block-at-0 thresholds must 403, got {:?}",
+            decision.action
+        );
+        let result = decision.result.as_ref().expect("risk block must carry a result");
+        assert_eq!(result.phase, waf_common::Phase::RiskScore);
+        assert_eq!(result.rule_name, "cumulative_risk");
+
+        // Challenge: score 0 in [allow=0, block=101).
+        let mut ctx = make_ctx_with_thresholds("/", "198.51.100.2", 0, 101);
+        let decision = engine.inspect(&mut ctx).await;
+        assert!(
+            matches!(decision.action, WafAction::Challenge),
+            "challenge-band thresholds must challenge, got {:?}",
+            decision.action
+        );
+        let result = decision.result.as_ref().expect("risk challenge must carry a result");
+        assert_eq!(result.phase, waf_common::Phase::RiskScore);
+        assert_eq!(result.rule_name, "cumulative_risk");
+
+        // Disabled config short-circuits before the threshold gate.
+        engine.replace_risk_config(RiskConfig::default());
+        let mut ctx = make_ctx_with_thresholds("/", "198.51.100.3", 0, 0);
+        let decision = engine.inspect(&mut ctx).await;
+        assert!(
+            matches!(decision.action, WafAction::Allow),
+            "disabled risk config must not enforce, got {:?}",
+            decision.action
+        );
+    }
+
+    /// FR-028 canary contract: a canary hit 403s at `Phase::RiskScore` with
+    /// score 100 (issue AC #2), IP-bans via the `DDoS` table so the follow-up
+    /// request blocks at `Phase::Ddos`, and a directly pinned actor blocks
+    /// through the threshold override (issue AC #3).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn canary_hit_bans_and_pin_blocks() {
+        use crate::checks::ddos::DdosTierCfg;
+        use crate::risk::config::CanaryConfig;
+        use waf_common::tier::Tier;
+
+        let (engine, _container) = spawn_engine().await;
+        // Default DdosConfig has no tiers → the ban-table check never runs.
+        // Configure the CatchAll tier with unreachable burst thresholds so
+        // only the ban lookup is active.
+        engine.ddos_cfg.store(Arc::new(DdosConfig {
+            tiers: HashMap::from([(
+                Tier::CatchAll,
+                DdosTierCfg {
+                    per_fp_threshold: 1_000_000,
+                    per_fp_window_s: 60,
+                    per_tier_threshold: 1_000_000,
+                    per_tier_window_s: 60,
+                },
+            )]),
+            ..DdosConfig::default()
+        }));
+        engine.replace_risk_config(RiskConfig {
+            canary: CanaryConfig {
+                enabled: true,
+                paths: vec!["/admin-test".to_string()],
+                ban_ttl_secs: 600,
+            },
+            ..enabled_risk_config()
+        });
+
+        // Canary hit → real 403 at the engine boundary (issue AC #2).
+        let mut ctx = make_ctx("risk-test", "/admin-test", "203.0.113.50");
+        let decision = engine.inspect(&mut ctx).await;
+        assert!(
+            matches!(decision.action, WafAction::Block { status: 403, .. }),
+            "canary hit must 403, got {:?}",
+            decision.action
+        );
+        let result = decision.result.as_ref().expect("canary block must carry a result");
+        assert_eq!(result.phase, waf_common::Phase::RiskScore);
+        assert_eq!(result.rule_name, "cumulative_risk");
+        assert_eq!(decision.risk_score, 100, "canary force-max must pin score to 100");
+
+        // Same IP, normal path → blocked by the DDoS ban planted by the
+        // canary hit (FR-028 ban-table contract; Phase 19 runs pre-scoring).
+        let mut ctx = make_ctx("risk-test", "/", "203.0.113.50");
+        let decision = engine.inspect(&mut ctx).await;
+        assert!(
+            matches!(decision.action, WafAction::Block { .. }),
+            "banned canary IP must stay blocked, got {:?}",
+            decision.action
+        );
+        let result = decision.result.as_ref().expect("ban block must carry a result");
+        assert_eq!(
+            result.phase,
+            waf_common::Phase::Ddos,
+            "post-canary block must come from the DDoS ban phase, not re-scoring"
+        );
+
+        // Different IP, pinned directly via force_max → threshold override
+        // blocks even with default (permissive) thresholds (issue AC #3).
+        let mut ctx = make_ctx("risk-test", "/", "203.0.113.51");
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        engine
+            .scorer
+            .force_max(&ctx, None, now_ms + 60_000, now_ms)
+            .await
+            .expect("force_max");
+        let decision = engine.inspect(&mut ctx).await;
+        assert!(
+            matches!(decision.action, WafAction::Block { status: 403, .. }),
+            "pinned actor must block via override, got {:?}",
+            decision.action
+        );
+        let result = decision.result.as_ref().expect("pinned block must carry a result");
+        assert_eq!(result.phase, waf_common::Phase::RiskScore);
+        assert_eq!(result.rule_name, "cumulative_risk");
+        assert_eq!(decision.risk_score, 100, "pinned actor must carry score 100");
+    }
+
+    /// Monitor mode on `risk_assessment` downgrades a risk block to `LogOnly`:
+    /// the Block intent and `Phase::RiskScore` result are preserved for
+    /// logging, but the request proceeds.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn risk_block_respects_monitor_mode() {
+        let (engine, _container) = spawn_engine().await;
+        engine.replace_risk_config(enabled_risk_config());
+        let mr = ModeRegistry::new();
+        mr.set_feature("risk_assessment", InteropMode::LogOnly);
+        engine.set_mode_registry(mr);
+
+        let mut ctx = make_ctx_with_thresholds("/", "198.51.100.10", 0, 0);
+        let decision = engine.inspect(&mut ctx).await;
+        assert!(
+            matches!(decision.action, WafAction::Block { .. }),
+            "block intent must be preserved for logging, got {:?}",
+            decision.action
+        );
+        assert_eq!(decision.mode, InteropMode::LogOnly);
+        assert!(
+            decision.is_enforcement_allowed(),
+            "monitored risk block must let the request proceed"
+        );
+        let result = decision.result.as_ref().expect("monitored block must carry a result");
+        assert_eq!(result.phase, waf_common::Phase::RiskScore);
+        assert_eq!(result.rule_name, "cumulative_risk");
+    }
+
+    /// The escalation gate applies to plain-Allow decisions only: a pipeline
+    /// detection — enforced or downgraded to `LogOnly` by a monitored feature —
+    /// is never replaced by a risk escalation.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn risk_never_overrides_pipeline_decisions() {
+        let (engine, _container) = spawn_engine().await;
+        engine.replace_risk_config(enabled_risk_config());
+
+        // Enforced detection: SQLi block wins even at block-at-0 thresholds.
+        let mut ctx = make_ctx_with_thresholds("/", "198.51.100.20", 0, 0);
+        ctx.query = "id=1' OR '1'='1".into();
+        let decision = engine.inspect(&mut ctx).await;
+        assert!(
+            matches!(decision.action, WafAction::Block { .. }),
+            "SQLi payload must block, got {:?}",
+            decision.action
+        );
+        let result = decision.result.as_ref().expect("SQLi block must carry a result");
+        assert_eq!(
+            result.phase,
+            waf_common::Phase::SqlInjection,
+            "enforced detection must keep its own phase, not Phase::RiskScore"
+        );
+
+        // LogOnly'd detection: with injection_control in monitor mode the
+        // SQLi decision (mode LogOnly) is still returned — no risk escalation.
+        let mr = ModeRegistry::new();
+        mr.set_feature("injection_control", InteropMode::LogOnly);
+        engine.set_mode_registry(mr);
+        let mut ctx = make_ctx_with_thresholds("/", "198.51.100.21", 0, 0);
+        ctx.query = "id=1' OR '1'='1".into();
+        let decision = engine.inspect(&mut ctx).await;
+        let result = decision.result.as_ref().expect("LogOnly'd SQLi must carry its result");
+        assert_eq!(
+            result.phase,
+            waf_common::Phase::SqlInjection,
+            "LogOnly'd detection must not be replaced by a risk escalation"
+        );
+        assert_eq!(decision.mode, InteropMode::LogOnly);
+        assert!(
+            decision.is_enforcement_allowed(),
+            "LogOnly'd SQLi decision must let the request proceed"
         );
     }
 }

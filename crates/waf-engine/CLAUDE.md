@@ -10,6 +10,7 @@ Core detection engine. Evaluates inbound HTTP requests against rule sets and sec
 - **Device fingerprinting (FR-010)**: TLS ClientHello + HTTP/2 frame capture, JA3 / JA4 / Akamai H2 fingerprint hashers, identity store (in-memory or Redis), risk-signal providers (UA blocklist/entropy, fingerprint conflict, IP hopping, H2 anomaly), risk aggregator.
 - **Transaction velocity (FR-012)**: signal-only; dispatched from gateway `logging()` hook (not `response_filter`) so streaming, WAF-blocked, and origin-down paths are handled correctly. Events carry tristate `Outcome::{Pending, Ok, Failed}`; classifiers ignore Pending. Velocity signals carry both `count` (settled attempts in window) and `ok_count` (subset that succeeded). Cookie-less requests fall back to `RequestCtx.device_fp` scoped by `peer_ip` for session identity.
 - **CrowdSec integration**: AppSec component, decision sync, cache, pusher, models.
+- **Cumulative risk scoring (FR-025)**: per-actor score with decay, enforced in `inspect()` — threshold/canary/pinned outcomes surface as Block/Challenge decisions (`Phase::RiskScore`, `rule_name = "cumulative_risk"`), mode-gated by the `risk_assessment` feature. Escalation is a fallback gate: it only fires when the pipeline decision is a plain Allow, so detections downgraded to LogOnly by monitor mode keep their own decision and suppress risk escalation for that request (`risk_assessment` in monitor mode is the rollout valve). Canary honeypot hits (FR-028) pin the score to 100 and insert the IP into the DDoS dynamic ban table with config-driven TTL.
 - **Community blocklist**: enrollment, fetch, reporter, checker.
 - **Plugins**: WASM (`wasmtime`) and Rhai script execution for custom logic.
 - **GeoIP**: ip2region + MaxMind lookups with background updater.
@@ -48,8 +49,9 @@ src/
 │   ├── identity/            # memory + redis stores (redis gated by feature)
 │   ├── behavior/            # FR-011 behavioral anomaly detection (per-actor cadence/path classifiers)
 │   └── providers/           # ua_blocklist, ua_entropy, fp_conflict, ip_hopping, h2_anomaly
-├── risk/                    # FR-025 cumulative risk scoring (in-memory + config hot-reload)
+├── risk/                    # FR-025 cumulative risk scoring (enforced via Phase::RiskScore in engine.rs)
 │   ├── config.rs, scorer.rs, score.rs, decay.rs, threshold.rs
+│   ├── canary.rs            # FR-028 honeypot paths → score pin + DDoS ban-table insert
 │   ├── key.rs               # RiskKey (triple-index: IP/fingerprint/session)
 │   ├── state.rs             # RiskState, Contributor, ContributorKind
 │   ├── reload.rs            # notify-based hot-reload with ArcSwap
