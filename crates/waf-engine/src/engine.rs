@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use arc_swap::ArcSwap;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use waf_common::{DetectionResult, InteropMode, RequestCtx, RuleAction, WafAction, WafDecision};
@@ -185,6 +185,12 @@ pub struct WafEngine {
     /// risk-config load (when enabled) and re-attached on every scorer
     /// rebuild. HMAC secret and nonce store are start-time only.
     risk_challenge_verifier: OnceLock<Arc<ChallengeVerifier>>,
+    /// Backend actually running behind the scorer (`"memory"` or `"redis"`),
+    /// set once by [`Self::start_risk_watcher`]. May differ from
+    /// `RiskConfig.store.backend` after a redis connect fallback. Surfaced to
+    /// the admin API so a PUT that changes the backend can report
+    /// "restart required" instead of a silent no-op.
+    risk_active_backend: OnceLock<String>,
     // ── FR-007/FR-042 relay-intel feed metadata (D3) ─────────────────────────
     /// Threat-intel feed metadata (Tor / ASN / datacenter), loaded from
     /// `configs/relay.yaml` at startup via [`Self::load_relay_feeds`]. Empty
@@ -327,6 +333,7 @@ impl WafEngine {
             risk_canary,
             risk_seed: OnceLock::new(),
             risk_challenge_verifier: OnceLock::new(),
+            risk_active_backend: OnceLock::new(),
             relay_feeds: ArcSwap::from_pointee(Vec::new()),
         }
     }
@@ -348,9 +355,11 @@ impl WafEngine {
 
     /// Build a risk store from `RiskConfig.store`. Fail-soft: any redis
     /// failure (feature absent, connect/ping error) falls back to the
-    /// in-memory store so the gateway never refuses to start.
+    /// in-memory store so the gateway never refuses to start. Returns the
+    /// store together with the backend name actually built (`"redis"` or
+    /// `"memory"`) so callers can detect a fallback downgrade.
     #[cfg_attr(not(feature = "redis-store"), allow(clippy::unused_async))]
-    async fn build_risk_store(cfg: &RiskConfig) -> Arc<dyn RiskStore> {
+    async fn build_risk_store(cfg: &RiskConfig) -> (Arc<dyn RiskStore>, &'static str) {
         if cfg.store.backend == "redis" {
             #[cfg(feature = "redis-store")]
             {
@@ -366,7 +375,7 @@ impl WafEngine {
                 match connect.await {
                     Ok(Ok(store)) => {
                         info!("risk: redis store connected");
-                        return Arc::new(store);
+                        return (Arc::new(store), "redis");
                     }
                     Ok(Err(e)) => {
                         warn!(error = %e, "risk: redis store connect failed; falling back to memory store");
@@ -384,7 +393,7 @@ impl WafEngine {
         // before the Arc is unsized to `Arc<dyn RiskStore>`.
         let ttl_ms = i64::try_from(cfg.ttl_secs.saturating_mul(1000)).unwrap_or(i64::MAX);
         store.start_purge_loop(ttl_ms, cfg.gc_interval_secs, Arc::new(crate::time::SystemClock));
-        store
+        (store, "memory")
     }
 
     /// Build a scorer over `store` sharing the engine's config snapshot and
@@ -455,10 +464,19 @@ impl WafEngine {
         let mut active_backend = "memory".to_string();
         match RiskConfig::from_path(path) {
             Ok(cfg) => {
-                let store = Self::build_risk_store(&cfg).await;
+                let (store, built_backend) = Self::build_risk_store(&cfg).await;
+                if cfg.store.backend != built_backend {
+                    // error-level on purpose: the operator asked for a shared
+                    // store and is silently running per-instance memory.
+                    error!(
+                        requested = %cfg.store.backend,
+                        active = %built_backend,
+                        "risk: requested store backend unavailable; running degraded on the memory store (restart to retry)"
+                    );
+                }
                 self.init_risk_layers(&cfg);
                 self.scorer.store(Arc::new(self.build_scorer(store)));
-                active_backend.clone_from(&cfg.store.backend);
+                active_backend = built_backend.to_string();
                 self.replace_risk_config((*cfg).clone());
                 info!(file = %path.display(), backend = %active_backend, "risk: initial config loaded");
             }
@@ -466,6 +484,7 @@ impl WafEngine {
                 warn!(file = %path.display(), error = %e, "risk: initial load failed; risk scoring stays disabled");
             }
         }
+        let _ = self.risk_active_backend.set(active_backend.clone());
         let canary = Arc::clone(&self.risk_canary);
         let risk_cfg = Arc::clone(&self.risk_cfg);
         let result = RiskReloader::start(path.to_path_buf(), RISK_DEBOUNCE_MS, move |cfg| {
@@ -492,6 +511,14 @@ impl WafEngine {
                 "risk: hot-reload watcher failed to start; running without hot-reload"
             ),
         }
+    }
+
+    /// Admin API: the risk-store backend actually running (`"memory"` or
+    /// `"redis"`). `None` until [`Self::start_risk_watcher`] has run. May
+    /// differ from the configured `store.backend` after a redis connect
+    /// fallback, so it doubles as the downgrade-detection surface.
+    pub fn risk_store_backend(&self) -> Option<&str> {
+        self.risk_active_backend.get().map(String::as_str)
     }
 
     /// Admin API: remove an actor's risk state (all axes reachable from the
@@ -1843,7 +1870,8 @@ mod tests {
             gc_interval_secs: 1,
             ..RiskConfig::default()
         };
-        let store = WafEngine::build_risk_store(&cfg).await;
+        let (store, built) = WafEngine::build_risk_store(&cfg).await;
+        assert_eq!(built, "memory");
 
         let key = RiskKey::from_ip("198.51.100.77".parse().expect("ip"));
         let stale_ms = chrono::Utc::now().timestamp_millis() - 10_000;
@@ -1876,7 +1904,8 @@ mod tests {
         cfg.store.backend = "redis".to_string();
         cfg.store.redis.url = "redis://127.0.0.1:1".to_string();
 
-        let store = WafEngine::build_risk_store(&cfg).await;
+        let (store, built) = WafEngine::build_risk_store(&cfg).await;
+        assert_eq!(built, "memory", "fallback must report the memory backend, not the requested one");
         assert!(store.is_empty().await, "fallback memory store must start empty");
     }
 
@@ -1895,7 +1924,8 @@ mod tests {
         cfg.store.redis.url = url;
         cfg.store.redis.key_prefix = format!("waf:risk:enginetest:{now_ms}:");
 
-        let store = WafEngine::build_risk_store(&cfg).await;
+        let (store, built) = WafEngine::build_risk_store(&cfg).await;
+        assert_eq!(built, "redis");
         let key = crate::risk::key::RiskKey::from_ip("10.98.98.98".parse().unwrap());
         let bump = crate::risk::state::Contributor::new(
             crate::risk::state::ContributorKind::Signal("engine_test".to_string()),
@@ -1919,8 +1949,17 @@ mod tests {
         let path = dir.path().join("risk.yaml");
         std::fs::write(&path, "risk:\n  enabled: false\n").expect("write initial");
 
+        assert!(
+            engine.risk_store_backend().is_none(),
+            "no active backend reported before the watcher starts"
+        );
         engine.start_risk_watcher(&path).await;
         assert!(!engine.risk_cfg.load().enabled, "initial config has enabled=false");
+        assert_eq!(
+            engine.risk_store_backend(),
+            Some("memory"),
+            "watcher must record the store backend actually built"
+        );
 
         std::fs::write(&path, "risk:\n  enabled: true\n  canary:\n    paths:\n      - /trap\n").expect("write update");
 
