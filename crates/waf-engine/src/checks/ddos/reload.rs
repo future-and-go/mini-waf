@@ -1,4 +1,4 @@
-//! FR-005 phase-01 — hot-reload watcher for `configs/ddos.yaml`.
+//! Hot-reload watcher for `configs/ddos.yaml`.
 //!
 //! Mirrors `rate_limit::reload`: parent-dir `notify` watcher on a sync
 //! `std::thread`, debounced, fail-soft on parse error (previous snapshot

@@ -1,4 +1,4 @@
-//! FR-025 pure score-fold function.
+//! Pure score-fold function.
 //!
 //! Takes a `RiskState` and a list of deltas, returns the updated state.
 //! No I/O, no side effects — pure transformation.
@@ -34,7 +34,7 @@ pub fn sum_deltas(deltas: &[Contributor]) -> i32 {
     deltas.iter().map(|c| i32::from(c.delta)).sum()
 }
 
-/// FR-025: Maximum per-request raw delta sum.
+/// Maximum per-request raw delta sum.
 pub const MAX_PER_REQUEST_DELTA: i32 = 100;
 
 /// Convert rule engine `RiskDelta` to a `Contributor` for the risk store.

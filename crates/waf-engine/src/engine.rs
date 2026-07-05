@@ -369,7 +369,7 @@ impl WafEngine {
         // The purge loop needs the concrete `Arc<MemoryRiskStore>`; start it
         // before the Arc is unsized to `Arc<dyn RiskStore>`.
         let ttl_ms = i64::try_from(cfg.ttl_secs.saturating_mul(1000)).unwrap_or(i64::MAX);
-        store.start_purge_loop(ttl_ms, cfg.gc_interval_secs);
+        store.start_purge_loop(ttl_ms, cfg.gc_interval_secs, Arc::new(crate::time::SystemClock));
         store
     }
 

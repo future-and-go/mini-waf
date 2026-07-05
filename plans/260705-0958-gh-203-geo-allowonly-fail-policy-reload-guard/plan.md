@@ -1,7 +1,7 @@
 ---
 title: "GH-203 geo: AllowOnly fail policy + keep-old-searcher reload guard"
 description: "AllowOnly fails open on missing/empty geo data and reload can swap a working xdb for None; add a keep-old-on-failure reload guard and an opt-in fail-closed policy for AllowOnly."
-status: pending
+status: completed
 priority: P2
 effort: 5h
 branch: "main-harness"
@@ -64,9 +64,9 @@ would be a user-decision violation.
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Keep-old-on-failure reload guard](./phase-01-keep-old-on-failure-reload-guard.md) | Pending |
-| 2 | [AllowOnly fail-closed policy in engine](./phase-02-allowonly-fail-closed-policy-in-engine.md) | Pending |
-| 3 | [API knob + GH-197 loader wiring + acceptance](./phase-03-api-knob-gh-197-loader-wiring-acceptance.md) | Pending |
+| 1 | [Keep-old-on-failure reload guard](./phase-01-keep-old-on-failure-reload-guard.md) | Completed |
+| 2 | [AllowOnly fail-closed policy in engine](./phase-02-allowonly-fail-closed-policy-in-engine.md) | Completed |
+| 3 | [API knob + GH-197 loader wiring + acceptance](./phase-03-api-knob-gh-197-loader-wiring-acceptance.md) | Completed |
 
 ## Key Decisions
 

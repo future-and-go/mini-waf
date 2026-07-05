@@ -1,4 +1,4 @@
-//! FR-025 hot-reload watcher for `configs/risk.yaml`.
+//! Hot-reload watcher for `configs/risk.yaml`.
 //!
 //! Mirrors `device_fp::reload` pattern: per-path sync thread + mpsc, parent-dir
 //! watch, debounced reload, fail-soft on parse error.

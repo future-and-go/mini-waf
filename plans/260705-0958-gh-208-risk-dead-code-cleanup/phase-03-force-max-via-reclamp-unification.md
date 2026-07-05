@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "force_max via reclamp() unification"
-status: pending
+status: completed
 effort: "15m"
 ---
 

@@ -9,48 +9,17 @@ use std::sync::Arc;
 use axum::{Json, extract::State, http::header, response::IntoResponse};
 use serde_json::{Value, json};
 
+use crate::config_files::{resolve_path, write_yaml};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
-// ─── Path helper ─────────────────────────────────────────────────────────────
-
-fn resolve_path(state: &AppState, relative: &str) -> std::path::PathBuf {
-    state.main_config_file.as_ref().map_or_else(
-        || std::path::PathBuf::from(relative),
-        |main| {
-            let p = std::path::Path::new(main.as_str());
-            let root = p
-                .parent()
-                .and_then(|c| c.parent())
-                .unwrap_or_else(|| std::path::Path::new("."));
-            root.join(relative)
-        },
-    )
-}
-
+/// Unlike the shared `read_yaml_opt`, a present-but-malformed file surfaces
+/// as `BadRequest` here instead of silently falling back to defaults.
 async fn read_yaml(path: &std::path::Path) -> Result<Value, ApiError> {
     tokio::fs::read_to_string(path).await.map_or_else(
         |_| Ok(Value::Null),
         |raw| serde_yaml::from_str::<Value>(&raw).map_err(|e| ApiError::BadRequest(format!("parse YAML: {e}"))),
     )
-}
-
-async fn write_yaml(path: &std::path::Path, value: &Value) -> Result<(), ApiError> {
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("mkdir: {e}")))?;
-    }
-    let s = serde_yaml::to_string(value).map_err(|e| ApiError::Internal(anyhow::anyhow!("yaml: {e}")))?;
-    // Atomic write via temp file
-    let tmp = path.with_extension("yaml.tmp");
-    tokio::fs::write(&tmp, s.as_bytes())
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("write tmp: {e}")))?;
-    tokio::fs::rename(&tmp, path)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("rename: {e}")))?;
-    Ok(())
 }
 
 // ─── Mapping helpers ──────────────────────────────────────────────────────────

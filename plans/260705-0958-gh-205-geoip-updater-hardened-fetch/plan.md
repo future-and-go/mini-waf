@@ -1,7 +1,7 @@
 ---
 title: "GH-205 geoip updater: hardened fetch (SSRF validation, size cap, bounded redirects)"
 description: "Route the ip2region xdb downloader through a shared SSRF-validated, IP-pinned, redirect-disabled, size-capped fetch path instead of a plain reqwest client"
-status: pending
+status: completed
 priority: P2
 branch: "main-harness"
 tags: [bug, area:engine, geoip, security, gh-205]
@@ -59,9 +59,9 @@ stays proportional: no new config surface, cap is a compile-time const parameter
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Shared validated-fetch helper (extract from rules manager)](./phase-01-shared-validated-fetch-helper-extract-from-rules-manager.md) | Pending |
-| 2 | [Wire geoip updater to hardened fetch](./phase-02-wire-geoip-updater-to-hardened-fetch.md) | Pending |
-| 3 | [Acceptance tests and quality gates](./phase-03-acceptance-tests-and-quality-gates.md) | Pending |
+| 1 | [Shared validated-fetch helper (extract from rules manager)](./phase-01-shared-validated-fetch-helper-extract-from-rules-manager.md) | Completed |
+| 2 | [Wire geoip updater to hardened fetch](./phase-02-wire-geoip-updater-to-hardened-fetch.md) | Completed |
+| 3 | [Acceptance tests and quality gates](./phase-03-acceptance-tests-and-quality-gates.md) | Completed |
 
 ## Key Decisions
 

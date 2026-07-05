@@ -12,7 +12,7 @@ use crate::risk::state::{Contributor, ContributorKind};
 
 /// Configurable weights for signal → delta mapping.
 ///
-/// Default values match the plan table. Operators can override via
+/// Operators can override the default values via
 /// `risk.signal_weights` in the config YAML.
 #[derive(Clone, Debug)]
 pub struct SignalWeights {

@@ -27,6 +27,11 @@ struct GeoRuleRow {
     scope: String,
     #[serde(default = "default_enabled")]
     enabled: bool,
+    /// Allow rows only: block the host when the request has no determinable
+    /// country. Any enabled allow row with `true` makes the host's unioned
+    /// `AllowOnly` rule fail-closed (most-restrictive wins).
+    #[serde(default)]
+    fail_closed: bool,
 }
 
 fn default_action() -> String {
@@ -56,8 +61,8 @@ pub fn parse_geo_rules(path: &Path) -> anyhow::Result<HashMap<String, Vec<GeoRul
     let file: GeoRulesFile =
         serde_yaml::from_str(&raw).with_context(|| format!("geo rules: parse {}", path.display()))?;
 
-    // Per host: (block iso set, allow iso set)
-    let mut hosts: HashMap<String, (HashSet<String>, HashSet<String>)> = HashMap::new();
+    // Per host: (block iso set, allow iso set, allow fail-closed accumulator)
+    let mut hosts: HashMap<String, (HashSet<String>, HashSet<String>, bool)> = HashMap::new();
     for row in file.rules {
         if !row.enabled {
             continue;
@@ -71,13 +76,16 @@ pub fn parse_geo_rules(path: &Path) -> anyhow::Result<HashMap<String, Vec<GeoRul
         let entry = hosts.entry(host).or_default();
         if row.action == "allow" {
             entry.1.insert(iso);
+            // Most-restrictive wins: any allow row asking for fail-closed
+            // makes the host's whole allowlist fail-closed.
+            entry.2 |= row.fail_closed;
         } else {
             entry.0.insert(iso);
         }
     }
 
     let mut out = HashMap::new();
-    for (host, (block, allow)) in hosts {
+    for (host, (block, allow, fail_closed)) in hosts {
         let mut rules = Vec::new();
         if !block.is_empty() {
             rules.push(GeoRule {
@@ -86,6 +94,7 @@ pub fn parse_geo_rules(path: &Path) -> anyhow::Result<HashMap<String, Vec<GeoRul
                 mode: GeoRuleMode::Block,
                 iso_codes: block,
                 countries: HashSet::new(),
+                fail_closed: false,
             });
         }
         if !allow.is_empty() {
@@ -95,6 +104,7 @@ pub fn parse_geo_rules(path: &Path) -> anyhow::Result<HashMap<String, Vec<GeoRul
                 mode: GeoRuleMode::AllowOnly,
                 iso_codes: allow,
                 countries: HashSet::new(),
+                fail_closed,
             });
         }
         if !rules.is_empty() {
@@ -203,6 +213,55 @@ rules:
         assert_eq!(rules.len(), 1, "allow rows must union into ONE AllowOnly rule");
         assert_eq!(rules[0].mode, GeoRuleMode::AllowOnly);
         assert_eq!(rules[0].iso_codes.len(), 2);
+    }
+
+    #[test]
+    fn any_fail_closed_allow_row_makes_host_allowlist_fail_closed() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = write_rules(
+            &dir,
+            r#"
+rules:
+  - { id: 1, iso_code: "US", action: "allow", scope: "global", enabled: true }
+  - { id: 2, iso_code: "CA", action: "allow", scope: "global", enabled: true, fail_closed: true }
+"#,
+        );
+        let map = parse_geo_rules(&path).expect("parse");
+        let rules = map.get("*").expect("global host");
+        assert_eq!(rules.len(), 1);
+        assert!(rules[0].fail_closed, "one fail-closed row flips the unioned rule");
+    }
+
+    #[test]
+    fn absent_fail_closed_defaults_to_fail_open() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = write_rules(
+            &dir,
+            r#"
+rules:
+  - { id: 1, iso_code: "US", action: "allow", scope: "global", enabled: true }
+  - { id: 2, iso_code: "CA", action: "allow", scope: "global", enabled: true, fail_closed: false }
+"#,
+        );
+        let map = parse_geo_rules(&path).expect("parse");
+        let rules = map.get("*").expect("global host");
+        assert!(!rules[0].fail_closed);
+    }
+
+    #[test]
+    fn fail_closed_on_block_row_does_not_affect_block_rule() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = write_rules(
+            &dir,
+            r#"
+rules:
+  - { id: 1, iso_code: "KP", action: "block", scope: "global", enabled: true, fail_closed: true }
+"#,
+        );
+        let map = parse_geo_rules(&path).expect("parse");
+        let rules = map.get("*").expect("global host");
+        assert_eq!(rules[0].mode, GeoRuleMode::Block);
+        assert!(!rules[0].fail_closed);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! FR-005 Phase 6 — Degrade & Circuit Breaker.
+//! Degrade & Circuit Breaker.
 //!
 //! `resolve` maps (`Tier`, `FailMode`, `ErrorKind`) → `DegradeAction` per the fail-mode
 //! matrix. `OverloadGuard` monitors runtime load via an in-flight call counter
@@ -39,7 +39,7 @@ pub enum DegradeAction {
 
 /// Resolve the degradation action based on tier, `fail_mode`, and error kind.
 ///
-/// ## Matrix (FR-036/037/038)
+/// ## Fail-mode matrix
 ///
 /// | Tier       | `StoreUnavailable` | `BackendOverload` | `ConfigStale` |
 /// |------------|------------------|-----------------|-------------|

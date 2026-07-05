@@ -1,4 +1,4 @@
-//! FR-006/FR-025 Phase 8: Challenge Credit Token System.
+//! Challenge Credit Token System.
 //!
 //! Issues HMAC-signed credit tokens on successful challenge completion (e.g., JS-PoW).
 //! Tokens are single-use and bound to the actor identity to prevent replay and sharing.
@@ -63,7 +63,7 @@ impl std::fmt::Display for InvalidReason {
 
 /// Issues challenge credit tokens.
 ///
-/// Called by the challenge page (FR-006) on successful `PoW` completion.
+/// Called by the challenge page on successful `PoW` completion.
 pub struct ChallengeIssuer {
     secret: Arc<HmacSecret>,
     ttl_secs: u32,
