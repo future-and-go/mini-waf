@@ -296,6 +296,32 @@ redis.call('SET', state_key, state_out, 'EX', ttl_sec)
 return owner_id
 ";
 
+/// Clear script: delete the state of every owner reachable from the provided
+/// index keys, then delete the index keys themselves (admin clear).
+///
+/// Index keys for axes NOT present in the `RiskKey` may keep pointing at the
+/// deleted owner; they resolve to a fresh score-0 state on the next apply
+/// (never the cleared score) and expire via TTL.
+///
+/// KEYS[1..N]: index keys (ip, fp, session) — only populated axes
+/// ARGV[1]: `key_prefix`
+///
+/// Returns: total number of keys deleted (state + index)
+pub const CLEAR_SCRIPT: &str = r"
+local key_prefix = ARGV[1]
+local deleted = 0
+local seen = {}
+for i, key in ipairs(KEYS) do
+    local owner = redis.call('GET', key)
+    if owner and not seen[owner] then
+        seen[owner] = true
+        deleted = deleted + redis.call('DEL', key_prefix .. 'state:' .. owner)
+    end
+    deleted = deleted + redis.call('DEL', key)
+end
+return deleted
+";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,5 +331,6 @@ mod tests {
         // Basic syntax check - these would fail to compile if invalid
         assert!(!APPLY_SCRIPT.is_empty());
         assert!(!FORCE_MAX_SCRIPT.is_empty());
+        assert!(!CLEAR_SCRIPT.is_empty());
     }
 }

@@ -50,6 +50,8 @@ pub enum ContributorKind {
     Decay,
     /// FR-006 challenge credit verification result.
     ChallengeCredit(CreditOutcome),
+    /// Admin API credit — operator-issued score reduction.
+    AdminCredit,
 }
 
 /// A single risk contribution event.

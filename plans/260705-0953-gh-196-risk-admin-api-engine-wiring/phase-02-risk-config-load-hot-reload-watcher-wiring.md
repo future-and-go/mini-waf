@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Risk config load + hot-reload watcher wiring"
-status: pending
+status: completed
 priority: P1
 dependencies: [1]
 ---

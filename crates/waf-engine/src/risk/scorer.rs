@@ -43,7 +43,7 @@ pub struct ScorerResult {
 /// Phase 5 adds L2 detectors: anomaly layer and velocity layer.
 /// Phase 6 adds canary honeypot layer (FR-028).
 /// Phase 8 adds challenge credit verifier (FR-006).
-pub struct Scorer<S: RiskStore> {
+pub struct Scorer<S: RiskStore + ?Sized> {
     store: Arc<S>,
     cfg: Arc<ArcSwap<RiskConfig>>,
     seed: Option<Arc<SeedLayer>>,
@@ -57,7 +57,7 @@ pub struct Scorer<S: RiskStore> {
     velocity: VelocityLayer,
 }
 
-impl<S: RiskStore> Scorer<S> {
+impl<S: RiskStore + ?Sized> Scorer<S> {
     /// Create a new scorer with the given store and config.
     #[must_use]
     pub fn new(store: Arc<S>, cfg: Arc<ArcSwap<RiskConfig>>) -> Self {
@@ -121,8 +121,7 @@ impl<S: RiskStore> Scorer<S> {
         self.cfg.load_full()
     }
 
-    /// Test-only access to the underlying risk store.
-    #[cfg(test)]
+    /// Access to the underlying risk store (admin actor clear/credit).
     pub(crate) const fn store(&self) -> &Arc<S> {
         &self.store
     }

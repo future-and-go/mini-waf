@@ -22,6 +22,8 @@ pub async fn run_all<S: RiskStore>(store: &S) {
     test_apply_divergent_score_convergence(store).await;
     test_apply_converges_axes(store).await;
     test_decay_contributor_roundtrip(store).await;
+    test_clear_removes_all_axes(store).await;
+    test_admin_credit_reduces_score(store).await;
     test_reset_all(store).await;
     test_purge_expired(store).await;
 }
@@ -226,6 +228,68 @@ pub async fn test_decay_contributor_roundtrip<S: RiskStore>(store: &S) {
             .iter()
             .any(|c| matches!(c.kind, ContributorKind::Decay)),
         "Decay contributor must survive the round-trip"
+    );
+}
+
+/// Admin clear must remove the state so no axis resurrects the old score.
+pub async fn test_clear_removes_all_axes<S: RiskStore>(store: &S) {
+    store.reset_all().await.unwrap();
+
+    let ip = IpAddr::V4(Ipv4Addr::new(10, 9, 9, 9));
+    let key_all = RiskKey {
+        ip: Some(ip),
+        fp_hash: Some(555_555),
+        session: Some(SessionId::new(vec![1, 2, 3, 4])),
+    };
+    store
+        .apply(&key_all, &[make_contributor(60, 1000)], 1000)
+        .await
+        .unwrap();
+
+    // Clearing an absent actor reports nothing removed.
+    let other = RiskKey::from_ip(IpAddr::V4(Ipv4Addr::new(10, 9, 9, 10)));
+    assert!(!store.clear(&other).await.unwrap(), "clear of unknown actor → false");
+
+    // Clear via the IP axis only — fp/session axes must not resurrect it.
+    let key_ip = RiskKey::from_ip(ip);
+    assert!(store.clear(&key_ip).await.unwrap(), "clear of known actor → true");
+
+    assert!(
+        store.read(&key_ip).await.unwrap().is_none(),
+        "IP axis must be gone after clear"
+    );
+    let after = store.apply(&key_all, &[], 2000).await.unwrap();
+    assert_eq!(
+        after.state.clamped_score, 0,
+        "re-apply after clear must start from score 0, not the cleared score"
+    );
+}
+
+/// Admin credit: a negative `AdminCredit` contributor reduces the score,
+/// clamps at 0, and round-trips through the backend's serde.
+pub async fn test_admin_credit_reduces_score<S: RiskStore>(store: &S) {
+    store.reset_all().await.unwrap();
+
+    let key = RiskKey::from_ip(IpAddr::V4(Ipv4Addr::new(10, 10, 10, 10)));
+    store.apply(&key, &[make_contributor(60, 1000)], 1000).await.unwrap();
+
+    let credit = Contributor::new(ContributorKind::AdminCredit, -25, 2000);
+    let result = store.apply(&key, &[credit], 2000).await.unwrap();
+    assert_eq!(result.state.clamped_score, 35, "credit must subtract from the score");
+
+    // Over-credit clamps at 0 instead of going negative.
+    let big_credit = Contributor::new(ContributorKind::AdminCredit, -100, 3000);
+    let result = store.apply(&key, &[big_credit], 3000).await.unwrap();
+    assert_eq!(result.state.clamped_score, 0, "over-credit must clamp at 0");
+
+    // The persisted AdminCredit contributor must parse on read.
+    let state = store.read(&key).await.unwrap().expect("state must survive credit");
+    assert!(
+        state
+            .contributors
+            .iter()
+            .any(|c| matches!(c.kind, ContributorKind::AdminCredit)),
+        "AdminCredit contributor must survive the round-trip"
     );
 }
 

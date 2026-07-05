@@ -28,7 +28,7 @@ use redis::{Script, aio::ConnectionManager};
 use tokio::time::timeout;
 use tracing::{debug, warn};
 
-use super::redis_lua::{APPLY_SCRIPT, FORCE_MAX_SCRIPT};
+use super::redis_lua::{APPLY_SCRIPT, CLEAR_SCRIPT, FORCE_MAX_SCRIPT};
 use crate::risk::decay::{DECAY_RATE, MAX_DECAY, MIN_CLEAN_STREAK};
 use crate::risk::key::RiskKey;
 use crate::risk::state::{Contributor, RiskState};
@@ -79,6 +79,7 @@ pub struct RedisRiskStore {
     cache: Mutex<lru::LruCache<String, CacheEntry>>,
     apply_script: Script,
     force_max_script: Script,
+    clear_script: Script,
 }
 
 impl std::fmt::Debug for RedisRiskStore {
@@ -113,6 +114,7 @@ impl RedisRiskStore {
             consecutive_fails: AtomicU32::new(0),
             apply_script: Script::new(APPLY_SCRIPT),
             force_max_script: Script::new(FORCE_MAX_SCRIPT),
+            clear_script: Script::new(CLEAR_SCRIPT),
             cfg,
         })
     }
@@ -426,6 +428,40 @@ impl RiskStore for RedisRiskStore {
             Err(_) => {
                 self.record_fail();
                 Err(anyhow!("risk redis: force_max timeout"))
+            }
+        }
+    }
+
+    async fn clear(&self, key: &RiskKey) -> anyhow::Result<bool> {
+        if key.is_empty() {
+            return Ok(false);
+        }
+
+        let mut conn = self.conn.clone();
+        let mut invocation = self.clear_script.prepare_invoke();
+        for k in self.index_keys(key) {
+            invocation.key(k);
+        }
+        invocation.arg(&self.cfg.key_prefix);
+
+        let res = timeout(self.cfg.op_timeout, invocation.invoke_async::<i64>(&mut conn)).await;
+
+        match res {
+            Ok(Ok(deleted)) => {
+                self.record_ok();
+                // Drop the whole fallback cache: entries keyed by other axis
+                // combinations may still hold the cleared score and would
+                // resurrect it on fail-open. Admin clears are rare.
+                self.cache.lock().clear();
+                Ok(deleted > 0)
+            }
+            Ok(Err(e)) => {
+                self.record_fail();
+                Err(anyhow!(e).context("risk redis: clear"))
+            }
+            Err(_) => {
+                self.record_fail();
+                Err(anyhow!("risk redis: clear timeout"))
             }
         }
     }

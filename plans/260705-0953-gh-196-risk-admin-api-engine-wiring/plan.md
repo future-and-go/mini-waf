@@ -1,7 +1,7 @@
 ---
 title: "GH-196 risk admin API: wire config, store backend, and actor ops to the engine"
 description: "Make the risk admin API real: configs/risk.yaml loaded at startup + hot-reload, store built from StoreConfig (memory purge loop / redis), PUT round-trips full RiskConfig via serde, actor clear/credit mutate the store"
-status: pending
+status: completed
 priority: P1
 branch: "main-harness"
 tags: [bug, area:api, risk, gh-196]
@@ -50,11 +50,11 @@ fail-soft on missing/bad file.
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Scorer over dyn RiskStore + store from StoreConfig](./phase-01-scorer-over-dyn-riskstore-store-from-storeconfig.md) | Pending |
-| 2 | [Risk config load + hot-reload watcher wiring](./phase-02-risk-config-load-hot-reload-watcher-wiring.md) | Pending |
-| 3 | [Risk config PUT/GET serde round-trip](./phase-03-risk-config-put-get-serde-round-trip.md) | Pending |
-| 4 | [Actor clear/credit wired to the store](./phase-04-actor-clear-credit-wired-to-the-store.md) | Pending |
-| 5 | [Acceptance tests + quality gates](./phase-05-acceptance-tests-quality-gates.md) | Pending |
+| 1 | [Scorer over dyn RiskStore + store from StoreConfig](./phase-01-scorer-over-dyn-riskstore-store-from-storeconfig.md) | Completed |
+| 2 | [Risk config load + hot-reload watcher wiring](./phase-02-risk-config-load-hot-reload-watcher-wiring.md) | Completed |
+| 3 | [Risk config PUT/GET serde round-trip](./phase-03-risk-config-put-get-serde-round-trip.md) | Completed |
+| 4 | [Actor clear/credit wired to the store](./phase-04-actor-clear-credit-wired-to-the-store.md) | Completed |
+| 5 | [Acceptance tests + quality gates](./phase-05-acceptance-tests-quality-gates.md) | Completed |
 
 ## Key Decisions
 
@@ -93,10 +93,10 @@ fail-soft on missing/bad file.
 
 ## Acceptance Criteria (from issue)
 
-- [ ] Startup (or hot-reload watcher) loads `configs/risk.yaml` into the engine; PUT takes effect without restart.
-- [ ] Store constructed from `StoreConfig` (memory vs redis) and purge loop started for memory backend.
-- [ ] clear/credit endpoints mutate the store or return 501 — no false success.
-- [ ] PUT round-trips all `RiskConfig` fields (test: load → PUT → reload → same config).
+- [x] Startup (or hot-reload watcher) loads `configs/risk.yaml` into the engine; PUT takes effect without restart.
+- [x] Store constructed from `StoreConfig` (memory vs redis) and purge loop started for memory backend.
+- [x] clear/credit endpoints mutate the store or return 501 — no false success.
+- [x] PUT round-trips all `RiskConfig` fields (test: load → PUT → reload → same config).
 
 ## Validation
 

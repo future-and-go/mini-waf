@@ -51,6 +51,13 @@ pub trait RiskStore: Send + Sync {
     /// the score at 100 regardless of decay.
     async fn force_max(&self, key: &RiskKey, until_ms: i64, now_ms: i64) -> anyhow::Result<()>;
 
+    /// Remove the actor's state reachable from `key` (admin clear).
+    ///
+    /// Deletes the state and every index entry pointing at it, so no axis
+    /// can resurrect the cleared score. Returns `true` if anything was
+    /// removed. An empty key is a no-op returning `false`.
+    async fn clear(&self, key: &RiskKey) -> anyhow::Result<bool>;
+
     /// Purge entries that have been idle longer than `ttl_ms`.
     ///
     /// Returns the number of entries purged.
@@ -157,6 +164,10 @@ mod tests {
             Ok(())
         }
 
+        async fn clear(&self, _key: &RiskKey) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+
         async fn purge_expired(&self, _ttl_ms: i64, _now_ms: i64) -> anyhow::Result<usize> {
             Ok(0)
         }
@@ -189,6 +200,7 @@ mod tests {
         let r = s.apply(&key, &[], 100).await.unwrap();
         assert!(r.is_new);
         s.force_max(&key, 1000, 0).await.unwrap();
+        assert!(!s.clear(&key).await.unwrap());
         assert_eq!(s.purge_expired(0, 0).await.unwrap(), 0);
         assert_eq!(s.len().await, 0);
         assert!(s.is_empty().await);

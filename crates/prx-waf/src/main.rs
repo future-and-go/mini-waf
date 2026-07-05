@@ -1633,6 +1633,17 @@ async fn init_async(
         .join("configs/tx-velocity.yaml");
     engine.start_tx_velocity_watcher(&tx_velocity_path);
 
+    // FR-025 risk-scoring subsystem: load `configs/risk.yaml`, build the
+    // configured store (memory with purge loop, or redis), and start the
+    // hot-reload watcher. The path mirrors `risk_api::resolve_path` (the
+    // admin API writes the same file), so PUT /api/risk/config hot-reloads.
+    let risk_path = std::path::Path::new(config_file_path)
+        .parent()
+        .and_then(std::path::Path::parent)
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("configs/risk.yaml");
+    engine.start_risk_watcher(&risk_path).await;
+
     // FR-007/FR-042 (D3): load threat-intel feed metadata from configs/relay.yaml
     // so GET /api/threat-intel/feeds reports real per-feed name/source/count/
     // last-refresh. Fail-soft: missing/disabled feeds yield an empty/zero list.

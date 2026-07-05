@@ -191,6 +191,40 @@ impl RiskStore for MemoryRiskStore {
         Ok(())
     }
 
+    async fn clear(&self, key: &RiskKey) -> anyhow::Result<bool> {
+        if key.is_empty() {
+            return Ok(false);
+        }
+
+        let mut candidates: Vec<StateRef> = Vec::with_capacity(3);
+        if let Some(ip) = key.ip
+            && let Some((_, s)) = self.by_ip.remove(&ip)
+        {
+            candidates.push(s);
+        }
+        if let Some(fp) = key.fp_hash
+            && let Some((_, s)) = self.by_fp.remove(&fp)
+        {
+            candidates.push(s);
+        }
+        if let Some(ref sess) = key.session
+            && let Some((_, s)) = self.by_session.remove(sess.as_bytes())
+        {
+            candidates.push(s);
+        }
+        if candidates.is_empty() {
+            return Ok(false);
+        }
+
+        // Remove every index entry that shares an Arc with a removed state,
+        // so axes not present in `key` cannot resurrect the cleared score.
+        let is_candidate = |s: &StateRef| candidates.iter().any(|c| Arc::ptr_eq(c, s));
+        self.by_ip.retain(|_, s| !is_candidate(s));
+        self.by_fp.retain(|_, s| !is_candidate(s));
+        self.by_session.retain(|_, s| !is_candidate(s));
+        Ok(true)
+    }
+
     async fn purge_expired(&self, ttl_ms: i64, now_ms: i64) -> anyhow::Result<usize> {
         const MAX_PER_TICK: usize = 1000;
         let mut purged = 0;
