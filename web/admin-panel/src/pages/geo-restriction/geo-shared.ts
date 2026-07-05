@@ -1,10 +1,15 @@
 import type { TopEntry } from "../../types/api";
 
+// The engine's geo loader implements exactly two actions: "allow" and
+// "block" (waf-engine parse_geo_rules). The API rejects anything else with
+// 400, so the UI must not offer unsupported values like challenge/log.
+export type GeoAction = "block" | "allow";
+
 export interface GeoRule {
   id: number;
   iso_code: string;
   country_name?: string;
-  action: "block" | "challenge" | "log" | "allow";
+  action: GeoAction;
   scope: "global" | string;
   enabled: boolean;
   created_at?: string;
@@ -24,7 +29,7 @@ export interface GeoStat {
 
 export interface AddForm {
   iso_code: string;
-  action: "block" | "challenge" | "log" | "allow";
+  action: GeoAction;
   scope: string;
 }
 
@@ -83,7 +88,5 @@ export const countryLabel = (iso: string, name?: string) => {
 
 export const ACTION_OPTIONS = [
   { value: "block", label: "block" },
-  { value: "challenge", label: "challenge" },
-  { value: "log", label: "log" },
   { value: "allow", label: "allow" },
 ];

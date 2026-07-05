@@ -186,3 +186,58 @@ async fn fail_closed_round_trips_through_create_and_patch() {
     let rules = map.get("*").expect("global host rules");
     assert!(!rules[0].fail_closed);
 }
+
+/// Actions the engine has no geo implementation for ("challenge", "log")
+/// must be rejected with 400 by create and patch — never persisted and
+/// echoed back as honored while `parse_geo_rules` coerces them to Block.
+#[tokio::test(flavor = "multi_thread")]
+async fn unsupported_action_is_rejected_not_silently_coerced_to_block() {
+    let dir = tempfile::tempdir().expect("tmpdir");
+    let main_cfg = dir.path().join("config/waf.yaml");
+    let s = start_test_server_with_main_config(main_cfg.to_str().unwrap()).await;
+
+    for bad in ["challenge", "log"] {
+        let resp = client()
+            .post(url_for(s.addr, "/api/geoip/rules"))
+            .bearer_auth(&s.admin_token)
+            .json(&json!({ "iso_code": "US", "action": bad }))
+            .send()
+            .await
+            .expect("create send");
+        assert_eq!(resp.status(), 400, "create with action {bad:?} must be rejected");
+    }
+
+    // Nothing was persisted by the rejected creates.
+    let rules_file = dir.path().join("configs/geo-rules.yaml");
+    assert!(
+        parse_geo_rules(&rules_file).map_or(true, |m| m.is_empty()),
+        "rejected creates must not write rules"
+    );
+
+    // A valid rule can be created, but cannot be patched to an unsupported action.
+    let created: serde_json::Value = client()
+        .post(url_for(s.addr, "/api/geoip/rules"))
+        .bearer_auth(&s.admin_token)
+        .json(&json!({ "iso_code": "US", "action": "allow" }))
+        .send()
+        .await
+        .expect("create send")
+        .json()
+        .await
+        .expect("create json");
+    let id = created["data"]["id"].as_i64().expect("rule id");
+
+    let resp = client()
+        .patch(url_for(s.addr, &format!("/api/geoip/rules/{id}")))
+        .bearer_auth(&s.admin_token)
+        .json(&json!({ "action": "challenge" }))
+        .send()
+        .await
+        .expect("patch send");
+    assert_eq!(resp.status(), 400, "patch to an unsupported action must be rejected");
+
+    // The stored rule still parses as the allow rule the engine enforces.
+    let map = parse_geo_rules(&rules_file).expect("engine loader parses API file");
+    let rules = map.get("*").expect("global host rules");
+    assert_eq!(rules[0].mode, GeoRuleMode::AllowOnly);
+}

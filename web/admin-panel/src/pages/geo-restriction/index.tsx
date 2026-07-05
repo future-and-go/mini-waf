@@ -13,7 +13,7 @@ export const GeoRestrictionPage: React.FC = () => {
           {t("geo.title", { defaultValue: "Geo Restriction (FR-041)" })}
         </Typography.Title>
         <Typography.Text type="secondary">
-          {t("geo.subtitle", { defaultValue: "Block or challenge requests by country via GeoIP" })}
+          {t("geo.subtitle", { defaultValue: "Block or allow requests by country via GeoIP" })}
         </Typography.Text>
       </div>
 
