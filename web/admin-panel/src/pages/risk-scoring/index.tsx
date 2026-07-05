@@ -677,13 +677,15 @@ export const RiskScoringPage: React.FC = () => {
         <Space direction="vertical" style={{ width: "100%" }}>
           <Typography.Text type="secondary">{t("risk.creditHint")}</Typography.Text>
           <Space>
-            {([-50, -25, -10] as const).map((amt) => (
+            {/* Positive magnitudes: the API accepts 1..=100 and the engine
+                subtracts the amount from the score (credit always lowers). */}
+            {([50, 25, 10] as const).map((amt) => (
               <Button
                 key={amt}
                 onClick={() => onCredit(amt)}
                 loading={creditMutation.isPending}
               >
-                {amt}
+                −{amt}
               </Button>
             ))}
           </Space>

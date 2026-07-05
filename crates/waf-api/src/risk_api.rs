@@ -115,18 +115,26 @@ pub struct CreditBody {
 
 const DEFAULT_CREDIT_AMOUNT: i16 = 25;
 
+/// Contract gate shared with the admin UI credit modal: credit is a positive
+/// magnitude (1..=100) that the engine subtracts from the score — "add
+/// credit" can never raise it, so negative and zero amounts are rejected.
+fn validate_credit_amount(amount: i16) -> Result<i16, ApiError> {
+    if (1..=100).contains(&amount) {
+        Ok(amount)
+    } else {
+        Err(ApiError::BadRequest(format!(
+            "amount must be between 1 and 100, got {amount}"
+        )))
+    }
+}
+
 pub async fn credit_risk_actor(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<CreditBody>,
 ) -> ApiResult<Json<Value>> {
     let ip = parse_actor_ip(&id)?;
-    let amount = body.amount.unwrap_or(DEFAULT_CREDIT_AMOUNT);
-    if !(1..=100).contains(&amount) {
-        return Err(ApiError::BadRequest(format!(
-            "amount must be between 1 and 100, got {amount}"
-        )));
-    }
+    let amount = validate_credit_amount(body.amount.unwrap_or(DEFAULT_CREDIT_AMOUNT))?;
     let score = state.engine.risk_credit_actor(ip, amount).await?;
     Ok(Json(json!({ "success": true, "data": { "id": id, "score": score } })))
 }
@@ -143,6 +151,19 @@ pub async fn clear_risk_actor(State(state): State<Arc<AppState>>, Path(id): Path
 #[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    /// The credit modal sends positive magnitudes; every UI button value and
+    /// the API default must pass the gate, while the pre-fix negative UI
+    /// values, zero, and out-of-range magnitudes are rejected.
+    #[test]
+    fn credit_amount_gate_matches_ui_contract() {
+        for ui_amount in [50, 25, 10, DEFAULT_CREDIT_AMOUNT] {
+            assert!(validate_credit_amount(ui_amount).is_ok(), "UI amount {ui_amount} must pass");
+        }
+        for bad in [-50, -25, -10, 0, 101] {
+            assert!(validate_credit_amount(bad).is_err(), "amount {bad} must be rejected");
+        }
+    }
 
     /// Non-default fields in every section must survive
     /// YAML → deep-merge → `RiskConfig` → YAML, including sections the admin
