@@ -221,12 +221,7 @@ export const RulesTab: React.FC = () => {
           allowClear
           value={actionFilter}
           onChange={setActionFilter}
-          options={[
-            { value: "block", label: "block" },
-            { value: "challenge", label: "challenge" },
-            { value: "log", label: "log" },
-            { value: "allow", label: "allow" },
-          ]}
+          options={ACTION_OPTIONS}
         />
         <Button type="primary" icon={<PlusOutlined />} onClick={() => { addForm.resetFields(); setDrawerOpen(true); }}>
           {t("geo.addCountry", { defaultValue: "Add country" })}
