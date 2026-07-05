@@ -1,4 +1,4 @@
-//! FR-025 Phase 2: Hot-reload watcher for seed data files.
+//! Hot-reload watcher for seed data files.
 //!
 //! Watches tor-exits.txt, asn-classes.csv, and risk-whitelist.txt for changes.
 //! On any change, reloads all files and swaps `SeedTables` atomically.

@@ -1,13 +1,11 @@
-//! FR-025 risk store trait.
+//! Risk store trait.
 //!
 //! Defines the async interface for risk state persistence. Implementations
 //! must be `Send + Sync` for use in the async pipeline.
 
-use std::net::IpAddr;
-
 use async_trait::async_trait;
 
-use crate::risk::key::{RiskKey, SessionId};
+use crate::risk::key::RiskKey;
 use crate::risk::state::{Contributor, RiskState};
 
 /// Result of an `apply` operation — the post-update state.
@@ -52,7 +50,7 @@ pub trait RiskStore: Send + Sync {
 
     /// Force the state to max score (100) until `until_ms`.
     ///
-    /// Used for honeypot traps (FR-028). Sets `pinned_until_ms` and floors
+    /// Used for honeypot traps. Sets `pinned_until_ms` and floors
     /// the score at 100 regardless of decay.
     async fn force_max(&self, key: &RiskKey, until_ms: i64, now_ms: i64) -> anyhow::Result<()>;
 
@@ -84,55 +82,12 @@ pub trait RiskStore: Send + Sync {
     }
 }
 
-/// Builder for `RiskKey` from request context.
-pub struct RiskKeyBuilder {
-    key: RiskKey,
-}
-
-impl RiskKeyBuilder {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            key: RiskKey::default(),
-        }
-    }
-
-    #[must_use]
-    pub const fn with_ip(mut self, ip: IpAddr) -> Self {
-        self.key.ip = Some(ip);
-        self
-    }
-
-    #[must_use]
-    pub const fn with_fp_hash(mut self, hash: u64) -> Self {
-        self.key.fp_hash = Some(hash);
-        self
-    }
-
-    #[must_use]
-    pub fn with_session(mut self, session: SessionId) -> Self {
-        self.key.session = Some(session);
-        self
-    }
-
-    #[must_use]
-    pub fn build(self) -> RiskKey {
-        self.key
-    }
-}
-
-impl Default for RiskKeyBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::redundant_clone, clippy::uninlined_format_args)]
 mod tests {
     use super::*;
     use crate::risk::state::RiskState;
-    use std::net::Ipv4Addr;
+    use std::net::{IpAddr, Ipv4Addr};
 
     /// Minimal `RiskStore` impl that only implements required methods —
     /// drives default `is_empty` impl through the trait.
@@ -210,26 +165,6 @@ mod tests {
         assert_eq!(s.purge_expired(0, 0).await.unwrap(), 0);
         assert_eq!(s.len().await, 0);
         assert!(s.is_empty().await);
-    }
-
-    #[test]
-    fn key_builder_with_each_axis() {
-        use crate::risk::key::SessionId;
-        let key = RiskKeyBuilder::new()
-            .with_ip(IpAddr::V4(Ipv4Addr::LOCALHOST))
-            .with_fp_hash(0xDEAD_BEEF)
-            .with_session(SessionId::new(b"abc".to_vec()))
-            .build();
-        assert_eq!(key.axis_count(), 3);
-        assert!(key.ip.is_some());
-        assert!(key.fp_hash.is_some());
-        assert!(key.session.is_some());
-    }
-
-    #[test]
-    fn key_builder_default_is_empty() {
-        let key = RiskKeyBuilder::default().build();
-        assert!(key.is_empty());
     }
 
     #[test]

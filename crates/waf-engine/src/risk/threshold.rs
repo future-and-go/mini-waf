@@ -1,4 +1,4 @@
-//! FR-025 pure threshold gate.
+//! Pure threshold gate.
 //!
 //! Maps a clamped risk score (0..=100) to a `WafAction` based on configured
 //! thresholds. Uses the tier's `RiskThresholds` (allow, challenge, block).

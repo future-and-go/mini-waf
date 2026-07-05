@@ -1,4 +1,4 @@
-//! FR-025 Phase 2: Whitelist CIDR loader.
+//! Whitelist CIDR loader.
 //!
 //! Loads whitelist CIDRs from a newline-delimited file. Malformed lines are
 //! logged and skipped — never panics.

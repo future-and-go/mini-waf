@@ -1,4 +1,4 @@
-//! FR-025 Phase 4 — Async ingest pipeline.
+//! Async ingest pipeline.
 //!
 //! Replaces `NoopAggregator` with `ScoringAggregator` — bounded MPSC channel +
 //! worker that translates `Signal` → `Contributor`, builds `RiskKey` from

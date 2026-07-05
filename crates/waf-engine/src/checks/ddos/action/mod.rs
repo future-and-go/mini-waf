@@ -1,6 +1,6 @@
-//! FR-005 phase-05 — `DDoS` action executors (Command pattern).
+//! `DDoS` action executors (Command pattern).
 //!
-//! Decouples detection (phases 2-4) from side-effects (bans, risk bumps).
+//! Decouples detection from side-effects (bans, risk bumps).
 //! Each action implements [`ActionExecutor`] and produces an [`ActionResult`].
 
 use std::net::IpAddr;

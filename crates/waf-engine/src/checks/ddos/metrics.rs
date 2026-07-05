@@ -1,4 +1,4 @@
-//! FR-005 Phase 7 — `DDoS` observability metrics.
+//! `DDoS` observability metrics.
 //!
 //! Provides atomic counters for `DDoS` detection events. Uses `AtomicU64` for
 //! lock-free updates on the hot path. Counters are exposed via accessor methods
