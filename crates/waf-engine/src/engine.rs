@@ -44,9 +44,11 @@ use crate::rules::custom_file_loader::CustomRuleFileWatcher;
 use crate::rules::engine::{CustomRulesEngine, from_db_rule};
 
 use crate::risk::canary::{CanaryLayer, DEFAULT_CANARY_BAN_TTL_SECS};
+use crate::risk::challenge_credit::{ChallengeBuilder, ChallengeVerifier};
 use crate::risk::config::RiskConfig;
 use crate::risk::reload::{DEFAULT_DEBOUNCE_MS as RISK_DEBOUNCE_MS, RiskReloader};
 use crate::risk::scorer::{Scorer, ScorerResult};
+use crate::risk::seed::{SeedDeltas, SeedLayer};
 use crate::risk::store::{MemoryRiskStore, RiskStore};
 
 /// WAF engine configuration
@@ -173,6 +175,16 @@ pub struct WafEngine {
     /// subsequent requests. Paths and ban TTL follow `RiskConfig.canary`
     /// via [`Self::replace_risk_config`].
     risk_canary: Arc<CanaryLayer>,
+    /// L0 seed layer (Tor exits / ASN classes / whitelist) built from
+    /// `RiskConfig.seed` on initial risk-config load and re-attached on every
+    /// scorer rebuild. Table paths and deltas are start-time only; the
+    /// `seed.enabled` flag stays hot-reloadable because the scorer gates on
+    /// the live config snapshot per request.
+    risk_seed: OnceLock<Arc<SeedLayer>>,
+    /// Challenge-credit verifier built from `RiskConfig.challenge` on initial
+    /// risk-config load (when enabled) and re-attached on every scorer
+    /// rebuild. HMAC secret and nonce store are start-time only.
+    risk_challenge_verifier: OnceLock<Arc<ChallengeVerifier>>,
     // ── FR-007/FR-042 relay-intel feed metadata (D3) ─────────────────────────
     /// Threat-intel feed metadata (Tor / ASN / datacenter), loaded from
     /// `configs/relay.yaml` at startup via [`Self::load_relay_feeds`]. Empty
@@ -313,6 +325,8 @@ impl WafEngine {
             scorer,
             risk_reloader: OnceLock::new(),
             risk_canary,
+            risk_seed: OnceLock::new(),
+            risk_challenge_verifier: OnceLock::new(),
             relay_feeds: ArcSwap::from_pointee(Vec::new()),
         }
     }
@@ -375,11 +389,55 @@ impl WafEngine {
 
     /// Build a scorer over `store` sharing the engine's config snapshot and
     /// canary layer (the canary must be re-attached on every scorer rebuild
-    /// or honeypot hits stop pinning scores).
+    /// or honeypot hits stop pinning scores). The seed layer and challenge
+    /// verifier are likewise re-attached whenever they have been initialized
+    /// by [`Self::init_risk_layers`].
     fn build_scorer(&self, store: Arc<dyn RiskStore>) -> Scorer<dyn RiskStore> {
         let mut scorer = Scorer::new(store, Arc::clone(&self.risk_cfg));
         scorer.set_canary(Arc::clone(&self.risk_canary));
+        if let Some(seed) = self.risk_seed.get() {
+            scorer.set_seed(Arc::clone(seed));
+        }
+        if let Some(verifier) = self.risk_challenge_verifier.get() {
+            scorer.set_challenge_verifier(Arc::clone(verifier));
+        }
         scorer
+    }
+
+    /// Build the L0 seed layer and challenge-credit verifier from the initial
+    /// risk config so [`Self::build_scorer`] can attach them.
+    ///
+    /// The seed layer is always built: table paths pointing at missing files
+    /// load empty (fail-soft), and the per-request `seed.enabled` gate lives
+    /// in the scorer, so a hot-reload that flips the flag works without a
+    /// scorer rebuild. The challenge verifier is only built when
+    /// `challenge.enabled` because construction bootstraps the HMAC secret
+    /// file on disk; enabling it later requires a restart.
+    fn init_risk_layers(&self, cfg: &RiskConfig) {
+        let deltas = SeedDeltas {
+            tor_exit: cfg.seed.tor_delta,
+            datacenter: cfg.seed.datacenter_delta,
+            bad_asn: cfg.seed.bad_asn_delta,
+        };
+        let seed = SeedLayer::load_from_paths(
+            cfg.seed.tor_exits_path.as_deref().map(Path::new),
+            cfg.seed.asn_classes_path.as_deref().map(Path::new),
+            cfg.seed.whitelist_path.as_deref().map(Path::new),
+            deltas,
+        );
+        let _ = self.risk_seed.set(Arc::new(seed));
+
+        if cfg.challenge.enabled {
+            match ChallengeBuilder::from_config(&cfg.challenge) {
+                Ok((_issuer, verifier)) => {
+                    let _ = self.risk_challenge_verifier.set(Arc::new(verifier));
+                }
+                Err(e) => warn!(
+                    error = %e,
+                    "risk: challenge verifier init failed; challenge credit stays disabled"
+                ),
+            }
+        }
     }
 
     /// Load `configs/risk.yaml` once, build the configured store, and start
@@ -398,6 +456,7 @@ impl WafEngine {
         match RiskConfig::from_path(path) {
             Ok(cfg) => {
                 let store = Self::build_risk_store(&cfg).await;
+                self.init_risk_layers(&cfg);
                 self.scorer.store(Arc::new(self.build_scorer(store)));
                 active_backend.clone_from(&cfg.store.backend);
                 self.replace_risk_config((*cfg).clone());
