@@ -75,7 +75,7 @@ risk:
 
     # Exact-match paths (case-sensitive). Partial matches do NOT trigger.
     # Example: "/admin-test" matches only "/admin-test", not "/admin-test/foo"
-    paths:
+    paths: []
       # - "/admin-test"
       # - "/api-debug"
       # - "/.git/config"

@@ -30,9 +30,27 @@ async fn current_risk_node(path: &std::path::Path) -> Result<Value, ApiError> {
         && let Some(r) = v.get("risk")
         && !r.is_null()
     {
-        return Ok(r.clone());
+        let mut node = r.clone();
+        strip_null_entries(&mut node);
+        return Ok(node);
     }
     serde_json::to_value(RiskConfig::default()).map_err(|e| ApiError::Internal(anyhow::anyhow!("{e}")))
+}
+
+/// Drop object entries whose value is explicit `null`, recursively.
+///
+/// YAML like `paths:` with only commented-out items parses as `null`, but
+/// `#[serde(default)]` applies only to *missing* keys — an explicit null
+/// fails `serde_json::from_value` (e.g. "invalid type: null, expected a
+/// sequence"). Removing null entries lets serde defaults kick in, matching
+/// the leniency of the engine's direct `serde_yaml` parser.
+fn strip_null_entries(v: &mut Value) {
+    if let Value::Object(map) = v {
+        map.retain(|_, val| !val.is_null());
+        for val in map.values_mut() {
+            strip_null_entries(val);
+        }
+    }
 }
 
 /// Deep-merge `patch` over `base`: objects merge recursively, everything else
@@ -207,5 +225,43 @@ mod tests {
         let mut base = json!({ "canary": { "paths": ["/a", "/b"] } });
         deep_merge(&mut base, json!({ "canary": { "paths": ["/c"] } }));
         assert_eq!(base["canary"]["paths"], json!(["/c"]));
+    }
+
+    /// YAML `paths:` with only commented-out items parses as explicit null;
+    /// the API read path must fall back to serde defaults instead of 500ing.
+    #[test]
+    fn explicit_null_entries_fall_back_to_serde_defaults() {
+        let yaml = r"
+            enabled: true
+            canary:
+              enabled: false
+              paths:
+              ban_ttl_secs: 60
+        ";
+        let mut node: Value = serde_yaml::from_str(yaml).unwrap();
+        assert!(node["canary"]["paths"].is_null(), "precondition: YAML null list");
+
+        strip_null_entries(&mut node);
+        let cfg: RiskConfig = serde_json::from_value(node).expect("null list must not reject the config");
+        assert!(cfg.canary.paths.is_empty());
+        assert_eq!(cfg.canary.ban_ttl_secs, 60);
+    }
+
+    /// Shipped `configs/risk.yaml` must round-trip through the exact API
+    /// path (YAML → `serde_json::Value` → strip nulls → `RiskConfig`) —
+    /// GET and PUT both die if this regresses.
+    #[test]
+    fn shipped_risk_yaml_round_trips_through_api_path() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../configs/risk.yaml");
+        let raw = std::fs::read_to_string(path).expect("shipped configs/risk.yaml readable");
+        let v: Value = serde_yaml::from_str(&raw).expect("shipped risk.yaml parses as YAML");
+        let mut node = v.get("risk").expect("risk: root key present").clone();
+        strip_null_entries(&mut node);
+
+        let cfg: RiskConfig =
+            serde_json::from_value(node).expect("API path: shipped configs/risk.yaml must parse as RiskConfig");
+        // PUT round-trip: serialized config must reparse (what the watcher reads).
+        let out = serde_json::to_value(&cfg).unwrap();
+        let _: RiskConfig = serde_json::from_value(out).expect("serialized config reparses");
     }
 }
