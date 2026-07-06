@@ -686,4 +686,202 @@ mod tests {
         let results = mgr.load_remote_sources().await;
         assert!(results.is_empty());
     }
+
+    #[test]
+    fn load_all_reads_rules_dir_and_configured_sources() {
+        let rules_dir = tempdir().expect("tempdir");
+        write_yaml_rule(rules_dir.path(), "dir-rule.yaml", "DIR-1");
+
+        let src_dir = tempdir().expect("tempdir");
+        let file_path = write_yaml_rule(src_dir.path(), "src-rule.yaml", "SRC-1");
+        // Registered as LocalFile at new() time, then removed so load_all
+        // hits the per-source error branch instead of aborting the load.
+        let vanishing_path = write_yaml_rule(src_dir.path(), "vanishing.yaml", "GONE-1");
+
+        let cfg = RulesConfig {
+            dir: rules_dir.path().display().to_string(),
+            hot_reload: false,
+            reload_debounce_ms: 0,
+            enable_builtin_owasp: false,
+            enable_builtin_bot: false,
+            enable_builtin_scanner: false,
+            sources: vec![
+                RuleSourceEntry {
+                    name: "file-src".to_string(),
+                    path: Some(file_path.display().to_string()),
+                    url: None,
+                    format: "yaml".to_string(),
+                    update_interval: 0,
+                },
+                RuleSourceEntry {
+                    name: "vanishing-src".to_string(),
+                    path: Some(vanishing_path.display().to_string()),
+                    url: None,
+                    format: "yaml".to_string(),
+                    update_interval: 0,
+                },
+                RuleSourceEntry {
+                    name: "remote-src".to_string(),
+                    path: None,
+                    url: Some("https://rules.example.com/rules.yaml".to_string()),
+                    format: "yaml".to_string(),
+                    update_interval: 60,
+                },
+            ],
+        };
+        let mut mgr = RuleManager::new(&cfg);
+        std::fs::remove_file(&vanishing_path).expect("remove source file");
+
+        let report = mgr.load_all().expect("load_all");
+        assert!(mgr.registry.read().get("DIR-1").is_some(), "rules_dir file loaded");
+        assert!(mgr.registry.read().get("SRC-1").is_some(), "LocalFile source loaded");
+        assert!(mgr.registry.read().get("GONE-1").is_none());
+        assert_eq!(report.errors.len(), 1, "missing LocalFile source is a soft error");
+        assert!(report.errors[0].contains("vanishing-src"));
+        // RemoteUrl sources are deferred to load_remote_sources(), not an error.
+        assert!(!report.errors.iter().any(|e| e.contains("remote-src")));
+    }
+
+    #[test]
+    fn load_all_reads_local_dir_source() {
+        let src_dir = tempdir().expect("tempdir");
+        write_yaml_rule(src_dir.path(), "a.yaml", "LD-1");
+
+        let cfg = RulesConfig {
+            dir: "/nonexistent-rules-dir".to_string(),
+            hot_reload: false,
+            reload_debounce_ms: 0,
+            enable_builtin_owasp: false,
+            enable_builtin_bot: false,
+            enable_builtin_scanner: false,
+            sources: vec![RuleSourceEntry {
+                name: "dir-src".to_string(),
+                path: Some(src_dir.path().display().to_string()),
+                url: None,
+                format: "yaml".to_string(),
+                update_interval: 0,
+            }],
+        };
+        let mut mgr = RuleManager::new(&cfg);
+        let report = mgr.load_all().expect("load_all");
+        assert!(mgr.registry.read().get("LD-1").is_some());
+        assert!(report.errors.is_empty());
+    }
+
+    #[test]
+    fn load_from_dir_skips_subdirs_and_unknown_extensions_and_reports_bad_files() {
+        let dir = tempdir().expect("tempdir");
+        write_yaml_rule(dir.path(), "good.yaml", "GOOD-1");
+        std::fs::write(dir.path().join("broken.yaml"), "{{{ not yaml").expect("write broken");
+        std::fs::write(dir.path().join("notes.txt"), "not a rule file").expect("write txt");
+        std::fs::create_dir(dir.path().join("subdir")).expect("mkdir");
+
+        let mgr = RuleManager::new(&minimal_config());
+        let report = mgr.load_from_dir(dir.path()).expect("load_from_dir");
+        assert_eq!(report.rules_loaded, 1);
+        assert_eq!(report.sources_loaded, 1);
+        assert_eq!(report.errors.len(), 1);
+        assert!(report.errors[0].contains("broken.yaml"));
+    }
+
+    #[test]
+    fn load_from_dir_returns_empty_report_for_missing_dir() {
+        let mgr = RuleManager::new(&minimal_config());
+        let report = mgr.load_from_dir(Path::new("/nonexistent-rules-dir")).expect("ok");
+        assert_eq!(report.rules_loaded, 0);
+        assert_eq!(report.sources_loaded, 0);
+        assert!(report.errors.is_empty());
+    }
+
+    #[test]
+    fn custom_rule_v1_documents_convert_to_registry_rules() {
+        let content = r#"
+kind: custom_rule_v1
+id: cr-block
+name: "blocking rule"
+category: sqli
+severity: high
+pattern: "(?i)union\\s+select"
+tags: [sqli, custom]
+reference: "https://example.com/cve"
+---
+kind: custom_rule_v1
+id: cr-allow
+name: "allow rule"
+action: allow
+---
+kind: custom_rule_v1
+id: cr-log
+name: "log rule"
+action: log
+---
+kind: custom_rule_v1
+id: cr-challenge
+name: "challenge rule"
+action: challenge
+"#;
+        let rules = try_custom_rule_v1_as_registry(content).expect("parse custom_rule_v1");
+        assert_eq!(rules.len(), 4);
+
+        let actions: Vec<&str> = rules.iter().map(|r| r.action.as_str()).collect();
+        assert_eq!(actions, vec!["block", "allow", "log", "challenge"]);
+
+        let block = &rules[0];
+        assert_eq!(block.id, "cr-block");
+        assert_eq!(block.category, "sqli");
+        assert_eq!(block.severity.as_deref(), Some("high"));
+        assert_eq!(block.source, "file");
+        assert!(block.enabled);
+        assert!(block.pattern.is_some());
+        assert_eq!(block.description.as_deref(), Some("https://example.com/cve"));
+        assert_eq!(block.tags, vec!["sqli", "custom"]);
+
+        // category falls back to "custom" when the document omits it
+        assert_eq!(rules[1].category, "custom");
+    }
+
+    #[test]
+    fn custom_rule_v1_rejects_content_without_matching_documents() {
+        // Registry-format YAML has no `kind` discriminator — parsed as zero
+        // documents, which must be an error so callers fall through.
+        let err = try_custom_rule_v1_as_registry("- id: R-1\n  name: registry rule").unwrap_err();
+        assert!(err.to_string().contains("no custom_rule_v1 documents"));
+    }
+
+    #[tokio::test]
+    async fn import_from_url_rejects_loopback_targets() {
+        let mut mgr = RuleManager::new(&minimal_config());
+        let err = mgr.import_from_url("http://127.0.0.1:1/rules.yaml").await.unwrap_err();
+        assert!(err.to_string().contains("SSRF validation"), "got: {err:#}");
+
+        let err = mgr
+            .import_from_url_with_format("http://127.0.0.1:1/rules.yaml", RuleFormat::Yaml)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("SSRF validation"), "got: {err:#}");
+    }
+
+    #[tokio::test]
+    async fn load_remote_sources_reports_per_source_failures() {
+        let cfg = RulesConfig {
+            dir: "/nonexistent-rules-dir".to_string(),
+            hot_reload: false,
+            reload_debounce_ms: 0,
+            enable_builtin_owasp: false,
+            enable_builtin_bot: false,
+            enable_builtin_scanner: false,
+            sources: vec![RuleSourceEntry {
+                name: "blocked-src".to_string(),
+                path: None,
+                url: Some("http://127.0.0.1:1/rules.yaml".to_string()),
+                format: "yaml".to_string(),
+                update_interval: 60,
+            }],
+        };
+        let mut mgr = RuleManager::new(&cfg);
+        let results = mgr.load_remote_sources().await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "blocked-src");
+        assert!(results[0].1.is_err(), "loopback remote source must fail");
+    }
 }
