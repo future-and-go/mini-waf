@@ -737,7 +737,7 @@ mod tests {
         assert!(mgr.registry.read().get("SRC-1").is_some(), "LocalFile source loaded");
         assert!(mgr.registry.read().get("GONE-1").is_none());
         assert_eq!(report.errors.len(), 1, "missing LocalFile source is a soft error");
-        assert!(report.errors[0].contains("vanishing-src"));
+        assert!(report.errors.first().expect("one error").contains("vanishing-src"));
         // RemoteUrl sources are deferred to load_remote_sources(), not an error.
         assert!(!report.errors.iter().any(|e| e.contains("remote-src")));
     }
@@ -781,7 +781,7 @@ mod tests {
         assert_eq!(report.rules_loaded, 1);
         assert_eq!(report.sources_loaded, 1);
         assert_eq!(report.errors.len(), 1);
-        assert!(report.errors[0].contains("broken.yaml"));
+        assert!(report.errors.first().expect("one error").contains("broken.yaml"));
     }
 
     #[test]
@@ -826,7 +826,7 @@ action: challenge
         let actions: Vec<&str> = rules.iter().map(|r| r.action.as_str()).collect();
         assert_eq!(actions, vec!["block", "allow", "log", "challenge"]);
 
-        let block = &rules[0];
+        let block = rules.first().expect("first rule");
         assert_eq!(block.id, "cr-block");
         assert_eq!(block.category, "sqli");
         assert_eq!(block.severity.as_deref(), Some("high"));
@@ -837,7 +837,7 @@ action: challenge
         assert_eq!(block.tags, vec!["sqli", "custom"]);
 
         // category falls back to "custom" when the document omits it
-        assert_eq!(rules[1].category, "custom");
+        assert_eq!(rules.get(1).expect("second rule").category, "custom");
     }
 
     #[test]
@@ -881,7 +881,8 @@ action: challenge
         let mut mgr = RuleManager::new(&cfg);
         let results = mgr.load_remote_sources().await;
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, "blocked-src");
-        assert!(results[0].1.is_err(), "loopback remote source must fail");
+        let (name, result) = results.first().expect("one source result");
+        assert_eq!(name, "blocked-src");
+        assert!(result.is_err(), "loopback remote source must fail");
     }
 }
