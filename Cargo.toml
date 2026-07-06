@@ -30,7 +30,6 @@ tokio = { version = "1", features = ["full"] }
 # Crates.io versions kept; [patch.crates-io] at workspace root redirects to
 # vendor/pingora so its own workspace inheritance still resolves. The fork is
 # patched with ClientHello/H2 frame inspector hooks for FR-010 device fingerprinting.
-pingora = { version = "0.8", features = ["lb"] }
 pingora-core = { version = "0.8", features = ["rustls"] }
 pingora-proxy = { version = "0.8", features = ["rustls"] }
 pingora-http = { version = "0.8" }
@@ -167,7 +166,6 @@ strip = true
 
 # Redirect crates.io pingora* lookups to the vendored fork (FR-010 hook patches).
 [patch.crates-io]
-pingora = { path = "vendor/pingora/pingora" }
 pingora-core = { path = "vendor/pingora/pingora-core" }
 pingora-proxy = { path = "vendor/pingora/pingora-proxy" }
 pingora-http = { path = "vendor/pingora/pingora-http" }
