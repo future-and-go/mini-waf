@@ -96,7 +96,9 @@ export const RuleSourcesPage: React.FC = () => {
     return [...sourceGroups.entries()]
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [registryResult, sources]);
+    // depend on the stable payload, not the per-render result wrapper,
+    // so the memo only recomputes when data actually changes
+  }, [registryResult?.data, sources]);
 
   const onSyncAll = () =>
     syncAll(

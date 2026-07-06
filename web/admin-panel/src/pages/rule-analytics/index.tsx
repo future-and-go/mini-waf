@@ -282,7 +282,9 @@ export const RuleAnalyticsPage: React.FC = () => {
       .map(([path, count]) => ({ path, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 30);
-  }, [blockedEvents.result]);
+    // depend on the stable payload, not the per-render result wrapper,
+    // so the memo only recomputes when data actually changes
+  }, [blockedEvents.result?.data]);
 
   const stats = overview.result?.data;
   const traffic = timeseries.result?.data ?? [];

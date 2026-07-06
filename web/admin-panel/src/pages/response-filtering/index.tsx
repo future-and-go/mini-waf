@@ -147,7 +147,9 @@ const GlobalTab: React.FC = () => {
     if (!raw) return;
     const cfg = (raw as PanelConfig).response_filtering ?? DEFAULT_FILTER_CONFIG;
     form.setFieldsValue(cfg);
-  }, [configQuery.result]);
+    // result wrapper is rebuilt every render; depend on the stable payload
+    // so hydration doesn't clobber in-progress form edits.
+  }, [configQuery.result?.data]);
 
   const onSave = async () => {
     const vals = await form.validateFields();
@@ -330,7 +332,9 @@ const PerHostTab: React.FC = () => {
     if (!hostFilterQuery.result?.data) return;
     const data = hostFilterQuery.result.data as HostResponseFilter;
     form.setFieldsValue(data);
-  }, [hostFilterQuery.result]);
+    // result wrapper is rebuilt every render; depend on the stable payload
+    // so hydration doesn't clobber in-progress form edits.
+  }, [hostFilterQuery.result?.data]);
 
   useEffect(() => {
     if (selectedHostId == null) return;
@@ -347,7 +351,12 @@ const PerHostTab: React.FC = () => {
         values: vals,
       },
       {
-        onSuccess: () => message.success(t("responseFilter.saved", { defaultValue: "Settings saved" })),
+        onSuccess: () => {
+          message.success(t("responseFilter.saved", { defaultValue: "Settings saved" }));
+          // Refresh the cached per-host filter so remounts within staleTime
+          // hydrate from the saved values instead of the pre-save cache.
+          hostFilterQuery.query.refetch();
+        },
         onError: (err) => message.error(err.message),
       },
     );

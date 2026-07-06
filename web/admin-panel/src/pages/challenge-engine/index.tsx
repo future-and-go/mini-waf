@@ -79,7 +79,9 @@ export const ChallengeEnginePage: React.FC = () => {
     const c = configQuery.result?.data;
     if (!c) return;
     form.setFieldsValue(c);
-  }, [configQuery.result, form]);
+    // result wrapper is rebuilt every render; depend on the stable payload
+    // so hydration doesn't clobber in-progress form edits.
+  }, [configQuery.result?.data, form]);
 
   // ── API: save config ──────────────────────────────────────────────────────
 

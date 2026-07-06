@@ -102,7 +102,9 @@ export const RelayIntelPage: React.FC = () => {
       setNotAvailable(true);
       form.setFieldsValue(DEFAULT_CONFIG);
     }
-  }, [configQuery.result]);
+    // result wrapper is rebuilt every render; depend on the stable payload
+    // so hydration doesn't clobber in-progress form edits.
+  }, [configQuery.result?.data]);
 
   useEffect(() => {
     if (configQuery.query.isError) {

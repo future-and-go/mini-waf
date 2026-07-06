@@ -21,7 +21,7 @@ import type { ColumnsType } from "antd/es/table";
 import { ScanOutlined, SaveOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useCustom, useCustomMutation } from "@refinedev/core";
 import { useTranslation } from "react-i18next";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { fmtDateTime } from "../../utils/format";
 
 interface DeviceFpConfig {
@@ -91,7 +91,6 @@ export const DeviceFingerprintingPage: React.FC = () => {
   const [form] = Form.useForm<DeviceFpConfig>();
   const [saving, setSaving] = useState(false);
   const [notAvailable, setNotAvailable] = useState(false);
-  const dirtyRef = useRef(false);
   const [storeBackend, setStoreBackend] = useState<"memory" | "redis">("memory");
 
   const configQuery = useCustom<DeviceFpConfig>({
@@ -123,7 +122,9 @@ export const DeviceFingerprintingPage: React.FC = () => {
       setNotAvailable(true);
       form.setFieldsValue(DEFAULT_CONFIG);
     }
-  }, [configQuery.result]);
+    // result wrapper is rebuilt every render; depend on the stable payload
+    // so hydration doesn't clobber in-progress form edits.
+  }, [configQuery.result?.data]);
 
   useEffect(() => {
     if (configQuery.query.isError) {
@@ -138,7 +139,7 @@ export const DeviceFingerprintingPage: React.FC = () => {
     saveMutate(
       { url: "/api/device-fp/config", method: "put", values: vals },
       {
-        onSuccess: () => { message.success(t("deviceFp.saved")); dirtyRef.current = false; configQuery.query.refetch(); },
+        onSuccess: () => { message.success(t("deviceFp.saved")); configQuery.query.refetch(); },
         onError: () => message.error("Failed to save config"),
         onSettled: () => setSaving(false),
       }
@@ -186,7 +187,7 @@ export const DeviceFingerprintingPage: React.FC = () => {
         />
       )}
 
-      <Form form={form} layout="vertical" onValuesChange={() => { dirtyRef.current = true; }}>
+      <Form form={form} layout="vertical">
         <Tabs
           items={[
             {

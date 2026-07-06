@@ -88,7 +88,9 @@ export const CrowdsecSettingsPage: React.FC = () => {
       fallback_action: c.fallback_action ?? "allow",
       appsec_endpoint: c.appsec_endpoint ?? "",
     });
-  }, [configQuery.result, form]);
+    // result wrapper is rebuilt every render; depend on the stable payload
+    // so hydration doesn't clobber in-progress form edits.
+  }, [configQuery.result?.data, form]);
 
   const onSave = async () => {
     const v = await form.validateFields();

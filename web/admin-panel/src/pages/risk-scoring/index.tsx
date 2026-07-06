@@ -135,7 +135,9 @@ export const RiskScoringPage: React.FC = () => {
     if (!c) return;
     configForm.setFieldsValue(c);
     setCanaryPaths(c.canary?.paths ?? []);
-  }, [configQuery.result, configForm]);
+    // result wrapper is rebuilt every render; depend on the stable payload
+    // so hydration doesn't clobber in-progress form edits.
+  }, [configQuery.result?.data, configForm]);
 
   // ── API: actors (paginated) ───────────────────────────────────────────────
 
@@ -168,7 +170,12 @@ export const RiskScoringPage: React.FC = () => {
     saveConfig(
       { url: "/api/risk/config", method: "put", values: payload },
       {
-        onSuccess: () => message.success(t("risk.configSaved")),
+        onSuccess: () => {
+          message.success(t("risk.configSaved"));
+          // Refresh the cached config so remounts within staleTime hydrate
+          // from the saved values instead of the pre-save cache.
+          configQuery.query.refetch();
+        },
         onError: (err) => message.error(err.message),
       },
     );

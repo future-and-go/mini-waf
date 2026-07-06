@@ -142,7 +142,9 @@ export const BotManagementPage: React.FC = () => {
     return [...relay, ...proxy]
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .slice(0, 100);
-  }, [relayQuery.result, proxyQuery.result]);
+    // depend on the stable payloads, not the per-render result wrappers,
+    // so the memo only recomputes when data actually changes
+  }, [relayQuery.result?.data, proxyQuery.result?.data]);
 
   const statsOverview =
     (overviewQuery.result?.data as unknown as { data: StatsOverview })?.data ??

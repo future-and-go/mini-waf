@@ -193,7 +193,9 @@ export const SettingsPage: React.FC = () => {
   const feedRows = useMemo<FeedRow[]>(() => {
     const d = feedsQuery.result?.data;
     return Array.isArray(d) ? (d as FeedRow[]) : [];
-  }, [feedsQuery.result]);
+    // depend on the stable payload, not the per-render result wrapper,
+    // so the memo only recomputes when data actually changes
+  }, [feedsQuery.result?.data]);
 
   const feedColumns: ColumnsType<FeedRow> = [
     { title: t("common.name"), dataIndex: "name", width: 130 },

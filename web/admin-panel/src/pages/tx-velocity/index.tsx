@@ -94,7 +94,9 @@ const TxVelocityConfigCard: React.FC = () => {
       limit_max_count: raw.classifiers?.limit_change_velocity?.max_count,
       limit_window_ms: raw.classifiers?.limit_change_velocity?.window_ms,
     });
-  }, [cfgQuery.result]);
+    // result wrapper is rebuilt every render; depend on the stable payload
+    // so hydration doesn't clobber in-progress form edits.
+  }, [cfgQuery.result?.data]);
 
   const { mutate: save, mutation } = useCustomMutation();
 
