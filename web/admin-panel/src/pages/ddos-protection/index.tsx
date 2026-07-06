@@ -33,12 +33,35 @@ import { KpiCard } from "../../components/kpi-card";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+// Mirrors backend `DdosFileConfig` (crates/waf-engine/src/checks/ddos/config.rs).
+// The PUT endpoint deserializes with deny_unknown_fields, so this shape must
+// match the backend schema exactly.
+
+interface TierThresholds {
+  per_fp_threshold: number;
+  per_fp_window_s: number;
+  per_tier_threshold: number;
+  per_tier_window_s: number;
+}
+
+type TierKey = "critical" | "high" | "medium" | "catch_all";
+
+interface RedisCfg {
+  url: string;
+  key_prefix: string;
+  op_timeout_ms: number;
+}
+
 interface DdosConfig {
+  schema_version: number;
   enabled: boolean;
-  per_ip: { threshold_rps: number; window_secs: number };
-  per_fingerprint: { threshold_rps: number; window_secs: number };
-  ban_durations_secs: number[];
-  store: { backend: "memory" | "redis"; redis_url?: string };
+  hot_reload: boolean;
+  // Tiers set to null are not DDoS-protected (the check skips them).
+  tiers: Partial<Record<TierKey, TierThresholds | null>>;
+  gc_interval_s: number;
+  max_keys: number;
+  // null ⇒ memory-only standalone mode.
+  redis: RedisCfg | null;
 }
 
 interface BanEntry {
@@ -58,12 +81,51 @@ interface DdosMetrics {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
+const TIER_KEYS: TierKey[] = ["critical", "high", "medium", "catch_all"];
+
+const TIER_LABELS: Record<TierKey, string> = {
+  critical: "ddos.tierCritical",
+  high: "ddos.tierHigh",
+  medium: "ddos.tierMedium",
+  catch_all: "ddos.tierCatchAll",
+};
+
+// Mirrors backend serde defaults (empty ddos.yaml ⇒ inert subsystem).
 const DEFAULT_CONFIG: DdosConfig = {
-  enabled: true,
-  per_ip: { threshold_rps: 100, window_secs: 10 },
-  per_fingerprint: { threshold_rps: 200, window_secs: 10 },
-  ban_durations_secs: [60, 300, 3600],
-  store: { backend: "memory" },
+  schema_version: 1,
+  enabled: false,
+  hot_reload: true,
+  tiers: {},
+  gc_interval_s: 60,
+  max_keys: 100_000,
+  redis: null,
+};
+
+// Seed values shown when the operator first enables a tier / the redis block.
+const DEFAULT_TIER: TierThresholds = {
+  per_fp_threshold: 100,
+  per_fp_window_s: 10,
+  per_tier_threshold: 1000,
+  per_tier_window_s: 10,
+};
+
+const DEFAULT_REDIS: RedisCfg = {
+  url: "redis://127.0.0.1:6379",
+  key_prefix: "wafddos:",
+  op_timeout_ms: 50,
+};
+
+// Form store shape: null tiers/redis are replaced by seed values so the
+// inputs always have content; toggles decide what actually gets sent.
+const INITIAL_FORM: DdosConfig = {
+  ...DEFAULT_CONFIG,
+  tiers: {
+    critical: DEFAULT_TIER,
+    high: DEFAULT_TIER,
+    medium: DEFAULT_TIER,
+    catch_all: DEFAULT_TIER,
+  },
+  redis: DEFAULT_REDIS,
 };
 
 // ── Countdown cell ─────────────────────────────────────────────────────────────
@@ -125,6 +187,13 @@ export const DdosProtectionPage: React.FC = () => {
   const { message } = App.useApp();
 
   const [config, setConfig] = useState<DdosConfig>(DEFAULT_CONFIG);
+  const [tierEnabled, setTierEnabled] = useState<Record<TierKey, boolean>>({
+    critical: false,
+    high: false,
+    medium: false,
+    catch_all: false,
+  });
+  const [redisEnabled, setRedisEnabled] = useState(false);
   const [endpointMissing, setEndpointMissing] = useState(false);
   const [ipFilter, setIpFilter] = useState("");
   const [banLevelFilter, setBanLevelFilter] = useState<number | null>(null);
@@ -162,19 +231,31 @@ export const DdosProtectionPage: React.FC = () => {
       const loaded = (raw as { data?: DdosConfig }).data ?? raw as DdosConfig;
       if (loaded?.enabled !== undefined) {
         setConfig(loaded);
-        form.setFieldsValue({ ...loaded, ban_durations_secs: loaded.ban_durations_secs ?? [60, 300, 3600] });
+        setTierEnabled({
+          critical: !!loaded.tiers?.critical,
+          high: !!loaded.tiers?.high,
+          medium: !!loaded.tiers?.medium,
+          catch_all: !!loaded.tiers?.catch_all,
+        });
+        setRedisEnabled(!!loaded.redis);
+        form.setFieldsValue({
+          ...loaded,
+          tiers: Object.fromEntries(
+            TIER_KEYS.map((k) => [k, loaded.tiers?.[k] ?? DEFAULT_TIER]),
+          ),
+          redis: loaded.redis ?? DEFAULT_REDIS,
+        });
         setEndpointMissing(false);
       }
     }
-  }, [configResult]);
+    // Depend on the stable payload, not the useCustom() result wrapper — the
+    // wrapper is rebuilt every render and would re-hydrate (and clobber) the
+    // form and tier/redis toggles on every re-render.
+  }, [configResult?.data]);
 
   useEffect(() => {
     if (configQuery.isError) setEndpointMissing(true);
   }, [configQuery.isError]);
-
-  useEffect(() => {
-    if (configQuery.error) setEndpointMissing(true);
-  }, [configQuery.error]);
 
   // ── Ban table ────────────────────────────────────────────────────────────────
 
@@ -224,17 +305,46 @@ export const DdosProtectionPage: React.FC = () => {
 
   const onSave = async () => {
     const values = await form.validateFields();
+    // Build the exact backend `DdosFileConfig` shape: disabled tiers and a
+    // disabled redis block are sent as null, matching operator YAML semantics.
+    const payload: DdosConfig = {
+      schema_version: config.schema_version ?? 1,
+      enabled: values.enabled,
+      hot_reload: values.hot_reload,
+      gc_interval_s: values.gc_interval_s,
+      max_keys: values.max_keys,
+      tiers: Object.fromEntries(
+        TIER_KEYS.map((k) => [k, tierEnabled[k] ? values.tiers?.[k] ?? DEFAULT_TIER : null]),
+      ),
+      redis: redisEnabled ? values.redis ?? DEFAULT_REDIS : null,
+    };
     saveConfig(
-      { url: "/api/ddos/config", method: "put", values },
+      { url: "/api/ddos/config", method: "put", values: payload },
       {
-        onSuccess: () => message.success(t("ddos.saved")),
+        onSuccess: () => {
+          message.success(t("ddos.saved"));
+          // Refresh the cached config so remounts within staleTime hydrate
+          // from the saved values instead of the pre-save cache.
+          configQuery.refetch();
+        },
         onError: (err) => message.error(err.message),
       },
     );
   };
 
-  const storeBackend = Form.useWatch("store", form);
-  const currentBackend = storeBackend?.backend ?? config.store.backend;
+  const onToggleTier = (k: TierKey, on: boolean) => {
+    setTierEnabled((prev) => ({ ...prev, [k]: on }));
+    if (on && form.getFieldValue(["tiers", k, "per_fp_threshold"]) === undefined) {
+      form.setFieldValue(["tiers", k], DEFAULT_TIER);
+    }
+  };
+
+  const onToggleRedis = (on: boolean) => {
+    setRedisEnabled(on);
+    if (on && form.getFieldValue(["redis", "url"]) === undefined) {
+      form.setFieldValue("redis", DEFAULT_REDIS);
+    }
+  };
 
   // ── Ban table columns ────────────────────────────────────────────────────────
 
@@ -389,116 +499,115 @@ export const DdosProtectionPage: React.FC = () => {
         <Form
           form={form}
           layout="vertical"
-          initialValues={DEFAULT_CONFIG}
+          initialValues={INITIAL_FORM}
           size="small"
         >
-          <Form.Item name="enabled" valuePropName="checked" label={t("ddos.enabled")}>
-            <Switch />
-          </Form.Item>
-
           <Row gutter={24}>
-            <Col xs={24} md={12}>
-              <Card size="small" title={t("ddos.perIp")} style={{ marginBottom: 12 }}>
-                <Row gutter={12}>
-                  <Col span={12}>
-                    <Form.Item
-                      name={["per_ip", "threshold_rps"]}
-                      label={t("ddos.thresholdRps")}
-                      rules={[{ required: true }]}
-                    >
-                      <InputNumber min={1} addonAfter="rps" style={{ width: "100%" }} />
-                    </Form.Item>
-                  </Col>
-                  <Col span={12}>
-                    <Form.Item
-                      name={["per_ip", "window_secs"]}
-                      label={t("ddos.windowSecs")}
-                      rules={[{ required: true }]}
-                    >
-                      <InputNumber min={1} addonAfter="s" style={{ width: "100%" }} />
-                    </Form.Item>
-                  </Col>
-                </Row>
-              </Card>
+            <Col>
+              <Form.Item name="enabled" valuePropName="checked" label={t("ddos.enabled")}>
+                <Switch />
+              </Form.Item>
             </Col>
-
-            <Col xs={24} md={12}>
-              <Card size="small" title={t("ddos.perFingerprint")} style={{ marginBottom: 12 }}>
-                <Row gutter={12}>
-                  <Col span={12}>
-                    <Form.Item
-                      name={["per_fingerprint", "threshold_rps"]}
-                      label={t("ddos.thresholdRps")}
-                      rules={[{ required: true }]}
-                    >
-                      <InputNumber min={1} addonAfter="rps" style={{ width: "100%" }} />
-                    </Form.Item>
-                  </Col>
-                  <Col span={12}>
-                    <Form.Item
-                      name={["per_fingerprint", "window_secs"]}
-                      label={t("ddos.windowSecs")}
-                      rules={[{ required: true }]}
-                    >
-                      <InputNumber min={1} addonAfter="s" style={{ width: "100%" }} />
-                    </Form.Item>
-                  </Col>
-                </Row>
-              </Card>
+            <Col>
+              <Form.Item name="hot_reload" valuePropName="checked" label={t("ddos.hotReload")}>
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col>
+              <Form.Item
+                name="gc_interval_s"
+                label={t("ddos.gcInterval")}
+                rules={[{ required: true }]}
+              >
+                <InputNumber min={1} addonAfter="s" style={{ width: 130 }} />
+              </Form.Item>
+            </Col>
+            <Col>
+              <Form.Item name="max_keys" label={t("ddos.maxKeys")} rules={[{ required: true }]}>
+                <InputNumber min={1} style={{ width: 150 }} />
+              </Form.Item>
             </Col>
           </Row>
 
-          {/* Ban escalation ladder */}
-          <Card size="small" title={t("ddos.banEscalation")} style={{ marginBottom: 12 }}>
-            <Space wrap>
-              <Form.Item
-                name={["ban_durations_secs", 0]}
-                label={t("ddos.banLevel1")}
-                rules={[{ required: true }]}
-                style={{ marginBottom: 0 }}
-              >
-                <InputNumber min={1} addonAfter="s" style={{ width: 130 }} />
-              </Form.Item>
-              <Form.Item
-                name={["ban_durations_secs", 1]}
-                label={t("ddos.banLevel2")}
-                rules={[{ required: true }]}
-                style={{ marginBottom: 0 }}
-              >
-                <InputNumber min={1} addonAfter="s" style={{ width: 130 }} />
-              </Form.Item>
-              <Form.Item
-                name={["ban_durations_secs", 2]}
-                label={t("ddos.banLevel3")}
-                rules={[{ required: true }]}
-                style={{ marginBottom: 0 }}
-              >
-                <InputNumber min={1} addonAfter="s" style={{ width: 130 }} />
-              </Form.Item>
-            </Space>
-          </Card>
-
-          {/* Store backend */}
-          <Card size="small" title={t("ddos.storeBackend")} style={{ marginBottom: 0 }}>
-            <Row gutter={12}>
-              <Col xs={24} sm={8}>
-                <Form.Item
-                  name={["store", "backend"]}
-                  label={t("ddos.backend")}
-                  rules={[{ required: true }]}
+          {/* Per-tier thresholds — tiers left off are not DDoS-protected */}
+          <Row gutter={24}>
+            {TIER_KEYS.map((k) => (
+              <Col xs={24} md={12} key={k}>
+                <Card
+                  size="small"
+                  title={t(TIER_LABELS[k])}
+                  style={{ marginBottom: 12 }}
+                  extra={
+                    <Switch
+                      size="small"
+                      checked={tierEnabled[k]}
+                      onChange={(on) => onToggleTier(k, on)}
+                    />
+                  }
                 >
-                  <Select
-                    options={[
-                      { value: "memory", label: t("ddos.backendMemory") },
-                      { value: "redis", label: t("ddos.backendRedis") },
-                    ]}
-                  />
-                </Form.Item>
+                  {tierEnabled[k] ? (
+                    <Row gutter={12}>
+                      <Col span={12}>
+                        <Form.Item
+                          name={["tiers", k, "per_fp_threshold"]}
+                          label={t("ddos.perFpThreshold")}
+                          rules={[{ required: true }]}
+                        >
+                          <InputNumber min={1} addonAfter="req" style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={12}>
+                        <Form.Item
+                          name={["tiers", k, "per_fp_window_s"]}
+                          label={t("ddos.perFpWindow")}
+                          rules={[{ required: true }]}
+                        >
+                          <InputNumber min={1} addonAfter="s" style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={12}>
+                        <Form.Item
+                          name={["tiers", k, "per_tier_threshold"]}
+                          label={t("ddos.perTierThreshold")}
+                          rules={[{ required: true }]}
+                          style={{ marginBottom: 0 }}
+                        >
+                          <InputNumber min={1} addonAfter="req" style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={12}>
+                        <Form.Item
+                          name={["tiers", k, "per_tier_window_s"]}
+                          label={t("ddos.perTierWindow")}
+                          rules={[{ required: true }]}
+                          style={{ marginBottom: 0 }}
+                        >
+                          <InputNumber min={1} addonAfter="s" style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                  ) : (
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      {t("ddos.tierUnprotected")}
+                    </Typography.Text>
+                  )}
+                </Card>
               </Col>
-              {currentBackend === "redis" && (
-                <Col xs={24} sm={16}>
+            ))}
+          </Row>
+
+          {/* Optional Redis backend — off ⇒ memory-only standalone mode */}
+          <Card
+            size="small"
+            title={t("ddos.redisBackend")}
+            style={{ marginBottom: 0 }}
+            extra={<Switch size="small" checked={redisEnabled} onChange={onToggleRedis} />}
+          >
+            {redisEnabled ? (
+              <Row gutter={12}>
+                <Col xs={24} sm={12}>
                   <Form.Item
-                    name={["store", "redis_url"]}
+                    name={["redis", "url"]}
                     label={t("ddos.redisUrl")}
                     rules={[{ required: true, message: t("ddos.redisUrlRequired") }]}
                   >
@@ -508,8 +617,30 @@ export const DdosProtectionPage: React.FC = () => {
                     />
                   </Form.Item>
                 </Col>
-              )}
-            </Row>
+                <Col xs={12} sm={6}>
+                  <Form.Item
+                    name={["redis", "key_prefix"]}
+                    label={t("ddos.redisKeyPrefix")}
+                    rules={[{ required: true }]}
+                  >
+                    <Input style={{ fontFamily: "ui-monospace, monospace" }} />
+                  </Form.Item>
+                </Col>
+                <Col xs={12} sm={6}>
+                  <Form.Item
+                    name={["redis", "op_timeout_ms"]}
+                    label={t("ddos.redisOpTimeout")}
+                    rules={[{ required: true }]}
+                  >
+                    <InputNumber min={1} addonAfter="ms" style={{ width: "100%" }} />
+                  </Form.Item>
+                </Col>
+              </Row>
+            ) : (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t("ddos.redisDisabled")}
+              </Typography.Text>
+            )}
           </Card>
         </Form>
       </SectionCard>
