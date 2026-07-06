@@ -280,4 +280,111 @@ relay_detection:
         assert!(id.signals.is_empty());
         assert!(id.asn.is_none());
     }
+
+    #[test]
+    fn file_mtime_ms_is_zero_for_missing_file_and_positive_for_real_file() {
+        assert_eq!(super::file_mtime_ms(std::path::Path::new("/nonexistent/feed.txt")), 0);
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("feed.txt");
+        std::fs::write(&path, "1.2.3.4\n").expect("write");
+        assert!(super::file_mtime_ms(&path) > 0);
+    }
+
+    #[test]
+    fn load_feed_metadata_counts_entries_from_configured_files() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let tor_path = tmp.path().join("tor-exits.txt");
+        std::fs::write(&tor_path, "# comment\n\n1.2.3.4\n5.6.7.8\nnot-an-ip\n").expect("write tor");
+        let mmdb_path = tmp.path().join("asn.mmdb");
+        std::fs::write(&mmdb_path, "opaque").expect("write mmdb");
+        let dc_path = tmp.path().join("datacenters.txt");
+        std::fs::write(&dc_path, "13335\n16509 # aws\n").expect("write dc");
+
+        let mut cfg = RelayConfig::default();
+        cfg.tor.list_path = Some(tor_path.clone());
+        cfg.asn.mmdb_path = Some(mmdb_path.clone());
+        cfg.asn.datacenter_lists = vec![dc_path.clone()];
+
+        let feeds = super::load_feed_metadata(&cfg);
+        let tor = feeds.iter().find(|f| f.name == "tor_exit").expect("tor feed");
+        assert_eq!(tor.entry_count, 2, "comments/blank/malformed lines skipped");
+        assert_eq!(tor.source, tor_path.display().to_string());
+        assert!(tor.last_refresh_ms > 0);
+
+        let asn = feeds.iter().find(|f| f.name == "asn").expect("asn feed");
+        assert_eq!(asn.entry_count, 0, "mmdb entry count is not cheaply available");
+        assert_eq!(asn.source, mmdb_path.display().to_string());
+        assert!(asn.last_refresh_ms > 0);
+
+        let dc = feeds.iter().find(|f| f.name == "datacenter").expect("dc feed");
+        assert_eq!(dc.entry_count, 2);
+        assert_eq!(dc.source, dc_path.display().to_string());
+        assert!(dc.last_refresh_ms > 0);
+    }
+
+    #[test]
+    fn load_feed_metadata_is_fail_soft_for_unreadable_feed_files() {
+        let mut cfg = RelayConfig::default();
+        cfg.tor.list_path = Some(std::path::PathBuf::from("/nonexistent/tor.txt"));
+        cfg.asn.datacenter_lists = vec![std::path::PathBuf::from("/nonexistent/dc.txt")];
+
+        let feeds = super::load_feed_metadata(&cfg);
+        let tor = feeds.iter().find(|f| f.name == "tor_exit").expect("tor feed");
+        assert_eq!(tor.entry_count, 0);
+        assert_eq!(tor.last_refresh_ms, 0);
+        assert_eq!(tor.source, "/nonexistent/tor.txt");
+
+        let dc = feeds.iter().find(|f| f.name == "datacenter").expect("dc feed");
+        assert_eq!(dc.entry_count, 0);
+        assert_eq!(dc.last_refresh_ms, 0);
+    }
+
+    #[derive(Default)]
+    struct ScriptedProvider {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl IntelProvider for ScriptedProvider {
+        fn name(&self) -> &'static str {
+            "scripted"
+        }
+
+        async fn refresh(&self) -> anyhow::Result<RefreshOutcome> {
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            match n {
+                0 => Ok(RefreshOutcome::Updated),
+                1 => Ok(RefreshOutcome::NotModified),
+                2 => Ok(RefreshOutcome::Failed(anyhow::anyhow!("transient"))),
+                _ => Err(anyhow::anyhow!("hard error")),
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn refresh_loop_survives_every_outcome_kind() {
+        let provider = Arc::new(ScriptedProvider::default());
+        let handles = RelayDetector::start_refresh_tasks(vec![(
+            provider.clone() as Arc<dyn IntelProvider>,
+            Duration::from_millis(10),
+        )]);
+
+        // Paused-clock advance: each step fires at most one interval tick.
+        // The loop must keep running through Updated, NotModified, Failed,
+        // and hard-Err outcomes rather than terminating.
+        for _ in 0..200 {
+            if provider.calls.load(std::sync::atomic::Ordering::SeqCst) >= 5 {
+                break;
+            }
+            tokio::time::advance(Duration::from_millis(10)).await;
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            provider.calls.load(std::sync::atomic::Ordering::SeqCst) >= 5,
+            "refresh loop stopped early"
+        );
+        for h in handles {
+            h.abort();
+        }
+    }
 }
