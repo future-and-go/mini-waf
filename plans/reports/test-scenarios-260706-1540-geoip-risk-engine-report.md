@@ -152,3 +152,17 @@ Suggested locations: geo unit gaps → `src/checks/geo.rs` `#[cfg(test)]`; score
 1. GEO-F6: should legacy `action: challenge` rows be (a) treated as block (current), (b) dropped, or (c) migrated on load? Live `configs/geo-rules.yaml` id 4 (IR) is affected right now — currently enforced as **block**, likely not the admin's intent.
 2. Live `configs/risk.yaml` has `enabled: false` and `canary.enabled: false` — are the working-tree edits to both configs intentional test fixtures or pending changes? (Both files show as modified in git.)
 3. RSK-ST1: is a live-Redis integration test acceptable in CI (docker-compose exists), or keep redis scenarios behind a feature flag / manual suite?
+
+## Correction (plan validation, 2026-07-06 evening)
+
+- RSK-SE2 and RSK-C1 are **not gaps**. Coverage exists in
+  `crates/waf-engine/src/risk/tests/canary.rs` (not scanned above):
+  `whitelist_bypasses_canary` (:374) covers RSK-SE2;
+  `canary_path_triggers_block_and_score_100` (:119) +
+  `canary_pin_expires_after_ttl` (:177) cover RSK-C1. §10's cited test name
+  `canary_path_forces_block_with_pin` does not exist; the real names are above.
+- Unresolved questions 1–3 answered: (1) convert the id-4 IR row to
+  `action: block` (challenge unsupported; enforcement unchanged);
+  (2) working-tree config edits are leftovers — revert to committed values;
+  (3) Redis-in-CI is owned by plan `260704-2309-gh-198-redis-riskstate-roundtrip`.
+- Follow-up plan: `plans/260706-2038-geoip-risk-p0-test-gaps/` (issue #250).
