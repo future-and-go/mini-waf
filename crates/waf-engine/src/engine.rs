@@ -1880,18 +1880,20 @@ mod tests {
         let store = WafEngine::build_risk_store(&cfg).await;
 
         let key = RiskKey::from_ip("198.51.100.77".parse().expect("ip"));
-        let stale_ms = chrono::Utc::now().timestamp_millis() - 10_000;
+        // Insert live (unexpired) state so the running purge loop cannot
+        // remove it before the existence assert; it expires ttl_secs later.
+        let now_ms = chrono::Utc::now().timestamp_millis();
         store
             .apply(
                 &key,
-                &[Contributor::new(ContributorKind::Seed(SeedKind::Generic), 25, stale_ms)],
-                stale_ms,
+                &[Contributor::new(ContributorKind::Seed(SeedKind::Generic), 25, now_ms)],
+                now_ms,
             )
             .await
             .expect("apply");
         assert!(!store.is_empty().await, "state must exist before purge");
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
         while std::time::Instant::now() < deadline {
             if store.is_empty().await {
                 return;
