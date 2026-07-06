@@ -61,7 +61,7 @@ rand = { workspace = true }
 # FR-010 phase-08 — Redis identity store backend; gated by `redis-store` feature.
 redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager", "tls-rustls", "tokio-rustls-comp", "script"], optional = true }
 # FR-025 phase-07 — O(1) fail-open fallback cache for the Redis risk store.
-lru = { version = "0.12", optional = true }
+lru = { version = "0.16", optional = true }
 
 [dev-dependencies]
 rand = { workspace = true }

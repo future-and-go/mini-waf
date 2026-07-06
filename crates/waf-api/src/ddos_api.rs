@@ -158,7 +158,7 @@ pub async fn delete_ban_entry(
 mod tests {
     use super::*;
 
-    /// The admin-panel DDoS page PUTs the `DdosFileConfig` shape verbatim,
+    /// The admin-panel `DDoS` page PUTs the `DdosFileConfig` shape verbatim,
     /// sending `null` for unprotected tiers and for a disabled redis block.
     /// That exact payload must deserialize, validate, and — once written as
     /// YAML — reparse through the engine parser the hot-reload watcher uses.
