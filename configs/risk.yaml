@@ -1,86 +1,46 @@
-# FR-025 cumulative risk scoring — default configuration.
-# Schema v1. Empty / absent file = subsystem disabled.
-# Hot-reload watches this file; bad edits log a warning and the previous
-# snapshot is retained.
-
 risk:
-  schema_version: 1
-  enabled: false
-
-  # TTL for idle entries (seconds). Entries not updated within this window
-  # are purged by the background GC task. Default: 30 minutes.
-  ttl_secs: 1800
-
-  # GC interval (seconds) for the purge loop.
-  gc_interval_secs: 60
-
-  # Session cookie name to extract SessionId from. When set, the session
-  # axis is included in the triple-index lookup. Leave empty to disable.
-  # session_cookie: "session_id"
-
-  # Header name for the egress risk score.
-  header_name: "X-WAF-Risk-Score"
-
-  # Whether to emit the risk score header on responses.
-  emit_header: true
-
-  # Store backend configuration.
-  store:
-    backend: memory    # memory | redis (redis requires feature flag)
-    # Uncomment for Redis backend (FR-025 Phase 7):
-    # redis:
-    #   url: "redis://127.0.0.1:6379"      # Single node or cluster endpoint
-    #   key_prefix: "waf:risk:"             # Namespace prefix
-    #   op_timeout_ms: 100                  # Per-operation timeout in milliseconds
-    #   breaker_threshold: 5                # Circuit breaker opens after N failures
-    #   cache_capacity: 10000               # LRU cache capacity for fail-open fallback
-
-  # Decay behavior — how risk scores reduce over time for "clean" requests.
-  decay:
-    # Minimum consecutive clean requests before decay starts.
-    min_clean_streak: 10
-    # Points decayed per clean request after min_clean_streak is reached.
-    decay_rate: 1
-    # Floor below which automatic decay stops. Scores can only go below this
-    # via explicit credits (e.g., completed CAPTCHA, manual override).
-    max_decay: 50
-
-  # L0 seed layer — Tor exit, ASN classification, whitelist short-circuit.
-  # Evaluated FIRST, before any other risk layers.
-  seed:
-    enabled: true
-
-    # Path to Tor exit list (newline IPs). Update from check.torproject.org.
-    # tor_exits_path: "/etc/prx-waf/tor-exits.txt"
-
-    # Path to ASN classification CSV (cidr,asn,classification).
-    # asn_classes_path: "/etc/prx-waf/asn-classes.csv"
-
-    # Path to whitelist CIDRs (newline CIDRs). Whitelist = score 0, skip all layers.
-    # whitelist_path: "/etc/prx-waf/risk-whitelist.txt"
-
-    # Risk deltas for each classification.
-    tor_delta: 30          # Tor exit IPs
-    datacenter_delta: 15   # AWS, GCP, Azure, etc.
-    bad_asn_delta: 25      # Operator-curated bad ASN list
-
-  # FR-028 canary honeypot layer — scanner detection.
-  # Configured paths that no legitimate user should hit. When triggered:
-  # 1. Score pinned to 100 until ban_ttl_secs expires
-  # 2. IP added to dynamic ban table (FR-005)
-  # 3. Request blocked immediately (bypasses threshold gate)
-  # Evaluated AFTER seed whitelist, BEFORE all other layers.
   canary:
-    enabled: false
-
-    # Exact-match paths (case-sensitive). Partial matches do NOT trigger.
-    # Example: "/admin-test" matches only "/admin-test", not "/admin-test/foo"
-    paths: []
-      # - "/admin-test"
-      # - "/api-debug"
-      # - "/.git/config"
-      # - "/wp-admin/install.php"
-
-    # Ban TTL in seconds for canary hits (default: 1 hour).
-    # Both the risk score pin and dynamic ban table use this TTL.
     ban_ttl_secs: 3600
+    enabled: false
+    paths: []
+  challenge:
+    enabled: false
+    expired_delta: 10
+    header_name: X-WAF-Cred
+    hmac_secret_path: null
+    invalid_delta: 20
+    lru_size: 100000
+    replay_delta: 30
+    ttl_secs: 300
+    valid_delta: -25
+  decay:
+    decay_rate: 1
+    max_decay: 50
+    min_clean_streak: 12
+  emit_header: true
+  enabled: true
+  gc_interval_secs: 60
+  header_name: X-WAF-Risk-Score
+  ingest:
+    channel_capacity: 65536
+    enabled: true
+    signal_weights: {}
+  schema_version: 1
+  seed:
+    asn_classes_path: null
+    bad_asn_delta: 25
+    datacenter_delta: 15
+    enabled: true
+    tor_delta: 30
+    tor_exits_path: null
+    whitelist_path: null
+  session_cookie: null
+  store:
+    backend: memory
+    redis:
+      breaker_threshold: 5
+      cache_capacity: 10000
+      key_prefix: 'waf:risk:'
+      op_timeout_ms: 100
+      url: redis://127.0.0.1:6379
+  ttl_secs: 1808

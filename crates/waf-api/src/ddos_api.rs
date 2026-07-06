@@ -153,3 +153,57 @@ pub async fn delete_ban_entry(
 
     Ok(Json(json!({ "success": true, "data": { "ip": ip.to_string() } })))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The admin-panel DDoS page PUTs the `DdosFileConfig` shape verbatim,
+    /// sending `null` for unprotected tiers and for a disabled redis block.
+    /// That exact payload must deserialize, validate, and — once written as
+    /// YAML — reparse through the engine parser the hot-reload watcher uses.
+    #[test]
+    fn admin_panel_put_payload_round_trips() {
+        let body = json!({
+            "schema_version": 1,
+            "enabled": true,
+            "hot_reload": true,
+            "gc_interval_s": 60,
+            "max_keys": 100_000,
+            "tiers": {
+                "critical": {
+                    "per_fp_threshold": 50,
+                    "per_fp_window_s": 10,
+                    "per_tier_threshold": 500,
+                    "per_tier_window_s": 10
+                },
+                "high": null,
+                "medium": null,
+                "catch_all": null
+            },
+            "redis": null
+        });
+        let cfg: DdosFileConfig = serde_json::from_value(body).expect("FE payload must deserialize");
+        cfg.validate().expect("FE payload must validate");
+
+        let doc = DdosDocument { ddos: cfg };
+        let yaml = serde_yaml::to_string(&doc).expect("serialize yaml");
+        DdosFileConfig::from_yaml_str(&yaml).expect("saved YAML must reparse through engine parser");
+    }
+
+    /// Variant with the redis block enabled in the form.
+    #[test]
+    fn admin_panel_redis_payload_accepted() {
+        let body = json!({
+            "schema_version": 1,
+            "enabled": false,
+            "hot_reload": true,
+            "gc_interval_s": 60,
+            "max_keys": 100_000,
+            "tiers": { "critical": null, "high": null, "medium": null, "catch_all": null },
+            "redis": { "url": "redis://127.0.0.1:6379", "key_prefix": "wafddos:", "op_timeout_ms": 50 }
+        });
+        let cfg: DdosFileConfig = serde_json::from_value(body).expect("deserialize");
+        cfg.validate().expect("validate");
+    }
+}

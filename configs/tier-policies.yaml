@@ -19,7 +19,7 @@ policies:
   high:
     cache_policy: default
     ddos_threshold_rps: 200
-    fail_mode: close
+    fail_mode: open
     risk_thresholds:
       allow: 20
       block: 85
@@ -27,7 +27,7 @@ policies:
   medium:
     cache_policy: short_ttl
     ddos_threshold_rps: 500
-    fail_mode: open
+    fail_mode: close
     risk_thresholds:
       allow: 20
       block: 85
