@@ -1066,4 +1066,433 @@ mod tests {
         let bad = format!("g{}", "0".repeat(63));
         assert!(parse_public_key(&bad).is_none());
     }
+
+    // ── HTTP-path tests for the private sync methods ──────────────────────────
+    //
+    // `delta_pull`, `fetch_version`, and the full-pull helpers are private, so
+    // they are exercised here (same module) against a wiremock server rather
+    // than from the integration suite.
+
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use crate::community::client::CommunityClient;
+
+    fn sync_for(server_uri: &str, verify_key: Option<VerifyingKey>) -> CommunityBlocklistSync {
+        let client = Arc::new(CommunityClient::new(server_uri).expect("client"));
+        CommunityBlocklistSync::new(client, "test-key".to_string(), 3600, verify_key)
+    }
+
+    /// Build a signed delta response: the canonical payload is signed, while the
+    /// outer `added`/`removed` fields can carry decoy data.
+    fn signed_delta_body(sk: &SigningKey, payload: &serde_json::Value, outer_added: &serde_json::Value) -> serde_json::Value {
+        let payload_bytes = serde_json::to_vec(payload).unwrap();
+        let sig = sk.sign(&payload_bytes);
+        serde_json::json!({
+            "from_version": 5,
+            "to_version": 6,
+            "added": outer_added,
+            "removed": [],
+            "signature_hex": hex::encode(sig.to_bytes()),
+            "payload_hex": hex::encode(&payload_bytes),
+        })
+    }
+
+    async fn mount_delta(server: &MockServer, response: ResponseTemplate) {
+        Mock::given(method("GET"))
+            .and(path("/api/v1/waf/blocklist/delta"))
+            .respond_with(response)
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delta_pull_returns_false_before_first_full_pull() {
+        // local version 0 → must fall back to full pull without any HTTP call
+        let sync = sync_for("http://127.0.0.1:9", None);
+        assert!(!sync.delta_pull().await.unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delta_pull_gone_falls_back_to_full_pull() {
+        let server = MockServer::start().await;
+        mount_delta(&server, ResponseTemplate::new(410)).await;
+        let sync = sync_for(&server.uri(), None);
+        sync.current_version.store(5, Ordering::Relaxed);
+        assert!(!sync.delta_pull().await.unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delta_pull_http_error_is_reported() {
+        let server = MockServer::start().await;
+        mount_delta(&server, ResponseTemplate::new(500)).await;
+        let sync = sync_for(&server.uri(), None);
+        sync.current_version.store(5, Ordering::Relaxed);
+        let err = sync.delta_pull().await.unwrap_err().to_string();
+        assert!(err.contains("delta pull returned"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delta_pull_unsigned_applies_added_and_removed() {
+        let server = MockServer::start().await;
+        let removed_ip: IpAddr = "9.9.9.9".parse().unwrap();
+        let body = serde_json::json!({
+            "from_version": 5,
+            "to_version": 6,
+            "added": [
+                {"ip": "1.2.3.4", "scenario": "brute_force", "action": "ban"},
+                {"ip": "5.6.7.8", "scenario": "scan"},
+                {"ip": "not-an-ip", "scenario": "junk"}
+            ],
+            "removed": [{"ip": "9.9.9.9"}],
+        });
+        mount_delta(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), None);
+        sync.current_version.store(5, Ordering::Relaxed);
+        sync.blocked_ips.write().insert(
+            removed_ip,
+            CommunityDecision {
+                reason: "old".into(),
+                source: "community-block".into(),
+            },
+        );
+
+        assert!(sync.delta_pull().await.unwrap());
+        assert_eq!(sync.current_version.load(Ordering::Relaxed), 6);
+        assert!(sync.check_ip(&removed_ip).is_none());
+
+        let banned = sync.check_ip(&"1.2.3.4".parse().unwrap()).unwrap();
+        assert_eq!(banned.reason, "brute_force");
+        assert_eq!(banned.source, "community-ban");
+
+        // Missing `action` defaults to "block"
+        let scanned = sync.check_ip(&"5.6.7.8".parse().unwrap()).unwrap();
+        assert_eq!(scanned.source, "community-block");
+        assert_eq!(sync.len(), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delta_pull_signed_uses_verified_payload_not_outer_fields() {
+        let server = MockServer::start().await;
+        let sk = test_signing_key();
+        let payload = serde_json::json!({
+            "from_version": 5,
+            "to_version": 6,
+            "added": [{"ip": "1.2.3.4", "scenario": "brute_force", "action": "ban"}],
+            "removed": [],
+        });
+        // Outer `added` carries a decoy entry that must NOT be applied.
+        let decoy = serde_json::json!([{"ip": "6.6.6.6", "scenario": "decoy", "action": "ban"}]);
+        let body = signed_delta_body(&sk, &payload, &decoy);
+        mount_delta(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), Some(sk.verifying_key()));
+        sync.current_version.store(5, Ordering::Relaxed);
+
+        assert!(sync.delta_pull().await.unwrap());
+        assert!(sync.check_ip(&"1.2.3.4".parse().unwrap()).is_some());
+        assert!(sync.check_ip(&"6.6.6.6".parse().unwrap()).is_none());
+        assert_eq!(sync.current_version.load(Ordering::Relaxed), 6);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delta_pull_signed_rejects_missing_signature_fields() {
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "from_version": 5, "to_version": 6, "added": [], "removed": [],
+        });
+        mount_delta(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), Some(test_signing_key().verifying_key()));
+        sync.current_version.store(5, Ordering::Relaxed);
+        assert!(!sync.delta_pull().await.unwrap());
+        assert_eq!(sync.current_version.load(Ordering::Relaxed), 5);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delta_pull_signed_rejects_wrong_key_signature() {
+        let server = MockServer::start().await;
+        let attacker = test_signing_key();
+        let payload = serde_json::json!({
+            "from_version": 5, "to_version": 6,
+            "added": [{"ip": "1.2.3.4", "scenario": "x", "action": "ban"}],
+            "removed": [],
+        });
+        let body = signed_delta_body(&attacker, &payload, &serde_json::json!([]));
+        mount_delta(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), Some(test_signing_key().verifying_key()));
+        sync.current_version.store(5, Ordering::Relaxed);
+        assert!(!sync.delta_pull().await.unwrap());
+        assert!(sync.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delta_pull_rejects_nonpositive_to_version() {
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "from_version": 5, "to_version": 0, "added": [], "removed": [],
+        });
+        mount_delta(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), None);
+        sync.current_version.store(5, Ordering::Relaxed);
+        let err = sync.delta_pull().await.unwrap_err().to_string();
+        assert!(err.contains("not positive"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delta_pull_rejects_to_version_not_after_from_version() {
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "from_version": 5, "to_version": 5, "added": [], "removed": [],
+        });
+        mount_delta(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), None);
+        sync.current_version.store(5, Ordering::Relaxed);
+        let err = sync.delta_pull().await.unwrap_err().to_string();
+        assert!(err.contains("rejecting invalid delta"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delta_pull_from_version_mismatch_falls_back() {
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "from_version": 4, "to_version": 6, "added": [], "removed": [],
+        });
+        mount_delta(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), None);
+        sync.current_version.store(5, Ordering::Relaxed);
+        assert!(!sync.delta_pull().await.unwrap());
+        assert_eq!(sync.current_version.load(Ordering::Relaxed), 5);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delta_pull_too_many_changes_falls_back() {
+        let server = MockServer::start().await;
+        let added: Vec<serde_json::Value> = (0..5001u32)
+            .map(|i| serde_json::json!({"ip": format!("10.0.{}.{}", i / 256, i % 256), "scenario": "s"}))
+            .collect();
+        let body = serde_json::json!({
+            "from_version": 5, "to_version": 6, "added": added, "removed": [],
+        });
+        mount_delta(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), None);
+        sync.current_version.store(5, Ordering::Relaxed);
+        assert!(!sync.delta_pull().await.unwrap());
+        assert!(sync.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delta_pull_skips_oversized_fields() {
+        let server = MockServer::start().await;
+        let long_scenario = "x".repeat(MAX_FIELD_LEN + 1);
+        let long_ip = "y".repeat(MAX_IP_LEN + 1);
+        let body = serde_json::json!({
+            "from_version": 5,
+            "to_version": 6,
+            "added": [
+                {"ip": "1.2.3.4", "scenario": long_scenario},
+                {"ip": "2.3.4.5", "scenario": "ok", "action": "z".repeat(MAX_FIELD_LEN + 1)}
+            ],
+            "removed": [{"ip": long_ip}],
+        });
+        mount_delta(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), None);
+        sync.current_version.store(5, Ordering::Relaxed);
+        assert!(sync.delta_pull().await.unwrap());
+        // Oversized entries skipped, but the version still advances
+        assert!(sync.is_empty());
+        assert_eq!(sync.current_version.load(Ordering::Relaxed), 6);
+    }
+
+    // ── fetch_version ─────────────────────────────────────────────────────────
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_version_returns_server_version() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/waf/blocklist/version"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"version": 17})))
+            .mount(&server)
+            .await;
+        let sync = sync_for(&server.uri(), None);
+        assert_eq!(sync.fetch_version().await.unwrap(), 17);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_version_http_error_is_reported() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/waf/blocklist/version"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let sync = sync_for(&server.uri(), None);
+        let err = sync.fetch_version().await.unwrap_err().to_string();
+        assert!(err.contains("blocklist version returned"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_version_invalid_json_is_reported() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/waf/blocklist/version"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not json"))
+            .mount(&server)
+            .await;
+        let sync = sync_for(&server.uri(), None);
+        let err = sync.fetch_version().await.unwrap_err().to_string();
+        assert!(err.contains("failed to parse blocklist version"));
+    }
+
+    // ── full_pull_verified error branches ─────────────────────────────────────
+
+    async fn mount_full(server: &MockServer, response: ResponseTemplate) {
+        Mock::given(method("GET"))
+            .and(path("/api/v1/waf/blocklist/full"))
+            .respond_with(response)
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn full_pull_verified_bad_signature_with_key_id_rejected() {
+        let server = MockServer::start().await;
+        let vk = test_signing_key().verifying_key();
+        let attacker = test_signing_key();
+        let payload = zstd::encode_all(&b"[]"[..], 3).unwrap();
+        let sig = attacker.sign(&payload);
+        let body = serde_json::json!({
+            "version": 7,
+            "key_id": "rotated-key-1",
+            "payload_hex": hex::encode(&payload),
+            "signature_hex": hex::encode(sig.to_bytes()),
+        });
+        mount_full(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), Some(vk));
+        sync.full_pull_verified(&vk).await;
+        assert_eq!(sync.current_version.load(Ordering::Relaxed), 0);
+        assert!(sync.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn full_pull_verified_rejects_payload_that_is_not_zstd() {
+        let server = MockServer::start().await;
+        let sk = test_signing_key();
+        let vk = sk.verifying_key();
+        let payload = b"definitely not zstd".to_vec();
+        let sig = sk.sign(&payload);
+        let body = serde_json::json!({
+            "version": 7,
+            "payload_hex": hex::encode(&payload),
+            "signature_hex": hex::encode(sig.to_bytes()),
+        });
+        mount_full(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), Some(vk));
+        sync.full_pull_verified(&vk).await;
+        assert_eq!(sync.current_version.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn full_pull_verified_rejects_invalid_decompressed_json() {
+        let server = MockServer::start().await;
+        let sk = test_signing_key();
+        let vk = sk.verifying_key();
+        let payload = zstd::encode_all(&b"{ not valid json"[..], 3).unwrap();
+        let sig = sk.sign(&payload);
+        let body = serde_json::json!({
+            "version": 7,
+            "payload_hex": hex::encode(&payload),
+            "signature_hex": hex::encode(sig.to_bytes()),
+        });
+        mount_full(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), Some(vk));
+        sync.full_pull_verified(&vk).await;
+        assert_eq!(sync.current_version.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn full_pull_verified_skips_oversized_entries_but_applies_version() {
+        let server = MockServer::start().await;
+        let sk = test_signing_key();
+        let vk = sk.verifying_key();
+        let entries = serde_json::json!([
+            {"ip": "1.2.3.4", "scenario": "x".repeat(MAX_FIELD_LEN + 1), "action": "ban"}
+        ]);
+        let payload = zstd::encode_all(serde_json::to_vec(&entries).unwrap().as_slice(), 3).unwrap();
+        let sig = sk.sign(&payload);
+        let body = serde_json::json!({
+            "version": 7,
+            "payload_hex": hex::encode(&payload),
+            "signature_hex": hex::encode(sig.to_bytes()),
+        });
+        mount_full(&server, ResponseTemplate::new(200).set_body_json(body)).await;
+
+        let sync = sync_for(&server.uri(), Some(vk));
+        sync.full_pull_verified(&vk).await;
+        assert!(sync.is_empty());
+        assert_eq!(sync.current_version.load(Ordering::Relaxed), 7);
+    }
+
+    // ── full_pull_decoded oversized entries ───────────────────────────────────
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn full_pull_decoded_skips_oversized_entries_but_applies_version() {
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "version": 42,
+            "entries": [
+                {"ip": "1.2.3.4", "reason": "r".repeat(MAX_FIELD_LEN + 1), "source": "s"},
+                {"ip": "i".repeat(MAX_IP_LEN + 1), "reason": "r", "source": "s"}
+            ],
+        });
+        Mock::given(method("GET"))
+            .and(path("/api/v1/waf/blocklist/decoded"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+
+        let sync = sync_for(&server.uri(), None);
+        sync.full_pull_decoded().await;
+        assert!(sync.is_empty());
+        assert_eq!(sync.current_version.load(Ordering::Relaxed), 42);
+    }
+
+    // ── response body and decompression limits ────────────────────────────────
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn read_response_body_limited_rejects_oversized_content_length() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/big"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0u8; 64]))
+            .mount(&server)
+            .await;
+        let resp = reqwest::get(format!("{}/big", server.uri())).await.unwrap();
+        let err = read_response_body_limited(resp, 16).await.unwrap_err();
+        assert!(err.contains("byte limit"));
+    }
+
+    #[test]
+    fn decompress_with_limit_rejects_oversized_output() {
+        let big = vec![b'a'; 1024];
+        let compressed = zstd::encode_all(big.as_slice(), 3).unwrap();
+        let err = decompress_with_limit(&compressed, 100).unwrap_err();
+        assert!(err.contains("exceeds 100 byte limit"));
+    }
+
+    #[test]
+    fn decompress_with_limit_rejects_garbage_input() {
+        let result = decompress_with_limit(b"not zstd at all", 1024);
+        assert!(result.is_err());
+    }
 }
