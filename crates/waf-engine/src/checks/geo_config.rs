@@ -198,6 +198,32 @@ rules:
     }
 
     #[test]
+    fn unsupported_action_row_falls_back_to_block() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = write_rules(
+            &dir,
+            r#"
+rules:
+  - { id: 1, iso_code: "IR", action: "challenge", scope: "global", enabled: true }
+  - { id: 2, iso_code: "KP", action: "block", scope: "global", enabled: true }
+"#,
+        );
+        let map = parse_geo_rules(&path).expect("parse");
+        let rules = map.get("*").expect("global host");
+        assert_eq!(
+            rules.len(),
+            1,
+            "unknown-action row must union into the Block rule, not be dropped"
+        );
+        assert_eq!(rules[0].mode, GeoRuleMode::Block);
+        assert!(
+            rules[0].iso_codes.contains("IR"),
+            "fail-safe: any action other than allow is enforced as block"
+        );
+        assert!(rules[0].iso_codes.contains("KP"));
+    }
+
+    #[test]
     fn allow_rows_union_into_single_allow_only_rule() {
         let dir = tempfile::tempdir().expect("tmpdir");
         let path = write_rules(

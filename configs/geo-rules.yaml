@@ -20,7 +20,7 @@ rules:
   id: 3
   iso_code: KP
   scope: global
-- action: challenge
+- action: block
   country_name: null
   created_at: 2026-06-30T16:24:31.669428421+00:00
   enabled: true
