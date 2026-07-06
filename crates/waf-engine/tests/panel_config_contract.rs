@@ -116,11 +116,11 @@ fn validate_rejects_equal_challenge_and_block() {
 fn validate_accepts_plain_ips_and_networks_as_trusted_cidrs() {
     let mut c = WafPanelConfig::default();
     c.trusted_waf_bypass.cidrs = vec![
-        "192.168.1.1".to_string(),        // bare IPv4
-        "10.0.0.0/8".to_string(),         // IPv4 network
-        "2001:db8::1".to_string(),        // bare IPv6
-        "2001:db8::/32".to_string(),      // IPv6 network
-        "  172.16.0.0/12  ".to_string(),  // whitespace trimmed
+        "192.168.1.1".to_string(),       // bare IPv4
+        "10.0.0.0/8".to_string(),        // IPv4 network
+        "2001:db8::1".to_string(),       // bare IPv6
+        "2001:db8::/32".to_string(),     // IPv6 network
+        "  172.16.0.0/12  ".to_string(), // whitespace trimmed
     ];
     assert!(c.validate().is_ok());
 }
@@ -167,8 +167,11 @@ fn validate_rejects_unsafe_json_redact_field_names() {
 #[test]
 fn validate_accepts_safe_json_redact_field_names() {
     let mut c = WafPanelConfig::default();
-    c.response_filtering.json_redact_fields =
-        vec!["_private".to_string(), "camelCase2".to_string(), "snake_case".to_string()];
+    c.response_filtering.json_redact_fields = vec![
+        "_private".to_string(),
+        "camelCase2".to_string(),
+        "snake_case".to_string(),
+    ];
     assert!(c.validate().is_ok());
 }
 
@@ -199,7 +202,11 @@ fn load_panel_config_reads_valid_file() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("waf-panel.toml");
     let mut f = std::fs::File::create(&path).expect("create");
-    writeln!(f, "shadow_mode = true\nrisk_allow = 10\nrisk_challenge = 20\nrisk_block = 30").expect("write");
+    writeln!(
+        f,
+        "shadow_mode = true\nrisk_allow = 10\nrisk_challenge = 20\nrisk_block = 30"
+    )
+    .expect("write");
 
     let loaded = load_panel_config(&path).expect("load").expect("present");
     assert!(loaded.shadow_mode);

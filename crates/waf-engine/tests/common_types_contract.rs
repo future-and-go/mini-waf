@@ -66,15 +66,30 @@ fn cookie_header_empty_input_yields_empty_map() {
 #[test]
 fn waf_action_contract_strings_cover_all_variants() {
     assert_eq!(WafAction::Allow.as_contract_str(), "allow");
-    assert_eq!(WafAction::Block { status: 403, body: None }.as_contract_str(), "block");
+    assert_eq!(
+        WafAction::Block {
+            status: 403,
+            body: None
+        }
+        .as_contract_str(),
+        "block"
+    );
     assert_eq!(WafAction::Challenge.as_contract_str(), "challenge");
     assert_eq!(
-        WafAction::RateLimit { status: 429, body: None }.as_contract_str(),
+        WafAction::RateLimit {
+            status: 429,
+            body: None
+        }
+        .as_contract_str(),
         "rate_limit"
     );
     assert_eq!(WafAction::Timeout { status: 504 }.as_contract_str(), "timeout");
     assert_eq!(
-        WafAction::CircuitBreaker { status: 503, body: None }.as_contract_str(),
+        WafAction::CircuitBreaker {
+            status: 503,
+            body: None
+        }
+        .as_contract_str(),
         "circuit_breaker"
     );
     // Internal variants map to "allow" on the wire
@@ -103,7 +118,10 @@ fn rule_action_translates_to_waf_action() {
     // Allow and Log both pass the request through; log-only is a mode, not an action
     assert!(matches!(RuleAction::Allow.to_waf_action(0, None), WafAction::Allow));
     assert!(matches!(RuleAction::Log.to_waf_action(0, None), WafAction::Allow));
-    assert!(matches!(RuleAction::Challenge.to_waf_action(0, None), WafAction::Challenge));
+    assert!(matches!(
+        RuleAction::Challenge.to_waf_action(0, None),
+        WafAction::Challenge
+    ));
 }
 
 // ── InteropMode contract strings ───────────────────────────────────────────────

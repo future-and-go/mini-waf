@@ -82,15 +82,15 @@ fn public_ipv4_literals_pass_with_no_dns_pinning_needed() {
 #[test]
 fn private_and_reserved_ipv6_literals_are_blocked() {
     for ip in [
-        "::1",              // loopback
-        "::",               // unspecified
-        "ff02::1",          // multicast
-        "fc00::1",          // ULA fc00::/7
-        "fd12:3456::1",     // ULA upper half
-        "fe80::1",          // link-local
-        "::ffff:10.0.0.1",  // IPv4-mapped private
-        "2001:db8::1",      // documentation
-        "64:ff9b::7f00:1",  // NAT64 translation prefix
+        "::1",             // loopback
+        "::",              // unspecified
+        "ff02::1",         // multicast
+        "fc00::1",         // ULA fc00::/7
+        "fd12:3456::1",    // ULA upper half
+        "fe80::1",         // link-local
+        "::ffff:10.0.0.1", // IPv4-mapped private
+        "2001:db8::1",     // documentation
+        "64:ff9b::7f00:1", // NAT64 translation prefix
     ] {
         let raw = format!("http://[{ip}]/hook");
         assert!(

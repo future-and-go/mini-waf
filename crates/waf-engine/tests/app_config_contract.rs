@@ -9,9 +9,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
-use waf_common::config::{
-    AdminTlsMode, AppConfig, CacheBackendKind, ClusterConfig, load_config,
-};
+use waf_common::config::{AdminTlsMode, AppConfig, CacheBackendKind, ClusterConfig, load_config};
 
 /// Smallest config file that satisfies the required (non-defaulted) fields.
 const MINIMAL_TOML: &str = r#"
@@ -54,7 +52,10 @@ fn app_config_default_composes_section_defaults() {
     assert!(c.proxy.worker_threads.is_none());
     assert!(!c.proxy.trust_proxy_headers);
     assert_eq!(c.api.listen_addr, "127.0.0.1:9527");
-    assert_eq!(c.storage.database_url, "postgresql://prx_waf:prx_waf@127.0.0.1:5432/prx_waf");
+    assert_eq!(
+        c.storage.database_url,
+        "postgresql://prx_waf:prx_waf@127.0.0.1:5432/prx_waf"
+    );
     assert_eq!(c.storage.max_connections, 20);
     assert!(c.hosts.is_empty());
     assert!(c.cluster.is_none(), "standalone by default");

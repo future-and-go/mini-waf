@@ -226,7 +226,10 @@ mod tests {
             ..unreachable_config()
         };
         let (_tx, rx) = watch::channel(false);
-        assert!(init_community(cfg, rx).await.is_none(), "empty strings must still trigger enrollment");
+        assert!(
+            init_community(cfg, rx).await.is_none(),
+            "empty strings must still trigger enrollment"
+        );
     }
 
     #[tokio::test]

@@ -177,7 +177,9 @@ mod tests {
             ..enabled_config()
         };
         let (_tx, rx) = watch::channel(false);
-        let components = init_crowdsec(cfg, rx).await.expect("appsec mode without config still initialises");
+        let components = init_crowdsec(cfg, rx)
+            .await
+            .expect("appsec mode without config still initialises");
         assert!(
             components.appsec_client.is_none(),
             "appsec mode with no [crowdsec.appsec] section runs bouncer-only"

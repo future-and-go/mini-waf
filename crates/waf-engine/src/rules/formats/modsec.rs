@@ -279,7 +279,13 @@ mod tests {
 
     #[test]
     fn action_keywords_map_to_internal_actions() {
-        for (keyword, expected) in [("deny", "block"), ("block", "block"), ("allow", "allow"), ("pass", "allow"), ("log", "log")] {
+        for (keyword, expected) in [
+            ("deny", "block"),
+            ("block", "block"),
+            ("allow", "allow"),
+            ("pass", "allow"),
+            ("log", "log"),
+        ] {
             let content = format!("SecRule ARGS \"@rx x\" \"id:1,{keyword}\"\n");
             let rules = parse(&content).unwrap();
             assert_eq!(rules[0].action, expected, "{keyword} maps to {expected}");
@@ -297,7 +303,10 @@ mod tests {
         ] {
             let content = format!("SecRule ARGS \"{op}\" \"id:1,deny\"\n");
             let rules = parse(&content).unwrap();
-            assert_eq!(rules[0].metadata.get("operator").map(String::as_str), Some(expected_name));
+            assert_eq!(
+                rules[0].metadata.get("operator").map(String::as_str),
+                Some(expected_name)
+            );
             assert_eq!(rules[0].pattern.as_deref(), Some(expected_value));
         }
     }

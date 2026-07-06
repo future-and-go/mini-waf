@@ -1085,7 +1085,11 @@ mod tests {
 
     /// Build a signed delta response: the canonical payload is signed, while the
     /// outer `added`/`removed` fields can carry decoy data.
-    fn signed_delta_body(sk: &SigningKey, payload: &serde_json::Value, outer_added: &serde_json::Value) -> serde_json::Value {
+    fn signed_delta_body(
+        sk: &SigningKey,
+        payload: &serde_json::Value,
+        outer_added: &serde_json::Value,
+    ) -> serde_json::Value {
         let payload_bytes = serde_json::to_vec(payload).unwrap();
         let sig = sk.sign(&payload_bytes);
         serde_json::json!({
