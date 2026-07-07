@@ -840,7 +840,16 @@
     "testTier": "Classified Tier",
     "matchedTier": "Matched Tier",
     "ruleId": "Rule",
-    "dryRunError": "Dry-run failed — check backend logs"
+    "dryRunError": "Dry-run failed — check backend logs",
+    "cacheTtl": "Cache TTL (seconds)",
+    "defaultTier": "Default Tier",
+    "defaultTierHint": "Tier assigned when no classifier rule matches",
+    "matchKind": "Match Kind",
+    "kindExact": "Exact",
+    "kindPrefix": "Prefix",
+    "kindRegex": "Regex",
+    "headers": "Headers",
+    "readOnlyMatcher": "Host/header matchers are read-only here; edit the TOML file directly"
   },
   "ddos": {
     "title": "DDoS Protection (FR-005)",

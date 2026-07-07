@@ -784,7 +784,16 @@
     "testTier": "Tầng được phân loại",
     "matchedTier": "Tầng khớp",
     "ruleId": "Luật",
-    "dryRunError": "Dry-run thất bại — kiểm tra log backend"
+    "dryRunError": "Dry-run thất bại — kiểm tra log backend",
+    "cacheTtl": "TTL cache (giây)",
+    "defaultTier": "Tier mặc định",
+    "defaultTierHint": "Tier áp dụng khi không rule phân loại nào khớp",
+    "matchKind": "Kiểu khớp",
+    "kindExact": "Chính xác",
+    "kindPrefix": "Tiền tố",
+    "kindRegex": "Regex",
+    "headers": "Headers",
+    "readOnlyMatcher": "Matcher host/header chỉ đọc ở đây; chỉnh trực tiếp file TOML"
   },
   "accessLists": {
     "title": "Danh sách truy cập (FR-008)",

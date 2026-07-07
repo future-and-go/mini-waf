@@ -51,6 +51,24 @@ pub async fn write_yaml_str(path: &Path, contents: &str) -> Result<(), ApiError>
     Ok(())
 }
 
+/// Atomically persist pre-serialized TOML: create the parent directory,
+/// write to `<stem>.toml.tmp`, then rename over `path`.
+pub async fn write_toml_str(path: &Path, contents: &str) -> Result<(), ApiError> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("mkdir: {e}")))?;
+    }
+    let tmp = path.with_extension("toml.tmp");
+    tokio::fs::write(&tmp, contents.as_bytes())
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("write: {e}")))?;
+    tokio::fs::rename(&tmp, path)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("rename: {e}")))?;
+    Ok(())
+}
+
 /// Serialize `value` to YAML and persist it atomically via [`write_yaml_str`].
 pub async fn write_yaml(path: &Path, value: &Value) -> Result<(), ApiError> {
     let s = serde_yaml::to_string(value).map_err(|e| ApiError::Internal(anyhow::anyhow!("{e}")))?;

@@ -61,6 +61,10 @@ pub struct AppState {
     pub panel_config_path: Option<PathBuf>,
     /// Path to the main WAF config file the server was started with (e.g. `configs/default.toml`).
     pub main_config_file: Option<String>,
+    /// Path to the tiered-protection TOML the engine watcher loads
+    /// (`[tiered_protection] config_path`, CWD-relative like the watcher).
+    /// `None` when the profile leaves the subsystem inert.
+    pub tier_config_path: Option<PathBuf>,
     /// Closure to change the global tracing filter at runtime.
     /// `None` when the dynamic reload layer is not wired (e.g. CLI sub-commands).
     pub log_level_setter: Option<LogLevelSetter>,
@@ -114,6 +118,7 @@ impl AppState {
             login_rate_limiter: None,
             panel_config_path: None,
             main_config_file: None,
+            tier_config_path: None,
             log_level_setter: None,
             interop_config: waf_common::config::InteropConfig::default(),
             mode_registry: ModeRegistry::new(),

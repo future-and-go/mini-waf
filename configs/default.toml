@@ -203,6 +203,18 @@ config_path = "configs/rate-limit.yaml"
 enabled = true
 log_path = "./waf_audit.log"
 
+# ── FR-002/FR-037 tiered-protection classifier (TOML, hot-reload) ────────────
+# The engine watcher and the admin panel's tier-policies page both use this
+# file — panel saves hot-reload into enforcement. Omit `config_path` to leave
+# the subsystem inert (every request classifies as catch_all with built-in
+# fallback thresholds).
+#
+# The path must point at a DEDICATED, panel-managed file: a panel save
+# rewrites it in full (only [tiered_protection] survives), so co-located
+# tables and hand-written comments would be lost.
+[tiered_protection]
+config_path = "configs/tier-protection.toml"
+
 # ── Community Integration ─────────────────────────────────────────────────────
 # Share threat intelligence with the OpenPRX community network.
 # Enable to report detected attacks and receive the community blocklist.
