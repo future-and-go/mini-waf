@@ -118,4 +118,72 @@ mod tests {
         let (_tx, rx) = watch::channel(false);
         assert!(init_crowdsec(cfg, rx).await.is_none());
     }
+
+    /// Port 1 on loopback is closed: background tasks fail with an immediate
+    /// connection-refused instead of hanging on a live LAPI.
+    fn enabled_config() -> CrowdSecConfig {
+        CrowdSecConfig {
+            enabled: true,
+            lapi_url: "http://127.0.0.1:1".to_string(),
+            api_key: "test-key".to_string(),
+            ..CrowdSecConfig::default()
+        }
+    }
+
+    fn appsec_config() -> AppSecConfig {
+        AppSecConfig {
+            endpoint: "http://127.0.0.1:1".to_string(),
+            api_key: "appsec-key".to_string(),
+            timeout_ms: 100,
+            failure_action: FallbackAction::default(),
+            circuit_breaker_threshold: 3,
+            circuit_breaker_reset_secs: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn bouncer_mode_initialises_without_appsec_or_pusher() {
+        let cfg = enabled_config();
+        let (_tx, rx) = watch::channel(false);
+        let components = init_crowdsec(cfg, rx).await.expect("bouncer mode initialises");
+        assert!(components.appsec_client.is_none(), "bouncer mode has no AppSec client");
+        assert!(components.pusher.is_none(), "no pusher config, no pusher");
+        components.sync_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn both_mode_builds_appsec_client_and_pusher() {
+        let cfg = CrowdSecConfig {
+            mode: CrowdSecMode::Both,
+            appsec: Some(appsec_config()),
+            pusher: Some(PusherConfig {
+                login: "machine-1".to_string(),
+                password: "secret".to_string(),
+            }),
+            ..enabled_config()
+        };
+        let (_tx, rx) = watch::channel(false);
+        let components = init_crowdsec(cfg, rx).await.expect("both mode initialises");
+        assert!(components.appsec_client.is_some(), "both mode builds AppSec client");
+        assert!(components.pusher.is_some(), "pusher config builds pusher");
+        components.sync_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn appsec_mode_without_appsec_config_yields_no_client() {
+        let cfg = CrowdSecConfig {
+            mode: CrowdSecMode::Appsec,
+            appsec: None,
+            ..enabled_config()
+        };
+        let (_tx, rx) = watch::channel(false);
+        let components = init_crowdsec(cfg, rx)
+            .await
+            .expect("appsec mode without config still initialises");
+        assert!(
+            components.appsec_client.is_none(),
+            "appsec mode with no [crowdsec.appsec] section runs bouncer-only"
+        );
+        components.sync_handle.abort();
+    }
 }

@@ -255,4 +255,110 @@ mod tests {
         let rules = parse(content).unwrap();
         assert_eq!(rules.len(), 1);
     }
+
+    #[test]
+    fn malformed_secrule_is_skipped_not_fatal() {
+        let content = "SecRule ONLY_VARIABLES\nSecRule REQUEST_URI \"@rx /ok\" \"id:1,deny\"\n";
+        let rules = parse(content).unwrap();
+        assert_eq!(rules.len(), 1, "bad line skipped, good line kept");
+        assert_eq!(rules[0].id, "MODSEC-1");
+    }
+
+    #[test]
+    fn lowercase_secrule_directive_is_accepted() {
+        let rules = parse("secrule REQUEST_URI \"@rx /x\" \"id:9,deny\"\n").unwrap();
+        assert_eq!(rules.len(), 1);
+    }
+
+    #[test]
+    fn missing_id_falls_back_to_line_number() {
+        let rules = parse("SecRule REQUEST_URI \"@rx /x\" \"deny\"\n").unwrap();
+        assert_eq!(rules[0].id, "MODSEC-LINE-1");
+        assert!(rules[0].name.contains("MODSEC-LINE-1"), "default name embeds the id");
+    }
+
+    #[test]
+    fn action_keywords_map_to_internal_actions() {
+        for (keyword, expected) in [
+            ("deny", "block"),
+            ("block", "block"),
+            ("allow", "allow"),
+            ("pass", "allow"),
+            ("log", "log"),
+        ] {
+            let content = format!("SecRule ARGS \"@rx x\" \"id:1,{keyword}\"\n");
+            let rules = parse(&content).unwrap();
+            assert_eq!(rules[0].action, expected, "{keyword} maps to {expected}");
+        }
+    }
+
+    #[test]
+    fn operator_variants_are_recognised() {
+        for (op, expected_name, expected_value) in [
+            ("@contains foo", "contains", "foo"),
+            ("@beginsWith /api", "beginsWith", "/api"),
+            ("@endsWith .php", "endsWith", ".php"),
+            ("@ipMatch 10.0.0.0/8", "ipMatch", "10.0.0.0/8"),
+            ("bare-pattern", "regex", "bare-pattern"),
+        ] {
+            let content = format!("SecRule ARGS \"{op}\" \"id:1,deny\"\n");
+            let rules = parse(&content).unwrap();
+            assert_eq!(
+                rules[0].metadata.get("operator").map(String::as_str),
+                Some(expected_name)
+            );
+            assert_eq!(rules[0].pattern.as_deref(), Some(expected_value));
+        }
+    }
+
+    #[test]
+    fn category_is_inferred_from_pattern_then_variables() {
+        for (variables, pattern, expected) in [
+            ("REQUEST_HEADERS", "union all select", "sqli"),
+            ("REQUEST_HEADERS", "<script>alert(1)", "xss"),
+            ("REQUEST_HEADERS", "../etc/passwd", "traversal"),
+            ("REQUEST_URI", "benign", "path"),
+            ("ARGS", "benign", "input"),
+            ("REQUEST_HEADERS", "benign", "custom"),
+        ] {
+            let content = format!("SecRule {variables} \"@contains {pattern}\" \"id:1,deny\"\n");
+            let rules = parse(&content).unwrap();
+            assert_eq!(rules[0].category, expected, "{variables} + {pattern}");
+        }
+    }
+
+    #[test]
+    fn metadata_captures_phase_status_severity_and_msg() {
+        let content =
+            "SecRule REQUEST_URI \"@rx /x\" \"id:7,phase:2,deny,status:403,severity:CRITICAL,msg:'Named rule'\"\n";
+        let rules = parse(content).unwrap();
+        let rule = &rules[0];
+        assert_eq!(rule.metadata.get("phase").map(String::as_str), Some("2"));
+        assert_eq!(rule.metadata.get("status").map(String::as_str), Some("403"));
+        assert_eq!(rule.severity.as_deref(), Some("CRITICAL"));
+        assert_eq!(rule.name, "Named rule");
+        assert_eq!(rule.description.as_deref(), Some("Named rule"));
+        assert_eq!(rule.source, "modsec");
+        assert!(rule.enabled);
+        assert_eq!(rule.tags, vec!["modsec".to_string()]);
+    }
+
+    #[test]
+    fn continuation_backslash_at_eof_still_parses() {
+        let content = "SecRule ARGS \"@rx x\" \\";
+        let rules = parse(content).unwrap();
+        assert!(rules.is_empty(), "incomplete rule (no actions) is skipped, not fatal");
+
+        let complete = "SecRule ARGS \\\n\"@rx x\" \\\n\"id:5,deny\" \\";
+        let rules = parse(complete).unwrap();
+        assert_eq!(rules.len(), 1, "trailing backslash on the final line is flushed");
+        assert_eq!(rules[0].id, "MODSEC-5");
+    }
+
+    #[test]
+    fn non_secrule_directives_are_ignored() {
+        let content = "SecDefaultAction \"phase:1,log\"\nSecComponentSignature \"x\"\n";
+        let rules = parse(content).unwrap();
+        assert!(rules.is_empty());
+    }
 }

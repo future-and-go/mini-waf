@@ -1,33 +1,64 @@
+# FR-010 device fingerprinting — default configuration.
+# Schema v1. Empty / absent file = subsystem disabled.
+# Hot-reload watches this file; bad edits log a warning and the previous
+# snapshot is retained.
+
 device_fp:
+  schema_version: 1
+  enabled: true
   capture:
+    tls:
+      enabled: true
+      algorithms: [ja3, ja4]
     h2:
       enabled: false
       hash: akamai
-    tls:
-      algorithms:
-      - ja3
-      - ja4
-      enabled: true
-  enabled: true
-  providers:
-  - enabled: true
-    name: fp_conflict
-    signal_weight: 25
-  - enabled: true
-    name: h2_anomaly
-    signal_weight: 20
-  - enabled: true
-    max_distinct_ips: 3
-    name: ip_hopping
-    signal_weight: 25
-    window_secs: 600
-  - enabled: true
-    name: ua_blocklist
-    signal_weight: 30
-  - enabled: false
-    min_entropy_x100: 250
-    name: ua_entropy
-    signal_weight: 15
   store:
-    backend: memory
+    backend: memory      # memory | redis (redis requires `redis-store` feature)
     ttl_secs: 3600
+  # Providers are enabled by presence in this list; remove an entry to
+  # disable it. There is no per-provider `enabled` flag.
+  providers:
+    - name: ip_hopping
+      window_secs: 600
+      max_distinct_ips: 3
+      signal_weight: 25
+    - name: fp_conflict
+      window_secs: 600
+      max_distinct_uas: 3
+      signal_weight: 25
+    - name: ua_blocklist
+      blocklist_patterns: []
+      signal_weight: 30
+    - name: h2_anomaly
+      signal_weight: 20
+    # ua_entropy is currently disabled. Re-add to enable:
+    # - name: ua_entropy
+    #   min_entropy_x100: 250
+    #   signal_weight: 15
+  hot_reload: true
+  # FR-011 behavioral anomaly detection. Omit any sub-block to inherit defaults.
+  behavior:
+    window_size: 16
+    actor_ttl_secs: 600
+    burst_interval:
+      enabled: true
+      threshold_ms: 50
+      min_consecutive: 5
+      risk_delta: 15
+    regularity:
+      enabled: true
+      min_samples: 6
+      cv_threshold: 0.15
+      min_mean_ms: 100
+      risk_delta: 10
+    zero_depth:
+      enabled: true
+      min_samples: 4
+      critical_hits_required: 2
+      risk_delta: 10
+    missing_referer:
+      enabled: true
+      risk_delta: 5
+      exempt_paths:    ["/", "/login", "/index", "/health"]
+      exempt_prefixes: ["/static/", "/assets/", "/api/"]

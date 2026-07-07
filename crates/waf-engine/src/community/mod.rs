@@ -194,4 +194,88 @@ mod tests {
         let (_tx, rx) = watch::channel(false);
         assert!(init_community(cfg, rx).await.is_none());
     }
+
+    /// Compressed encoding of the Ed25519 base point — a structurally valid
+    /// public key that needs no signing-key machinery to construct.
+    const VALID_PUBKEY_HEX: &str = "5866666666666666666666666666666666666666666666666666666666666666";
+
+    /// Port 1 on loopback is closed, so every network attempt fails with an
+    /// immediate connection-refused instead of a slow timeout.
+    fn unreachable_config() -> CommunityConfig {
+        CommunityConfig {
+            enabled: true,
+            server_url: "http://127.0.0.1:1".to_string(),
+            ..CommunityConfig::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn enrollment_failure_returns_none() {
+        // No machine_id/api_key -> auto-enrollment against an unreachable
+        // server must fail and abort initialisation.
+        let cfg = unreachable_config();
+        let (_tx, rx) = watch::channel(false);
+        assert!(init_community(cfg, rx).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn empty_credentials_are_treated_as_missing() {
+        let cfg = CommunityConfig {
+            machine_id: Some(String::new()),
+            api_key: Some(String::new()),
+            ..unreachable_config()
+        };
+        let (_tx, rx) = watch::channel(false);
+        assert!(
+            init_community(cfg, rx).await.is_none(),
+            "empty strings must still trigger enrollment"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_public_key_refuses_initialisation() {
+        for bad_key in ["zz-not-hex", "aabb"] {
+            let cfg = CommunityConfig {
+                machine_id: Some("m-1".to_string()),
+                api_key: Some("k-1".to_string()),
+                public_key: Some(bad_key.to_string()),
+                ..unreachable_config()
+            };
+            let (_tx, rx) = watch::channel(false);
+            assert!(
+                init_community(cfg, rx).await.is_none(),
+                "invalid public_key {bad_key:?} must fail closed"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_key_and_credentials_initialise_components() {
+        let cfg = CommunityConfig {
+            machine_id: Some("m-1".to_string()),
+            api_key: Some("k-1".to_string()),
+            public_key: Some(VALID_PUBKEY_HEX.to_string()),
+            ..unreachable_config()
+        };
+        let (_tx, rx) = watch::channel(false);
+        let components = init_community(cfg, rx).await.expect("valid config initialises");
+        components.sync_handle.abort();
+        components.flush_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn blank_public_key_falls_back_to_discovery_and_still_initialises() {
+        // Whitespace-only key means "not configured": discovery against the
+        // unreachable server fails, and the blocklist runs unverified.
+        let cfg = CommunityConfig {
+            machine_id: Some("m-1".to_string()),
+            api_key: Some("k-1".to_string()),
+            public_key: Some("   ".to_string()),
+            ..unreachable_config()
+        };
+        let (_tx, rx) = watch::channel(false);
+        let components = init_community(cfg, rx).await.expect("discovery failure is fail-soft");
+        components.sync_handle.abort();
+        components.flush_handle.abort();
+    }
 }
