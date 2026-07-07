@@ -2061,3 +2061,124 @@ mod resolve_config_path_tests {
         assert_eq!(resolved, "configs/default.toml");
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::disallowed_types, clippy::disallowed_methods)]
+mod helper_tests {
+    use super::{app_config_to_crowdsec, ensure_self_signed_cert, resolve_panel_config_path, truncate};
+    use waf_common::config::AppConfig;
+    use waf_engine::crowdsec::config::{CrowdSecMode, FallbackAction};
+
+    #[test]
+    fn truncate_short_string_unchanged() {
+        assert_eq!(truncate("abc", 10), "abc");
+        assert_eq!(truncate("abcde", 5), "abcde");
+    }
+
+    #[test]
+    fn truncate_long_string_appends_ellipsis() {
+        assert_eq!(truncate("abcdefgh", 5), "abcd…");
+    }
+
+    #[test]
+    fn crowdsec_defaults_map_to_bouncer_allow() {
+        let cfg = AppConfig::default();
+        let cs = app_config_to_crowdsec(&cfg);
+        assert!(!cs.enabled);
+        assert_eq!(cs.mode, CrowdSecMode::Bouncer);
+        assert_eq!(cs.fallback_action, FallbackAction::Allow);
+        assert_eq!(cs.lapi_url, cfg.crowdsec.lapi_url);
+        assert!(cs.appsec.is_none());
+        assert!(cs.pusher.is_none());
+    }
+
+    #[test]
+    fn crowdsec_mode_and_fallback_strings_map_to_enums() {
+        let mut cfg = AppConfig::default();
+        cfg.crowdsec.mode = "appsec".to_string();
+        cfg.crowdsec.fallback_action = "block".to_string();
+        let cs = app_config_to_crowdsec(&cfg);
+        assert_eq!(cs.mode, CrowdSecMode::Appsec);
+        assert_eq!(cs.fallback_action, FallbackAction::Block);
+
+        cfg.crowdsec.mode = "both".to_string();
+        cfg.crowdsec.fallback_action = "log".to_string();
+        let cs = app_config_to_crowdsec(&cfg);
+        assert_eq!(cs.mode, CrowdSecMode::Both);
+        assert_eq!(cs.fallback_action, FallbackAction::Log);
+
+        // Unrecognized strings fall back to the safe defaults.
+        cfg.crowdsec.mode = "bogus".to_string();
+        cfg.crowdsec.fallback_action = "bogus".to_string();
+        let cs = app_config_to_crowdsec(&cfg);
+        assert_eq!(cs.mode, CrowdSecMode::Bouncer);
+        assert_eq!(cs.fallback_action, FallbackAction::Allow);
+    }
+
+    #[test]
+    fn crowdsec_appsec_block_built_from_endpoint_missing_key_is_empty() {
+        let mut cfg = AppConfig::default();
+        cfg.crowdsec.appsec_endpoint = Some("http://127.0.0.1:7422".to_string());
+        let cs = app_config_to_crowdsec(&cfg);
+        let appsec = cs.appsec.expect("appsec block");
+        assert_eq!(appsec.endpoint, "http://127.0.0.1:7422");
+        assert_eq!(appsec.api_key, "");
+
+        cfg.crowdsec.appsec_key = Some("k".to_string());
+        let cs = app_config_to_crowdsec(&cfg);
+        assert_eq!(cs.appsec.expect("appsec block").api_key, "k");
+    }
+
+    #[test]
+    fn crowdsec_pusher_requires_both_login_and_password() {
+        let mut cfg = AppConfig::default();
+        cfg.crowdsec.pusher_login = Some("login".to_string());
+        assert!(app_config_to_crowdsec(&cfg).pusher.is_none());
+
+        cfg.crowdsec.pusher_password = Some("pw".to_string());
+        let pusher = app_config_to_crowdsec(&cfg).pusher.expect("pusher block");
+        assert_eq!(pusher.login, "login");
+        assert_eq!(pusher.password, "pw");
+    }
+
+    #[test]
+    fn panel_path_unset_or_blank_is_none() {
+        assert!(resolve_panel_config_path("configs/default.toml", None).is_none());
+        assert!(resolve_panel_config_path("configs/default.toml", Some("")).is_none());
+        assert!(resolve_panel_config_path("configs/default.toml", Some("   ")).is_none());
+    }
+
+    #[test]
+    fn panel_path_absolute_is_kept_verbatim() {
+        let p = resolve_panel_config_path("configs/default.toml", Some("/etc/prx-waf/waf-panel.toml")).unwrap();
+        assert_eq!(p, std::path::PathBuf::from("/etc/prx-waf/waf-panel.toml"));
+    }
+
+    #[test]
+    fn panel_path_relative_resolves_against_main_config_dir() {
+        let p = resolve_panel_config_path("configs/default.toml", Some("waf-panel.toml")).unwrap();
+        assert_eq!(p, std::path::PathBuf::from("configs/waf-panel.toml"));
+    }
+
+    #[test]
+    fn self_signed_cert_created_then_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (cert_path, key_path) = ensure_self_signed_cert(dir.path()).unwrap();
+        let cert = std::fs::read_to_string(&cert_path).unwrap();
+        let key = std::fs::read_to_string(&key_path).unwrap();
+        assert!(cert.contains("BEGIN CERTIFICATE"), "cert should be PEM: {cert_path}");
+        assert!(key.contains("PRIVATE KEY"), "key should be PEM: {key_path}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&key_path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "key must be owner-only");
+        }
+
+        // Second call must reuse the existing pair, not regenerate it.
+        let (cert_path2, key_path2) = ensure_self_signed_cert(dir.path()).unwrap();
+        assert_eq!(cert_path2, cert_path);
+        assert_eq!(key_path2, key_path);
+        assert_eq!(std::fs::read_to_string(&cert_path2).unwrap(), cert);
+    }
+}
