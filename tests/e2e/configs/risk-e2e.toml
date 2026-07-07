@@ -1,0 +1,74 @@
+# PRX-WAF config for the risk-config E2E suite.
+#
+# Copy of configs/e2e.toml (base stack + existing suites stay untouched) with a
+# [tiered_protection] reference added so per-tier RiskThresholds are wired and
+# risk enforcement (challenge/block) is observable. Risk scoring itself is
+# driven by /configs/risk.yaml, which the engine resolves two levels above this
+# file (mounted at /app/risk-e2e.toml -> /configs/risk.yaml).
+
+[proxy]
+listen_addr     = "0.0.0.0:80"
+listen_addr_tls = "0.0.0.0:443"
+
+[api]
+listen_addr = "0.0.0.0:9527"
+
+# The E2E suites, the compose healthcheck, and admin_ip_allowlist all talk to
+# the admin API over plain HTTP. The product default enables admin TLS
+# (mode = "auto"), so the suite must turn it off to reach the API over HTTP.
+[api.tls]
+enabled = false
+
+[storage]
+database_url    = "postgresql://prx_waf:prx_waf@postgres:5432/prx_waf"
+max_connections = 10
+
+[cache]
+enabled          = true
+max_size_mb      = 64
+default_ttl_secs = 30
+max_ttl_secs     = 300
+
+[http3]
+enabled     = false
+listen_addr = "0.0.0.0:443"
+
+[security]
+admin_ip_allowlist     = []
+max_request_body_bytes = 10485760
+api_rate_limit_rps     = 0
+cors_origins           = []
+
+# ── Tiered-protection classifier (risk enforcement thresholds) ────────────────
+# Absolute container path: `config_path` is resolved as a literal PathBuf from
+# the process CWD, so an absolute path is unambiguous. The tier file carries low
+# RiskThresholds so accumulated scores cross challenge/block observably.
+[tiered_protection]
+config_path = "/app/tier-risk-e2e.toml"
+
+# ── Interop v2.3 benchmark control plane (/__waf_control/*) ──────────────────
+[interop]
+enabled          = true
+benchmark_secret = "waf-hackathon-2026-ctrl"
+
+# ── Audit JSONL sink ─────────────────────────────────────────────────────────
+[audit]
+enabled  = true
+log_path = "/tmp/waf_audit.log"
+
+# ── Upstream: httpbin echo server (deterministic for assertions) ─────────────
+[[hosts]]
+host         = "e2e.local"
+port         = 80
+remote_host  = "httpbin"
+remote_port  = 80
+guard_status = true
+
+# Allow plain localhost requests for suites that hit 127.0.0.1:16880 directly
+# without a custom Host header.
+[[hosts]]
+host         = "localhost"
+port         = 80
+remote_host  = "httpbin"
+remote_port  = 80
+guard_status = true

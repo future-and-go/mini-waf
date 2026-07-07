@@ -16,6 +16,11 @@ IN_DIR="${1:?usage: render-report.sh <input_dir> <output_dir>}"
 OUT_DIR="${2:?usage: render-report.sh <input_dir> <output_dir>}"
 mkdir -p "$OUT_DIR"
 
+# Expected suites: a suite listed here that produced no results.json is a
+# hard MISSING/FAIL (it should have run). Suites that produced results but
+# aren't listed here are auto-appended below (present-only, never MISSING) so
+# an optional/local suite like risk-config can't turn a pipeline report red
+# when it simply didn't run there.
 SUITES=(rules-engine gateway waf-api cluster)
 
 TOTAL_PASS=0
@@ -61,6 +66,31 @@ for s in "${SUITES[@]}"; do
     else
         SUITE_STATUS+=("PASS")
     fi
+    TOTAL_PASS=$(( TOTAL_PASS + p ))
+    TOTAL_FAIL=$(( TOTAL_FAIL + fc ))
+    TOTAL_TIME=$(( TOTAL_TIME + t ))
+    SUITE_TESTS_JSON+=("$(awk '/"tests":/{flag=1} flag{print}' "$f")")
+done
+
+# Auto-append suites that produced a results.json but aren't in the expected
+# list (e.g. risk-config, interop). Present-only: never MISSING, so a suite that
+# didn't run in this pipeline can't force the aggregate red.
+OUT_BASE=$(basename "$OUT_DIR")
+for dir in "$IN_DIR"/*/; do
+    [[ -d "$dir" ]] || continue
+    name=$(basename "$dir")
+    [[ "$name" == "$OUT_BASE" ]] && continue
+    printf '%s\n' "${SUITES[@]}" | grep -qxF "$name" && continue
+    f="$dir/results.json"
+    [[ -f "$f" ]] || continue
+    p=$(read_field pass "$f");      p="${p:-0}"
+    fc=$(read_field fail "$f");     fc="${fc:-0}"
+    t=$(read_field elapsed_s "$f"); t="${t:-0}"
+    SUITE_NAMES+=("$name")
+    SUITE_PASS+=("$p")
+    SUITE_FAIL+=("$fc")
+    SUITE_TIME+=("$t")
+    if (( fc > 0 )); then SUITE_STATUS+=("FAIL"); else SUITE_STATUS+=("PASS"); fi
     TOTAL_PASS=$(( TOTAL_PASS + p ))
     TOTAL_FAIL=$(( TOTAL_FAIL + fc ))
     TOTAL_TIME=$(( TOTAL_TIME + t ))

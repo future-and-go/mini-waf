@@ -1,0 +1,36 @@
+# Tiered-protection classifier for the risk-config E2E suite.
+# Referenced by risk-e2e.toml via `[tiered_protection] config_path`.
+#
+# Every request classifies as CatchAll (no classifier_rules) with deliberately
+# LOW risk thresholds so an accumulated per-actor score crosses challenge/block
+# and the enforcement action is observable on the data plane. Canary hits pin
+# the score to 100, which is >= block for every tier below.
+#
+# Validation invariant (waf-common::tier): allow < challenge < block per tier.
+
+[tiered_protection]
+default_tier = "catch_all"
+
+[tiered_protection.policies.critical]
+fail_mode          = "open"
+ddos_threshold_rps = 100000
+cache_policy       = { mode = "no_cache" }
+risk_thresholds    = { allow = 10, challenge = 30, block = 60 }
+
+[tiered_protection.policies.high]
+fail_mode          = "open"
+ddos_threshold_rps = 100000
+cache_policy       = { mode = "no_cache" }
+risk_thresholds    = { allow = 10, challenge = 30, block = 60 }
+
+[tiered_protection.policies.medium]
+fail_mode          = "open"
+ddos_threshold_rps = 100000
+cache_policy       = { mode = "no_cache" }
+risk_thresholds    = { allow = 10, challenge = 30, block = 60 }
+
+[tiered_protection.policies.catch_all]
+fail_mode          = "open"
+ddos_threshold_rps = 100000
+cache_policy       = { mode = "no_cache" }
+risk_thresholds    = { allow = 10, challenge = 30, block = 60 }

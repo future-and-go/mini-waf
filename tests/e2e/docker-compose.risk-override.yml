@@ -1,0 +1,36 @@
+# Risk-config E2E override — layered on top of docker-compose.e2e.yml.
+#
+#   docker compose -f tests/e2e/docker-compose.e2e.yml \
+#                  -f tests/e2e/docker-compose.risk-override.yml up -d
+#
+# Swaps the main config to risk-e2e.toml (adds tiered_protection thresholds) and
+# mounts a WRITABLE /configs directory so PUT /api/risk/config can persist via
+# tmp-write-then-rename. run-risk-config.sh seeds ./out/risk-config/cfg/risk.yaml
+# from the pristine ./configs/risk.yaml before `up`. The base e2e.toml mount is
+# left in place (harmless, unused) so the base compose file stays untouched.
+
+services:
+  prx-waf:
+    build:
+      # Host-built binary links the host glibc; bookworm-slim (2.36) is too old.
+      # trixie-slim (2.41) covers current build hosts. Mirrors docker-compose.deploy.yml.
+      dockerfile: Dockerfile.prebuilt
+      args:
+        BASE_IMAGE: debian:trixie-slim
+    # Distinct host ports so the risk stack coexists with a running dev stack
+    # (which binds 16880/16827). `!override` replaces the base port list rather
+    # than concatenating (which would re-bind the conflicting base ports).
+    ports: !override
+      - "26880:80"
+      - "26827:9527"
+    volumes:
+      - ./configs/risk-e2e.toml:/app/risk-e2e.toml:ro
+      - ./configs/tier-risk-e2e.toml:/app/tier-risk-e2e.toml:ro
+      # Directory mount (NOT a single-file mount): the admin API persists risk
+      # config with tmp-write-then-rename, which EBUSY-fails over a file mount.
+      - ./out/risk-config/cfg:/configs
+    command:
+      - "/usr/local/bin/waf"
+      - "--config"
+      - "/app/risk-e2e.toml"
+      - "run"

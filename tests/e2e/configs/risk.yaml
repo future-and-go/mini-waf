@@ -1,0 +1,59 @@
+# Pristine risk-scoring fixture for the risk-config E2E suite.
+#
+# This file is the SOURCE OF TRUTH. run-risk-config.sh copies it into a
+# writable runtime dir (tests/e2e/out/risk-config/cfg/) which the compose
+# override mounts at /configs (a DIRECTORY mount — the admin API persists via
+# tmp-write-then-rename, which fails over a single-file bind mount). The engine
+# and admin API both resolve `configs/risk.yaml` to /configs/risk.yaml because
+# the main config sits at /app/risk-e2e.toml (resolve_path = two levels up).
+#
+# Values are tuned for fast, observable behavioral tests (short TTLs, small
+# decay streak). Persistence tests PUT their own values; behavioral tests reset
+# the relevant fields before each sub-test, so these are just the boot baseline.
+risk:
+  schema_version: 1
+  enabled: true
+  emit_header: true
+  header_name: X-WAF-Risk-Score
+  ttl_secs: 5
+  gc_interval_secs: 2
+  session_cookie: null
+  store:
+    backend: memory
+    redis:
+      url: redis://127.0.0.1:6379
+      key_prefix: 'waf:risk:'
+      op_timeout_ms: 100
+      breaker_threshold: 5
+      cache_capacity: 10000
+  decay:
+    min_clean_streak: 2
+    decay_rate: 5
+    max_decay: 0
+  seed:
+    enabled: true
+    tor_exits_path: null
+    asn_classes_path: null
+    whitelist_path: null
+    tor_delta: 30
+    datacenter_delta: 15
+    bad_asn_delta: 25
+  ingest:
+    enabled: true
+    channel_capacity: 65536
+    signal_weights: {}
+  canary:
+    enabled: true
+    paths:
+      - /canary/trap
+    ban_ttl_secs: 3
+  challenge:
+    enabled: false
+    ttl_secs: 300
+    hmac_secret_path: null
+    lru_size: 100000
+    header_name: X-WAF-Cred
+    valid_delta: -25
+    invalid_delta: 20
+    replay_delta: 30
+    expired_delta: 10
