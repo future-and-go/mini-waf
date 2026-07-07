@@ -17,6 +17,7 @@ import {
   Typography,
   App,
   Popconfirm,
+  Tooltip,
 } from "antd";
 import {
   ReloadOutlined,
@@ -31,60 +32,117 @@ import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Types (mirror waf_common::tier serde shapes exactly) ──────────────────────
+
+type CacheMode = "no_cache" | "short_ttl" | "aggressive" | "default";
+
+/** Tagged enum: `no_cache` carries no TTL, every other mode requires one. */
+interface CachePolicy {
+  mode: CacheMode;
+  ttl_seconds?: number;
+}
 
 interface TierPolicy {
   fail_mode: "close" | "open";
   ddos_threshold_rps: number;
-  cache_policy: "no_cache" | "short_ttl" | "aggressive" | "default";
+  cache_policy: CachePolicy;
   risk_thresholds: { allow: number; challenge: number; block: number };
 }
 
+type PathMatchKind = "exact" | "prefix" | "regex";
+type HostMatchKind = "exact" | "suffix" | "regex";
+
+interface PathMatch {
+  kind: PathMatchKind;
+  value: string;
+}
+
+interface HostMatch {
+  kind: HostMatchKind;
+  value: string;
+}
+
+interface HeaderMatch {
+  name: string;
+  value: string;
+}
+
 interface ClassifierRule {
-  id: number;
   priority: number;
-  tier: string;
-  host_match?: string;
-  path_match?: string;
-  methods?: string[];
+  tier: TierKey;
+  host?: HostMatch | null;
+  path?: PathMatch | null;
+  method?: string[] | null;
+  headers?: HeaderMatch[] | null;
 }
 
 interface TierConfig {
-  policies: {
-    critical: TierPolicy;
-    high: TierPolicy;
-    medium: TierPolicy;
-    catch_all: TierPolicy;
-  };
+  default_tier: TierKey;
   classifier_rules: ClassifierRule[];
+  policies: Record<TierKey, TierPolicy>;
 }
 
 interface DryRunResponse {
   matched_tier: string;
-  matched_rule_id?: number;
+  policy?: TierPolicy | null;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_POLICY: TierPolicy = {
-  fail_mode: "close",
-  ddos_threshold_rps: 100,
-  cache_policy: "default",
-  risk_thresholds: { allow: 20, challenge: 60, block: 85 },
-};
-
-const DEFAULT_CONFIG: TierConfig = {
-  policies: {
-    critical: { ...DEFAULT_POLICY, ddos_threshold_rps: 50, cache_policy: "no_cache" },
-    high: { ...DEFAULT_POLICY, ddos_threshold_rps: 200 },
-    medium: { ...DEFAULT_POLICY, ddos_threshold_rps: 500, cache_policy: "short_ttl" },
-    catch_all: { ...DEFAULT_POLICY, fail_mode: "open", ddos_threshold_rps: 1000, cache_policy: "aggressive" },
-  },
-  classifier_rules: [],
-};
-
 const TIER_KEYS = ["critical", "high", "medium", "catch_all"] as const;
 type TierKey = (typeof TIER_KEYS)[number];
+
+// Suggested TTL per cache mode when the operator switches away from no_cache;
+// values follow the shipped configs/tier-protection.toml.
+const DEFAULT_TTL: Record<Exclude<CacheMode, "no_cache">, number> = {
+  short_ttl: 5,
+  default: 30,
+  aggressive: 300,
+};
+
+const DEFAULT_POLICY: TierPolicy = {
+  fail_mode: "open",
+  ddos_threshold_rps: 1000,
+  cache_policy: { mode: "no_cache" },
+  risk_thresholds: { allow: 30, challenge: 70, block: 90 },
+};
+
+// Mirrors configs/tier-protection.toml so the pre-load render matches what a
+// fresh install actually enforces.
+const DEFAULT_CONFIG: TierConfig = {
+  default_tier: "catch_all",
+  classifier_rules: [
+    { priority: 100, tier: "critical", path: { kind: "prefix", value: "/critical" } },
+    { priority: 90, tier: "high", path: { kind: "prefix", value: "/high" } },
+    { priority: 80, tier: "medium", path: { kind: "prefix", value: "/medium" } },
+  ],
+  policies: {
+    critical: {
+      fail_mode: "close",
+      ddos_threshold_rps: 50,
+      cache_policy: { mode: "no_cache" },
+      risk_thresholds: { allow: 20, challenge: 50, block: 70 },
+    },
+    high: {
+      fail_mode: "close",
+      ddos_threshold_rps: 200,
+      cache_policy: { mode: "short_ttl", ttl_seconds: 5 },
+      risk_thresholds: { allow: 30, challenge: 60, block: 80 },
+    },
+    medium: {
+      fail_mode: "open",
+      ddos_threshold_rps: 1000,
+      cache_policy: { mode: "default", ttl_seconds: 30 },
+      risk_thresholds: { allow: 40, challenge: 70, block: 90 },
+    },
+    catch_all: {
+      fail_mode: "open",
+      ddos_threshold_rps: 5000,
+      cache_policy: { mode: "aggressive", ttl_seconds: 300 },
+      risk_thresholds: { allow: 50, challenge: 80, block: 95 },
+    },
+  },
+};
 
 const TIER_COLOR: Record<TierKey, string> = {
   critical: "#f5222d",
@@ -93,10 +151,13 @@ const TIER_COLOR: Record<TierKey, string> = {
   catch_all: "#1677ff",
 };
 
-const HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
+// waf_common::tier::HttpMethod variants (UPPERCASE serde).
+const HTTP_METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"];
 
 // Stable tooltip config — defined outside component to avoid new object on every render.
 const SLIDER_TOOLTIP = { formatter: (v?: number) => `${v ?? 0}` };
+
+const MONO_STYLE: React.CSSProperties = { fontFamily: "ui-monospace, monospace", fontSize: 12 };
 
 // ── SectionCard helper ─────────────────────────────────────────────────────────
 
@@ -141,7 +202,7 @@ const TierPolicyCard: React.FC<TierPolicyCardProps> = React.memo(({ tierKey, lab
   // less frequent than onChange during a drag. This eliminates the cascade where
   // 60+ setConfig calls per second caused the parent to re-render on every pixel.
   const [localThresh, setLocalThresh] = useState(
-    () => policy.risk_thresholds ?? { allow: 20, challenge: 60, block: 85 },
+    () => policy.risk_thresholds ?? DEFAULT_POLICY.risk_thresholds,
   );
 
   // Keep stable refs so the stable callbacks below always read latest values.
@@ -156,7 +217,7 @@ const TierPolicyCard: React.FC<TierPolicyCardProps> = React.memo(({ tierKey, lab
   // reset). We compare values so we don't clobber a mid-drag local state with the
   // echo of our own last commit.
   useEffect(() => {
-    const incoming = policy.risk_thresholds ?? { allow: 20, challenge: 60, block: 85 };
+    const incoming = policy.risk_thresholds ?? DEFAULT_POLICY.risk_thresholds;
     const cur = localThreshRef.current;
     if (
       incoming.allow !== cur.allow ||
@@ -171,6 +232,20 @@ const TierPolicyCard: React.FC<TierPolicyCardProps> = React.memo(({ tierKey, lab
   // For non-slider fields: direct parent update (lightweight, no drag).
   const setField = useCallback(<K extends keyof TierPolicy>(key: K, val: TierPolicy[K]) =>
     onChangeRef.current({ ...policyRef.current, [key]: val }), []);
+
+  // Cache mode switch: no_cache drops the TTL, the other modes require one —
+  // keep the current TTL when present, else seed the mode's suggested value.
+  const setCacheMode = useCallback((mode: CacheMode) => {
+    const cur = policyRef.current.cache_policy;
+    const next: CachePolicy =
+      mode === "no_cache" ? { mode } : { mode, ttl_seconds: cur.ttl_seconds ?? DEFAULT_TTL[mode] };
+    onChangeRef.current({ ...policyRef.current, cache_policy: next });
+  }, []);
+
+  const setCacheTtl = useCallback((ttl: number) => {
+    const cur = policyRef.current.cache_policy;
+    onChangeRef.current({ ...policyRef.current, cache_policy: { ...cur, ttl_seconds: ttl } });
+  }, []);
 
   // During drag: update local state only (fast — no parent involved).
   const onSliderChange = useCallback((field: "allow" | "challenge" | "block", val: number) => {
@@ -188,6 +263,7 @@ const TierPolicyCard: React.FC<TierPolicyCardProps> = React.memo(({ tierKey, lab
 
   const { allow, challenge, block } = localThresh;
   const thresholdsValid = allow < challenge && challenge < block;
+  const cacheMode = policy.cache_policy?.mode ?? "no_cache";
 
   return (
     <Card
@@ -218,17 +294,31 @@ const TierPolicyCard: React.FC<TierPolicyCardProps> = React.memo(({ tierKey, lab
         </Form.Item>
 
         <Form.Item label={t("tierPolicies.cachePolicy")}>
-          <Select
-            value={policy.cache_policy}
-            onChange={(v) => setField("cache_policy", v)}
-            style={{ width: "100%" }}
-            options={[
-              { value: "no_cache", label: t("tierPolicies.cacheNoCache") },
-              { value: "short_ttl", label: t("tierPolicies.cacheShortTtl") },
-              { value: "aggressive", label: t("tierPolicies.cacheAggressive") },
-              { value: "default", label: t("tierPolicies.cacheDefault") },
-            ]}
-          />
+          <Space.Compact style={{ width: "100%" }}>
+            <Select
+              value={cacheMode}
+              onChange={setCacheMode}
+              style={{ width: cacheMode === "no_cache" ? "100%" : "55%" }}
+              options={[
+                { value: "no_cache", label: t("tierPolicies.cacheNoCache") },
+                { value: "short_ttl", label: t("tierPolicies.cacheShortTtl") },
+                { value: "aggressive", label: t("tierPolicies.cacheAggressive") },
+                { value: "default", label: t("tierPolicies.cacheDefault") },
+              ]}
+            />
+            {cacheMode !== "no_cache" && (
+              <Tooltip title={t("tierPolicies.cacheTtl")}>
+                <InputNumber
+                  min={1}
+                  max={86400}
+                  value={policy.cache_policy?.ttl_seconds ?? DEFAULT_TTL[cacheMode]}
+                  onChange={(v) => v !== null && setCacheTtl(v)}
+                  addonAfter="s"
+                  style={{ width: "45%" }}
+                />
+              </Tooltip>
+            )}
+          </Space.Compact>
         </Form.Item>
 
         <Form.Item
@@ -291,6 +381,14 @@ const TierPolicyCard: React.FC<TierPolicyCardProps> = React.memo(({ tierKey, lab
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
+interface RuleFormValues {
+  priority: number;
+  tier: TierKey;
+  path_kind: PathMatchKind;
+  path_value?: string;
+  method?: string[];
+}
+
 export const TierPoliciesPage: React.FC = () => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -304,7 +402,7 @@ export const TierPoliciesPage: React.FC = () => {
   const [testResult, setTestResult] = useState<DryRunResponse | null>(null);
 
   const isDirty = useRef(false);
-  const [form] = Form.useForm<Omit<ClassifierRule, "id">>();
+  const [form] = Form.useForm<RuleFormValues>();
 
   // ── Load config ──────────────────────────────────────────────────────────────
 
@@ -327,6 +425,7 @@ export const TierPoliciesPage: React.FC = () => {
         "high" in policies
       ) {
         setConfig({
+          default_tier: (cfg as TierConfig).default_tier ?? "catch_all",
           policies: {
             critical: policies.critical ?? DEFAULT_POLICY,
             high: policies.high ?? DEFAULT_POLICY,
@@ -415,13 +514,25 @@ export const TierPoliciesPage: React.FC = () => {
     [onPolicyChange],
   );
 
+  const onDefaultTierChange = (tier: TierKey) => {
+    isDirty.current = true;
+    setConfig((prev) => ({ ...prev, default_tier: tier }));
+  };
+
   // ── Classifier rules ─────────────────────────────────────────────────────────
+  // The editor covers priority/tier/path/method. Rules may also carry `host`
+  // and `headers` matchers (file-edited); those render read-only and are
+  // preserved untouched on save because the full rule objects live in state.
 
   const onAddRule = async () => {
     const values = await form.validateFields();
     const newRule: ClassifierRule = {
-      id: Date.now(),
-      ...values,
+      priority: values.priority,
+      tier: values.tier,
+      ...(values.path_value
+        ? { path: { kind: values.path_kind, value: values.path_value } }
+        : {}),
+      ...(values.method?.length ? { method: values.method } : {}),
     };
     isDirty.current = true;
     setConfig((prev) => ({
@@ -432,11 +543,11 @@ export const TierPoliciesPage: React.FC = () => {
     setDrawerOpen(false);
   };
 
-  const onDeleteRule = (id: number) => {
+  const onDeleteRule = (index: number) => {
     isDirty.current = true;
     setConfig((prev) => ({
       ...prev,
-      classifier_rules: prev.classifier_rules.filter((r) => r.id !== id),
+      classifier_rules: prev.classifier_rules.filter((_, i) => i !== index),
     }));
   };
 
@@ -458,31 +569,37 @@ export const TierPoliciesPage: React.FC = () => {
     },
     {
       title: t("tierPolicies.hostMatch"),
-      dataIndex: "host_match",
+      dataIndex: "host",
       ellipsis: true,
-      render: (v?: string) =>
+      render: (v?: HostMatch | null) =>
         v ? (
-          <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{v}</span>
+          <Tooltip title={t("tierPolicies.readOnlyMatcher")}>
+            <span style={MONO_STYLE}>
+              {v.kind}:{v.value}
+            </span>
+          </Tooltip>
         ) : (
           <span style={{ color: "#bfbfbf" }}>*</span>
         ),
     },
     {
       title: t("tierPolicies.pathMatch"),
-      dataIndex: "path_match",
+      dataIndex: "path",
       ellipsis: true,
-      render: (v?: string) =>
+      render: (v?: PathMatch | null) =>
         v ? (
-          <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{v}</span>
+          <span style={MONO_STYLE}>
+            {v.kind}:{v.value}
+          </span>
         ) : (
           <span style={{ color: "#bfbfbf" }}>*</span>
         ),
     },
     {
       title: t("tierPolicies.methods"),
-      dataIndex: "methods",
+      dataIndex: "method",
       width: 180,
-      render: (v?: string[]) =>
+      render: (v?: string[] | null) =>
         v?.length
           ? v.map((m) => (
               <Tag key={m} style={{ fontSize: 11 }}>
@@ -492,11 +609,27 @@ export const TierPoliciesPage: React.FC = () => {
           : <span style={{ color: "#bfbfbf" }}>{t("tierPolicies.allMethods")}</span>,
     },
     {
+      title: t("tierPolicies.headers"),
+      dataIndex: "headers",
+      width: 140,
+      ellipsis: true,
+      render: (v?: HeaderMatch[] | null) =>
+        v?.length ? (
+          <Tooltip title={t("tierPolicies.readOnlyMatcher")}>
+            <span style={MONO_STYLE}>
+              {v.map((h) => h.name).join(", ")}
+            </span>
+          </Tooltip>
+        ) : (
+          <span style={{ color: "#bfbfbf" }}>*</span>
+        ),
+    },
+    {
       title: "",
       key: "actions",
       width: 60,
-      render: (_: unknown, r: ClassifierRule) => (
-        <Popconfirm title={t("common.confirm")} onConfirm={() => onDeleteRule(r.id)}>
+      render: (_: unknown, __: ClassifierRule, index: number) => (
+        <Popconfirm title={t("common.confirm")} onConfirm={() => onDeleteRule(index)}>
           <Button size="small" type="text" icon={<DeleteOutlined />} danger />
         </Popconfirm>
       ),
@@ -577,24 +710,36 @@ export const TierPoliciesPage: React.FC = () => {
         icon={<ThunderboltOutlined style={{ color: "#722ed1" }} />}
         title={t("tierPolicies.classifierRules")}
         extra={
-          <Button
-            size="small"
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => setDrawerOpen(true)}
-          >
-            {t("tierPolicies.addRule")}
-          </Button>
+          <Space>
+            <Tooltip title={t("tierPolicies.defaultTierHint")}>
+              <span style={{ fontSize: 12, color: "#8c8c8c" }}>{t("tierPolicies.defaultTier")}</span>
+            </Tooltip>
+            <Select<TierKey>
+              size="small"
+              value={config.default_tier}
+              onChange={onDefaultTierChange}
+              style={{ width: 120 }}
+              options={TIER_KEYS.map((k) => ({ value: k, label: TIER_LABELS[k] }))}
+            />
+            <Button
+              size="small"
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setDrawerOpen(true)}
+            >
+              {t("tierPolicies.addRule")}
+            </Button>
+          </Space>
         }
       >
         <Table<ClassifierRule>
-          rowKey="id"
+          rowKey={(_, index) => index ?? 0}
           size="small"
           dataSource={config.classifier_rules}
           columns={ruleColumns}
           pagination={false}
           locale={{ emptyText: t("tierPolicies.noRules") }}
-          scroll={{ x: 700 }}
+          scroll={{ x: 800 }}
         />
       </SectionCard>
 
@@ -638,14 +783,18 @@ export const TierPoliciesPage: React.FC = () => {
               type="info"
               showIcon
               message={
-                <Space>
+                <Space wrap>
                   <span>{t("tierPolicies.matchedTier")}:</span>
                   <Tag color={TIER_COLOR[testResult.matched_tier as TierKey] ?? "default"}>
                     {testResult.matched_tier}
                   </Tag>
-                  {testResult.matched_rule_id !== undefined && (
+                  {testResult.policy && (
                     <span style={{ color: "#8c8c8c", fontSize: 12 }}>
-                      {t("tierPolicies.ruleId")}: #{testResult.matched_rule_id}
+                      {t("tierPolicies.failMode")}: {testResult.policy.fail_mode} ·{" "}
+                      {testResult.policy.ddos_threshold_rps} rps ·{" "}
+                      {testResult.policy.risk_thresholds.allow}/
+                      {testResult.policy.risk_thresholds.challenge}/
+                      {testResult.policy.risk_thresholds.block}
                     </span>
                   )}
                 </Space>
@@ -668,7 +817,11 @@ export const TierPoliciesPage: React.FC = () => {
         }
         destroyOnClose
       >
-        <Form form={form} layout="vertical" initialValues={{ priority: 100, tier: "medium" }}>
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ priority: 100, tier: "medium", path_kind: "prefix" }}
+        >
           <Form.Item name="priority" label={t("tierPolicies.priority")} rules={[{ required: true }]}>
             <InputNumber min={1} max={9999} style={{ width: "100%" }} />
           </Form.Item>
@@ -677,13 +830,24 @@ export const TierPoliciesPage: React.FC = () => {
               options={TIER_KEYS.map((k) => ({ value: k, label: TIER_LABELS[k] }))}
             />
           </Form.Item>
-          <Form.Item name="host_match" label={t("tierPolicies.hostMatch")}>
-            <Input placeholder="example.com" style={{ fontFamily: "ui-monospace, monospace" }} />
+          <Form.Item label={t("tierPolicies.pathMatch")}>
+            <Space.Compact style={{ width: "100%" }}>
+              <Form.Item name="path_kind" noStyle>
+                <Select
+                  style={{ width: "35%" }}
+                  options={[
+                    { value: "prefix", label: t("tierPolicies.kindPrefix") },
+                    { value: "exact", label: t("tierPolicies.kindExact") },
+                    { value: "regex", label: t("tierPolicies.kindRegex") },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item name="path_value" noStyle>
+                <Input placeholder="/api/payments" style={{ ...MONO_STYLE, width: "65%" }} />
+              </Form.Item>
+            </Space.Compact>
           </Form.Item>
-          <Form.Item name="path_match" label={t("tierPolicies.pathMatch")}>
-            <Input placeholder="/api/*" style={{ fontFamily: "ui-monospace, monospace" }} />
-          </Form.Item>
-          <Form.Item name="methods" label={t("tierPolicies.methods")}>
+          <Form.Item name="method" label={t("tierPolicies.methods")}>
             <Select
               mode="multiple"
               options={HTTP_METHODS.map((m) => ({ value: m, label: m }))}

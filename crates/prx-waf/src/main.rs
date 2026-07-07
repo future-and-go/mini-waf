@@ -1845,6 +1845,13 @@ async fn init_async(
     api_state.login_rate_limiter = Some(waf_api::security::ApiRateLimiter::new(10));
     api_state.panel_config_path = panel_config_path;
     api_state.main_config_file = Some(config_file_path.to_string());
+    // Same CWD-relative path the tier watcher loads (see `_tier_watcher` in
+    // run_server) so the admin API edits the file enforcement actually reads.
+    api_state.tier_config_path = config
+        .tiered_protection
+        .config_path
+        .as_deref()
+        .map(std::path::PathBuf::from);
 
     api_state.log_level_setter = log_level_setter;
     api_state.interop_config = config.interop.clone();
